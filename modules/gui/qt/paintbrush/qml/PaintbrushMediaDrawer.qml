@@ -7,6 +7,7 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
+import QtQuick.Dialogs
 
 import VLC.MainInterface
 import VLC.Widgets as Widgets
@@ -139,20 +140,182 @@ Item {
                 }
 
                 Widgets.IconToolButton {
+                    text: PaintbrushCtx.trackingPaused ? VLCIcons.play : VLCIcons.pause_filled
+                    description: PaintbrushCtx.trackingPaused ? qsTr("Resume tracking")
+                                                              : qsTr("Pause tracking")
+                    visible: PaintbrushCtx.tracking
+                    onClicked: PaintbrushCtx.pauseResumeTracking()
+                }
+
+                Widgets.IconToolButton {
                     text: VLCIcons.remove
                     description: qsTr("Cancel tracking")
                     visible: PaintbrushCtx.tracking
                     onClicked: PaintbrushCtx.cancelTracking()
                 }
 
-                Widgets.LabelExt {
+                /* saved tracks: label, range, corrections, seek, delete */
+                ListView {
                     Layout.fillWidth: true
-                    text: PaintbrushCtx.document.trackCount > 0
-                          ? qsTr("%n track(s) saved", "", PaintbrushCtx.document.trackCount)
-                          : ""
-                    color: theme.fg.secondary
-                    font.pixelSize: VLCStyle.fontSize_xsmall
-                    horizontalAlignment: Text.AlignRight
+                    Layout.preferredHeight: VLCStyle.dp(30, VLCStyle.scale)
+                    orientation: ListView.Horizontal
+                    spacing: VLCStyle.margin_xsmall
+                    clip: true
+                    model: PaintbrushCtx.trackList
+                    visible: PaintbrushCtx.document.trackCount > 0
+                    delegate: Rectangle {
+                        width: VLCStyle.dp(150, VLCStyle.scale)
+                        height: parent.height
+                        radius: VLCStyle.margin_xxxsmall
+                        color: Qt.rgba(theme.fg.primary.r, theme.fg.primary.g,
+                                       theme.fg.primary.b, 0.06)
+                        border.width: 1
+                        border.color: modelData.complete ? theme.accent : theme.border
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: VLCStyle.margin_xxxsmall
+                            spacing: VLCStyle.margin_xxxsmall
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 0
+                                Widgets.LabelExt {
+                                    text: modelData.label
+                                    color: theme.fg.primary
+                                    font.pixelSize: VLCStyle.fontSize_xxxsmall
+                                    elide: Text.ElideRight
+                                }
+                                Widgets.LabelExt {
+                                    text: qsTr("%1 kf · %2 corr")
+                                          .arg(modelData.keyframes)
+                                          .arg(modelData.corrections)
+                                    color: theme.fg.secondary
+                                    font.pixelSize: VLCStyle.fontSize_xxxsmall
+                                }
+                            }
+                            Widgets.IconToolButton {
+                                text: VLCIcons.remove
+                                description: qsTr("Delete track")
+                                onClicked: PaintbrushCtx.deleteTrack(modelData.id)
+                            }
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: PaintbrushCtx.seekToTrackKeyframe(modelData.id, 0)
+                        }
+                    }
+                }
+
+                Widgets.IconToolButton {
+                    text: VLCIcons.add
+                    description: qsTr("Make animated sticker from the last track")
+                    visible: PaintbrushCtx.document.trackCount > 0
+                    onClicked: stickerDirDialog.open()
+                }
+            }
+        }
+
+        FolderDialog {
+            id: stickerDirDialog
+            title: qsTr("Choose a folder for the animated sticker sequence")
+            onAccepted: {
+                if (currentFolder)
+                    PaintbrushCtx.exportTrackedSticker(0, currentFolder)
+            }
+        }
+
+        /* thumbnail timeline */
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: VLCStyle.dp(92, VLCStyle.scale)
+            radius: VLCStyle.margin_xsmall
+            color: Qt.rgba(theme.bg.primary.r, theme.bg.primary.g, theme.bg.primary.b, 0.5)
+            border.width: 1
+            border.color: theme.border
+            visible: PaintbrushCtx.playerLengthMs > 0
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: VLCStyle.margin_xsmall
+                spacing: VLCStyle.margin_xxxsmall
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: VLCStyle.margin_xsmall
+
+                    Widgets.LabelExt {
+                        text: qsTr("Timeline")
+                        color: theme.fg.secondary
+                        font.pixelSize: VLCStyle.fontSize_xsmall
+                    }
+                    Widgets.LabelExt {
+                        Layout.fillWidth: true
+                        text: PaintbrushCtx.thumbnailsGenerating
+                              ? qsTr("Generating thumbnails…")
+                              : ""
+                        color: theme.fg.secondary
+                        font.pixelSize: VLCStyle.fontSize_xsmall
+                    }
+                    Widgets.IconToolButton {
+                        text: VLCIcons.history
+                        description: qsTr("Generate thumbnails")
+                        visible: !PaintbrushCtx.thumbnailsGenerating
+                        onClicked: PaintbrushCtx.generateThumbnails()
+                    }
+                    Widgets.IconToolButton {
+                        text: VLCIcons.remove
+                        description: qsTr("Stop generating")
+                        visible: PaintbrushCtx.thumbnailsGenerating
+                        onClicked: PaintbrushCtx.cancelThumbnails()
+                    }
+                }
+
+                ListView {
+                    id: thumbStrip
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    orientation: ListView.Horizontal
+                    spacing: VLCStyle.margin_xxxsmall
+                    clip: true
+                    model: PaintbrushCtx.thumbnailList
+                    delegate: Rectangle {
+                        width: VLCStyle.dp(86, VLCStyle.scale)
+                        height: thumbStrip.height
+                        radius: VLCStyle.margin_xxxsmall
+                        color: model.failed ? Qt.rgba(0.8, 0.2, 0.2, 0.15)
+                                            : Qt.rgba(theme.fg.primary.r, theme.fg.primary.g,
+                                                      theme.fg.primary.b, 0.06)
+                        border.width: model.timeMs === PaintbrushCtx.playerTimeMs ? 2 : 0
+                        border.color: theme.accent
+
+                        Image {
+                            anchors.fill: parent
+                            anchors.margins: 1
+                            source: model.hasImage ? PaintbrushCtx.thumbnailDataUrl(index) : ""
+                            fillMode: Image.PreserveAspectFit
+                            asynchronous: true
+                        }
+
+                        Widgets.LabelExt {
+                            anchors.left: parent.left
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 2
+                            text: model.hasImage || model.failed
+                                  ? root.formatTime(model.timeMs)
+                                  : ""
+                            color: theme.fg.primary
+                            font.pixelSize: VLCStyle.fontSize_xxxsmall
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: {
+                                if (model.hasImage)
+                                    PaintbrushCtx.playerSeek(model.timeMs)
+                            }
+                        }
+                    }
                 }
             }
         }

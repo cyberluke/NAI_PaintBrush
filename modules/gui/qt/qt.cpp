@@ -473,6 +473,10 @@ vlc_module_begin ()
                  PB_ASSISTANT_COMPACTION_PRESERVE_TEXT, nullptr )
     add_integer( "paintbrush-assistant-compaction-reserved", 20000,
                  PB_ASSISTANT_COMPACTION_RESERVED_TEXT, nullptr )
+    add_string( "paintbrush-recent-projects", NULL,
+                N_( "Recent Paintbrush projects" ), N_( "Semicolon-separated list of recently opened Paintbrush projects." ) )
+    add_bool( "paintbrush-demo-mode", false,
+              N_( "Paintbrush demo mode" ), N_( "Show the strongest Paintbrush features for recording and demos." ) )
 
     add_bool( "qt-system-tray", true, SYSTRAY_TEXT, SYSTRAY_LONGTEXT)
 

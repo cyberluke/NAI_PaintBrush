@@ -8,6 +8,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Window
 import QtQuick.Dialogs
+import QtQuick.Controls
 
 import VLC.MainInterface
 import VLC.Widgets as Widgets
@@ -85,6 +86,42 @@ Item {
         onAccepted: {
             if (selectedFile)
                 PaintbrushCtx.exportObjectPng(selectedFile)
+        }
+    }
+
+    Dialog {
+        id: projectInfoDialog
+        title: qsTr("Project info")
+        modal: true
+        x: Overlay.overlay ? Math.round((Overlay.overlay.width - width) / 2) : 0
+        y: Overlay.overlay ? Math.round((Overlay.overlay.height - height) / 2) : 0
+        standardButtons: Dialog.Close
+
+        contentItem: ColumnLayout {
+            spacing: VLCStyle.margin_small
+
+            Widgets.LabelExt {
+                Layout.fillWidth: true
+                text: PaintbrushCtx.projectInfoText
+                color: theme.fg.primary
+                font.pixelSize: VLCStyle.fontSize_small
+                wrapMode: Text.WordWrap
+            }
+            Button {
+                Layout.fillWidth: true
+                text: qsTr("Relink missing media…")
+                onClicked: relinkMediaDialog.open()
+            }
+        }
+    }
+
+    FileDialog {
+        id: relinkMediaDialog
+        title: qsTr("Relink source media")
+        nameFilters: ["Video files (*.mp4 *.mkv *.avi *.mov *.webm *.ts)", "All files (*)"]
+        onAccepted: {
+            if (selectedFile)
+                PaintbrushCtx.relinkMedia(selectedFile)
         }
     }
 
@@ -166,6 +203,12 @@ Item {
                 description: qsTr("Save project")
                 enabled: PaintbrushCtx.hasOpenDocument
                 onClicked: saveProjectDialog.open()
+            }
+            Widgets.IconToolButton {
+                text: VLCIcons.info
+                description: qsTr("Project info")
+                enabled: PaintbrushCtx.hasOpenDocument
+                onClicked: projectInfoDialog.open()
             }
             Widgets.IconToolButton {
                 text: VLCIcons.ic_fluent_arrow_download_24_regular
@@ -255,4 +298,75 @@ Item {
         visible: PaintbrushCtx.welcomeVisible
         z: 10
     }
+
+    /* crash recovery banner */
+    Rectangle {
+        anchors.top: topBar.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        height: VLCStyle.dp(48, VLCStyle.scale)
+        z: 9
+        visible: PaintbrushCtx.recoveryAvailable
+        color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.18)
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.margins: VLCStyle.margin_normal
+            spacing: VLCStyle.margin_normal
+
+            Widgets.LabelExt {
+                Layout.fillWidth: true
+                text: PaintbrushCtx.recoveryDescription
+                color: theme.fg.primary
+                font.pixelSize: VLCStyle.fontSize_small
+                wrapMode: Text.WordWrap
+            }
+
+            Button {
+                text: qsTr("Restore")
+                onClicked: PaintbrushCtx.restoreRecovery()
+            }
+            Button {
+                text: qsTr("Open copy…")
+                onClicked: saveProjectDialog.open()
+            }
+            Button {
+                text: qsTr("Discard")
+                onClicked: PaintbrushCtx.discardRecovery()
+            }
+        }
+    }
+
+    /* ---------------------------------------------------------- shortcuts */
+
+    Shortcut { sequence: "Ctrl+N"; onActivated: { PaintbrushCtx.newBlankCanvas(1280, 720); PaintbrushCtx.companionNotifyEvent("new-canvas") } }
+    Shortcut { sequence: "Ctrl+O"; onActivated: openImageDialog.open() }
+    Shortcut { sequence: "Ctrl+S"; onActivated: PaintbrushCtx.autosaveNow() }
+    Shortcut { sequence: "Ctrl+Shift+S"; onActivated: saveProjectDialog.open() }
+    Shortcut { sequence: "Ctrl+E"; onActivated: exportDialog.open() }
+    Shortcut { sequence: "Ctrl+Z"; onActivated: PaintbrushCtx.undo() }
+    Shortcut { sequence: "Ctrl+Y"; onActivated: PaintbrushCtx.redo() }
+    Shortcut { sequence: "Ctrl+X"; onActivated: paintbrushCanvas.cutSelection() }
+    Shortcut { sequence: "Ctrl+C"; onActivated: paintbrushCanvas.copySelection() }
+    Shortcut { sequence: "Ctrl+V"; onActivated: paintbrushCanvas.pasteClipboard(Qt.point(0, 0)) }
+    Shortcut { sequence: "Ctrl+A"; onActivated: paintbrushCanvas.selectionSelectAll() }
+    Shortcut { sequence: "Ctrl+D"; onActivated: paintbrushCanvas.selectionClear() }
+    Shortcut { sequence: "Delete"; onActivated: paintbrushCanvas.deleteSelection() }
+    Shortcut { sequence: "B"; onActivated: paintbrushCanvas.tool = 5 }
+    Shortcut { sequence: "E"; onActivated: paintbrushCanvas.tool = 6 }
+    Shortcut { sequence: "O"; onActivated: paintbrushCanvas.tool = 3 }
+    Shortcut { sequence: "T"; onActivated: paintbrushCanvas.tool = 14 }
+    Shortcut { sequence: "G"; onActivated: paintbrushCanvas.gridVisible = !paintbrushCanvas.gridVisible }
+    Shortcut { sequence: "Shift+G"; onActivated: paintbrushCanvas.snapToGrid = !paintbrushCanvas.snapToGrid }
+    Shortcut { sequence: "+"; onActivated: paintbrushCanvas.zoomIn() }
+    Shortcut { sequence: "-"; onActivated: paintbrushCanvas.zoomOut() }
+    Shortcut { sequence: "Ctrl+0"; onActivated: paintbrushCanvas.zoomTo(1.0) }
+    Shortcut { sequence: "F"; onActivated: paintbrushCanvas.fitToView() }
+    Shortcut { sequence: "Space"; onActivated: { /* reserved: pan via drag */ } }
+    Shortcut { sequence: "Ctrl+Left"; onActivated: PaintbrushCtx.playerFramePrev() }
+    Shortcut { sequence: "Ctrl+Right"; onActivated: PaintbrushCtx.playerFrameNext() }
+    Shortcut { sequence: "Ctrl+Space"; onActivated: PaintbrushCtx.playerPlayPause() }
+    Shortcut { sequence: "Ctrl+U"; onActivated: PaintbrushCtx.captureVideoFrame() }
+    Shortcut { sequence: "Ctrl+I"; onActivated: assistantDock.visible = !assistantDock.visible }
+    Shortcut { sequence: "Escape"; onActivated: PaintbrushCtx.cancelTracking(); PaintbrushCtx.cancelGeneration(); PaintbrushCtx.cancelThumbnails() }
 }

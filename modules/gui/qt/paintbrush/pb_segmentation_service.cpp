@@ -106,6 +106,14 @@ void SegmentationService::initialize()
     m_worker = std::thread([this]() { workerLoop(); });
 }
 
+void SegmentationService::clearCache()
+{
+    QMutexLocker lock(&m_mutex);
+    m_encodedHash = 0;
+    /* drop any queued jobs that would re-use the stale embedding */
+    m_queue.clear();
+}
+
 void SegmentationService::shutdown()
 {
     if (!m_running)

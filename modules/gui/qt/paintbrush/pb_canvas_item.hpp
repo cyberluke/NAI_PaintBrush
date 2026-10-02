@@ -50,6 +50,13 @@ class PaintbrushCanvasItem : public QQuickItem
     Q_PROPERTY(qreal brushSize READ brushSize WRITE setBrushSize NOTIFY brushSizeChanged FINAL)
     Q_PROPERTY(qreal sprayDensity READ sprayDensity WRITE setSprayDensity NOTIFY sprayDensityChanged FINAL)
     Q_PROPERTY(qreal sprayFlow READ sprayFlow WRITE setSprayFlow NOTIFY sprayFlowChanged FINAL)
+    Q_PROPERTY(bool gridVisible READ gridVisible WRITE setGridVisible NOTIFY gridVisibleChanged FINAL)
+    Q_PROPERTY(int gridSpacing READ gridSpacing WRITE setGridSpacing NOTIFY gridSpacingChanged FINAL)
+    Q_PROPERTY(bool snapToGrid READ snapToGrid WRITE setSnapToGrid NOTIFY snapToGridChanged FINAL)
+    Q_PROPERTY(bool pressureEnabled READ pressureEnabled WRITE setPressureEnabled NOTIFY pressureEnabledChanged FINAL)
+    Q_PROPERTY(bool pressureToOpacity READ pressureToOpacity WRITE setPressureToOpacity NOTIFY pressureToOpacityChanged FINAL)
+    Q_PROPERTY(qreal pressureMin READ pressureMin WRITE setPressureMin NOTIFY pressureMinChanged FINAL)
+    Q_PROPERTY(qreal pressureMax READ pressureMax WRITE setPressureMax NOTIFY pressureMaxChanged FINAL)
     Q_PROPERTY(qreal zoom READ zoom WRITE setZoom NOTIFY zoomChanged FINAL)
     Q_PROPERTY(QPointF panOffset READ panOffset WRITE setPanOffset NOTIFY panOffsetChanged FINAL)
     Q_PROPERTY(bool hasSelection READ hasSelection NOTIFY selectionChanged FINAL)
@@ -83,6 +90,24 @@ public:
      * wheel adjusts it while the Spray tool is active. */
     qreal sprayFlow() const { return m_sprayFlow; }
     void setSprayFlow(qreal flow);
+    /* Precision drawing: optional canvas grid (display + snap). */
+    bool gridVisible() const { return m_gridVisible; }
+    void setGridVisible(bool visible);
+    int gridSpacing() const { return m_gridSpacing; }
+    void setGridSpacing(int spacing);
+    bool snapToGrid() const { return m_snapToGrid; }
+    void setSnapToGrid(bool snap);
+    /* Pen/tablet pressure (mouse is unaffected: pressure reads 1.0). */
+    bool pressureEnabled() const { return m_pressureEnabled; }
+    void setPressureEnabled(bool enabled);
+    bool pressureToOpacity() const { return m_pressureToOpacity; }
+    void setPressureToOpacity(bool enabled);
+    qreal pressureMin() const { return m_pressureMin; }
+    void setPressureMin(qreal min);
+    qreal pressureMax() const { return m_pressureMax; }
+    void setPressureMax(qreal max);
+    /* QML hint: true while a tablet/pen is the active pointing device. */
+    bool tabletActive() const { return m_tabletActive; }
     qreal zoom() const { return m_zoom; }
     void setZoom(qreal zoom);
     QPointF panOffset() const { return m_panOffset; }
@@ -110,6 +135,8 @@ public:
     Q_INVOKABLE void selectionShrink(int px);
     Q_INVOKABLE void selectionFeather(int px);
     Q_INVOKABLE void selectionFillHoles();
+    Q_INVOKABLE void selectionSmooth();
+    Q_INVOKABLE void selectionSelectAll();
     Q_INVOKABLE void cutSelection();
     Q_INVOKABLE void copySelection();
     Q_INVOKABLE void pasteClipboard(const QPointF &at);
@@ -150,6 +177,13 @@ signals:
     void brushSizeChanged();
     void sprayDensityChanged();
     void sprayFlowChanged();
+    void gridVisibleChanged();
+    void gridSpacingChanged();
+    void snapToGridChanged();
+    void pressureEnabledChanged();
+    void pressureToOpacityChanged();
+    void pressureMinChanged();
+    void pressureMaxChanged();
     void zoomChanged();
     void panOffsetChanged();
     void selectionChanged(bool hasSelection);
@@ -229,6 +263,10 @@ private:
     void updateStatus(const QPointF &canvasPos);
     void rebuildTransformNode(QSGTransformNode *root);
     QRect tileRect(int tx, int ty) const;
+    QPointF snapPoint(const QPointF &p) const;
+    QSGNode *buildGridNode();
+    bool shouldSnap() const;
+    qreal pressureFactor() const;   /* 0..1 applied when pressure enabled */
 
     PaintbrushDocument *m_doc = nullptr;
     UndoStack *m_undoStack = nullptr;
@@ -247,6 +285,16 @@ private:
     bool m_objectSelectBusy = false;
     bool m_objectMaskVisible = false;
 
+    /* precision drawing: grid display/snap, tablet pressure */
+    bool m_gridVisible = false;
+    int m_gridSpacing = 32;
+    bool m_snapToGrid = false;
+    bool m_pressureEnabled = false;
+    bool m_pressureToOpacity = false;
+    qreal m_pressureMin = 0.2;
+    qreal m_pressureMax = 1.0;
+    bool m_tabletActive = false;
+
     /* spray physics state (graffiti can) */
     QTimer m_sprayTimer;             /* continuous emission while held */
     QPointF m_sprayNozzle;           /* the can tip (canvas coords)      */
@@ -264,6 +312,7 @@ private:
     QHash<TileKey, QSGTexture *> m_textures;
     QHash<TileKey, QSGTransformNode *> m_tileNodes;
     bool m_texturesNeedRebuild = false;
+    QSGNode *m_gridNode = nullptr;   /* overlay geometry, owned by scene graph */
 
     /* stroke state */
     bool m_strokeActive = false;
@@ -272,6 +321,7 @@ private:
     QRect m_strokeUnion;
     QList<QPair<QRect, QImage>> m_strokeBefore;
     bool m_strokeHadPaint = false;
+    qreal m_currentPressure = 1.0;   /* 1.0 for mouse; tablet reports 0..1 */
 
     /* selection state */
     QPointF m_dragStartCanvas;

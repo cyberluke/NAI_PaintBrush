@@ -58,6 +58,14 @@ void CompanionService::setNetworkAllowed(bool allowed)
     m_networkAllowed = allowed;
 }
 
+void CompanionService::setTalkLevel(int level)
+{
+    level = qBound(0, level, 2);
+    if (m_talkLevel == level)
+        return;
+    m_talkLevel = level;
+}
+
 bool CompanionService::analysisAllowed() const
 {
     if (m_mode == MODE_OFF)
@@ -166,11 +174,24 @@ void CompanionService::notifyEvent(const QString &event, const QImage &preview)
 {
     if (m_mode == MODE_OFF || m_mode == MODE_QUIET)
         return;
+    /* "Only when I ask" — never speak spontaneously */
+    if (m_talkLevel == 0)
+        return;
 
     /* keep a compact recent-activity ring */
     m_recentEvents.append(event);
     while (m_recentEvents.size() > 6)
         m_recentEvents.removeFirst();
+
+    /* silence discipline: after the last comment, wait at least one more
+     * interval before speaking again, so we never nag while the user is
+     * absorbed. "Talk less" doubles the quiet period. */
+    if (m_hasLastAnalysis)
+    {
+        const qint64 quiet = m_minIntervalMs * (m_talkLevel == 1 ? 2 : 1);
+        if (m_lastAnalysis.elapsed() < quiet)
+            return;
+    }
 
     runAnalysis(buildObservationPrompt(event), preview);
 }

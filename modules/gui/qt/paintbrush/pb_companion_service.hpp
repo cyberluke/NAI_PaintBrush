@@ -64,6 +64,9 @@ public:
     bool isThinking() const { return m_thinking; }
     bool networkAllowed() const { return m_networkAllowed; }
     void setNetworkAllowed(bool allowed);
+    /* Talk level: 0 = "Only when I ask", 1 = "Talk less", 2 = default. */
+    int talkLevel() const { return m_talkLevel; }
+    void setTalkLevel(int level);
 
     /* Meaningful canvas events (aggregated by the controller). */
     void notifyEvent(const QString &event, const QImage &preview);
@@ -93,6 +96,7 @@ private:
 
     int m_mode = MODE_BUDDY;
     int m_minIntervalMs = 30000;
+    int m_talkLevel = 2;             /* 0 = only when asked, 1 = less, 2 = normal */
     bool m_thinking = false;
     bool m_networkAllowed = true;    /* kids mode flips this off by default */
 

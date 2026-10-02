@@ -185,7 +185,7 @@ void TrackingService::beginTracking()
 
 void TrackingService::stepNext()
 {
-    if (!m_tracking)
+    if (!m_tracking || m_paused)
         return;
 
     if (m_done >= m_total)
@@ -341,10 +341,29 @@ void TrackingService::cancel()
     if (m_tracking)
     {
         m_tracking = false;
+        m_paused = false;
         emit trackFinished(false, true, {});
     }
     QMutexLocker lock(&m_mutex);
     m_queue.clear();
+}
+
+void TrackingService::pause()
+{
+    if (!m_tracking || m_paused)
+        return;
+    m_paused = true;
+    m_stepTimer.stop();
+    setStatus(QStringLiteral("Tracking paused"));
+}
+
+void TrackingService::resume()
+{
+    if (!m_tracking || !m_paused)
+        return;
+    m_paused = false;
+    setStatus(QStringLiteral("Tracking resumed"));
+    QTimer::singleShot(0, this, [this]() { stepNext(); });
 }
 
 void TrackingService::finishTrack(bool complete, bool cancelled,

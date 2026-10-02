@@ -84,6 +84,9 @@ public:
                     int direction, int maxFrames);
     void cancel();
     void shutdown();
+    void pause();
+    void resume();
+    bool paused() const { return m_paused; }
 
     /* Refine the tracked object on the current frame with extra points,
      * then continue propagation. */
@@ -146,6 +149,7 @@ private:
     vlc_player_t *m_player = nullptr;
     vlc_player_listener_id *m_listener = nullptr;
     bool m_tracking = false;
+    bool m_paused = false;
     int m_done = 0;
     int m_total = 0;
     int m_direction = TRACK_FORWARD;

@@ -12,6 +12,9 @@
 
 #include <QQuickItem>
 #include <QImage>
+#include <QBuffer>
+#include <QElapsedTimer>
+#include <QThread>
 #include <QFileInfo>
 #include <QClipboard>
 #include <QGuiApplication>
@@ -77,6 +80,13 @@ PaintbrushController::PaintbrushController(qt_intf_t *intf, QObject *parent)
     connect(&m_assistant, &AssistantService::availabilityChanged,
             this, [this](bool, const QString &) { emit serviceAvailabilityChanged(); });
 
+    connect(&m_thumbnails, &ThumbnailService::thumbnailReady,
+            this, [this](int, const QImage &) { emit thumbnailsChanged(); });
+    connect(&m_thumbnails, &ThumbnailService::generationFinished,
+            this, [this]() { emit thumbnailsChanged(); });
+    connect(&m_thumbnails, &ThumbnailService::generationFailed,
+            this, [this](const QString &reason) { setStatus(reason); emit thumbnailsChanged(); });
+
     m_companion.setAssistantService(&m_assistant);
 
     connect(&m_undoStack, &UndoStack::canUndoChanged,
@@ -93,6 +103,7 @@ PaintbrushController::PaintbrushController(qt_intf_t *intf, QObject *parent)
     m_mediaTimer.start();
 
     startAutosave();
+    checkForRecovery();
 }
 
 PaintbrushController::~PaintbrushController()
@@ -104,6 +115,7 @@ PaintbrushController::~PaintbrushController()
     m_vision.cancelAll();
     m_generation.cancelAll();
     m_assistant.cancelAll();
+    m_thumbnails.cancel();
 }
 
 void PaintbrushController::configureServices()
@@ -114,6 +126,43 @@ void PaintbrushController::configureServices()
     m_generation.configure(VLC_OBJECT(m_intf));
     m_assistant.configure(VLC_OBJECT(m_intf));
     m_companion.configure(VLC_OBJECT(m_intf));
+    m_lookup.configure(VLC_OBJECT(m_intf));
+
+    /* demo mode: preload a sample project if present; otherwise a blank
+     * canvas is ready anyway */
+    if (var_InheritBool(m_intf, "paintbrush-demo-mode"))
+    {
+        QString sample;
+        const QStringList candidates = {
+            QStringLiteral("sample.npb"),
+            QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
+                QStringLiteral("/paintbrush/sample.npb"),
+            QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
+                QStringLiteral("/paintbrush/demo.npb"),
+        };
+        for (const QString &c : candidates)
+            if (QFileInfo::exists(c))
+            {
+                sample = c;
+                break;
+            }
+        if (!sample.isEmpty())
+        {
+            const QString err = m_projectStore.load(&m_document, sample);
+            if (err.isEmpty())
+            {
+                m_welcomeVisible = false;
+                if (m_canvas)
+                {
+                    m_canvas->markCanvasDirty();
+                    m_canvas->fitToView();
+                }
+            }
+        }
+        /* highlight the strongest tool for the demo */
+        if (m_canvas)
+            m_canvas->setTool(TOOL_OBJECT_SELECT);
+    }
 
     if (m_companion.mode() == CompanionService::MODE_OFF)
         m_companionModeOffReason = QStringLiteral("The companion is off.");
@@ -323,6 +372,7 @@ void PaintbrushController::saveProject(const QUrl &url)
     m_document.setProjectPath(path);
     m_projectName = QFileInfo(path).completeBaseName();
     m_document.setDirty(false);
+    pushRecentProject(path);
     emit projectChanged();
     setStatus(QStringLiteral("Saved project %1").arg(m_projectName));
 }
@@ -347,6 +397,7 @@ void PaintbrushController::openProject(const QUrl &url)
     m_document.setProjectPath(path);
     m_projectName = QFileInfo(path).completeBaseName();
     m_undoStack.clear();
+    pushRecentProject(path);
     if (m_canvas)
     {
         m_canvas->markCanvasDirty();
@@ -357,6 +408,101 @@ void PaintbrushController::openProject(const QUrl &url)
     setStatus(QStringLiteral("Opened project %1").arg(m_projectName));
 }
 
+void PaintbrushController::pushRecentProject(const QString &path)
+{
+    /* keep the 6 most recent projects in the config (persisted) */
+    QStringList recent;
+    const QString current = var_InheritString(m_intf, "paintbrush-recent-projects");
+    if (!current.isEmpty())
+        recent = current.split(QLatin1Char(';'), Qt::SkipEmptyParts);
+    recent.removeAll(path);
+    recent.prepend(path);
+    while (recent.size() > 6)
+        recent.removeLast();
+    var_SetString(m_intf, "paintbrush-recent-projects",
+                  recent.join(QLatin1Char(';')).toUtf8().constData());
+    emit recentProjectsChanged();
+}
+
+QVariantList PaintbrushController::recentProjects() const
+{
+    QVariantList list;
+    const QString current = var_InheritString(m_intf, "paintbrush-recent-projects");
+    if (current.isEmpty())
+        return list;
+    const QStringList recent = current.split(QLatin1Char(';'), Qt::SkipEmptyParts);
+    for (const QString &path : recent)
+    {
+        QVariantMap item;
+        item[QStringLiteral("path")] = path;
+        item[QStringLiteral("name")] = QFileInfo(path).completeBaseName();
+        list.append(item);
+    }
+    return list;
+}
+
+void PaintbrushController::openRecentProject(int index)
+{
+    const QVariantList recent = recentProjects();
+    if (index < 0 || index >= recent.size())
+        return;
+    const QString path = recent[index].toMap()[QStringLiteral("path")].toString();
+    if (!QFileInfo::exists(path))
+    {
+        setStatus(QStringLiteral("Recent project is missing: %1").arg(path));
+        return;
+    }
+    openProject(QUrl::fromLocalFile(path));
+}
+
+/* ----------------------------------------------------------- AI scheduler */
+
+QVariantList PaintbrushController::activeJobs() const
+{
+    QVariantList jobs;
+    auto add = [&jobs](const QString &id, const QString &name,
+                       const QString &resource, bool busy) {
+        if (!busy)
+            return;
+        QVariantMap job;
+        job[QStringLiteral("id")] = id;
+        job[QStringLiteral("name")] = name;
+        job[QStringLiteral("resource")] = resource;
+        jobs.append(job);
+    };
+    add(QStringLiteral("segmentation"), QStringLiteral("Object Select"),
+        QStringLiteral("GPU"), m_segmentation.busy());
+    add(QStringLiteral("tracking"), QStringLiteral("Tracking"),
+        QStringLiteral("GPU"), m_tracking.isTracking());
+    add(QStringLiteral("vision"), QStringLiteral("Ask about this"),
+        QStringLiteral("remote"), m_vision.isBusy());
+    add(QStringLiteral("generation"), QStringLiteral("Generation"),
+        QStringLiteral("remote"), m_generation.isBusy());
+    add(QStringLiteral("assistant"), QStringLiteral("AI assistant"),
+        QStringLiteral("remote"), m_assistant.isBusy());
+    add(QStringLiteral("thumbnails"), QStringLiteral("Thumbnails"),
+        QStringLiteral("cpu"), m_thumbnails.isGenerating());
+    return jobs;
+}
+
+void PaintbrushController::cancelActiveJob(const QString &jobId)
+{
+    if (jobId == QStringLiteral("segmentation"))
+        m_segmentation.cancel();
+    else if (jobId == QStringLiteral("tracking"))
+        m_tracking.cancel();
+    else if (jobId == QStringLiteral("vision"))
+        m_vision.cancelAll();
+    else if (jobId == QStringLiteral("generation"))
+        m_generation.cancelAll();
+    else if (jobId == QStringLiteral("assistant"))
+        m_assistant.cancelAll();
+    else if (jobId == QStringLiteral("thumbnails"))
+        m_thumbnails.cancel();
+    emit activeJobsChanged();
+    setStatus(QStringLiteral("Cancelled %1").arg(jobId));
+}
+
 void PaintbrushController::exportImage(const QUrl &url, const QString &format)
 {
     const QString path = url.toLocalFile();
@@ -364,6 +510,40 @@ void PaintbrushController::exportImage(const QUrl &url, const QString &format)
         return;
     const QString err = ExportService::exportImage(&m_document, path, format);
     setStatus(err.isEmpty() ? QStringLiteral("Exported image")
+                            : err);
+}
+
+void PaintbrushController::exportImagePreset(const QUrl &url, int preset)
+{
+    const QString path = url.toLocalFile();
+    if (path.isEmpty())
+        return;
+    QString format;
+    double scale = 1.0;
+    bool crop = false;
+    QColor background = QColor(Qt::transparent);
+    switch (preset)
+    {
+    case 1: /* Transparent Sticker: trim + alpha */
+        crop = true;
+        format = QStringLiteral("png");
+        break;
+    case 2: /* Social Post: 1080 square */
+        scale = 1080.0 / qMax(1, m_document.canvasWidth());
+        format = QStringLiteral("png");
+        break;
+    case 3: /* Wallpaper: 1920x1080-ish, fill white behind JPEG */
+        scale = 1.0;
+        format = QStringLiteral("jpg");
+        background = Qt::white;
+        break;
+    case 4: /* Tracked Clip is handled by exportTrackedSticker */
+    default:
+        break; /* Canvas PNG: default */
+    }
+    const QString err = ExportService::exportImageOptions(
+        &m_document, path, format, scale, crop, background);
+    setStatus(err.isEmpty() ? QStringLiteral("Exported (%1)").arg(preset)
                             : err);
 }
 
@@ -386,6 +566,47 @@ void PaintbrushController::exportMaskPng(const QUrl &url)
     const QString err = ExportService::exportMask(m_objectMask, path);
     setStatus(err.isEmpty() ? QStringLiteral("Exported mask PNG")
                             : err);
+}
+
+void PaintbrushController::relinkMedia(const QUrl &url)
+{
+    const QString path = url.toLocalFile();
+    if (path.isEmpty())
+        return;
+    /* keep the old timestamp; only the MRL/title change */
+    m_document.setSourceMedia(path, QFileInfo(path).fileName(),
+                              m_document.sourceTimeMs());
+    /* update the tracked objects that referenced the old MRL */
+    QVector<ObjectTrack> tracks = m_document.tracks();
+    for (ObjectTrack &track : tracks)
+        track.sourceMRL = path;
+    m_document.setTracks(tracks);
+    m_document.setDirty(true);
+    emit documentChanged();
+    emit mediaStateChanged();
+    setStatus(QStringLiteral("Media relinked to %1").arg(QFileInfo(path).fileName()));
+}
+
+QString PaintbrushController::projectInfoText() const
+{
+    QStringList lines;
+    lines << QStringLiteral("Canvas: %1 x %2 px")
+                 .arg(m_document.canvasWidth()).arg(m_document.canvasHeight());
+    lines << QStringLiteral("Layers: %1 (current %2)")
+                 .arg(m_document.layerCount()).arg(m_document.currentLayerIndex() + 1);
+    if (!m_document.sourceMediaMRL().isEmpty())
+        lines << QStringLiteral("Linked media: %1").arg(m_document.sourceMediaTitle());
+    lines << QStringLiteral("Tracked objects: %1").arg(m_document.trackCount());
+    lines << QStringLiteral("AI history: %1 message(s)")
+                 .arg(m_assistantMessages.size());
+    lines << QStringLiteral("Autosave: %1")
+                 .arg(var_InheritBool(m_intf, "paintbrush-autosave")
+                          ? QStringLiteral("on (%1 s)").arg(
+                                var_InheritInteger(m_intf, "paintbrush-autosave-interval"))
+                          : QStringLiteral("off"));
+    if (!m_document.projectPath().isEmpty())
+        lines << QStringLiteral("Project: %1").arg(m_document.projectPath());
+    return lines.join(QStringLiteral("\n"));
 }
 
 void PaintbrushController::autosaveNow()
@@ -417,6 +638,80 @@ void PaintbrushController::startAutosave()
     m_autosaveTimer.setInterval(qMax(10, interval) * 1000);
     connect(&m_autosaveTimer, &QTimer::timeout, this, &PaintbrushController::autosaveNow);
     m_autosaveTimer.start();
+}
+
+/* ----------------------------------------------------------- crash recovery */
+
+void PaintbrushController::checkForRecovery()
+{
+    /* look for the recovery autosave for an unsaved document, or the sidecar
+     * autosave of the last project */
+    const QString fallback = QStandardPaths::writableLocation(
+                                 QStandardPaths::AppDataLocation) +
+                             QStringLiteral("/paintbrush/recovery.npb");
+    const QString projectAutosave = m_document.projectPath() + QStringLiteral(".autosave");
+
+    QString path;
+    if (QFileInfo::exists(fallback))
+        path = fallback;
+    else if (!m_document.projectPath().isEmpty() && QFileInfo::exists(projectAutosave))
+        path = projectAutosave;
+
+    if (path.isEmpty())
+    {
+        m_recoveryAvailable = false;
+        m_recoveryDescription.clear();
+        m_recoveryPath.clear();
+        emit recoveryStateChanged();
+        return;
+    }
+
+    m_recoveryPath = path;
+    m_recoveryDescription =
+        QStringLiteral("Paintbrush found an unsaved project from an earlier session.\n%1")
+            .arg(QFileInfo(path).fileName());
+    m_recoveryAvailable = true;
+    emit recoveryStateChanged();
+}
+
+void PaintbrushController::restoreRecovery()
+{
+    if (m_recoveryPath.isEmpty())
+        return;
+    const QString err = m_projectStore.load(&m_document, m_recoveryPath);
+    if (!err.isEmpty())
+    {
+        setStatus(QStringLiteral("Recovery failed: %1").arg(err));
+        return;
+    }
+    /* the recovery copy is clearly identified so it can never be confused
+     * with the explicit saved project */
+    m_document.setProjectPath({});
+    m_document.setDirty(true);
+    if (m_canvas)
+    {
+        m_canvas->markCanvasDirty();
+        m_canvas->setTool(m_canvas->tool());
+    }
+    m_undoStack.clear();
+    /* discard recovery data only after a successful restore */
+    QFile::remove(m_recoveryPath);
+    m_recoveryAvailable = false;
+    m_recoveryPath.clear();
+    m_recoveryDescription.clear();
+    emit documentChanged();
+    emit recoveryStateChanged();
+    setStatus(QStringLiteral("Recovered unsaved project (copy)"));
+}
+
+void PaintbrushController::discardRecovery()
+{
+    if (!m_recoveryPath.isEmpty())
+        QFile::remove(m_recoveryPath);
+    m_recoveryAvailable = false;
+    m_recoveryPath.clear();
+    m_recoveryDescription.clear();
+    emit recoveryStateChanged();
 }
 
 void PaintbrushController::undo()
@@ -711,6 +1006,78 @@ void PaintbrushController::askAboutSelection(const QString &question)
                  m_visionConversationId);
 }
 
+void PaintbrushController::askAboutObjectFollowUp(const QString &question)
+{
+    /* retains the object crop context from the previous turn */
+    if (!m_vision.isConfigured())
+    {
+        setStatus(m_vision.unavailableReason());
+        return;
+    }
+    if (m_visionConversationId.isEmpty())
+    {
+        askAboutObject(question);
+        return;
+    }
+    if (m_objectMask.isNull())
+    {
+        setStatus(QStringLiteral("Select an object first."));
+        return;
+    }
+    m_visionHasResult = false;
+    emit visionStateChanged();
+    m_vision.ask(objectCrop(), currentAiSource(), question, m_visionConversationId);
+    setStatus(QStringLiteral("Asking a follow-up…"));
+}
+
+void PaintbrushController::copyVisionAnswer()
+{
+    if (m_visionAnswer.isEmpty())
+        return;
+    QGuiApplication::clipboard()->setText(m_visionAnswer);
+    setStatus(QStringLiteral("Answer copied"));
+}
+
+void PaintbrushController::addVisionAnswerAsText()
+{
+    if (m_visionAnswer.isEmpty() || !m_canvas)
+        return;
+    QFont font;
+    font.setPixelSize(18);
+    /* place near the object if there is one, else center-ish */
+    const QPointF pos = m_canvas->objectMaskBounds().bottomLeft() +
+                        QPointF(0, 12);
+    m_canvas->applyText(m_visionAnswer, pos, font, QColor(Qt::black));
+    if (m_canvas)
+        m_canvas->markCanvasDirty();
+    setStatus(QStringLiteral("Answer added as text"));
+}
+
+void PaintbrushController::clearVisionResult()
+{
+    m_visionAnswer.clear();
+    m_visionEvidence.clear();
+    m_visionUncertainty.clear();
+    m_visionHasResult = false;
+    m_visionConversationId.clear();
+    emit visionStateChanged();
+}
+
+QString PaintbrushController::objectThumbnailDataUrl() const
+{
+    const QImage crop = objectCrop();
+    if (crop.isNull())
+        return {};
+    QImage thumb = crop.scaled(88, 88, Qt::KeepAspectRatio,
+                               Qt::SmoothTransformation);
+    QByteArray bytes;
+    QBuffer buffer(&bytes);
+    buffer.open(QIODevice::WriteOnly);
+    thumb.save(&buffer, "PNG");
+    return QStringLiteral("data:image/png;base64,") +
+           QString::fromLatin1(bytes.toBase64());
+}
+
 void PaintbrushController::onVisionResponse(const QString &conversationId,
                                             const QString &answer,
                                             const QString &evidence,
@@ -782,6 +1149,185 @@ QVector<QPointF> PaintbrushController::positivePointsForTracking() const
 void PaintbrushController::cancelTracking()
 {
     m_tracking.cancel();
+}
+
+void PaintbrushController::pauseResumeTracking()
+{
+    if (m_tracking.paused())
+        m_tracking.resume();
+    else
+        m_tracking.pause();
+    emit trackingStateChanged();
+}
+
+bool PaintbrushController::trackingPaused() const
+{
+    return m_tracking.paused();
+}
+
+QVariantList PaintbrushController::trackList() const
+{
+    QVariantList list;
+    const QVector<ObjectTrack> tracks = m_document.tracks();
+    for (const ObjectTrack &track : tracks)
+    {
+        QVariantMap item;
+        item[QStringLiteral("id")] = track.id;
+        item[QStringLiteral("label")] =
+            track.label.isEmpty() ? QStringLiteral("Object %1").arg(track.id + 1)
+                                  : track.label;
+        item[QStringLiteral("startMs")] = track.startMs;
+        item[QStringLiteral("endMs")] = track.endMs;
+        item[QStringLiteral("keyframes")] = track.keyframes.size();
+        item[QStringLiteral("complete")] = track.complete;
+        item[QStringLiteral("cancelled")] = track.cancelled;
+        /* correction markers */
+        int corrections = 0;
+        for (const TrackKeyframe &kf : track.keyframes)
+            if (kf.corrected)
+                ++corrections;
+        item[QStringLiteral("corrections")] = corrections;
+        list.append(item);
+    }
+    return list;
+}
+
+void PaintbrushController::seekToTrackKeyframe(int trackId, int keyframeIndex)
+{
+    const QVector<ObjectTrack> tracks = m_document.tracks();
+    for (const ObjectTrack &track : tracks)
+    {
+        if (track.id != trackId)
+            continue;
+        if (keyframeIndex < 0 || keyframeIndex >= track.keyframes.size())
+            return;
+        playerSeek(track.keyframes[keyframeIndex].timeMs);
+        return;
+    }
+}
+
+void PaintbrushController::deleteTrack(int trackId)
+{
+    QVector<ObjectTrack> tracks = m_document.tracks();
+    for (int i = 0; i < tracks.size(); ++i)
+    {
+        if (tracks[i].id == trackId)
+        {
+            tracks.removeAt(i);
+            m_document.setTracks(tracks);
+            emit trackingStateChanged();
+            emit documentChanged();
+            return;
+        }
+    }
+}
+
+QString PaintbrushController::exportTrackedSticker(int trackId, const QUrl &dirUrl)
+{
+    const QString dir = dirUrl.toLocalFile();
+    if (dir.isEmpty())
+        return QStringLiteral("Choose a folder first.");
+
+    const QVector<ObjectTrack> tracks = m_document.tracks();
+    int trackIndex = -1;
+    for (int i = 0; i < tracks.size(); ++i)
+        if (tracks[i].id == trackId)
+        {
+            trackIndex = i;
+            break;
+        }
+    if (trackIndex < 0)
+        return QStringLiteral("Track not found.");
+    const ObjectTrack &track = tracks[trackIndex];
+    if (track.keyframes.isEmpty())
+        return QStringLiteral("This track has no keyframes yet.");
+
+    vlc_player_t *player = m_intf->p_mainPlayerController->getPlayer();
+    if (!player)
+        return QStringLiteral("The source media is no longer loaded.");
+
+    const qint64 originalTime = FrameCaptureService::currentTimeMs(player);
+    QDir().mkpath(dir);
+    int written = 0;
+    QSize lastSize;
+
+    for (const TrackKeyframe &kf : track.keyframes)
+    {
+        /* seek the player to the keyframe time and grab the real frame */
+        {
+            PlayerLock lock(player);
+            vlc_player_SetTime(player, kf.timeMs * 1000);
+        }
+        /* allow the vout to display the frame */
+        QElapsedTimer wait;
+        wait.start();
+        QImage frame;
+        while (wait.elapsed() < 3000)
+        {
+            frame = FrameCaptureService::captureCurrentFrame(player);
+            if (!frame.isNull())
+                break;
+            QThread::msleep(60);
+        }
+        if (frame.isNull())
+            continue;
+
+        /* apply the keyframe mask -> transparent cutout */
+        QImage mask = kf.mask;
+        if (mask.size() != frame.size())
+            mask = mask.scaled(frame.size(), Qt::IgnoreAspectRatio,
+                               Qt::FastTransformation);
+        mask = mask.convertToFormat(QImage::Format_Grayscale8);
+
+        QImage cutout(frame.size(), QImage::Format_ARGB32);
+        cutout.fill(Qt::transparent);
+        {
+            QPainter p(&cutout);
+            p.drawImage(0, 0, frame);
+            p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+            p.drawImage(0, 0, mask);
+            p.end();
+        }
+
+        /* trim to the mask bounds */
+        int minX = cutout.width(), minY = cutout.height();
+        int maxX = -1, maxY = -1;
+        for (int y = 0; y < cutout.height(); ++y)
+        {
+            const QRgb *line = reinterpret_cast<const QRgb *>(cutout.constScanLine(y));
+            for (int x = 0; x < cutout.width(); ++x)
+                if (qAlpha(line[x]) != 0)
+                {
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                }
+        }
+        if (maxX < 0)
+            continue;
+        QImage sticker = cutout.copy(QRect(minX, minY, maxX - minX + 1, maxY - minY + 1));
+        lastSize = sticker.size();
+
+        const QString path = dir + QStringLiteral("/sticker_%1.png")
+                                     .arg(kf.frameIndex, 4, 10, QLatin1Char('0'));
+        if (!sticker.save(path, "PNG"))
+            return QStringLiteral("Failed to write %1").arg(path);
+        ++written;
+    }
+
+    /* restore the original position */
+    if (written > 0 && originalTime > 0)
+    {
+        PlayerLock lock(player);
+        vlc_player_SetTime(player, originalTime * 1000);
+    }
+
+    if (written == 0)
+        return QStringLiteral("No frames could be exported.");
+    setStatus(QStringLiteral("Sticker sequence: %1 frames (%2x%3) in %4")
+                  .arg(written).arg(lastSize.width()).arg(lastSize.height()).arg(dir));
+    return dir;
 }
 
 void PaintbrushController::onTrackKeyframe(int frameIndex, qint64 timeMs,
@@ -968,6 +1514,213 @@ void PaintbrushController::cancelGeneration()
     m_generation.cancelAll();
 }
 
+void PaintbrushController::autoCollage(int preset)
+{
+    if (!m_canvas)
+        return;
+
+    /* collect eligible layers: raster, image, sticker and generated layers
+     * that have actual content (not text/reference layers) */
+    QList<CanvasLayer> all = m_document.layers();
+    QList<int> indices;
+    for (int i = 0; i < all.size(); ++i)
+    {
+        const CanvasLayer &l = all[i];
+        if (l.type == LAYER_RASTER || l.type == LAYER_IMAGE ||
+            l.type == LAYER_GENERATED)
+        {
+            if (!l.raster.isNull() && !l.isEmpty())
+                indices.append(i);
+        }
+    }
+    if (indices.size() < 2)
+    {
+        setStatus(QStringLiteral("Auto collage needs at least two layers with content."));
+        return;
+    }
+
+    const QSize canvas = m_document.canvasSize();
+    if (canvas.isEmpty())
+        return;
+
+    /* compute each piece's non-transparent bounds (document coords) */
+    struct Piece { int layerIndex; QRectF bounds; };
+    QList<Piece> pieces;
+    for (int idx : indices)
+    {
+        const CanvasLayer &l = all[idx];
+        const QRect cb = l.contentBounds();
+        QRectF b;
+        if (!cb.isEmpty())
+            b = l.position.isNull()
+                    ? QRectF(cb)
+                    : QRectF(l.position + cb.topLeft(), cb.size());
+        else
+            b = l.position.isNull() ? QRectF(QPointF(0, 0), l.raster.size())
+                                    : QRectF(l.position, l.raster.size());
+        pieces.append({idx, b});
+    }
+
+    /* deterministic pseudo-random for scatter/scrapbook jitter */
+    auto rnd = [](int seed, int salt) {
+        return double((seed * 2654435761u + salt * 40503u) % 100000) / 100000.0;
+    };
+
+    const int n = pieces.size();
+    const qreal margin = qMax<qreal>(8, canvas.width() * 0.01);
+    const qreal areaW = canvas.width() - margin * 2;
+    const qreal areaH = canvas.height() - margin * 2;
+
+    QList<QPointF> newPositions;
+    newPositions.reserve(n);
+
+    switch (preset)
+    {
+    case 1: /* balanced grid */
+    {
+        const int cols = qCeil(qSqrt(qreal(n)));
+        const int rows = qCeil(qreal(n) / cols);
+        const qreal cellW = areaW / cols;
+        const qreal cellH = areaH / rows;
+        for (int i = 0; i < n; ++i)
+        {
+            const int c = i % cols;
+            const int r = i / cols;
+            const QRectF b = pieces[i].bounds;
+            const qreal scale = qMin(cellW / qMax(1.0, b.width()),
+                                     cellH / qMax(1.0, b.height()));
+            const qreal w = b.width() * scale, h = b.height() * scale;
+            newPositions.append(QPointF(margin + c * cellW + (cellW - w) / 2,
+                                        margin + r * cellH + (cellH - h) / 2));
+        }
+        break;
+    }
+    case 2: /* editorial: one hero + column of the rest */
+    {
+        const QRectF hero = pieces[0].bounds;
+        const qreal heroScale = qMin(areaW * 0.55 / qMax(1.0, hero.width()),
+                                     areaH / qMax(1.0, hero.height()));
+        const qreal heroW = hero.width() * heroScale;
+        const qreal heroH = hero.height() * heroScale;
+        newPositions.append(QPointF(margin, margin + (areaH - heroH) / 2));
+        const qreal colX = margin + heroW + margin;
+        const qreal colW = areaW - heroW - margin;
+        const qreal slotH = qMax<qreal>(30, (areaH - margin * (n - 1)) / (n - 1));
+        for (int i = 1; i < n; ++i)
+        {
+            const QRectF b = pieces[i].bounds;
+            const qreal scale = qMin(colW / qMax(1.0, b.width()),
+                                     slotH / qMax(1.0, b.height()));
+            const qreal w = b.width() * scale, h = b.height() * scale;
+            newPositions.append(QPointF(colX + (colW - w) / 2,
+                                        margin + (i - 1) * (slotH + margin) +
+                                            (slotH - h) / 2));
+        }
+        break;
+    }
+    case 3: /* scrapbook: scattered with rotation jitter */
+    {
+        const int seed = int(QDateTime::currentMSecsSinceEpoch()) & 0x7fffffff;
+        for (int i = 0; i < n; ++i)
+        {
+            const QRectF b = pieces[i].bounds;
+            const qreal maxW = areaW * (n > 6 ? 0.3 : 0.45);
+            const qreal maxH = areaH * 0.45;
+            const qreal scale = qMin(maxW / qMax(1.0, b.width()),
+                                     maxH / qMax(1.0, b.height()));
+            const qreal w = b.width() * scale, h = b.height() * scale;
+            const qreal x = margin + rnd(seed, i * 3 + 1) * (areaW - w);
+            const qreal y = margin + rnd(seed, i * 3 + 2) * (areaH - h);
+            newPositions.append(QPointF(x, y));
+        }
+        break;
+    }
+    case 4: /* vertical poster: stacked from top */
+    {
+        const qreal slotH = qMax<qreal>(24, (areaH - margin * (n - 1)) / n);
+        for (int i = 0; i < n; ++i)
+        {
+            const QRectF b = pieces[i].bounds;
+            const qreal scale = qMin(areaW / qMax(1.0, b.width()),
+                                     slotH / qMax(1.0, b.height()));
+            const qreal w = b.width() * scale, h = b.height() * scale;
+            newPositions.append(QPointF(margin + (areaW - w) / 2,
+                                        margin + i * (slotH + margin) +
+                                            (slotH - h) / 2));
+        }
+        break;
+    }
+    case 5: /* horizontal banner: one row */
+    {
+        const qreal slotW = qMax<qreal>(24, (areaW - margin * (n - 1)) / n);
+        for (int i = 0; i < n; ++i)
+        {
+            const QRectF b = pieces[i].bounds;
+            const qreal scale = qMin(slotW / qMax(1.0, b.width()),
+                                     areaH / qMax(1.0, b.height()));
+            const qreal w = b.width() * scale, h = b.height() * scale;
+            newPositions.append(QPointF(margin + i * (slotW + margin) +
+                                            (slotW - w) / 2,
+                                        margin + (areaH - h) / 2));
+        }
+        break;
+    }
+    case 0: /* free scatter (no jitter, keep sizes, avoid overlap) */
+    default:
+    {
+        const int seed = int(QDateTime::currentMSecsSinceEpoch()) & 0x7fffffff;
+        for (int i = 0; i < n; ++i)
+        {
+            const QRectF b = pieces[i].bounds;
+            const qreal scale = qMin(areaW * 0.5 / qMax(1.0, b.width()),
+                                     areaH * 0.5 / qMax(1.0, b.height()));
+            const qreal w = b.width() * scale, h = b.height() * scale;
+            const qreal x = margin + rnd(seed, i * 7 + 1) * (areaW - w);
+            const qreal y = margin + rnd(seed, i * 7 + 2) * (areaH - h);
+            newPositions.append(QPointF(x, y));
+        }
+        break;
+    }
+    }
+
+    /* apply as one undoable structure change: raster layers are converted to
+     * positioned image layers (cut to content), image/generated layers are
+     * rescaled and repositioned — every piece stays an independent editable
+     * layer. */
+    const QByteArray before = m_document.layersSnapshot();
+    QList<CanvasLayer> layers = m_document.layers();
+    for (int i = 0; i < pieces.size(); ++i)
+    {
+        const int idx = pieces[i].layerIndex;
+        const QRectF b = pieces[i].bounds;
+        CanvasLayer &l = layers[idx];
+        const QPointF newPos = newPositions[i];
+
+        if (l.type == LAYER_RASTER)
+        {
+            /* cut the raster layer's content into a positioned image layer */
+            QImage content = l.raster.copy(b.toAlignedRect());
+            if (content.isNull())
+                continue;
+            l.raster = content;
+            l.position = newPos;
+            l.type = LAYER_IMAGE;
+        }
+        else
+        {
+            /* image/generated layer: move it into its slot */
+            l.position = newPos;
+        }
+    }
+    m_document.setLayers(layers);
+    const QByteArray after = m_document.layersSnapshot();
+    m_undoStack.pushStructure({before, after, QStringLiteral("Auto collage")});
+    if (m_canvas)
+        m_canvas->markCanvasDirty();
+    setStatus(QStringLiteral("Auto collage applied"));
+    triggerCompanionEvent(QStringLiteral("collage"));
+}
+
 void PaintbrushController::onGenerationResult(const QString &requestId,
                                               const QImage &result)
 {
@@ -1022,7 +1775,18 @@ void PaintbrushController::companionReset()
 
 void PaintbrushController::companionClearConversation()
 {
-    m_assistantMessages.clear();
+    m_companion.resetConversation();
+    emit companionStateChanged();
+}
+
+int PaintbrushController::companionTalkLevel() const
+{
+    return m_companion.talkLevel();
+}
+
+void PaintbrushController::setCompanionTalkLevel(int level)
+{
+    m_companion.setTalkLevel(level);
     emit companionStateChanged();
 }
 
@@ -1142,6 +1906,108 @@ void PaintbrushController::playerSeek(qint64 timeMs)
     emit mediaStateChanged();
 }
 
+/* ---------------------------------------------------------- thumbnails */
+
+QVariantList PaintbrushController::thumbnailList() const
+{
+    QVariantList list;
+    const auto thumbs = m_thumbnails.thumbnails();
+    for (const auto &th : thumbs)
+    {
+        QVariantMap item;
+        item[QStringLiteral("timeMs")] = th.timeMs;
+        item[QStringLiteral("hasImage")] = !th.pending && !th.image.isNull();
+        item[QStringLiteral("failed")] = th.failed;
+        list.append(item);
+    }
+    return list;
+}
+
+QString PaintbrushController::thumbnailDataUrl(int index) const
+{
+    const auto thumbs = m_thumbnails.thumbnails();
+    if (index < 0 || index >= thumbs.size())
+        return {};
+    const auto &th = thumbs[index];
+    if (th.image.isNull())
+        return {};
+    QByteArray bytes;
+    QBuffer buffer(&bytes);
+    buffer.open(QIODevice::WriteOnly);
+    th.image.save(&buffer, "PNG");
+    return QStringLiteral("data:image/png;base64,") +
+           QString::fromLatin1(bytes.toBase64());
+}
+
+qint64 PaintbrushController::thumbnailTimeMs(int index) const
+{
+    const auto thumbs = m_thumbnails.thumbnails();
+    if (index < 0 || index >= thumbs.size())
+        return 0;
+    return thumbs[index].timeMs;
+}
+
+void PaintbrushController::generateThumbnails()
+{
+    vlc_player_t *player = m_intf->p_mainPlayerController->getPlayer();
+    if (!player)
+    {
+        setStatus(QStringLiteral("No media is loaded for thumbnails."));
+        return;
+    }
+    const QString mediaKey = FrameCaptureService::currentMRL(player);
+    if (mediaKey.isEmpty())
+        return;
+    const qint64 duration = m_intf->p_mainPlayerController->getLength().toMilliseconds();
+    const qint64 anchor = m_intf->p_mainPlayerController->getTime().toMilliseconds();
+    m_thumbnails.startBatch(player, mediaKey, qMax<qint64>(1, duration),
+                            anchor, 24);
+    emit thumbnailsChanged();
+}
+
+void PaintbrushController::cancelThumbnails()
+{
+    m_thumbnails.cancel();
+    emit thumbnailsChanged();
+}
+
+/* ----------------------------------------------------------- diagnostics */
+
+QString PaintbrushController::copyDiagnostics()
+{
+    const QString report = diagnosticsText();
+    QGuiApplication::clipboard()->setText(report);
+    return report;
+}
+
+void PaintbrushController::clearAiCache()
+{
+    m_segmentation.clearCache();
+    m_thumbnails.cancel();
+    setStatus(QStringLiteral("AI caches cleared"));
+    emit serviceAvailabilityChanged();
+}
+
+void PaintbrushController::unloadAiModels()
+{
+    m_segmentation.shutdown();
+    m_tracking.shutdown();
+    m_vision.cancelAll();
+    m_generation.cancelAll();
+    m_assistant.cancelAll();
+    setStatus(QStringLiteral("AI models unloaded"));
+    emit serviceAvailabilityChanged();
+}
+
+QString PaintbrushController::autosavePath() const
+{
+    const QString current = m_document.projectPath();
+    if (!current.isEmpty())
+        return current + QStringLiteral(".autosave");
+    return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
+           QStringLiteral("/paintbrush/recovery.npb");
+}
+
 void PaintbrushController::playerStop()
 {
     m_intf->p_mainPlaylistController->stop();
@@ -1238,10 +2104,22 @@ QString PaintbrushController::diagnosticsText() const
     lines << QStringLiteral("Tracking: %1").arg(m_tracking.isConfigured()
                                                     ? QStringLiteral("available")
                                                     : QStringLiteral("unavailable"));
-    lines << QStringLiteral("Companion: mode %1, %2")
+    lines << QStringLiteral("Companion: mode %1, talk %2, %3")
                  .arg(m_companion.mode())
+                 .arg(m_companion.talkLevel())
                  .arg(m_companion.isThinking() ? QStringLiteral("thinking")
                                                : QStringLiteral("idle"));
+
+    /* active AI jobs */
+    const QVariantList jobs = activeJobs();
+    lines << QStringLiteral("Active jobs: %1").arg(jobs.size());
+    for (const QVariant &v : jobs)
+    {
+        const QVariantMap job = v.toMap();
+        lines << QStringLiteral("  - %1 (%2)").arg(job[QStringLiteral("name")].toString(),
+                                                   job[QStringLiteral("resource")].toString());
+    }
+    lines << QStringLiteral("Autosave: %1").arg(autosavePath());
 
     if (!m_statusMessage.isEmpty())
         lines << QStringLiteral("Last status: %1").arg(m_statusMessage);

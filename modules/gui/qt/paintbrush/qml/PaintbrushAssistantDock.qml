@@ -94,6 +94,42 @@ Item {
             }
         }
 
+        /* talk level: how often the companion speaks unprompted */
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: VLCStyle.margin_xxxsmall
+            visible: PaintbrushCtx.companionMode !== 0
+
+            Repeater {
+                model: [
+                    { level: 0, label: qsTr("Only when I ask") },
+                    { level: 1, label: qsTr("Talk less") },
+                    { level: 2, label: qsTr("Talk") }
+                ]
+                Button {
+                    Layout.fillWidth: true
+                    text: modelData.label
+                    checkable: true
+                    autoExclusive: true
+                    checked: PaintbrushCtx.companionTalkLevel === modelData.level
+                    onClicked: PaintbrushCtx.setCompanionTalkLevel(modelData.level)
+
+                    contentItem: Text {
+                        text: parent.text
+                        font.pixelSize: VLCStyle.fontSize_xxxsmall
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                        color: parent.checked ? theme.accent : theme.fg.primary
+                    }
+                    background: Rectangle {
+                        color: parent.checked ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.15)
+                                              : "transparent"
+                        radius: VLCStyle.margin_xsmall
+                    }
+                }
+            }
+        }
+
         /* conversation */
         ListView {
             id: conversationList

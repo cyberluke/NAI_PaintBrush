@@ -87,6 +87,36 @@ Item {
             font.pixelSize: VLCStyle.fontSize_xsmall
             color: theme.fg.secondary
         }
+
+        /* recent Paintbrush projects */
+        ColumnLayout {
+            Layout.fillWidth: true
+            spacing: VLCStyle.margin_xxxsmall
+            visible: PaintbrushCtx.recentProjects.length > 0
+
+            Widgets.LabelExt {
+                Layout.alignment: Qt.AlignHCenter
+                text: qsTr("Recent projects")
+                color: theme.fg.secondary
+                font.pixelSize: VLCStyle.fontSize_xsmall
+            }
+
+            Repeater {
+                model: PaintbrushCtx.recentProjects
+                Button {
+                    Layout.fillWidth: true
+                    text: modelData.name
+                    onClicked: PaintbrushCtx.openRecentProject(index)
+                }
+            }
+        }
+
+        Widgets.LabelExt {
+            Layout.alignment: Qt.AlignHCenter
+            text: qsTr("You can also drop an image or video onto the canvas.")
+            font.pixelSize: VLCStyle.fontSize_xxxsmall
+            color: theme.fg.secondary
+        }
     }
 
     FileDialog {

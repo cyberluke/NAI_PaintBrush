@@ -194,6 +194,18 @@ Item {
             }
             Widgets.IconToolButton {
                 text: VLCIcons.ic_fluent_full_screen_maximize
+                description: qsTr("Smooth selection")
+                enabled: canvas.hasSelection
+                onClicked: canvas.selectionSmooth()
+            }
+            Widgets.IconToolButton {
+                text: VLCIcons.remove
+                description: qsTr("Clear selection")
+                enabled: canvas.hasSelection
+                onClicked: canvas.selectionClear()
+            }
+            Widgets.IconToolButton {
+                text: VLCIcons.ic_fluent_full_screen_maximize
                 description: qsTr("Crop to selection")
                 enabled: canvas.hasSelection
                 onClicked: canvas.cropToSelection()
@@ -234,6 +246,101 @@ Item {
                 text: qsTr("Generative fill…")
                 enabled: canvas.hasSelection && PaintbrushCtx.generationConfigured
                 onClicked: fillPromptDialog.open()
+            }
+            Widgets.ActionButtonPrimary {
+                Layout.fillWidth: true
+                text: qsTr("Find product…")
+                enabled: PaintbrushCtx.lookupAvailable && PaintbrushCtx.objectSelected
+                onClicked: PaintbrushCtx.companionAsk(
+                               qsTr("What brand or product is the selected object, if the visual evidence supports it?"))
+            }
+            Widgets.ActionButtonPrimary {
+                Layout.fillWidth: true
+                text: qsTr("Auto collage…")
+                onClicked: collageDialog.open()
+            }
+        }
+
+        /* "Ask about this" result */
+        Rectangle {
+            Layout.fillWidth: true
+            radius: VLCStyle.margin_xsmall
+            color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.08)
+            visible: PaintbrushCtx.visionHasResult
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: VLCStyle.margin_small
+                spacing: VLCStyle.margin_xsmall
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: VLCStyle.margin_xsmall
+
+                    /* object thumbnail */
+                    Image {
+                        Layout.preferredWidth: VLCStyle.dp(44, VLCStyle.scale)
+                        Layout.preferredHeight: VLCStyle.dp(44, VLCStyle.scale)
+                        source: PaintbrushCtx.objectSelected
+                                ? PaintbrushCtx.objectThumbnailDataUrl
+                                : ""
+                        fillMode: Image.PreserveAspectFit
+                        visible: PaintbrushCtx.objectSelected
+                        asynchronous: true
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 0
+
+                        Widgets.LabelExt {
+                            text: qsTr("Likely identification")
+                            color: theme.fg.secondary
+                            font.pixelSize: VLCStyle.fontSize_xxxsmall
+                        }
+                        Widgets.LabelExt {
+                            Layout.fillWidth: true
+                            text: PaintbrushCtx.visionAnswer
+                            color: theme.fg.primary
+                            font.pixelSize: VLCStyle.fontSize_small
+                            wrapMode: Text.WordWrap
+                        }
+                        Widgets.LabelExt {
+                            Layout.fillWidth: true
+                            text: PaintbrushCtx.visionEvidence
+                            visible: PaintbrushCtx.visionEvidence.length > 0
+                            color: theme.fg.secondary
+                            font.pixelSize: VLCStyle.fontSize_xsmall
+                            wrapMode: Text.WordWrap
+                        }
+                        Widgets.LabelExt {
+                            Layout.fillWidth: true
+                            text: PaintbrushCtx.visionUncertainty
+                            visible: PaintbrushCtx.visionUncertainty.length > 0
+                            color: theme.fg.secondary
+                            font.pixelSize: VLCStyle.fontSize_xsmall
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: VLCStyle.margin_xxxsmall
+
+                    Button {
+                        text: qsTr("Copy")
+                        onClicked: PaintbrushCtx.copyVisionAnswer()
+                    }
+                    Button {
+                        text: qsTr("Add as text")
+                        onClicked: PaintbrushCtx.addVisionAnswerAsText()
+                    }
+                    Button {
+                        text: qsTr("Clear")
+                        onClicked: PaintbrushCtx.clearVisionResult()
+                    }
+                }
             }
         }
 
@@ -314,16 +421,43 @@ Item {
         y: Overlay.overlay ? Math.round((Overlay.overlay.height - height) / 2) : 0
         width: Math.min(parent.width - VLCStyle.margin_large * 2, VLCStyle.dp(520, VLCStyle.scale))
 
-        contentItem: ScrollView {
+        contentItem: ColumnLayout {
             width: parent.width
-            height: VLCStyle.dp(320, VLCStyle.scale)
-            TextEdit {
-                text: PaintbrushCtx.diagnosticsText
-                readOnly: true
-                font.family: "monospace"
-                font.pixelSize: VLCStyle.fontSize_xsmall
-                color: theme.fg.primary
-                wrapMode: Text.WrapAnywhere
+
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.preferredHeight: VLCStyle.dp(260, VLCStyle.scale)
+                TextEdit {
+                    text: PaintbrushCtx.diagnosticsText
+                    readOnly: true
+                    font.family: "monospace"
+                    font.pixelSize: VLCStyle.fontSize_xsmall
+                    color: theme.fg.primary
+                    wrapMode: Text.WrapAnywhere
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: VLCStyle.margin_xsmall
+
+                Button {
+                    text: qsTr("Copy")
+                    onClicked: PaintbrushCtx.copyDiagnostics()
+                }
+                Button {
+                    text: qsTr("Clear AI cache")
+                    onClicked: PaintbrushCtx.clearAiCache()
+                }
+                Button {
+                    text: qsTr("Unload AI models")
+                    onClicked: PaintbrushCtx.unloadAiModels()
+                }
+                Button {
+                    text: qsTr("Reveal autosave")
+                    onClicked: Qt.openUrlExternally(
+                                   "file:///" + encodeURIComponent(PaintbrushCtx.autosavePath()))
+                }
             }
         }
     }
@@ -401,5 +535,50 @@ Item {
         }
 
         onAccepted: PaintbrushCtx.generativeFill(fillPromptField.text)
+    }
+
+    Dialog {
+        id: collageDialog
+        title: qsTr("Auto collage")
+        modal: true
+        x: Overlay.overlay ? Math.round((Overlay.overlay.width - width) / 2) : 0
+        y: Overlay.overlay ? Math.round((Overlay.overlay.height - height) / 2) : 0
+        standardButtons: Dialog.Close
+
+        contentItem: ColumnLayout {
+            spacing: VLCStyle.margin_small
+
+            Widgets.LabelExt {
+                text: qsTr("Arrange the content layers into a layout. Every piece stays an editable layer.")
+                color: theme.fg.secondary
+                wrapMode: Text.WordWrap
+            }
+
+            GridLayout {
+                Layout.fillWidth: true
+                columns: 2
+                rowSpacing: VLCStyle.margin_xsmall
+                columnSpacing: VLCStyle.margin_xsmall
+
+                Repeater {
+                    model: [
+                        { label: qsTr("Free scatter"), preset: 0 },
+                        { label: qsTr("Balanced grid"), preset: 1 },
+                        { label: qsTr("Editorial"), preset: 2 },
+                        { label: qsTr("Scrapbook"), preset: 3 },
+                        { label: qsTr("Vertical poster"), preset: 4 },
+                        { label: qsTr("Horizontal banner"), preset: 5 }
+                    ]
+                    Button {
+                        Layout.fillWidth: true
+                        text: modelData.label
+                        onClicked: {
+                            PaintbrushCtx.autoCollage(modelData.preset)
+                            collageDialog.close()
+                        }
+                    }
+                }
+            }
+        }
     }
 }

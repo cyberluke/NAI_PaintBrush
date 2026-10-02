@@ -108,14 +108,48 @@ Item {
             }
         }
 
-        Item { Layout.fillWidth: true }
+Item { Layout.fillWidth: true }
 
-        /* spray flow: how hard the can sprays (Spray tool only) */
+        /* precision drawing: grid + snap + pen pressure */
+        Button {
+            Layout.alignment: Qt.AlignVCenter
+            text: qsTr("Grid")
+            checkable: true
+            checked: canvas.gridVisible
+            onClicked: canvas.gridVisible = !canvas.gridVisible
+        }
+        Slider {
+            id: gridSpacingSlider
+            Layout.preferredWidth: VLCStyle.dp(70, VLCStyle.scale)
+            Layout.alignment: Qt.AlignVCenter
+            from: 8
+            to: 128
+            stepSize: 8
+            visible: canvas.gridVisible
+            value: canvas.gridSpacing
+            onMoved: canvas.gridSpacing = value
+        }
+        Button {
+            Layout.alignment: Qt.AlignVCenter
+            text: qsTr("Snap")
+            checkable: true
+            checked: canvas.snapToGrid
+            enabled: canvas.gridVisible
+            onClicked: canvas.snapToGrid = !canvas.snapToGrid
+        }
+        Button {
+            Layout.alignment: Qt.AlignVCenter
+            text: qsTr("Pen")
+            checkable: true
+            checked: canvas.pressureEnabled
+            onClicked: canvas.pressureEnabled = !canvas.pressureEnabled
+        }
+
+        /* brush size */
         Widgets.LabelExt {
-            text: qsTr("Flow")
+            text: qsTr("Size")
             color: theme.fg.secondary
             font.pixelSize: VLCStyle.fontSize_small
-            visible: canvas.tool === 9
         }
         Slider {
             Layout.preferredWidth: VLCStyle.dp(90, VLCStyle.scale)

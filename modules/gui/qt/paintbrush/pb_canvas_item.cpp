@@ -9,6 +9,8 @@
 
 #include <QSGTransformNode>
 #include <QSGSimpleTextureNode>
+#include <QSGGeometry>
+#include <QSGFlatColorMaterial>
 #include <QSGTexture>
 #include <QQuickWindow>
 #include <QMouseEvent>
@@ -148,6 +150,155 @@ void PaintbrushCanvasItem::setSprayFlow(qreal flow)
     m_sprayFlow = flow;
     emit sprayFlowChanged();
     updateStatus(m_lastCanvasPos);
+}
+
+/* --------------------------------------------------- precision drawing */
+
+void PaintbrushCanvasItem::setGridVisible(bool visible)
+{
+    if (m_gridVisible == visible)
+        return;
+    m_gridVisible = visible;
+    emit gridVisibleChanged();
+    update(); /* grid is a scene-graph overlay; it never dirties the raster */
+}
+
+void PaintbrushCanvasItem::setGridSpacing(int spacing)
+{
+    spacing = qBound(4, spacing, 512);
+    if (m_gridSpacing == spacing)
+        return;
+    m_gridSpacing = spacing;
+    emit gridSpacingChanged();
+    update();
+}
+
+void PaintbrushCanvasItem::setSnapToGrid(bool snap)
+{
+    if (m_snapToGrid == snap)
+        return;
+    m_snapToGrid = snap;
+    emit snapToGridChanged();
+    updateStatus(m_lastCanvasPos);
+}
+
+void PaintbrushCanvasItem::setPressureEnabled(bool enabled)
+{
+    if (m_pressureEnabled == enabled)
+        return;
+    m_pressureEnabled = enabled;
+    emit pressureEnabledChanged();
+    updateStatus(m_lastCanvasPos);
+}
+
+void PaintbrushCanvasItem::setPressureToOpacity(bool enabled)
+{
+    if (m_pressureToOpacity == enabled)
+        return;
+    m_pressureToOpacity = enabled;
+    emit pressureToOpacityChanged();
+}
+
+void PaintbrushCanvasItem::setPressureMin(qreal min)
+{
+    min = qBound<qreal>(0.0, min, 1.0);
+    if (qFuzzyCompare(m_pressureMin, min))
+        return;
+    m_pressureMin = min;
+    emit pressureMinChanged();
+}
+
+void PaintbrushCanvasItem::setPressureMax(qreal max)
+{
+    max = qBound<qreal>(0.0, max, 1.0);
+    if (qFuzzyCompare(m_pressureMax, max))
+        return;
+    m_pressureMax = max;
+    emit pressureMaxChanged();
+}
+
+QPointF PaintbrushCanvasItem::snapPoint(const QPointF &p) const
+{
+    if (!m_snapToGrid || m_gridSpacing <= 0)
+        return p;
+    const qreal step = m_gridSpacing;
+    return QPointF(qRound(p.x() / step) * step, qRound(p.y() / step) * step);
+}
+
+bool PaintbrushCanvasItem::shouldSnap() const
+{
+    if (!m_snapToGrid || !m_gridVisible)
+        return false;
+    switch (m_tool)
+    {
+    case TOOL_PENCIL:
+    case TOOL_BRUSH:
+    case TOOL_ERASER:
+    case TOOL_SPRAY:
+    case TOOL_LINE:
+    case TOOL_RECTANGLE:
+    case TOOL_ROUNDED_RECT:
+    case TOOL_ELLIPSE:
+    case TOOL_RECT_SELECT:
+    case TOOL_FREEFORM_SELECT:
+    case TOOL_TEXT:
+    case TOOL_FILL:
+    case TOOL_EYEDROPPER:
+        return true;
+    default:
+        return false;
+    }
+}
+
+qreal PaintbrushCanvasItem::pressureFactor() const
+{
+    /* mouse pressure reads 1.0; only scale when pressure is enabled and a
+     * pressure-capable device (tablet/pen) is actually active */
+    if (!m_pressureEnabled || !m_tabletActive)
+        return 1.0;
+    const qreal p = qBound<qreal>(0.0, m_currentPressure, 1.0);
+    const qreal min = qBound<qreal>(0.0, m_pressureMin, 1.0);
+    const qreal max = qBound<qreal>(min, m_pressureMax, 1.0);
+    return min + (max - min) * p;
+}
+
+/* Grid overlay rendered as scene-graph geometry (never part of the raster,
+ * never part of the document). Lines are drawn in canvas coordinates under
+ * the same pan/zoom transform as the tiles, so they scale with the canvas
+ * and stay crisp at integer zoom levels. */
+QSGNode *PaintbrushCanvasItem::buildGridNode()
+{
+    auto *node = new QSGGeometryNode();
+    const int rows = m_doc ? m_doc->canvasSize().height() / m_gridSpacing + 1 : 0;
+    const int cols = m_doc ? m_doc->canvasSize().width() / m_gridSpacing + 1 : 0;
+    const int vertexCount = (rows + cols) * 2;
+
+QSGGeometry *geometry = new QSGGeometry(QSGGeometry::defaultAttributes_Point2D(),
+                                        vertexCount);
+    geometry->setLineWidth(1.0f);
+    geometry->setDrawingMode(QSGGeometry::DrawLines);
+
+    QSGGeometry::Point2D *vertices = geometry->vertexDataAsPoint2D();
+    int idx = 0;
+    const int w = m_doc ? m_doc->canvasSize().width() : 0;
+    const int h = m_doc ? m_doc->canvasSize().height() : 0;
+    for (int x = 0; x <= w; x += m_gridSpacing)
+    {
+        vertices[idx++].set(x, 0);
+        vertices[idx++].set(x, h);
+    }
+    for (int y = 0; y <= h; y += m_gridSpacing)
+    {
+        vertices[idx++].set(0, y);
+        vertices[idx++].set(w, y);
+    }
+    node->setGeometry(geometry);
+    node->setFlag(QSGNode::OwnsGeometry, true);
+    QSGFlatColorMaterial *material = new QSGFlatColorMaterial();
+    material->setColor(QColor(0, 0, 0, 60));
+    node->setMaterial(material);
+    node->setFlag(QSGNode::OwnsMaterial, true);
+    return node;
 }
 
 void PaintbrushCanvasItem::setFillTolerance(qreal tolerance)
@@ -392,6 +543,7 @@ QSGNode *PaintbrushCanvasItem::updatePaintNode(QSGNode *oldNode,
 {
     if (!m_doc)
     {
+        m_gridNode = nullptr; /* children are freed with the old root */
         delete oldNode;
         return nullptr;
     }
@@ -433,6 +585,27 @@ QSGNode *PaintbrushCanvasItem::updatePaintNode(QSGNode *oldNode,
             if (QSGTransformNode *node = m_tileNodes.take(key))
                 delete node;
         }
+    }
+
+    /* grid overlay: kept as a single geometry node under the same transform;
+     * rebuilt whenever visibility/spacing/zoom changes (gridVisibleChanged
+     * and zoomChanged both call update()) */
+    if (m_gridVisible)
+    {
+        if (m_gridNode)
+        {
+            root->removeChildNode(m_gridNode);
+            delete m_gridNode;
+            m_gridNode = nullptr;
+        }
+        m_gridNode = buildGridNode();
+        root->appendChildNode(m_gridNode);
+    }
+    else if (m_gridNode)
+    {
+        root->removeChildNode(m_gridNode);
+        delete m_gridNode;
+        m_gridNode = nullptr;
     }
 
     /* ensure one transform node per tile, positioned in canvas coords */
@@ -528,6 +701,11 @@ void PaintbrushCanvasItem::paintDot(const QPointF &center, qreal radius, bool er
     if (!layer || layer->raster.isNull() || layer->locked)
         return;
 
+    /* tablet pressure scales the brush size (and optionally opacity) */
+    const qreal pf = pressureFactor();
+    if (pf != 1.0)
+        radius *= pf;
+
     const QRectF dotRect(center.x() - radius, center.y() - radius,
                          radius * 2, radius * 2);
     const QRect affected = dotRect.adjusted(-2, -2, 2, 2).toAlignedRect()
@@ -544,7 +722,10 @@ void PaintbrushCanvasItem::paintDot(const QPointF &center, qreal radius, bool er
     else
         p.setCompositionMode(QPainter::CompositionMode_SourceOver);
     p.setPen(Qt::NoPen);
-    p.setBrush(erase ? QColor(Qt::transparent) : m_fgColor);
+    QColor color = m_fgColor;
+    if (!erase && m_pressureToOpacity && pf != 1.0)
+        color.setAlphaF(color.alphaF() * pf);
+    p.setBrush(color);
     p.drawEllipse(dotRect);
     p.end();
 
@@ -561,7 +742,12 @@ void PaintbrushCanvasItem::paintLineSegment(const QPointF &a, const QPointF &b)
         return;
 
     const bool erase = (m_tool == TOOL_ERASER);
-    const qreal radius = erase ? qMax(2.0, m_brushSize) : (m_tool == TOOL_PENCIL ? 1.0 : m_brushSize / 2.0);
+    qreal radius = erase ? qMax(2.0, m_brushSize) : (m_tool == TOOL_PENCIL ? 1.0 : m_brushSize / 2.0);
+
+    /* tablet pressure scales brush size; pencil stays a hairline */
+    const qreal pf = pressureFactor();
+    if (pf != 1.0 && !erase)
+        radius *= pf;
 
     QRectF lineRect;
     lineRect.setCoords(qMin(a.x(), b.x()) - radius, qMin(a.y(), b.y()) - radius,
@@ -579,7 +765,10 @@ void PaintbrushCanvasItem::paintLineSegment(const QPointF &a, const QPointF &b)
         p.setCompositionMode(QPainter::CompositionMode_Clear);
     else
         p.setCompositionMode(QPainter::CompositionMode_SourceOver);
-    p.setPen(QPen(m_fgColor, radius * 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    QColor color = m_fgColor;
+    if (!erase && m_pressureToOpacity && pf != 1.0)
+        color.setAlphaF(color.alphaF() * pf);
+    p.setPen(QPen(color, radius * 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
     p.drawLine(a, b);
     p.end();
 
@@ -1360,6 +1549,16 @@ void PaintbrushCanvasItem::selectionClear()
     clearSelectionInternal();
 }
 
+void PaintbrushCanvasItem::selectionSelectAll()
+{
+    if (!m_doc)
+        return;
+    QPainterPath all;
+    all.addRect(QRectF(QPointF(0, 0), m_doc->canvasSize()));
+    m_doc->setSelectionPath(all);
+    markAllTilesDirty();
+}
+
 void PaintbrushCanvasItem::selectionInvert()
 {
     if (!m_doc || m_doc->selectionPath().isEmpty())
@@ -1415,6 +1614,48 @@ void PaintbrushCanvasItem::selectionShrink(int px)
     }
 
     m_doc->setSelectionPath(maskToPath(eroded));
+    markAllTilesDirty();
+}
+
+void PaintbrushCanvasItem::selectionSmooth()
+{
+    if (!m_doc || m_doc->selectionPath().isEmpty())
+        return;
+    QImage mask = selectionMaskImage();
+
+    /* 3x3 majority filter: a pixel stays selected only if at least 5 of its
+     * neighbours are selected. Two passes remove speckle and fill thin
+     * holes, giving a rounder silhouette. */
+    auto majorityPass = [](const QImage &src) {
+        QImage out(src.size(), QImage::Format_Grayscale8);
+        out.fill(0);
+        for (int y = 0; y < src.height(); ++y)
+        {
+            const uchar *prev = src.constScanLine(qMax(0, y - 1));
+            const uchar *cur = src.constScanLine(y);
+            const uchar *next = src.constScanLine(qMin(src.height() - 1, y + 1));
+            uchar *dst = out.scanLine(y);
+            for (int x = 0; x < src.width(); ++x)
+            {
+                const int x0 = qMax(0, x - 1), x1 = qMin(src.width() - 1, x + 1);
+                int count = 0;
+                for (int yy = -1; yy <= 1; ++yy)
+                {
+                    const uchar *line = yy == -1 ? prev : (yy == 0 ? cur : next);
+                    for (int xx = x0; xx <= x1; ++xx)
+                        if (line[xx] >= 128)
+                            ++count;
+                }
+                dst[x] = count >= 5 ? 255 : 0;
+            }
+        }
+        return out;
+    };
+
+    mask = majorityPass(mask);
+    mask = majorityPass(mask);
+
+    m_doc->setSelectionPath(maskToPath(mask));
     markAllTilesDirty();
 }
 
@@ -1920,7 +2161,13 @@ void PaintbrushCanvasItem::mousePressEvent(QMouseEvent *event)
 
     forceActiveFocus();
     m_lastItemPos = event->position();
-    const QPointF canvasPos = canvasFromItem(event->position());
+    /* tablet/pen detection (Qt 6 exposes device + pressure on the point) */
+    const QPointingDevice *device = event->point(0).device();
+    m_tabletActive = device && device->type() != QPointingDevice::DeviceType::Mouse;
+    m_currentPressure = m_tabletActive ? event->point(0).pressure() : 1.0;
+    QPointF canvasPos = canvasFromItem(event->position());
+    if (shouldSnap())
+        canvasPos = snapPoint(canvasPos);
     m_lastCanvasPos = canvasPos;
 
     const bool primary = event->button() == Qt::LeftButton;
@@ -1951,7 +2198,12 @@ void PaintbrushCanvasItem::mousePressEvent(QMouseEvent *event)
 void PaintbrushCanvasItem::mouseMoveEvent(QMouseEvent *event)
 {
     m_lastItemPos = event->position();
-    const QPointF canvasPos = canvasFromItem(event->position());
+    const QPointingDevice *device = event->point(0).device();
+    m_tabletActive = device && device->type() != QPointingDevice::DeviceType::Mouse;
+    m_currentPressure = m_tabletActive ? event->point(0).pressure() : 1.0;
+    QPointF canvasPos = canvasFromItem(event->position());
+    if (shouldSnap())
+        canvasPos = snapPoint(canvasPos);
     if (m_panning)
     {
         setPanOffset(m_panOffset + (event->position() - m_panLastItem));
@@ -2137,6 +2389,12 @@ void PaintbrushCanvasItem::updateStatus(const QPointF &canvasPos)
     text += QStringLiteral("   zoom: %1%").arg(int(m_zoom * 100));
     if (m_tool == TOOL_SPRAY)
         text += QStringLiteral("   flow: %1").arg(m_sprayFlow, 0, 'f', 1);
+    if (m_gridVisible)
+        text += QStringLiteral("   grid: %1px").arg(m_gridSpacing);
+    if (m_snapToGrid)
+        text += QStringLiteral("   snap");
+    if (m_tabletActive)
+        text += QStringLiteral("   pen %1").arg(m_currentPressure, 0, 'f', 2);
     if (m_objectMaskVisible)
         text += QStringLiteral("   object selected");
     if (m_statusText == text)

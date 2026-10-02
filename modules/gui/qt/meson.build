@@ -181,6 +181,8 @@ moc_headers = files(
     'paintbrush/pb_generation_service.hpp',
     'paintbrush/pb_assistant_service.hpp',
     'paintbrush/pb_companion_service.hpp',
+    'paintbrush/pb_thumbnail_service.hpp',
+    'paintbrush/pb_lookup_service.hpp',
     'paintbrush/pb_project_store.hpp',
     'paintbrush/pb_export.hpp',
 )
@@ -565,6 +567,8 @@ qt_plugin_sources = files(
     'paintbrush/pb_generation_service.cpp',
     'paintbrush/pb_assistant_service.cpp',
     'paintbrush/pb_companion_service.cpp',
+    'paintbrush/pb_thumbnail_service.cpp',
+    'paintbrush/pb_lookup_service.cpp',
     'paintbrush/pb_project_store.cpp',
     'paintbrush/pb_export.cpp',
 )

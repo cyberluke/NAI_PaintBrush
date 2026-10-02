@@ -396,6 +396,8 @@ libqt_plugin_la_SOURCES = \
 	paintbrush/pb_generation_service.cpp paintbrush/pb_generation_service.hpp \
 	paintbrush/pb_assistant_service.cpp paintbrush/pb_assistant_service.hpp \
 	paintbrush/pb_companion_service.cpp paintbrush/pb_companion_service.hpp \
+	paintbrush/pb_thumbnail_service.cpp paintbrush/pb_thumbnail_service.hpp \
+	paintbrush/pb_lookup_service.cpp paintbrush/pb_lookup_service.hpp \
 	paintbrush/pb_project_store.cpp paintbrush/pb_project_store.hpp \
 	paintbrush/pb_export.cpp paintbrush/pb_export.hpp
 
@@ -563,7 +565,9 @@ nodist_libqt_plugin_la_SOURCES = \
 	paintbrush/pb_vision_service.moc.cpp \
 	paintbrush/pb_generation_service.moc.cpp \
 	paintbrush/pb_assistant_service.moc.cpp \
-	paintbrush/pb_companion_service.moc.cpp
+	paintbrush/pb_companion_service.moc.cpp \
+	paintbrush/pb_thumbnail_service.moc.cpp \
+	paintbrush/pb_lookup_service.moc.cpp
 
 nodist_libqt_plugin_la_SOURCES += \
 	dialogs/extended/ui_equalizer.h \

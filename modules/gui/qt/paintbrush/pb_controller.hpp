@@ -22,6 +22,8 @@
 #include "pb_assistant_service.hpp"
 #include "pb_companion_service.hpp"
 #include "pb_project_store.hpp"
+#include "pb_thumbnail_service.hpp"
+#include "pb_lookup_service.hpp"
 
 #include <QObject>
 #include <QImage>
@@ -70,6 +72,8 @@ class PaintbrushController : public QObject
     Q_PROPERTY(QString companionUnavailableReason READ companionUnavailableReason NOTIFY serviceAvailabilityChanged FINAL)
     Q_PROPERTY(bool assistantConfigured READ assistantConfigured NOTIFY serviceAvailabilityChanged FINAL)
     Q_PROPERTY(QString assistantUnavailableReason READ assistantUnavailableReason NOTIFY serviceAvailabilityChanged FINAL)
+    Q_PROPERTY(bool thumbnailsGenerating READ thumbnailsGenerating NOTIFY thumbnailsChanged FINAL)
+    Q_PROPERTY(int thumbnailCount READ thumbnailCount NOTIFY thumbnailsChanged FINAL)
 
     Q_PROPERTY(bool objectSelected READ objectSelected NOTIFY objectSelectionChanged FINAL)
     Q_PROPERTY(QString objectMaskBoundsText READ objectMaskBoundsText NOTIFY objectSelectionChanged FINAL)
@@ -79,18 +83,22 @@ class PaintbrushController : public QObject
     Q_PROPERTY(int trackingDone READ trackingDone NOTIFY trackingStateChanged FINAL)
     Q_PROPERTY(int trackingTotal READ trackingTotal NOTIFY trackingStateChanged FINAL)
     Q_PROPERTY(QString trackingStatus READ trackingStatus NOTIFY trackingStateChanged FINAL)
+    Q_PROPERTY(QVariantList trackList READ trackList NOTIFY trackingStateChanged FINAL)
+    Q_PROPERTY(bool trackingPaused READ trackingPaused NOTIFY trackingStateChanged FINAL)
 
     Q_PROPERTY(bool visionBusy READ visionBusy NOTIFY visionStateChanged FINAL)
     Q_PROPERTY(QString visionAnswer READ visionAnswer NOTIFY visionStateChanged FINAL)
     Q_PROPERTY(QString visionEvidence READ visionEvidence NOTIFY visionStateChanged FINAL)
     Q_PROPERTY(QString visionUncertainty READ visionUncertainty NOTIFY visionStateChanged FINAL)
     Q_PROPERTY(bool visionHasResult READ visionHasResult NOTIFY visionStateChanged FINAL)
+    Q_PROPERTY(QString objectThumbnailDataUrl READ objectThumbnailDataUrl NOTIFY objectSelectionChanged FINAL)
 
     Q_PROPERTY(bool generationBusy READ generationBusy NOTIFY generationStateChanged FINAL)
 
     Q_PROPERTY(int companionMode READ companionMode NOTIFY companionStateChanged FINAL)
     Q_PROPERTY(bool companionThinking READ companionThinking NOTIFY companionStateChanged FINAL)
     Q_PROPERTY(QVariantList assistantMessages READ assistantMessages NOTIFY companionStateChanged FINAL)
+    Q_PROPERTY(int companionTalkLevel READ companionTalkLevel WRITE setCompanionTalkLevel NOTIFY companionStateChanged FINAL)
 
     Q_PROPERTY(QString currentMediaTitle READ currentMediaTitle NOTIFY mediaStateChanged FINAL)
     Q_PROPERTY(QString currentMediaMRL READ currentMediaMRL NOTIFY mediaStateChanged FINAL)
@@ -98,6 +106,12 @@ class PaintbrushController : public QObject
     Q_PROPERTY(qint64 playerLengthMs READ playerLengthMs NOTIFY mediaStateChanged FINAL)
     Q_PROPERTY(bool playerHasVideo READ playerHasVideo NOTIFY mediaStateChanged FINAL)
     Q_PROPERTY(QString diagnosticsText READ diagnosticsText NOTIFY serviceAvailabilityChanged FINAL)
+    Q_PROPERTY(bool lookupAvailable READ lookupAvailable NOTIFY serviceAvailabilityChanged FINAL)
+    Q_PROPERTY(QString lookupUnavailableReason READ lookupUnavailableReason NOTIFY serviceAvailabilityChanged FINAL)
+    Q_PROPERTY(QVariantList recentProjects READ recentProjects NOTIFY recentProjectsChanged FINAL)
+    Q_PROPERTY(QVariantList activeJobs READ activeJobs NOTIFY activeJobsChanged FINAL)
+    Q_PROPERTY(bool recoveryAvailable READ recoveryAvailable NOTIFY recoveryStateChanged FINAL)
+    Q_PROPERTY(QString recoveryDescription READ recoveryDescription NOTIFY recoveryStateChanged FINAL)
 
 public:
     explicit PaintbrushController(qt_intf_t *intf, QObject *parent = nullptr);
@@ -122,12 +136,19 @@ public:
     Q_INVOKABLE void saveProject(const QUrl &url);
     Q_INVOKABLE void openProject(const QUrl &url);
     Q_INVOKABLE void exportImage(const QUrl &url, const QString &format);
+    Q_INVOKABLE void exportImagePreset(const QUrl &url, int preset);
     Q_INVOKABLE void exportObjectPng(const QUrl &url);
     Q_INVOKABLE void exportMaskPng(const QUrl &url);
+    Q_INVOKABLE void relinkMedia(const QUrl &url);
+    Q_PROPERTY(QString projectInfoText READ projectInfoText NOTIFY documentChanged FINAL)
     Q_INVOKABLE void autosaveNow();
 
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();
+    Q_INVOKABLE void openRecentProject(int index);
+    QVariantList recentProjects() const;
+    QVariantList activeJobs() const;
+    Q_INVOKABLE void cancelActiveJob(const QString &jobId);
 
     /* -- layers ----------------------------------------------------------- */
     Q_INVOKABLE void newLayer();
@@ -143,13 +164,31 @@ public:
     Q_INVOKABLE void addObjectToCanvas();
     Q_INVOKABLE void askAboutObject(const QString &question);
     Q_INVOKABLE void askAboutSelection(const QString &question);
+    Q_INVOKABLE void askAboutObjectFollowUp(const QString &question);
+    Q_INVOKABLE void copyVisionAnswer();
+    Q_INVOKABLE void addVisionAnswerAsText();
+    Q_INVOKABLE void clearVisionResult();
     Q_INVOKABLE void trackObject(int direction, int frames);
     Q_INVOKABLE void cancelTracking();
+    Q_INVOKABLE void pauseResumeTracking();
+    Q_INVOKABLE void deleteTrack(int trackId);
+    Q_INVOKABLE void seekToTrackKeyframe(int trackId, int keyframeIndex);
+    bool trackingPaused() const;
+    QVariantList trackList() const;
+    /* Export a tracked object as a transparent animated sticker: seeks the
+     * player to each keyframe, applies the keyframe mask, trims to content
+     * and writes a transparent PNG sequence into `dir`. Returns a status
+     * string (may be a path prefix on success). */
+    Q_INVOKABLE QString exportTrackedSticker(int trackId, const QUrl &dir);
     Q_INVOKABLE void makeSticker();
     Q_INVOKABLE void removeObject(const QString &prompt);
     Q_INVOKABLE void generativeFill(const QString &prompt);
     Q_INVOKABLE void replaceBackground(const QString &prompt);
     Q_INVOKABLE void cancelGeneration();
+    /* Auto Collage: arrange two or more selected raster/cutout layers into
+     * a layout preset without flattening. One undoable operation. */
+    Q_INVOKABLE void autoCollage(int preset); /* 0 free, 1 grid, 2 editorial,
+                                                 3 scrapbook, 4 poster, 5 banner */
 
     /* -- companion --------------------------------------------------------- */
     Q_INVOKABLE void companionNotifyEvent(const QString &event);
@@ -157,6 +196,8 @@ public:
     Q_INVOKABLE void setCompanionMode(int mode);
     Q_INVOKABLE void companionReset();
     Q_INVOKABLE void companionClearConversation();
+    int companionTalkLevel() const;
+    void setCompanionTalkLevel(int level);
 
     /* -- media drawer ------------------------------------------------------ */
     Q_INVOKABLE void playerFrameNext();
@@ -186,6 +227,29 @@ public:
     QString companionUnavailableReason() const { return m_companionModeOffReason; }
     bool assistantConfigured() const { return m_assistant.isConfigured(); }
     QString assistantUnavailableReason() const { return m_assistant.unavailableReason(); }
+    bool lookupAvailable() const { return m_lookup.isConfigured(); }
+    QString lookupUnavailableReason() const { return m_lookup.unavailableReason(); }
+    QString objectThumbnailDataUrl() const;
+    bool thumbnailsGenerating() const { return m_thumbnails.isGenerating(); }
+    int thumbnailCount() const { return m_thumbnails.count(); }
+    /* QML: list of {timeMs, hasImage, failed} for the current batch */
+    QVariantList thumbnailList() const;
+    Q_INVOKABLE QString thumbnailDataUrl(int index) const;
+    Q_INVOKABLE qint64 thumbnailTimeMs(int index) const;
+    Q_INVOKABLE void generateThumbnails();
+    Q_INVOKABLE void cancelThumbnails();
+    /* Diagnostics support actions */
+    Q_INVOKABLE QString copyDiagnostics();
+    Q_INVOKABLE void clearAiCache();
+    Q_INVOKABLE void unloadAiModels();
+    Q_INVOKABLE QString autosavePath() const;
+    QString projectInfoText() const;
+    /* Crash recovery */
+    Q_INVOKABLE void checkForRecovery();
+    Q_INVOKABLE void restoreRecovery();
+    Q_INVOKABLE void discardRecovery();
+    bool recoveryAvailable() const { return m_recoveryAvailable; }
+    QString recoveryDescription() const { return m_recoveryDescription; }
 
     bool objectSelected() const { return m_objectSelected; }
     QString objectMaskBoundsText() const { return m_objectMaskBoundsText; }
@@ -228,6 +292,10 @@ signals:
     void generationStateChanged();
     void companionStateChanged();
     void mediaStateChanged();
+    void thumbnailsChanged();
+    void recoveryStateChanged();
+    void recentProjectsChanged();
+    void activeJobsChanged();
     void assistantMessageAppended(const QString &role, const QString &text);
     void welcomeChanged();
 
@@ -259,6 +327,7 @@ private:
     void addResultLayer(const QImage &image, const QString &name);
     void updateObjectSelection();
     void appendAssistantMessage(const QString &role, const QString &text);
+    void pushRecentProject(const QString &path);
     void buildTrackObject();
     void triggerCompanionEvent(const QString &event);
     QImage objectCrop() const;
@@ -278,6 +347,8 @@ private:
     AssistantService m_assistant;
     CompanionService m_companion;
     ProjectStore m_projectStore;
+    ThumbnailService m_thumbnails;
+    LookupService m_lookup;
 
     QString m_statusMessage;
     QString m_projectName;
@@ -302,6 +373,10 @@ private:
 
     QVariantList m_assistantMessages;
     QString m_companionModeOffReason;
+    /* recovery autosave state */
+    bool m_recoveryAvailable = false;
+    QString m_recoveryDescription;
+    QString m_recoveryPath;
     /* The workspace starts ready to draw: a blank canvas is created in the
      * constructor and the first-run overlay is hidden, so the tool rail and
      * canvas accept input immediately. */

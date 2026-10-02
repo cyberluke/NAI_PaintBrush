@@ -30,6 +30,13 @@ public:
     static QString exportImage(PaintbrushDocument *doc, const QString &path,
                                const QString &format = {});
 
+    /* Flatten with export options: scale multiplier (1 = original), crop
+     * to content bounds, and a background fill for opaque formats. */
+    static QString exportImageOptions(PaintbrushDocument *doc, const QString &path,
+                                      const QString &format, double scale,
+                                      bool cropToContent,
+                                      const QColor &background = QColor(Qt::transparent));
+
     /* Write a single image to path (transparent PNG keeps alpha). */
     static QString exportImageFile(const QImage &image, const QString &path,
                                    const QString &format = {});

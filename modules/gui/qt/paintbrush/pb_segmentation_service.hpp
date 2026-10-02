@@ -81,6 +81,8 @@ public:
     void initialize();
     /* Stop the worker and release model resources. */
     void shutdown();
+    /* Clear the frame-embedding cache (keeps the loaded model). */
+    void clearCache();
 
     /* Segment the frame with positive/negative points and/or a text prompt.
      * The frame is encoded once; repeated refinement clicks on the same
