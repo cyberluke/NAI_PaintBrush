@@ -63,3 +63,8 @@ static-lib/
 !buildsystem/
 !build.rs
 !extras/package/apple/build.sh
+
+# NAI Paintbrush local state (editor configs, caches, autosaves)
+.kilo/
+modules/gui/qt/paintbrush/.autosave/
+modules/gui/qt/paintbrush/*.npb~

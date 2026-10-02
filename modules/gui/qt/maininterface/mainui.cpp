@@ -1,6 +1,8 @@
 #include "mainui.hpp"
 
 #include <cassert>
+#include <QCoreApplication>
+#include <QDir>
 
 #include "maininterface/navigationmodel.hpp"
 
@@ -38,6 +40,14 @@
 
 #include "util/csdmenu.hpp"
 #include "util/item_key_event_filter.hpp"
+
+#include "paintbrush/pb_controller.hpp"
+#include "paintbrush/pb_canvas_item.hpp"
+#include "paintbrush/pb_segmentation_service.hpp"
+#include "paintbrush/pb_tracking_service.hpp"
+#include "paintbrush/pb_vision_service.hpp"
+#include "paintbrush/pb_generation_service.hpp"
+#include "paintbrush/pb_companion_service.hpp"
 #include "util/imageluminanceextractor.hpp"
 #include "util/keyhelper.hpp"
 #include "style/systempalette.hpp"
@@ -94,6 +104,49 @@
 
 static bool g_qmlTypesAreRegistered = false;
 
+#ifdef _WIN32
+# include <windows.h>
+
+/* The QML engine resolves plugin dependencies only against modules that are
+ * already loaded in the process (the contrib Qt used for release builds is
+ * static, which makes the QML plugins self-contained). With a shared Qt in
+ * development builds, the QML runtime DLLs must be preloaded explicitly or
+ * the engine reports "Cannot load library ... qquicklayoutsplugin.dll". */
+static void preloadQtRuntimeDlls()
+{
+    // Load each DLL by absolute path from the executable directory. Plain
+    // name-based LoadLibrary can be defeated by the process-wide DLL search
+    // configuration, so always resolve against the exe directory and try
+    // several loader search strategies in case the process restricts them.
+    const QString exeDir = QCoreApplication::applicationDirPath();
+    const QStringList qtDlls =
+        QDir(exeDir).entryList({QStringLiteral("Qt6*.dll")}, QDir::Files);
+    for (const QString &name : qtDlls)
+    {
+        const QString fullPath = exeDir + QLatin1Char('/') + name;
+        const wchar_t *wpath = reinterpret_cast<const wchar_t *>(fullPath.utf16());
+        static const DWORD searchFlags[] = {
+            0,                                       /* default search path */
+            LOAD_WITH_ALTERED_SEARCH_PATH,           /* dll dir first */
+            LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_APPLICATION_DIR
+                | LOAD_LIBRARY_SEARCH_SYSTEM32,      /* dll dir + app dir + system */
+            LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,        /* app dir + system + user dirs */
+        };
+        HMODULE handle = nullptr;
+        for (DWORD flags : searchFlags)
+        {
+            SetLastError(0);
+            handle = LoadLibraryExW(wpath, nullptr, flags);
+            if (handle != nullptr)
+                break;
+        }
+        if (handle == nullptr)
+            qInfo("preloadQt: %s failed (err %lu)", qPrintable(name),
+                  (unsigned long)GetLastError());
+    }
+}
+#endif
+
 using  namespace vlc::playlist;
 
 MainUI::MainUI(qt_intf_t *p_intf, MainCtx *mainCtx, QWindow* interfaceWindow,  QObject *parent)
@@ -105,6 +158,14 @@ MainUI::MainUI(qt_intf_t *p_intf, MainCtx *mainCtx, QWindow* interfaceWindow,  Q
     assert(m_intf);
     assert(m_mainCtx);
     assert(m_interfaceWindow);
+
+#ifdef _WIN32
+    preloadQtRuntimeDlls();
+#endif
+
+    /* NAI Paintbrush workspace controller (created before QML type
+     * registration so it can be exposed as a singleton). */
+    m_paintbrushController = new paintbrush::PaintbrushController(p_intf, this);
 
     registerQMLTypes();
 
@@ -131,6 +192,9 @@ MainUI::MainUI(qt_intf_t *p_intf, MainCtx *mainCtx, QWindow* interfaceWindow,  Q
 
 MainUI::~MainUI()
 {
+    delete m_paintbrushController;
+    m_paintbrushController = nullptr;
+
     if (!m_engineBound)
     {
         // If the global engine is dead, we assume no other QML engine exists hence can clear the
@@ -491,6 +555,31 @@ void MainUI::registerQMLTypes()
 
         qmlRegisterType<PlaylistListContextMenu>( uri, versionMajor, versionMinor, "PlaylistListContextMenu" );
         qmlRegisterType<PlaylistMediaContextMenu>( uri, versionMajor, versionMinor, "PlaylistMediaContextMenu" );
+
+        qmlRegisterModule(uri, versionMajor, versionMinor);
+        qmlProtectModule(uri, versionMajor);
+    }
+
+    {
+        const char* uri = "VLC.Paintbrush";
+        const int versionMajor = 1;
+        const int versionMinor = 0;
+
+        // @uri VLC.Paintbrush
+        qmlRegisterSingletonInstance<paintbrush::PaintbrushController>(uri, versionMajor, versionMinor,
+                                                           "PaintbrushCtx", m_paintbrushController);
+        qmlRegisterType<paintbrush::PaintbrushCanvasItem>(uri, versionMajor, versionMinor,
+                                              "PaintbrushCanvas");
+        qmlRegisterUncreatableType<paintbrush::SegmentationService>(uri, versionMajor, versionMinor,
+                                                        "SegmentationService", "");
+        qmlRegisterUncreatableType<paintbrush::TrackingService>(uri, versionMajor, versionMinor,
+                                                    "TrackingService", "");
+        qmlRegisterUncreatableType<paintbrush::VisionService>(uri, versionMajor, versionMinor,
+                                                  "VisionService", "");
+        qmlRegisterUncreatableType<paintbrush::GenerationService>(uri, versionMajor, versionMinor,
+                                                      "GenerationService", "");
+        qmlRegisterUncreatableType<paintbrush::CompanionService>(uri, versionMajor, versionMinor,
+                                                     "CompanionService", "");
 
         qmlRegisterModule(uri, versionMajor, versionMinor);
         qmlProtectModule(uri, versionMajor);

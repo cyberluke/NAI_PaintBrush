@@ -180,6 +180,30 @@ bool CompositorDirectComposition::init()
     return true;
 }
 
+namespace {
+
+/**
+ * Access the QRhiImplementation behind a QRhi.
+ *
+ * Qt <= 6.10 exposes this through the public QRhi::implementation()
+ * accessor. Qt 6.11 removed it and the pointer became a plain private
+ * data member (the sole data member of the class), so reach it through
+ * the pimpl layout instead. The static_assert guards against layout
+ * changes.
+ */
+QRhiImplementation* rhiImplementationOf(QRhi* rhi)
+{
+#if QT_VERSION >= QT_VERSION_CHECK(6, 11, 0)
+    static_assert(sizeof(QRhi) == sizeof(QRhiImplementation*),
+                  "Unexpected QRhi layout, adapt rhiImplementationOf()");
+    return *reinterpret_cast<QRhiImplementation**>(rhi);
+#else
+    return rhi->implementation();
+#endif
+}
+
+} // namespace
+
 bool CompositorDirectComposition::setup()
 {
     // WARNING: This lock is released explicitly as soon as we are ready to signal readiness:
@@ -201,7 +225,7 @@ bool CompositorDirectComposition::setup()
     const auto rhi = m_quickView->rhi();
     assert(rhi);
 
-    QRhiImplementation* const rhiImplementation = rhi->implementation();
+    QRhiImplementation* const rhiImplementation = rhiImplementationOf(rhi);
     assert(rhiImplementation);
     QRhiSwapChain* const rhiSwapChain = m_quickView->swapChain();
     assert(rhiSwapChain);

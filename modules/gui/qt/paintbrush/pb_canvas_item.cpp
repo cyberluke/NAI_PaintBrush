@@ -1,0 +1,2148 @@
+/*****************************************************************************
+ * pb_canvas_item.cpp : NAI Paintbrush — tile-based raster canvas
+ *****************************************************************************
+ * Copyright (C) 2026 NAI Paintbrush authors
+ *****************************************************************************/
+
+#include "pb_canvas_item.hpp"
+#include "pb_document.hpp"
+
+#include <QSGTransformNode>
+#include <QSGSimpleTextureNode>
+#include <QSGTexture>
+#include <QQuickWindow>
+#include <QMouseEvent>
+#include <QHoverEvent>
+#include <QWheelEvent>
+#include <QKeyEvent>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QMimeData>
+#include <QPainter>
+#include <QQueue>
+#include <QRandomGenerator>
+#include <QtMath>
+#include <QLineF>
+#include <QMatrix4x4>
+#include <QTransform>
+#include <QUrl>
+#include <QClipboard>
+#include <QGuiApplication>
+
+namespace paintbrush {
+
+PaintbrushCanvasItem::PaintbrushCanvasItem(QQuickItem *parent)
+    : QQuickItem(parent)
+{
+    setAcceptedMouseButtons(Qt::LeftButton | Qt::RightButton | Qt::MiddleButton);
+    setAcceptHoverEvents(true);
+    setFlag(ItemAcceptsDrops, true);
+    setFlag(ItemIsFocusScope, true);
+    /* Without ItemHasContents the scene graph never calls updatePaintNode()
+     * and the canvas tiles are never painted — drawing appears to do
+     * nothing even though strokes are committed to the document. */
+    setFlag(ItemHasContents, true);
+
+    /* The spray can keeps emitting while the button is held, even when the
+     * mouse is perfectly still — like a real can under pressure. */
+    m_sprayTimer.setTimerType(Qt::PreciseTimer);
+    m_sprayTimer.setInterval(12); /* ~83 Hz emission */
+    connect(&m_sprayTimer, &QTimer::timeout,
+            this, &PaintbrushCanvasItem::emitSprayPuff);
+}
+
+PaintbrushCanvasItem::~PaintbrushCanvasItem()
+{
+    /* Textures are owned by the scene graph; they are deleted when the
+     * nodes are destroyed. Release our references. */
+    m_textures.clear();
+    m_tileNodes.clear();
+}
+
+void PaintbrushCanvasItem::setDocument(PaintbrushDocument *doc)
+{
+    if (m_doc == doc)
+        return;
+    if (m_doc)
+        disconnect(m_doc, nullptr, this, nullptr);
+    m_doc = doc;
+    if (m_doc)
+    {
+        connect(m_doc, &PaintbrushDocument::layersChanged, this,
+                [this]() { markAllTilesDirty(); });
+        connect(m_doc, &PaintbrushDocument::canvasSizeChanged, this,
+                [this]() { markAllTilesDirty(); });
+        connect(m_doc, &PaintbrushDocument::selectionChanged, this,
+                [this]() {
+                    markAllTilesDirty();
+                    emit selectionChanged(hasSelection());
+                });
+    }
+    markAllTilesDirty();
+    update();
+}
+
+void PaintbrushCanvasItem::setUndoStack(UndoStack *stack)
+{
+    m_undoStack = stack;
+}
+
+/* ---------------------------------------------------------------- tools */
+
+void PaintbrushCanvasItem::setTool(int tool)
+{
+    if (m_tool == tool)
+        return;
+    m_tool = tool;
+    /* leaving the spray tool stops the emission timer and clears the
+     * physics state so the next stroke starts clean */
+    if (tool != TOOL_SPRAY)
+        resetSprayState();
+    /* leaving object select clears the pending AI mask so stale overlays
+     * never confuse the user */
+    if (tool != TOOL_OBJECT_SELECT)
+        clearObjectMask();
+    emit toolChanged(tool);
+    updateStatus(m_lastCanvasPos);
+}
+
+void PaintbrushCanvasItem::setFgColor(const QColor &color)
+{
+    if (m_fgColor == color)
+        return;
+    m_fgColor = color;
+    emit fgColorChanged();
+}
+
+void PaintbrushCanvasItem::setBgColor(const QColor &color)
+{
+    if (m_bgColor == color)
+        return;
+    m_bgColor = color;
+    emit bgColorChanged();
+}
+
+void PaintbrushCanvasItem::setBrushSize(qreal size)
+{
+    size = qBound<qreal>(1.0, size, 256.0);
+    if (qFuzzyCompare(m_brushSize, size))
+        return;
+    m_brushSize = size;
+    emit brushSizeChanged();
+}
+
+void PaintbrushCanvasItem::setSprayDensity(qreal density)
+{
+    density = qBound<qreal>(1.0, density, 500.0);
+    if (qFuzzyCompare(m_sprayDensity, density))
+        return;
+    m_sprayDensity = density;
+    emit sprayDensityChanged();
+}
+
+void PaintbrushCanvasItem::setSprayFlow(qreal flow)
+{
+    flow = qBound<qreal>(0.1, flow, 4.0);
+    if (qFuzzyCompare(m_sprayFlow, flow))
+        return;
+    m_sprayFlow = flow;
+    emit sprayFlowChanged();
+    updateStatus(m_lastCanvasPos);
+}
+
+void PaintbrushCanvasItem::setFillTolerance(qreal tolerance)
+{
+    tolerance = qBound<qreal>(0.0, tolerance, 255.0);
+    if (qFuzzyCompare(m_fillTolerance, tolerance))
+        return;
+    m_fillTolerance = tolerance;
+    emit fillToleranceChanged();
+}
+
+void PaintbrushCanvasItem::setZoom(qreal zoom)
+{
+    zoom = qBound<qreal>(0.05, zoom, 32.0);
+    if (qFuzzyCompare(m_zoom, zoom))
+        return;
+    m_zoom = zoom;
+    emit zoomChanged();
+    update();
+}
+
+void PaintbrushCanvasItem::setPanOffset(const QPointF &offset)
+{
+    if (m_panOffset == offset)
+        return;
+    m_panOffset = offset;
+    emit panOffsetChanged();
+    update();
+}
+
+void PaintbrushCanvasItem::setObjectMaskVisible(bool visible)
+{
+    if (m_objectMaskVisible == visible)
+        return;
+    m_objectMaskVisible = visible;
+    emit objectMaskVisibleChanged(visible);
+    markAllTilesDirty();
+    update();
+}
+
+/* ------------------------------------------------------- coordinate maps */
+
+QPointF PaintbrushCanvasItem::canvasFromItem(const QPointF &itemPos) const
+{
+    return QPointF((itemPos.x() - m_panOffset.x()) / m_zoom,
+                   (itemPos.y() - m_panOffset.y()) / m_zoom);
+}
+
+QPointF PaintbrushCanvasItem::itemFromCanvas(const QPointF &canvasPos) const
+{
+    return QPointF(canvasPos.x() * m_zoom + m_panOffset.x(),
+                   canvasPos.y() * m_zoom + m_panOffset.y());
+}
+
+QRect PaintbrushCanvasItem::canvasRect() const
+{
+    if (!m_doc)
+        return {};
+    return QRect(QPoint(0, 0), m_doc->canvasSize());
+}
+
+/* --------------------------------------------------------------- tiles */
+
+QRect PaintbrushCanvasItem::tileRect(int tx, int ty) const
+{
+    return QRect(tx * TILE, ty * TILE, TILE, TILE).intersected(canvasRect());
+}
+
+void PaintbrushCanvasItem::markTilesDirty(const QRect &canvasRect_)
+{
+    const QRect clipped = canvasRect_.intersected(canvasRect());
+    if (clipped.isEmpty())
+        return;
+
+    const int x0 = clipped.left() / TILE;
+    const int y0 = clipped.top() / TILE;
+    const int x1 = clipped.right() / TILE;
+    const int y1 = clipped.bottom() / TILE;
+
+    for (int ty = y0; ty <= y1; ++ty)
+        for (int tx = x0; tx <= x1; ++tx)
+            m_dirtyTiles.insert({tx, ty});
+
+    compositeDirtyTiles();
+    update();
+}
+
+void PaintbrushCanvasItem::markAllTilesDirty()
+{
+    const QRect r = canvasRect();
+    if (r.isEmpty())
+        return;
+    markTilesDirty(r);
+}
+
+/* Composite one layer into a tile buffer. */
+static void compositeLayer(QImage &tile, const CanvasLayer &layer,
+                           const QRect &tileCanvasRect)
+{
+    if (layer.raster.isNull() || !layer.visible)
+        return;
+
+    QRect srcRect = tileCanvasRect;
+    if (layer.type == LAYER_IMAGE || layer.type == LAYER_TEXT)
+        srcRect = tileCanvasRect.translated(-layer.position.toPoint());
+
+    const QRect layerRect = layer.raster.rect();
+    const QRect validSrc = srcRect.intersected(layerRect);
+    if (validSrc.isEmpty())
+        return;
+
+    const QRect dstRect = validSrc.translated(-tileCanvasRect.topLeft());
+    const QRect srcLocal = validSrc.translated(-layer.position.toPoint());
+
+    QImage layerPart(dstRect.size(), QImage::Format_ARGB32);
+    layerPart.fill(Qt::transparent);
+    {
+        QPainter p(&layerPart);
+        p.setCompositionMode(QPainter::CompositionMode_Source);
+        p.drawImage(QPoint(0, 0), layer.raster, srcLocal);
+        p.end();
+    }
+
+    if (!layer.mask.isNull())
+    {
+        QImage mask = layer.mask.scaled(layer.raster.size(),
+                                        Qt::IgnoreAspectRatio,
+                                        Qt::FastTransformation);
+        QPainter p(&layerPart);
+        p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+        p.drawImage(QPoint(0, 0), maskToImage(mask), validSrc.translated(-layer.position.toPoint()));
+        p.end();
+    }
+
+    QPainter p(&tile);
+    p.setOpacity(layer.opacity);
+    p.setCompositionMode(toCompositionMode(layer.blendMode));
+    p.drawImage(dstRect.topLeft(), layerPart);
+    p.end();
+}
+
+void PaintbrushCanvasItem::compositeTile(int tx, int ty, QImage &tile) const
+{
+    const QRect r = tileRect(tx, ty);
+    tile = QImage(r.size(), QImage::Format_ARGB32);
+    tile.fill(Qt::transparent);
+
+    if (!m_doc || r.isEmpty())
+        return;
+
+    /* layers, bottom to top */
+    const auto &layers = m_doc->layers();
+    for (const CanvasLayer &layer : layers)
+        compositeLayer(tile, layer, r);
+
+    /* object selection mask overlay (AI cutout preview) */
+    if (m_objectMaskVisible && !m_objectMask.isNull())
+    {
+        QPainter p(&tile);
+        for (int y = 0; y < r.height(); ++y)
+        {
+            const int my = r.top() + y;
+            if (my < 0 || my >= m_objectMask.height())
+                continue;
+            const uchar *mline = m_objectMask.constScanLine(my);
+            QRgb *tline = reinterpret_cast<QRgb *>(tile.scanLine(y));
+            for (int x = 0; x < r.width(); ++x)
+            {
+                const int mx = r.left() + x;
+                if (mx < 0 || mx >= m_objectMask.width())
+                    continue;
+                if (mline[mx] >= 128)
+                {
+                    const QRgb src = tline[x];
+                    tline[x] = qRgba(qRed(src) * 0.65 + 60,
+                                     qGreen(src) * 0.65 + 90,
+                                     qBlue(src) * 0.65 + 200,
+                                     qMin(255, qAlpha(src) + 60));
+                }
+            }
+        }
+        /* mask contour */
+        p.setPen(QPen(QColor(30, 90, 220), 2));
+        p.setBrush(Qt::NoBrush);
+        p.drawPath(maskToPath(m_objectMask));
+        p.end();
+    }
+
+    /* manual selection tint + marching border */
+    if (m_doc && !m_doc->selectionPath().isEmpty())
+    {
+        const QPainterPath &sel = m_doc->selectionPath();
+        QPainter p(&tile);
+        p.setClipRect(tile.rect());
+        p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+        /* dark tint outside the selection */
+        QPainterPath outside;
+        outside.addRect(r);
+        outside = outside.subtracted(sel.translated(-r.topLeft()));
+        p.fillPath(outside, QColor(0, 0, 0, 60));
+        QPen pen(QColor(255, 255, 255), 1, Qt::DashLine);
+        p.setPen(pen);
+        p.setBrush(Qt::NoBrush);
+        p.drawPath(sel.translated(-r.topLeft()));
+        p.end();
+    }
+
+    /* shape tool preview (rubber band) */
+    if (!m_shapePreviewPath.isEmpty())
+    {
+        QPainter p(&tile);
+        p.setClipRect(tile.rect());
+        p.translate(-r.topLeft());
+        QPen pen(m_fgColor, 1, Qt::SolidLine);
+        p.setPen(pen);
+        p.setBrush(Qt::NoBrush);
+        p.drawPath(m_shapePreviewPath);
+        p.end();
+    }
+}
+
+void PaintbrushCanvasItem::compositeDirtyTiles()
+{
+    if (m_dirtyTiles.isEmpty())
+        return;
+
+    const QSet<TileKey> dirty = m_dirtyTiles;
+    m_dirtyTiles.clear();
+    for (const TileKey &key : dirty)
+    {
+        QImage tile;
+        compositeTile(key.x, key.y, tile);
+        m_tiles.insert(key, tile);
+    }
+    m_texturesNeedRebuild = true;
+}
+
+/* ---------------------------------------------------------- scene graph */
+
+QSGNode *PaintbrushCanvasItem::updatePaintNode(QSGNode *oldNode,
+                                               UpdatePaintNodeData *)
+{
+    if (!m_doc)
+    {
+        delete oldNode;
+        return nullptr;
+    }
+
+    QSGTransformNode *root = static_cast<QSGTransformNode *>(oldNode);
+    if (!root)
+        root = new QSGTransformNode();
+
+    QMatrix4x4 matrix;
+    matrix.translate(m_panOffset.x(), m_panOffset.y());
+    matrix.scale(m_zoom);
+    root->setMatrix(matrix);
+
+    QQuickWindow *win = window();
+
+    /* (re)create textures for tiles whose content changed */
+    if (m_texturesNeedRebuild && win)
+    {
+        m_texturesNeedRebuild = false;
+        const auto tiles = m_tiles.keys();
+        for (const TileKey &key : tiles)
+        {
+            QSGTexture *&tex = m_textures[key];
+            if (tex)
+                delete tex;
+            tex = win->createTextureFromImage(m_tiles.value(key));
+            if (tex)
+                tex->setFiltering(QSGTexture::Nearest);
+        }
+    }
+
+    /* prune textures for tiles that no longer exist */
+    const auto textureKeys = m_textures.keys();
+    for (const TileKey &key : textureKeys)
+    {
+        if (!m_tiles.contains(key))
+        {
+            delete m_textures.take(key);
+            if (QSGTransformNode *node = m_tileNodes.take(key))
+                delete node;
+        }
+    }
+
+    /* ensure one transform node per tile, positioned in canvas coords */
+    const auto tileKeys = m_tiles.keys();
+    for (const TileKey &key : tileKeys)
+    {
+        QSGTransformNode *node = m_tileNodes.value(key);
+        if (!node)
+        {
+            node = new QSGTransformNode();
+            m_tileNodes.insert(key, node);
+            root->appendChildNode(node);
+            QMatrix4x4 tileMatrix;
+            tileMatrix.translate(key.x * TILE, key.y * TILE);
+            node->setMatrix(tileMatrix);
+        }
+        QSGSimpleTextureNode *texNode = nullptr;
+        for (QSGNode *child = node->firstChild(); child; child = child->nextSibling())
+        {
+            if (child->type() == QSGNode::GeometryNodeType)
+            {
+                texNode = static_cast<QSGSimpleTextureNode *>(child);
+                break;
+            }
+        }
+        if (!texNode)
+        {
+            texNode = new QSGSimpleTextureNode();
+            node->appendChildNode(texNode);
+        }
+        const QRect r = tileRect(key.x, key.y);
+        QSGTexture *tex = m_textures.value(key);
+        if (tex)
+        {
+            texNode->setTexture(tex);
+            texNode->setRect(0, 0, r.width(), r.height());
+        }
+        else
+        {
+            texNode->setTexture(nullptr);
+            texNode->setRect(0, 0, 0, 0);
+        }
+    }
+
+    return root;
+}
+
+void PaintbrushCanvasItem::geometryChange(const QRectF &newGeometry,
+                                          const QRectF &oldGeometry)
+{
+    QQuickItem::geometryChange(newGeometry, oldGeometry);
+    if (newGeometry.size() != oldGeometry.size())
+        update();
+}
+
+void PaintbrushCanvasItem::itemChange(ItemChange change, const ItemChangeData &value)
+{
+    QQuickItem::itemChange(change, value);
+    if (change == ItemSceneChange && value.window)
+        m_texturesNeedRebuild = true;
+}
+
+/* ------------------------------------------------------------- painting */
+
+void PaintbrushCanvasItem::captureBeforeRegion(const QRect &canvasRect_)
+{
+    if (!m_doc)
+        return;
+    CanvasLayer *layer = m_doc->currentLayer();
+    if (!layer || layer->raster.isNull())
+        return;
+
+    const QRect clipped = canvasRect_.intersected(layer->raster.rect());
+    if (clipped.isEmpty())
+        return;
+
+    /* skip sub-rects already covered by earlier captures */
+    for (const auto &pair : m_strokeBefore)
+    {
+        if (pair.first.contains(clipped))
+            return;
+    }
+
+    m_strokeBefore.append({clipped, layer->raster.copy(clipped)});
+    m_strokeUnion = m_strokeUnion.isNull() ? clipped : m_strokeUnion.united(clipped);
+}
+
+void PaintbrushCanvasItem::paintDot(const QPointF &center, qreal radius, bool erase)
+{
+    if (!m_doc)
+        return;
+    CanvasLayer *layer = m_doc->currentLayer();
+    if (!layer || layer->raster.isNull() || layer->locked)
+        return;
+
+    const QRectF dotRect(center.x() - radius, center.y() - radius,
+                         radius * 2, radius * 2);
+    const QRect affected = dotRect.adjusted(-2, -2, 2, 2).toAlignedRect()
+                               .intersected(layer->raster.rect());
+    if (affected.isEmpty())
+        return;
+
+    captureBeforeRegion(affected);
+
+    QPainter p(&layer->raster);
+    p.setRenderHint(QPainter::Antialiasing, radius > 2.0);
+    if (erase)
+        p.setCompositionMode(QPainter::CompositionMode_Clear);
+    else
+        p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+    p.setPen(Qt::NoPen);
+    p.setBrush(erase ? QColor(Qt::transparent) : m_fgColor);
+    p.drawEllipse(dotRect);
+    p.end();
+
+    m_strokeHadPaint = true;
+    markTilesDirty(affected);
+}
+
+void PaintbrushCanvasItem::paintLineSegment(const QPointF &a, const QPointF &b)
+{
+    if (!m_doc)
+        return;
+    CanvasLayer *layer = m_doc->currentLayer();
+    if (!layer || layer->raster.isNull() || layer->locked)
+        return;
+
+    const bool erase = (m_tool == TOOL_ERASER);
+    const qreal radius = erase ? qMax(2.0, m_brushSize) : (m_tool == TOOL_PENCIL ? 1.0 : m_brushSize / 2.0);
+
+    QRectF lineRect;
+    lineRect.setCoords(qMin(a.x(), b.x()) - radius, qMin(a.y(), b.y()) - radius,
+                       qMax(a.x(), b.x()) + radius, qMax(a.y(), b.y()) + radius);
+    const QRect affected = lineRect.adjusted(-2, -2, 2, 2).toAlignedRect()
+                               .intersected(layer->raster.rect());
+    if (affected.isEmpty())
+        return;
+
+    captureBeforeRegion(affected);
+
+    QPainter p(&layer->raster);
+    p.setRenderHint(QPainter::Antialiasing, radius > 2.0);
+    if (erase)
+        p.setCompositionMode(QPainter::CompositionMode_Clear);
+    else
+        p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+    p.setPen(QPen(m_fgColor, radius * 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    p.drawLine(a, b);
+    p.end();
+
+    m_strokeHadPaint = true;
+    markTilesDirty(affected);
+}
+
+void PaintbrushCanvasItem::strokeSegment(const QPointF &from, const QPointF &to)
+{
+    switch (m_tool)
+    {
+    case TOOL_PENCIL:
+    case TOOL_BRUSH:
+    case TOOL_ERASER:
+        if (from == to)
+            paintDot(to, m_tool == TOOL_PENCIL ? 0.5 : m_brushSize / 2.0,
+                     m_tool == TOOL_ERASER);
+        else
+            paintLineSegment(from, to);
+        break;
+    case TOOL_SPRAY:
+        /* spray is emitted continuously by the physics timer; a single
+         * strokeSegment call should never happen (beginStroke routes to
+         * emitSprayPuff) but keep a safe fallback */
+        if (from == to)
+            emitSprayPuff();
+        break;
+    default:
+        break;
+    }
+}
+
+void PaintbrushCanvasItem::beginStroke(const QPointF &canvasPos, bool primary)
+{
+    if (!m_doc)
+        return;
+
+    m_strokePrimary = primary;
+    m_strokeHadPaint = false;
+    m_strokeUnion = QRect();
+    m_strokeBefore.clear();
+    m_prevPreviewRect = QRect();
+
+    switch (m_tool)
+    {
+    case TOOL_PENCIL:
+    case TOOL_BRUSH:
+    case TOOL_ERASER:
+        m_strokeActive = true;
+        m_lastCanvasPos = canvasPos;
+        captureBeforeRegion(
+            QRectF(canvasPos.x() - m_brushSize, canvasPos.y() - m_brushSize,
+                   m_brushSize * 2, m_brushSize * 2)
+                .toAlignedRect().intersected(canvasRect()));
+        strokeSegment(canvasPos, canvasPos);
+        break;
+
+    case TOOL_SPRAY:
+    {
+        m_strokeActive = true;
+        m_lastCanvasPos = canvasPos;
+        /* the can starts exactly where the hand pressed */
+        m_sprayNozzle = canvasPos;
+        m_sprayTarget = canvasPos;
+        m_sprayVel = QPointF();
+        m_sprayWobblePhase = 0.0;
+        m_sprayWobbleAmp = 0.0;
+        captureBeforeRegion(
+            QRectF(canvasPos.x() - m_brushSize * 2,
+                   canvasPos.y() - m_brushSize * 2,
+                   m_brushSize * 4, m_brushSize * 4)
+                .toAlignedRect().intersected(canvasRect()));
+        emitSprayPuff();
+        /* keep emitting while the button is held, even without motion */
+        m_sprayTimer.start();
+        break;
+    }
+
+    case TOOL_FILL:
+        if (primary)
+            floodFillAt(canvasPos);
+        break;
+
+    case TOOL_EYEDROPPER:
+        if (primary)
+            sampleColorAt(canvasPos);
+        break;
+
+    case TOOL_LINE:
+    case TOOL_RECTANGLE:
+    case TOOL_ROUNDED_RECT:
+    case TOOL_ELLIPSE:
+        m_strokeActive = true;
+        m_lastCanvasPos = canvasPos;
+        m_dragStartCanvas = canvasPos;
+        m_shapePreviewPath = buildShapePath(canvasPos, canvasPos);
+        m_prevPreviewRect = m_shapePreviewPath.boundingRect().toAlignedRect();
+        markAllTilesDirty();
+        break;
+
+    case TOOL_RECT_SELECT:
+    case TOOL_FREEFORM_SELECT:
+        m_strokeActive = true;
+        m_dragStartCanvas = canvasPos;
+        m_dragLastCanvas = canvasPos;
+        m_dragging = true;
+        if (m_tool == TOOL_FREEFORM_SELECT)
+        {
+            m_pendingPath = QPainterPath();
+            m_pendingPath.moveTo(canvasPos);
+        }
+        /* dragging inside an existing selection moves it */
+        if (hasSelection() && m_doc->selectionPath().contains(canvasPos))
+            m_movingSelection = true;
+        else if (hasSelection())
+            m_doc->clearSelection();
+        break;
+
+    case TOOL_OBJECT_SELECT:
+        if (primary)
+            emit objectSelectClick(canvasPos, true, itemFromCanvas(canvasPos));
+        break;
+
+    case TOOL_PAN_ZOOM:
+        m_panning = true;
+        m_panLastItem = eventLastItemPos();
+        break;
+
+    default:
+        break;
+    }
+}
+
+void PaintbrushCanvasItem::continueStroke(const QPointF &canvasPos)
+{
+    switch (m_tool)
+    {
+    case TOOL_PENCIL:
+    case TOOL_BRUSH:
+    case TOOL_ERASER:
+        if (m_strokeActive)
+        {
+            strokeSegment(m_lastCanvasPos, canvasPos);
+            m_lastCanvasPos = canvasPos;
+        }
+        break;
+
+    case TOOL_SPRAY:
+        /* the timer pulls the nozzle toward the hand; here we only feed it
+         * the latest hand position and velocity so the physics stays smooth */
+        if (m_strokeActive)
+        {
+            m_sprayVel = m_sprayVel * 0.6
+                         + (canvasPos - m_sprayTarget) * 0.4;
+            m_sprayTarget = canvasPos;
+            m_lastCanvasPos = canvasPos;
+        }
+        break;
+
+    case TOOL_LINE:
+    case TOOL_RECTANGLE:
+    case TOOL_ROUNDED_RECT:
+    case TOOL_ELLIPSE:
+        if (m_strokeActive)
+        {
+            const QPainterPath newPath = buildShapePath(m_dragStartCanvas, canvasPos);
+            const QRect newRect = newPath.boundingRect().adjusted(-8, -8, 8, 8)
+                                    .toAlignedRect();
+            m_shapePreviewPath = newPath;
+            markTilesDirty(m_prevPreviewRect.adjusted(-8, -8, 8, 8).united(newRect));
+            m_prevPreviewRect = newRect;
+        }
+        break;
+
+    case TOOL_RECT_SELECT:
+    case TOOL_FREEFORM_SELECT:
+        if (m_dragging)
+        {
+            if (m_movingSelection)
+            {
+                moveSelection(canvasPos - m_dragLastCanvas);
+                m_dragLastCanvas = canvasPos;
+            }
+            else
+            {
+                updateSelectionFromDrag(canvasPos);
+                m_dragLastCanvas = canvasPos;
+            }
+        }
+        break;
+
+    case TOOL_PAN_ZOOM:
+        if (m_panning)
+        {
+            const QPointF itemPos = eventLastItemPos();
+            setPanOffset(m_panOffset + (itemPos - m_panLastItem));
+            m_panLastItem = itemPos;
+        }
+        break;
+
+    default:
+        break;
+    }
+    updateStatus(canvasPos);
+}
+
+void PaintbrushCanvasItem::endStroke(const QPointF &canvasPos, bool primary)
+{
+    switch (m_tool)
+    {
+    case TOOL_PENCIL:
+    case TOOL_BRUSH:
+    case TOOL_ERASER:
+        if (m_strokeActive)
+        {
+            strokeSegment(m_lastCanvasPos, canvasPos);
+            m_strokeActive = false;
+            if (m_strokeHadPaint)
+            {
+                /* apply selection + alpha-lock masking to the stroke */
+                maskStrokeToSelectionAndAlphaLock();
+                pushStrokeEntry(QStringLiteral("Draw"));
+                emit strokeCommitted(m_strokeUnion);
+                emit canvasModified();
+            }
+            m_strokeBefore.clear();
+            m_strokeUnion = QRect();
+        }
+        break;
+
+    case TOOL_SPRAY:
+        if (m_strokeActive)
+        {
+            m_sprayTimer.stop();
+            m_sprayTarget = canvasPos;
+            emitSprayPuff(); /* final puff at the release point */
+            m_strokeActive = false;
+            if (m_strokeHadPaint)
+            {
+                maskStrokeToSelectionAndAlphaLock();
+                pushStrokeEntry(QStringLiteral("Spray"));
+                emit strokeCommitted(m_strokeUnion);
+                emit canvasModified();
+            }
+            m_strokeBefore.clear();
+            m_strokeUnion = QRect();
+        }
+        break;
+
+    case TOOL_LINE:
+    case TOOL_RECTANGLE:
+    case TOOL_ROUNDED_RECT:
+    case TOOL_ELLIPSE:
+        if (m_strokeActive)
+        {
+            const QPainterPath path = buildShapePath(m_dragStartCanvas, canvasPos);
+            if (!path.isEmpty())
+                commitShape(path, primary);
+            m_shapePreviewPath = QPainterPath();
+            m_strokeActive = false;
+            markAllTilesDirty();
+        }
+        break;
+
+    case TOOL_RECT_SELECT:
+    case TOOL_FREEFORM_SELECT:
+        if (m_dragging)
+        {
+            m_dragging = false;
+            m_strokeActive = false;
+            if (m_movingSelection)
+            {
+                m_movingSelection = false;
+                emit canvasModified();
+            }
+            else
+            {
+                finishSelection();
+            }
+            markAllTilesDirty();
+        }
+        break;
+
+    case TOOL_PAN_ZOOM:
+        m_panning = false;
+        break;
+
+    default:
+        break;
+    }
+    updateStatus(canvasPos);
+}
+
+/* ----------------------------------------------------------- spray physics */
+
+void PaintbrushCanvasItem::resetSprayState()
+{
+    m_sprayTimer.stop();
+    m_sprayNozzle = QPointF();
+    m_sprayTarget = QPointF();
+    m_sprayVel = QPointF();
+    m_sprayWobblePhase = 0.0;
+    m_sprayWobbleAmp = 0.0;
+}
+
+/* One emission of the spray can. The can tip lags behind the hand (the
+ * faster the hand moves, the more the nozzle trails — exactly like a real
+ * can that can't keep up with a flick), the nozzle wobbles with a smoothed
+ * hand-shake, and the cone widens with velocity. The result is the loose,
+ * "under the bridge in Prague" curve — never a rigid straight line.
+ *
+ * Droplets are drawn as a dense core plus a translucent mist, so quick
+ * passes feather out and slow passes build up a solid coat. */
+void PaintbrushCanvasItem::emitSprayPuff()
+{
+    if (!m_doc || m_tool != TOOL_SPRAY)
+        return;
+    CanvasLayer *layer = m_doc->currentLayer();
+    if (!layer || layer->raster.isNull() || layer->locked)
+        return;
+
+    QRandomGenerator *rng = QRandomGenerator::global();
+
+    /* --- nozzle lag: pull the can tip toward the hand --------------------- */
+    const QPointF toTarget = m_sprayTarget - m_sprayNozzle;
+    const qreal handSpeed = QLineF(QPointF(), m_sprayVel).length();
+
+    /* the faster the hand, the lazier the can: more lag = more curve */
+    const qreal lag = qBound<qreal>(0.10, 0.55 - handSpeed * 0.02, 0.9);
+    m_sprayNozzle += toTarget * lag;
+
+    /* movement direction (for the cone slope) */
+    QPointF dir(1, 0);
+    if (handSpeed > 0.5)
+        dir = m_sprayVel / handSpeed;
+    const QPointF perp(-dir.y(), dir.x());
+
+    /* --- hand wobble: smoothed sinusoidal shake --------------------------- */
+    m_sprayWobblePhase += 0.35 + handSpeed * 0.05;
+    const qreal targetAmp = qMin<qreal>(1.8, 0.3 + handSpeed * 0.04 + m_sprayFlow * 0.2);
+    m_sprayWobbleAmp += (targetAmp - m_sprayWobbleAmp) * 0.15;
+    const QPointF tip = m_sprayNozzle + perp * (qSin(m_sprayWobblePhase) * m_sprayWobbleAmp);
+
+    /* --- cone geometry ------------------------------------------------------ */
+    const qreal base = qMax(2.0, m_brushSize / 2.0);
+    const qreal coreRadius = base * (0.7 + m_sprayFlow * 0.12);
+    const qreal mistRadius = base * (1.3 + handSpeed * 0.10 + m_sprayFlow * 0.35);
+
+    /* gaussian-ish falloff (sum of two uniforms) */
+    auto gauss = [rng]() {
+        return (rng->generateDouble() + rng->generateDouble()) * 0.5;
+    };
+
+    const int coreDrops = qMax(3, int(9 * m_sprayFlow));
+    const int mistDrops = qMax(8, int(16 * m_sprayFlow + handSpeed * 0.4));
+
+    QRect affected;
+    auto growRect = [&affected](const QPointF &p, qreal r) {
+        const QRectF rc(p.x() - r - 1, p.y() - r - 1, r * 2 + 2, r * 2 + 2);
+        affected = affected.isNull() ? rc.toAlignedRect() : affected.united(rc.toAlignedRect());
+    };
+
+    QPainter p(&layer->raster);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+    p.setPen(Qt::NoPen);
+
+    /* dense core: small, fairly opaque dots near the nozzle */
+    for (int i = 0; i < coreDrops; ++i)
+    {
+        const qreal ang = rng->generateDouble() * 2 * M_PI;
+        const qreal r = gauss() * coreRadius;
+        const QPointF pos = tip + QPointF(qCos(ang), qSin(ang)) * r;
+        const qreal dotR = 0.4 + rng->generateDouble() * 1.0;
+        QColor c = m_fgColor;
+        c.setAlpha(170 + int(rng->generateDouble() * 85));
+        p.setBrush(c);
+        p.drawEllipse(pos, dotR, dotR);
+        growRect(pos, dotR);
+    }
+
+    /* translucent mist: feathered, wider, lighter */
+    for (int i = 0; i < mistDrops; ++i)
+    {
+        const qreal ang = rng->generateDouble() * 2 * M_PI;
+        const qreal r = gauss() * mistRadius;
+        const QPointF pos = tip + QPointF(qCos(ang), qSin(ang)) * r;
+        const qreal dotR = 0.2 + rng->generateDouble() * 0.5;
+        QColor c = m_fgColor;
+        c.setAlpha(28 + int(rng->generateDouble() * 72));
+        p.setBrush(c);
+        p.drawEllipse(pos, dotR, dotR);
+        growRect(pos, dotR);
+    }
+
+    /* occasional heavy drip that runs down, like over-saturated paint */
+    if (m_sprayFlow > 1.1 && rng->generateDouble() < 0.18)
+    {
+        const QPointF pos = tip + QPointF((rng->generateDouble() - 0.5) * coreRadius,
+                                          coreRadius * (0.5 + rng->generateDouble()));
+        const qreal dotR = 0.7 + rng->generateDouble() * 1.3;
+        QColor c = m_fgColor;
+        c.setAlpha(120);
+        p.setBrush(c);
+        p.drawEllipse(pos, dotR, dotR);
+        growRect(pos, dotR);
+    }
+
+    p.end();
+
+    const QRect clipped = affected.intersected(layer->raster.rect());
+    if (clipped.isEmpty())
+        return;
+
+    captureBeforeRegion(clipped);
+    m_strokeHadPaint = true;
+    m_strokeUnion = m_strokeUnion.isNull() ? clipped : m_strokeUnion.united(clipped);
+    markTilesDirty(clipped);
+}
+
+/* Restore stroke pixels that fall outside the active selection or on fully
+ * transparent pixels of an alpha-locked layer. */
+void PaintbrushCanvasItem::maskStrokeToSelectionAndAlphaLock()
+{
+    if (!m_doc)
+        return;
+    CanvasLayer *layer = m_doc->currentLayer();
+    if (!layer || layer->raster.isNull() || m_strokeBefore.isEmpty())
+        return;
+
+    const bool hasSel = hasSelection();
+    const QPainterPath &sel = m_doc->selectionPath();
+    const bool alphaLock = layer->alphaLocked;
+
+    if (!hasSel && !alphaLock)
+        return;
+
+    for (const auto &pair : m_strokeBefore)
+    {
+        const QRect &rect = pair.first;
+        const QImage &before = pair.second;
+        QImage &raster = layer->raster;
+        const int w = qMin(rect.width(), raster.width() - rect.left());
+        const int h = qMin(rect.height(), raster.height() - rect.top());
+        for (int y = 0; y < h; ++y)
+        {
+            const QRgb *src = reinterpret_cast<const QRgb *>(before.constScanLine(y));
+            QRgb *dst = reinterpret_cast<QRgb *>(raster.scanLine(rect.top() + y) + rect.left() * 4);
+            for (int x = 0; x < w; ++x)
+            {
+                const bool inside = !hasSel ||
+                                    sel.contains(QPointF(rect.left() + x, rect.top() + y));
+                const bool lockedPixel = alphaLock && qAlpha(src[x]) == 0;
+                if (!inside || lockedPixel)
+                    dst[x] = src[x];
+            }
+        }
+    }
+}
+
+void PaintbrushCanvasItem::pushStrokeEntry(const QString &desc)
+{
+    if (!m_undoStack || !m_doc || m_strokeBefore.isEmpty())
+        return;
+
+    CanvasLayer *layer = m_doc->currentLayer();
+    if (!layer || layer->raster.isNull())
+        return;
+
+    PaintUndoEntry entry;
+    entry.layerIndex = m_doc->currentLayerIndex();
+    entry.unionRect = m_strokeUnion.intersected(layer->raster.rect());
+    entry.beforeRects = m_strokeBefore;
+    entry.after = layer->raster.copy(entry.unionRect);
+    entry.description = desc;
+    m_undoStack->pushPaint(entry);
+    m_doc->setDirty(true);
+}
+
+QPainterPath PaintbrushCanvasItem::buildShapePath(const QPointF &a,
+                                                  const QPointF &b) const
+{
+    QPainterPath path;
+    const QRectF rect = QRectF(a, b).normalized();
+    switch (m_tool)
+    {
+    case TOOL_LINE:
+        path.moveTo(a);
+        path.lineTo(b);
+        break;
+    case TOOL_RECTANGLE:
+        path.addRect(rect);
+        break;
+    case TOOL_ROUNDED_RECT:
+        path.addRoundedRect(rect, qMin(rect.width(), rect.height()) * 0.15,
+                            qMin(rect.width(), rect.height()) * 0.15);
+        break;
+    case TOOL_ELLIPSE:
+        path.addEllipse(rect);
+        break;
+    default:
+        break;
+    }
+    return path;
+}
+
+void PaintbrushCanvasItem::commitShape(const QPainterPath &path, bool filled)
+{
+    if (!m_doc)
+        return;
+    CanvasLayer *layer = m_doc->currentLayer();
+    if (!layer || layer->raster.isNull() || layer->locked)
+        return;
+
+    const QRect affected = path.boundingRect().adjusted(-4, -4, 4, 4)
+                               .toAlignedRect().intersected(layer->raster.rect());
+    if (affected.isEmpty())
+        return;
+
+    m_strokeBefore.clear();
+    m_strokeUnion = affected;
+    captureBeforeRegion(affected);
+
+    QPainter p(&layer->raster);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+    if (filled && m_tool != TOOL_LINE)
+    {
+        p.setPen(QPen(m_fgColor, 1.0));
+        p.setBrush(m_bgColor);
+    }
+    else
+    {
+        p.setPen(QPen(m_fgColor, 1.0));
+        p.setBrush(Qt::NoBrush);
+    }
+    p.drawPath(path);
+    p.end();
+
+    m_strokeHadPaint = true;
+    markTilesDirty(affected);
+    maskStrokeToSelectionAndAlphaLock();
+    pushStrokeEntry(QStringLiteral("Shape"));
+    emit strokeCommitted(affected);
+    emit canvasModified();
+}
+
+void PaintbrushCanvasItem::floodFillAt(const QPointF &canvasPos)
+{
+    if (!m_doc)
+        return;
+    CanvasLayer *layer = m_doc->currentLayer();
+    if (!layer || layer->raster.isNull() || layer->locked)
+        return;
+
+    const QPoint start = canvasPos.toPoint();
+    if (!layer->raster.rect().contains(start))
+        return;
+
+    const bool hasSel = hasSelection();
+    const QPainterPath &sel = m_doc->selectionPath();
+
+    QImage &img = layer->raster;
+    const int w = img.width();
+    const int h = img.height();
+    const QRgb target = img.pixel(start);
+    const QRgb fill = m_fgColor.rgba();
+
+    if (target == fill)
+        return;
+
+    const int tolerance = int(m_fillTolerance);
+
+    /* BFS flood fill with optional selection constraint. A flat byte buffer
+     * tracks visited pixels (QImage::pixelIndex was removed in Qt 6). */
+    QVector<quint8> visited(size_t(w) * size_t(h), 0);
+    auto visitedAt = [&](int x, int y) -> quint8 & {
+        return visited[size_t(y) * size_t(w) + size_t(x)];
+    };
+
+    QQueue<QPoint> queue;
+    queue.enqueue(start);
+    visitedAt(start.x(), start.y()) = 1;
+
+    QImage affectedImage = img.copy(); /* working copy */
+
+    const qint64 maxPixels = qint64(w) * qint64(h);
+    qint64 count = 0;
+    QRect bounds(start, start);
+
+    auto similar = [&](QRgb a, QRgb b) {
+        if (tolerance <= 0)
+            return a == b;
+        return qAbs(qRed(a) - qRed(b)) <= tolerance &&
+               qAbs(qGreen(a) - qGreen(b)) <= tolerance &&
+               qAbs(qBlue(a) - qBlue(b)) <= tolerance;
+    };
+
+    while (!queue.isEmpty() && count < maxPixels)
+    {
+        const QPoint pt = queue.dequeue();
+        count++;
+        if (hasSel && !sel.contains(QPointF(pt)))
+            continue;
+        affectedImage.setPixel(pt, fill);
+        bounds = bounds.united(QRect(pt, pt));
+
+        const int x = pt.x(), y = pt.y();
+        if (x > 0 && !visitedAt(x - 1, y) && similar(img.pixel(x - 1, y), target))
+        {
+            visitedAt(x - 1, y) = 1;
+            queue.enqueue(QPoint(x - 1, y));
+        }
+        if (x + 1 < w && !visitedAt(x + 1, y) && similar(img.pixel(x + 1, y), target))
+        {
+            visitedAt(x + 1, y) = 1;
+            queue.enqueue(QPoint(x + 1, y));
+        }
+        if (y > 0 && !visitedAt(x, y - 1) && similar(img.pixel(x, y - 1), target))
+        {
+            visitedAt(x, y - 1) = 1;
+            queue.enqueue(QPoint(x, y - 1));
+        }
+        if (y + 1 < h && !visitedAt(x, y + 1) && similar(img.pixel(x, y + 1), target))
+        {
+            visitedAt(x, y + 1) = 1;
+            queue.enqueue(QPoint(x, y + 1));
+        }
+    }
+
+    if (count == 0)
+        return;
+
+    const QRect affected = bounds.adjusted(-1, -1, 1, 1).intersected(img.rect());
+    m_strokeBefore.clear();
+    m_strokeUnion = affected;
+    captureBeforeRegion(affected);
+
+    QPainter p(&img);
+    p.setCompositionMode(QPainter::CompositionMode_Source);
+    p.drawImage(affected.topLeft(), affectedImage, affected);
+    p.end();
+
+    m_strokeHadPaint = true;
+    markTilesDirty(affected);
+    pushStrokeEntry(QStringLiteral("Fill"));
+    emit strokeCommitted(affected);
+    emit canvasModified();
+}
+
+void PaintbrushCanvasItem::sampleColorAt(const QPointF &canvasPos)
+{
+    if (!m_doc)
+        return;
+    const QImage flat = m_doc->flattenedImage();
+    const QPoint pt = canvasPos.toPoint();
+    if (!flat.rect().contains(pt))
+        return;
+    const QColor color = flat.pixelColor(pt);
+    setFgColor(color);
+    emit colorPicked(color);
+}
+
+void PaintbrushCanvasItem::applyText(const QString &text, const QPointF &at,
+                                     const QFont &font, const QColor &color)
+{
+    if (!m_doc || text.trimmed().isEmpty())
+        return;
+
+    QFont f = font;
+    if (f.pixelSize() <= 0 && f.pointSize() <= 0)
+        f.setPixelSize(32);
+
+    QFontMetrics fm(f);
+    const QRect textRect = fm.boundingRect(QRect(0, 0, 1, 1), Qt::AlignLeft | Qt::AlignTop, text);
+    const QSize size = textRect.size().grownBy(QMargins(4, 4, 4, 4));
+
+    /* create a text layer (kept editable in the project file) */
+    CanvasLayer layer = CanvasLayer::createText(text, at, size,
+                                                QStringLiteral("Text"));
+    layer.raster.fill(Qt::transparent);
+    {
+        QPainter p(&layer.raster);
+        p.setRenderHint(QPainter::TextAntialiasing, true);
+        p.setPen(color);
+        p.setFont(f);
+        p.drawText(layer.raster.rect(), Qt::AlignLeft | Qt::AlignTop, text);
+        p.end();
+    }
+
+    if (!m_undoStack)
+        return;
+    const QByteArray before = m_doc->layersSnapshot();
+    QList<CanvasLayer> layers = m_doc->layers();
+    layers.append(std::move(layer));
+    m_doc->setLayers(layers);
+    m_doc->setCurrentLayerIndex(layers.size() - 1);
+    const QByteArray after = m_doc->layersSnapshot();
+    m_undoStack->pushStructure({before, after, QStringLiteral("Add text")});
+    markAllTilesDirty();
+    emit canvasModified();
+}
+
+/* ------------------------------------------------------------ selection */
+
+QImage PaintbrushCanvasItem::selectionMaskImage() const
+{
+    if (!m_doc || m_doc->selectionPath().isEmpty())
+        return {};
+    const QSize size = m_doc->canvasSize();
+    QImage mask(size, QImage::Format_Grayscale8);
+    mask.fill(0);
+    QPainter p(&mask);
+    p.fillPath(m_doc->selectionPath(), QColor(255, 255, 255));
+    p.end();
+    return mask;
+}
+
+void PaintbrushCanvasItem::updateSelectionFromDrag(const QPointF &canvasPos)
+{
+    if (!m_doc)
+        return;
+    QPainterPath path;
+    if (m_tool == TOOL_RECT_SELECT)
+    {
+        path.addRect(QRectF(m_dragStartCanvas, canvasPos).normalized());
+    }
+    else
+    {
+        m_pendingPath.lineTo(canvasPos);
+        path = m_pendingPath;
+    }
+    m_doc->setSelectionPath(path);
+    markAllTilesDirty();
+}
+
+void PaintbrushCanvasItem::finishSelection()
+{
+    if (!m_doc)
+        return;
+    if (m_tool == TOOL_FREEFORM_SELECT)
+    {
+        m_pendingPath.closeSubpath();
+        if (m_pendingPath.boundingRect().isEmpty())
+            m_doc->clearSelection();
+        else
+            m_doc->setSelectionPath(m_pendingPath);
+    }
+    m_pendingPath = QPainterPath();
+    markAllTilesDirty();
+}
+
+void PaintbrushCanvasItem::moveSelection(const QPointF &delta)
+{
+    if (!m_doc || !hasSelection())
+        return;
+    m_doc->setSelectionPath(m_doc->selectionPath().translated(delta));
+    markAllTilesDirty();
+}
+
+void PaintbrushCanvasItem::clearSelectionInternal()
+{
+    if (!m_doc)
+        return;
+    m_doc->clearSelection();
+    markAllTilesDirty();
+}
+
+QRectF PaintbrushCanvasItem::selectionBounds() const
+{
+    if (!m_doc)
+        return {};
+    return m_doc->selectionPath().boundingRect();
+}
+
+void PaintbrushCanvasItem::selectionClear()
+{
+    clearSelectionInternal();
+}
+
+void PaintbrushCanvasItem::selectionInvert()
+{
+    if (!m_doc || m_doc->selectionPath().isEmpty())
+        return;
+    QPainterPath full;
+    full.addRect(QRectF(QPointF(0, 0), m_doc->canvasSize()));
+    m_doc->setSelectionPath(full.subtracted(m_doc->selectionPath()));
+    markAllTilesDirty();
+}
+
+void PaintbrushCanvasItem::selectionGrow(int px)
+{
+    if (!m_doc || m_doc->selectionPath().isEmpty())
+        return;
+    const QImage mask = selectionMaskImage();
+    /* dilate: paint the mask with a thicker brush */
+    QImage dilated(mask.size(), QImage::Format_Grayscale8);
+    dilated.fill(0);
+    QPainter p(&dilated);
+    p.setPen(QPen(QColor(255, 255, 255), px * 2 + 1, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    p.setBrush(QColor(255, 255, 255));
+    p.drawPath(m_doc->selectionPath());
+    p.end();
+    m_doc->setSelectionPath(maskToPath(dilated));
+    markAllTilesDirty();
+}
+
+void PaintbrushCanvasItem::selectionShrink(int px)
+{
+    if (!m_doc || m_doc->selectionPath().isEmpty())
+        return;
+    const QImage mask = selectionMaskImage();
+
+    /* stroke the selection outline: the stroked band is what we remove */
+    QImage stroked(mask.size(), QImage::Format_Grayscale8);
+    stroked.fill(0);
+    QPainter p(&stroked);
+    p.setPen(QPen(QColor(255, 255, 255), px * 2 + 1, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    p.setBrush(QColor(255, 255, 255));
+    p.drawPath(m_doc->selectionPath());
+    p.end();
+
+    /* eroded = original AND NOT outline band */
+    QImage eroded(mask.size(), QImage::Format_Grayscale8);
+    eroded.fill(0);
+    for (int y = 0; y < mask.height(); ++y)
+    {
+        const uchar *mline = mask.constScanLine(y);
+        const uchar *sline = stroked.constScanLine(y);
+        uchar *bline = eroded.scanLine(y);
+        for (int x = 0; x < mask.width(); ++x)
+            bline[x] = mline[x] && !sline[x] ? 255 : 0;
+    }
+
+    m_doc->setSelectionPath(maskToPath(eroded));
+    markAllTilesDirty();
+}
+
+void PaintbrushCanvasItem::selectionFeather(int px)
+{
+    if (!m_doc || m_doc->selectionPath().isEmpty() || px <= 0)
+        return;
+    const QImage mask = selectionMaskImage();
+    /* blur the mask */
+    QImage blurred(mask.size(), QImage::Format_Grayscale8);
+    {
+        QPainter p(&blurred);
+        p.fillRect(blurred.rect(), Qt::black);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(255, 255, 255));
+        p.drawPath(m_doc->selectionPath());
+        p.end();
+        blurred = blurred.convertToFormat(QImage::Format_Grayscale8);
+    }
+    QImage soft = blurred;
+    /* cheap box blur */
+    const int radius = qMax(1, px);
+    const int kw = radius * 2 + 1;
+    QImage tmp = soft;
+    for (int pass = 0; pass < 2; ++pass)
+    {
+        for (int y = 0; y < soft.height(); ++y)
+        {
+            int acc = 0;
+            for (int x = 0; x < qMin(kw, soft.width()); ++x)
+                acc += qGray(soft.pixel(x, y));
+            for (int x = 0; x < soft.width(); ++x)
+            {
+                if (x + radius < soft.width())
+                    acc += qGray(soft.pixel(x + radius, y));
+                if (x - radius - 1 >= 0)
+                    acc -= qGray(soft.pixel(x - radius - 1, y));
+                tmp.setPixel(x, y, qBound(0, acc / kw, 255));
+            }
+        }
+        for (int x = 0; x < soft.width(); ++x)
+        {
+            int acc = 0;
+            for (int y = 0; y < qMin(kw, soft.height()); ++y)
+                acc += qGray(tmp.pixel(x, y));
+            for (int y = 0; y < soft.height(); ++y)
+            {
+                if (y + radius < soft.height())
+                    acc += qGray(tmp.pixel(x, y + radius));
+                if (y - radius - 1 >= 0)
+                    acc -= qGray(tmp.pixel(x, y - radius - 1));
+                soft.setPixel(x, y, qBound(0, acc / kw, 255));
+            }
+        }
+    }
+    /* threshold at 50% for the path, keep feather by using the soft mask as
+     * a selection approximation through the contour of the blurred shape */
+    m_doc->setSelectionPath(maskToPath(soft));
+    markAllTilesDirty();
+}
+
+void PaintbrushCanvasItem::selectionFillHoles()
+{
+    if (!m_doc || m_doc->selectionPath().isEmpty())
+        return;
+    const QImage mask = selectionMaskImage();
+    /* flood fill from all border pixels with the inverse */
+    QImage filled(mask.size(), QImage::Format_Grayscale8);
+    filled.fill(255);
+    QQueue<QPoint> queue;
+    const int w = mask.width(), h = mask.height();
+    auto isFg = [&](int x, int y) { return qGray(mask.pixel(x, y)) >= 128; };
+    auto isBg = [&](int x, int y) {
+        return x >= 0 && y >= 0 && x < w && y < h &&
+               qGray(mask.pixel(x, y)) < 128 &&
+               qGray(filled.pixel(x, y)) == 255;
+    };
+    for (int x = 0; x < w; ++x)
+    {
+        if (!isFg(x, 0)) { filled.setPixel(x, 0, 0); queue.enqueue(QPoint(x, 0)); }
+        if (!isFg(x, h - 1)) { filled.setPixel(x, h - 1, 0); queue.enqueue(QPoint(x, h - 1)); }
+    }
+    for (int y = 0; y < h; ++y)
+    {
+        if (!isFg(0, y)) { filled.setPixel(0, y, 0); queue.enqueue(QPoint(0, y)); }
+        if (!isFg(w - 1, y)) { filled.setPixel(w - 1, y, 0); queue.enqueue(QPoint(w - 1, y)); }
+    }
+    while (!queue.isEmpty())
+    {
+        const QPoint pt = queue.dequeue();
+        const int x = pt.x(), y = pt.y();
+        if (isBg(x - 1, y)) { filled.setPixel(x - 1, y, 0); queue.enqueue(QPoint(x - 1, y)); }
+        if (isBg(x + 1, y)) { filled.setPixel(x + 1, y, 0); queue.enqueue(QPoint(x + 1, y)); }
+        if (isBg(x, y - 1)) { filled.setPixel(x, y - 1, 0); queue.enqueue(QPoint(x, y - 1)); }
+        if (isBg(x, y + 1)) { filled.setPixel(x, y + 1, 0); queue.enqueue(QPoint(x, y + 1)); }
+    }
+    m_doc->setSelectionPath(maskToPath(filled));
+    markAllTilesDirty();
+}
+
+void PaintbrushCanvasItem::copySelection()
+{
+    if (!m_doc || !hasSelection())
+        return;
+    const QImage mask = selectionMaskImage();
+    const QImage flat = m_doc->flattenedImage();
+    const QRectF bounds = m_doc->selectionPath().boundingRect();
+    const QRect b = bounds.toAlignedRect().intersected(flat.rect());
+    if (b.isEmpty())
+        return;
+
+    QImage result(b.size(), QImage::Format_ARGB32);
+    result.fill(Qt::transparent);
+    QPainter p(&result);
+    p.setCompositionMode(QPainter::CompositionMode_Source);
+    p.drawImage(0, 0, flat, b.x(), b.y(), b.width(), b.height());
+    p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+    p.drawImage(0, 0, mask, b.x(), b.y(), b.width(), b.height());
+    p.end();
+
+    m_clipboard = std::move(result);
+    m_clipboardAnchor = b.topLeft();
+}
+
+void PaintbrushCanvasItem::cutSelection()
+{
+    if (!m_doc || !hasSelection())
+        return;
+    copySelection();
+
+    CanvasLayer *layer = m_doc->currentLayer();
+    if (!layer || layer->raster.isNull() || layer->locked)
+        return;
+
+    const QImage mask = selectionMaskImage();
+    const QRect affected = mask.rect().intersected(layer->raster.rect());
+    if (affected.isEmpty())
+        return;
+
+    m_strokeBefore.clear();
+    m_strokeUnion = affected;
+    captureBeforeRegion(affected);
+
+    QPainter p(&layer->raster);
+    p.setCompositionMode(QPainter::CompositionMode_DestinationOut);
+    p.drawImage(0, 0, mask);
+    p.end();
+
+    m_strokeHadPaint = true;
+    pushStrokeEntry(QStringLiteral("Cut"));
+    markAllTilesDirty();
+    emit canvasModified();
+}
+
+void PaintbrushCanvasItem::pasteClipboard(const QPointF &at)
+{
+    if (!m_doc || m_clipboard.isNull())
+        return;
+
+    const QPointF pos = at.isNull() ? m_clipboardAnchor : at;
+    CanvasLayer layer = CanvasLayer::createImage(m_clipboard, pos,
+                                                 QStringLiteral("Pasted"));
+    if (!m_undoStack)
+        return;
+    const QByteArray before = m_doc->layersSnapshot();
+    QList<CanvasLayer> layers = m_doc->layers();
+    layers.append(std::move(layer));
+    m_doc->setLayers(layers);
+    m_doc->setCurrentLayerIndex(layers.size() - 1);
+    const QByteArray after = m_doc->layersSnapshot();
+    m_undoStack->pushStructure({before, after, QStringLiteral("Paste")});
+    markAllTilesDirty();
+    emit canvasModified();
+}
+
+void PaintbrushCanvasItem::deleteSelection()
+{
+    if (!m_doc || !hasSelection())
+        return;
+    CanvasLayer *layer = m_doc->currentLayer();
+    if (!layer || layer->raster.isNull() || layer->locked)
+        return;
+
+    const QImage mask = selectionMaskImage();
+    const QRect affected = mask.rect().intersected(layer->raster.rect());
+    if (affected.isEmpty())
+        return;
+
+    m_strokeBefore.clear();
+    m_strokeUnion = affected;
+    captureBeforeRegion(affected);
+
+    QPainter p(&layer->raster);
+    p.setCompositionMode(QPainter::CompositionMode_DestinationOut);
+    p.drawImage(0, 0, mask);
+    p.end();
+
+    m_strokeHadPaint = true;
+    pushStrokeEntry(QStringLiteral("Delete selection"));
+    markAllTilesDirty();
+    emit canvasModified();
+}
+
+void PaintbrushCanvasItem::setSelectionFromMask(const QImage &mask)
+{
+    if (!m_doc || mask.isNull())
+        return;
+    m_doc->setSelectionPath(maskToPath(mask));
+    markAllTilesDirty();
+}
+
+/* -------------------------------------------------------------- transform */
+
+void PaintbrushCanvasItem::flipHorizontal()
+{
+    if (!m_doc)
+        return;
+    CanvasLayer *layer = m_doc->currentLayer();
+    if (!layer || layer->raster.isNull() || layer->locked)
+        return;
+
+    m_strokeBefore.clear();
+    m_strokeUnion = layer->raster.rect();
+    captureBeforeRegion(m_strokeUnion);
+
+    QImage flipped = layer->raster.flipped(Qt::Horizontal);
+    layer->raster = std::move(flipped);
+
+    m_strokeHadPaint = true;
+    pushStrokeEntry(QStringLiteral("Flip horizontal"));
+    markAllTilesDirty();
+    emit canvasModified();
+}
+
+void PaintbrushCanvasItem::flipVertical()
+{
+    if (!m_doc)
+        return;
+    CanvasLayer *layer = m_doc->currentLayer();
+    if (!layer || layer->raster.isNull() || layer->locked)
+        return;
+
+    m_strokeBefore.clear();
+    m_strokeUnion = layer->raster.rect();
+    captureBeforeRegion(m_strokeUnion);
+
+    QImage flipped = layer->raster.flipped(Qt::Vertical);
+    layer->raster = std::move(flipped);
+
+    m_strokeHadPaint = true;
+    pushStrokeEntry(QStringLiteral("Flip vertical"));
+    markAllTilesDirty();
+    emit canvasModified();
+}
+
+void PaintbrushCanvasItem::rotate90(bool clockwise)
+{
+    if (!m_doc)
+        return;
+    const QSize oldSize = m_doc->canvasSize();
+
+    m_strokeBefore.clear();
+
+    if (!m_undoStack)
+        return;
+    const QByteArray beforeLayers = m_doc->layersSnapshot();
+    const QByteArray beforeCanvas = m_doc->canvasSnapshot();
+
+    QList<CanvasLayer> layers = m_doc->layers();
+    for (CanvasLayer &layer : layers)
+    {
+        if (layer.raster.isNull())
+            continue;
+        QTransform t;
+        if (clockwise)
+        {
+            t.rotate(90);
+            layer.raster = layer.raster.transformed(t, Qt::SmoothTransformation);
+            layer.position = QPointF(oldSize.height() - layer.raster.height() - layer.position.y(),
+                                     layer.position.x());
+        }
+        else
+        {
+            t.rotate(-90);
+            layer.raster = layer.raster.transformed(t, Qt::SmoothTransformation);
+            layer.position = QPointF(layer.position.y(),
+                                     oldSize.width() - layer.raster.width() - layer.position.x());
+        }
+    }
+    m_doc->setLayers(layers);
+    m_doc->setCanvasSize(QSize(oldSize.height(), oldSize.width()));
+
+    const QByteArray afterLayers = m_doc->layersSnapshot();
+    const QByteArray afterCanvas = m_doc->canvasSnapshot();
+    m_undoStack->pushStructure({beforeCanvas + beforeLayers,
+                                afterCanvas + afterLayers,
+                                QStringLiteral("Rotate")});
+    markAllTilesDirty();
+    emit canvasModified();
+}
+
+void PaintbrushCanvasItem::cropToSelection()
+{
+    if (!m_doc || !hasSelection())
+        return;
+    const QRect b = m_doc->selectionPath().boundingRect().toAlignedRect()
+                        .intersected(canvasRect());
+    if (b.isEmpty() || b == canvasRect())
+    {
+        m_doc->clearSelection();
+        return;
+    }
+
+    if (!m_undoStack)
+        return;
+    const QByteArray beforeLayers = m_doc->layersSnapshot();
+    const QByteArray beforeCanvas = m_doc->canvasSnapshot();
+
+    QList<CanvasLayer> layers = m_doc->layers();
+    for (CanvasLayer &layer : layers)
+    {
+        if (layer.raster.isNull())
+            continue;
+        QRect src = b;
+        if (layer.type == LAYER_IMAGE || layer.type == LAYER_TEXT)
+        {
+            /* image layers: crop their raster and adjust position */
+            QRect local = b.translated(-layer.position.toPoint());
+            local = local.intersected(layer.raster.rect());
+            if (local.isEmpty())
+                continue;
+            QImage cropped = layer.raster.copy(local);
+            layer.raster = std::move(cropped);
+            layer.position = b.topLeft();
+        }
+        else
+        {
+            src = src.intersected(layer.raster.rect());
+            if (src.isEmpty())
+            {
+                layer.raster = QImage(b.size(), QImage::Format_ARGB32);
+                layer.raster.fill(Qt::transparent);
+                continue;
+            }
+            layer.raster = layer.raster.copy(src);
+        }
+        if (!layer.mask.isNull())
+        {
+            const QRect msrc = b.intersected(layer.mask.rect());
+            layer.mask = msrc.isEmpty() ? QImage() : layer.mask.copy(msrc);
+        }
+    }
+    m_doc->setLayers(layers);
+    m_doc->setCanvasSize(b.size());
+    m_doc->clearSelection();
+
+    const QByteArray afterLayers = m_doc->layersSnapshot();
+    const QByteArray afterCanvas = m_doc->canvasSnapshot();
+    m_undoStack->pushStructure({beforeCanvas + beforeLayers,
+                                afterCanvas + afterLayers,
+                                QStringLiteral("Crop")});
+    markAllTilesDirty();
+    emit canvasModified();
+}
+
+/* ---------------------------------------------------------------- object */
+
+void PaintbrushCanvasItem::setObjectMask(const QImage &mask, double score)
+{
+    m_objectMask = maskToImage(mask);
+    m_objectScore = score;
+    setObjectMaskVisible(true);
+    emit objectMaskReady(m_objectMask, m_objectScore);
+    markAllTilesDirty();
+}
+
+void PaintbrushCanvasItem::clearObjectMask()
+{
+    m_objectMask = QImage();
+    m_objectScore = 0.0;
+    setObjectMaskVisible(false);
+    markAllTilesDirty();
+}
+
+QImage PaintbrushCanvasItem::currentObjectMask() const
+{
+    return m_objectMask;
+}
+
+QRectF PaintbrushCanvasItem::objectMaskBounds() const
+{
+    if (m_objectMask.isNull())
+        return {};
+    int minX = m_objectMask.width(), minY = m_objectMask.height();
+    int maxX = -1, maxY = -1;
+    for (int y = 0; y < m_objectMask.height(); ++y)
+    {
+        const uchar *line = m_objectMask.constScanLine(y);
+        for (int x = 0; x < m_objectMask.width(); ++x)
+        {
+            if (line[x] >= 128)
+            {
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+            }
+        }
+    }
+    if (maxX < 0)
+        return {};
+    return QRectF(minX, minY, maxX - minX + 1, maxY - minY + 1);
+}
+
+void PaintbrushCanvasItem::cancelObjectSelection()
+{
+    m_objectSelectBusy = false;
+    emit objectSelectBusyChanged(false);
+    clearObjectMask();
+}
+
+void PaintbrushCanvasItem::setObjectSelectBusy(bool busy)
+{
+    if (m_objectSelectBusy == busy)
+        return;
+    m_objectSelectBusy = busy;
+    emit objectSelectBusyChanged(busy);
+    update();
+}
+
+/* ------------------------------------------------------------------ view */
+
+void PaintbrushCanvasItem::zoomIn() { setZoom(m_zoom * 1.25); }
+void PaintbrushCanvasItem::zoomOut() { setZoom(m_zoom / 1.25); }
+
+void PaintbrushCanvasItem::fitToView()
+{
+    if (!m_doc || width() <= 0 || height() <= 0)
+        return;
+    const QSize canvas = m_doc->canvasSize();
+    const qreal scale = qMin(width() / qreal(canvas.width()),
+                             height() / qreal(canvas.height()));
+    setZoom(scale);
+    setPanOffset(QPointF((width() - canvas.width() * scale) / 2.0,
+                         (height() - canvas.height() * scale) / 2.0));
+}
+
+void PaintbrushCanvasItem::zoomTo(qreal zoom) { setZoom(zoom); }
+
+QImage PaintbrushCanvasItem::grabCanvasRegion(const QRectF &canvasRect_) const
+{
+    if (!m_doc)
+        return {};
+    const QRect r = canvasRect_.toAlignedRect().intersected(canvasRect());
+    if (r.isEmpty())
+        return {};
+
+    QImage result(r.size(), QImage::Format_ARGB32);
+    result.fill(Qt::transparent);
+    const auto &layers = m_doc->layers();
+    for (const CanvasLayer &layer : layers)
+        compositeLayer(result, layer, r);
+    return result;
+}
+
+QImage PaintbrushCanvasItem::grabSelectionImage() const
+{
+    if (!m_doc || !hasSelection())
+        return {};
+    const QImage mask = selectionMaskImage();
+    const QImage flat = m_doc->flattenedImage();
+    const QRect b = m_doc->selectionPath().boundingRect().toAlignedRect()
+                        .intersected(flat.rect());
+    if (b.isEmpty())
+        return {};
+
+    QImage result(b.size(), QImage::Format_ARGB32);
+    result.fill(Qt::transparent);
+    QPainter p(&result);
+    p.setCompositionMode(QPainter::CompositionMode_Source);
+    p.drawImage(0, 0, flat, b.x(), b.y(), b.width(), b.height());
+    p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+    p.drawImage(0, 0, mask, b.x(), b.y(), b.width(), b.height());
+    p.end();
+    return result;
+}
+
+/* ------------------------------------------------------------ input events */
+
+QPointF PaintbrushCanvasItem::eventLastItemPos() const
+{
+    return m_lastItemPos;
+}
+
+void PaintbrushCanvasItem::mousePressEvent(QMouseEvent *event)
+{
+    if (!m_doc)
+    {
+        event->ignore();
+        return;
+    }
+
+    forceActiveFocus();
+    m_lastItemPos = event->position();
+    const QPointF canvasPos = canvasFromItem(event->position());
+    m_lastCanvasPos = canvasPos;
+
+    const bool primary = event->button() == Qt::LeftButton;
+    const bool alt = event->modifiers().testFlag(Qt::AltModifier);
+
+    /* Object Select: right-click / alt-click adds a negative point */
+    if (m_tool == TOOL_OBJECT_SELECT &&
+        (event->button() == Qt::RightButton || alt))
+    {
+        emit objectSelectClick(canvasPos, false, itemFromCanvas(canvasPos));
+        event->accept();
+        return;
+    }
+
+    if (event->button() == Qt::MiddleButton)
+    {
+        m_panning = true;
+        m_panLastItem = event->position();
+        event->accept();
+        return;
+    }
+
+    if (primary || event->button() == Qt::RightButton)
+        beginStroke(canvasPos, primary);
+    event->accept();
+}
+
+void PaintbrushCanvasItem::mouseMoveEvent(QMouseEvent *event)
+{
+    m_lastItemPos = event->position();
+    const QPointF canvasPos = canvasFromItem(event->position());
+    if (m_panning)
+    {
+        setPanOffset(m_panOffset + (event->position() - m_panLastItem));
+        m_panLastItem = event->position();
+        event->accept();
+        return;
+    }
+    if (m_strokeActive || m_dragging)
+    {
+        continueStroke(canvasPos);
+        event->accept();
+        return;
+    }
+    updateStatus(canvasPos);
+    event->accept();
+}
+
+void PaintbrushCanvasItem::mouseReleaseEvent(QMouseEvent *event)
+{
+    m_lastItemPos = event->position();
+    const QPointF canvasPos = canvasFromItem(event->position());
+    if (m_panning)
+    {
+        m_panning = false;
+        event->accept();
+        return;
+    }
+    if (m_strokeActive || m_dragging)
+    {
+        endStroke(canvasPos, event->button() == Qt::LeftButton);
+        event->accept();
+        return;
+    }
+    event->accept();
+}
+
+void PaintbrushCanvasItem::mouseDoubleClickEvent(QMouseEvent *event)
+{
+    /* double-click = single click (avoid accidental double strokes) */
+    mousePressEvent(event);
+}
+
+void PaintbrushCanvasItem::hoverEnterEvent(QHoverEvent *event)
+{
+    m_hovered = true;
+    emit hoverCanvasChanged(true);
+    updateStatus(canvasFromItem(event->position()));
+    event->accept();
+}
+
+void PaintbrushCanvasItem::hoverMoveEvent(QHoverEvent *event)
+{
+    updateStatus(canvasFromItem(event->position()));
+    event->accept();
+}
+
+void PaintbrushCanvasItem::hoverLeaveEvent(QHoverEvent *event)
+{
+    m_hovered = false;
+    emit hoverCanvasChanged(false);
+    m_statusText.clear();
+    emit statusTextChanged();
+    event->accept();
+}
+
+void PaintbrushCanvasItem::wheelEvent(QWheelEvent *event)
+{
+    if (!m_doc)
+        return;
+
+    /* With the Spray tool active, the wheel throttles the can (flow) —
+     * "how hard the spray comes out". Ctrl+wheel keeps zooming so zoom
+     * stays reachable from every tool. */
+    if (m_tool == TOOL_SPRAY &&
+        !event->modifiers().testFlag(Qt::ControlModifier))
+    {
+        const qreal delta = event->angleDelta().y() > 0 ? 1.15 : 1.0 / 1.15;
+        setSprayFlow(m_sprayFlow * delta);
+        event->accept();
+        return;
+    }
+
+    const QPointF itemPos = event->position();
+    const QPointF canvasPos = canvasFromItem(itemPos);
+    const qreal delta = event->angleDelta().y() > 0 ? 1.25 : 1.0 / 1.25;
+    const qreal newZoom = qBound<qreal>(0.05, m_zoom * delta, 32.0);
+    if (qFuzzyCompare(newZoom, m_zoom))
+        return;
+
+    /* zoom around the cursor */
+    setZoom(newZoom);
+    const QPointF newItemPos = itemFromCanvas(canvasPos);
+    setPanOffset(m_panOffset + (itemPos - newItemPos));
+    event->accept();
+}
+
+void PaintbrushCanvasItem::keyPressEvent(QKeyEvent *event)
+{
+    if (!m_doc)
+        return;
+
+    switch (event->key())
+    {
+    case Qt::Key_Delete:
+    case Qt::Key_Backspace:
+        if (hasSelection())
+        {
+            deleteSelection();
+            event->accept();
+            return;
+        }
+        break;
+    case Qt::Key_Left:
+        if (hasSelection()) { moveSelection(QPointF(-1, 0)); event->accept(); return; }
+        break;
+    case Qt::Key_Right:
+        if (hasSelection()) { moveSelection(QPointF(1, 0)); event->accept(); return; }
+        break;
+    case Qt::Key_Up:
+        if (hasSelection()) { moveSelection(QPointF(0, -1)); event->accept(); return; }
+        break;
+    case Qt::Key_Down:
+        if (hasSelection()) { moveSelection(QPointF(0, 1)); event->accept(); return; }
+        break;
+    case Qt::Key_Escape:
+        if (hasSelection())
+        {
+            m_doc->clearSelection();
+            markAllTilesDirty();
+            event->accept();
+            return;
+        }
+        clearObjectMask();
+        break;
+    default:
+        break;
+    }
+    QQuickItem::keyPressEvent(event);
+}
+
+void PaintbrushCanvasItem::dragEnterEvent(QDragEnterEvent *event)
+{
+    if (event->mimeData()->hasUrls())
+    {
+        const QUrl url = event->mimeData()->urls().first();
+        if (url.isLocalFile() || url.scheme() == QStringLiteral("file"))
+            event->acceptProposedAction();
+    }
+}
+
+void PaintbrushCanvasItem::dropEvent(QDropEvent *event)
+{
+    if (!event->mimeData()->hasUrls())
+        return;
+    const QUrl url = event->mimeData()->urls().first();
+    const QPointF canvasPos = canvasFromItem(event->position());
+    event->acceptProposedAction();
+    emit imageDropped(url, canvasPos);
+}
+
+void PaintbrushCanvasItem::markCanvasDirty()
+{
+    markAllTilesDirty();
+}
+
+void PaintbrushCanvasItem::notifyModified()
+{
+    emit canvasModified();
+}
+
+void PaintbrushCanvasItem::updateStatus(const QPointF &canvasPos)
+{
+    if (!m_doc)
+        return;
+    QString text = QStringLiteral("x: %1  y: %2").arg(int(canvasPos.x()))
+                                                 .arg(int(canvasPos.y()));
+    if (hasSelection())
+    {
+        const QRectF b = m_doc->selectionPath().boundingRect();
+        text += QStringLiteral("   sel: %1 x %2").arg(int(b.width()))
+                                                 .arg(int(b.height()));
+    }
+    text += QStringLiteral("   zoom: %1%").arg(int(m_zoom * 100));
+    if (m_tool == TOOL_SPRAY)
+        text += QStringLiteral("   flow: %1").arg(m_sprayFlow, 0, 'f', 1);
+    if (m_objectMaskVisible)
+        text += QStringLiteral("   object selected");
+    if (m_statusText == text)
+        return;
+    m_statusText = text;
+    emit statusTextChanged();
+}
+
+} // namespace paintbrush

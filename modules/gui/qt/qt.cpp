@@ -225,6 +225,57 @@ static void ShowDialog   ( intf_thread_t *, int, int, intf_dialog_args_t * );
 
 #define QT_MINIMAL_MODE_TEXT N_("Start in minimal view (without menus)" )
 
+/* NAI Paintbrush creative workspace options */
+#define PB_ENABLED_TEXT N_( "Enable the Paintbrush creative workspace" )
+#define PB_ENABLED_LONGTEXT N_( "Show the NAI Paintbrush workspace entry and allow "\
+                                "switching to the Paintbrush creative mode." )
+#define PB_START_TEXT N_( "Start in Paintbrush mode" )
+#define PB_START_LONGTEXT N_( "Start VLC directly in the Paintbrush creative "\
+                              "workspace. Equivalent to: vlc --paintbrush [media]" )
+#define PB_AUTOSAVE_TEXT N_( "Autosave Paintbrush projects" )
+#define PB_AUTOSAVE_INTERVAL_TEXT N_( "Paintbrush autosave interval (seconds)" )
+#define PB_SAM_MODEL_TEXT N_( "SAM model path" )
+#define PB_SAM_MODEL_LONGTEXT N_( "Path to a SAM3 (or SAM2) model file used for "\
+                                  "object selection and tracking." )
+#define PB_SAM_DEVICE_TEXT N_( "SAM inference device" )
+#define PB_SAM_DEVICE_LONGTEXT N_( "Device used for SAM inference: auto, cpu or gpu." )
+#define PB_VLM_BASE_TEXT N_( "Vision model base URL" )
+#define PB_VLM_BASE_LONGTEXT N_( "Base URL of an OpenAI-compatible vision endpoint "\
+                                 "used by Ask about this." )
+#define PB_VLM_MODEL_TEXT N_( "Vision model ID" )
+#define PB_VLM_TIMEOUT_TEXT N_( "Vision request timeout (seconds)" )
+#define PB_IMAGE_BASE_TEXT N_( "Image model base URL" )
+#define PB_IMAGE_BASE_LONGTEXT N_( "Base URL of an OpenAI-compatible image generation "\
+                                   "endpoint used by Remove, Fill and Sticker." )
+#define PB_IMAGE_MODEL_TEXT N_( "Image model ID" )
+#define PB_STT_BASE_TEXT N_( "Speech-to-text base URL" )
+#define PB_STT_MODEL_TEXT N_( "Speech-to-text model ID" )
+#define PB_TTS_BASE_TEXT N_( "Text-to-speech base URL" )
+#define PB_TTS_MODEL_TEXT N_( "Text-to-speech model ID" )
+#define PB_COMPANION_MODE_TEXT N_( "AI companion mode" )
+#define PB_COMPANION_MODE_LONGTEXT N_( "0 = off, 1 = quiet, 2 = buddy, 3 = kids. "\
+                                       "The companion observes the canvas and "\
+                                       "offers encouragement and open questions." )
+#define PB_COMPANION_INTERVAL_TEXT N_( "Minimum interval between companion observations (seconds)" )
+#define PB_COMPANION_VOICE_TEXT N_( "Allow companion voice (STT/TTS)" )
+
+#define PB_ASSISTANT_BASE_TEXT N_( "AI assistant base URL" )
+#define PB_ASSISTANT_BASE_LONGTEXT N_( "Base URL of an OpenAI-compatible chat endpoint "\
+                                       "used by the in-app AI assistant. The default "\
+                                       "points at the local LiteLLM Edge gateway." )
+#define PB_ASSISTANT_MODEL_TEXT N_( "AI assistant model ID" )
+#define PB_ASSISTANT_TIMEOUT_TEXT N_( "AI assistant request timeout (seconds)" )
+#define PB_ASSISTANT_REASONING_TEXT N_( "Enable reasoning for the AI assistant model" )
+#define PB_ASSISTANT_CONTEXT_TEXT N_( "AI assistant context limit (tokens)" )
+#define PB_ASSISTANT_INPUT_TEXT N_( "AI assistant input limit (tokens)" )
+#define PB_ASSISTANT_OUTPUT_TEXT N_( "AI assistant output limit (tokens)" )
+#define PB_ASSISTANT_COMPACTION_AUTO_TEXT N_( "Automatically compact the AI assistant conversation" )
+#define PB_ASSISTANT_COMPACTION_THRESHOLD_TEXT N_( "Compaction threshold (percent of input budget)" )
+#define PB_ASSISTANT_COMPACTION_PRUNE_TEXT N_( "Prune old turns when compacting" )
+#define PB_ASSISTANT_COMPACTION_TAIL_TEXT N_( "Keep this many recent turns when compacting" )
+#define PB_ASSISTANT_COMPACTION_PRESERVE_TEXT N_( "Preserve at least this many recent tokens" )
+#define PB_ASSISTANT_COMPACTION_RESERVED_TEXT N_( "Tokens reserved for the response" )
+
 #define QT_BGCONE_TEXT N_( "Display background cone or art" )
 #define QT_BGCONE_LONGTEXT N_( "Display background cone or current album art " \
                             "when not playing. " \
@@ -314,6 +365,10 @@ static const int i_raise_list[] =
 static const char *const psz_raise_list_text[] =
     { N_( "Never" ), N_( "Video" ), N_( "Audio" ), _( "Audio/Video" ) };
 
+static const char *const psz_sam_devices[] = { "auto", "cpu", "gpu" };
+static const char *const psz_sam_devices_text[] =
+    { N_( "Automatic" ), N_( "CPU" ), N_( "GPU" ) };
+
 static const char *const compositor_vlc[] = {
     "auto",
 #ifdef _WIN32
@@ -357,6 +412,67 @@ vlc_module_begin ()
 
     add_bool( "qt-minimal-view", false, QT_MINIMAL_MODE_TEXT,
               nullptr )
+
+    /* NAI Paintbrush creative workspace */
+    add_bool( "paintbrush-enabled", true, PB_ENABLED_TEXT, PB_ENABLED_LONGTEXT )
+    add_bool( "paintbrush", false, PB_START_TEXT, PB_START_LONGTEXT )
+        change_volatile()
+    add_bool( "paintbrush-autosave", true, PB_AUTOSAVE_TEXT, nullptr )
+    add_integer_with_range( "paintbrush-autosave-interval", 120, 10, 3600,
+                            PB_AUTOSAVE_INTERVAL_TEXT, nullptr )
+    add_string( "paintbrush-sam-model", NULL, PB_SAM_MODEL_TEXT, PB_SAM_MODEL_LONGTEXT )
+    add_string( "paintbrush-sam-device", "auto", PB_SAM_DEVICE_TEXT, PB_SAM_DEVICE_LONGTEXT )
+            change_string_list( psz_sam_devices, psz_sam_devices_text )
+    add_string( "paintbrush-vlm-base-url", NULL, PB_VLM_BASE_TEXT, PB_VLM_BASE_LONGTEXT )
+    add_string( "paintbrush-vlm-model", NULL, PB_VLM_MODEL_TEXT, nullptr )
+    add_integer_with_range( "paintbrush-vlm-timeout", 60, 5, 600, PB_VLM_TIMEOUT_TEXT, nullptr )
+    add_string( "paintbrush-vlm-api-key", NULL, PB_VLM_BASE_TEXT, nullptr )
+    add_string( "paintbrush-image-base-url", NULL, PB_IMAGE_BASE_TEXT, PB_IMAGE_BASE_LONGTEXT )
+    add_string( "paintbrush-image-model", NULL, PB_IMAGE_MODEL_TEXT, nullptr )
+    add_string( "paintbrush-image-api-key", NULL, PB_IMAGE_MODEL_TEXT, nullptr )
+    add_string( "paintbrush-stt-base-url", NULL, PB_STT_BASE_TEXT, nullptr )
+    add_string( "paintbrush-stt-model", NULL, PB_STT_MODEL_TEXT, nullptr )
+    add_string( "paintbrush-tts-base-url", NULL, PB_TTS_BASE_TEXT, nullptr )
+    add_string( "paintbrush-tts-model", NULL, PB_TTS_MODEL_TEXT, nullptr )
+    add_integer_with_range( "paintbrush-companion-mode", 2, 0, 3,
+                            PB_COMPANION_MODE_TEXT, PB_COMPANION_MODE_LONGTEXT )
+    add_integer_with_range( "paintbrush-companion-min-interval", 30, 5, 600,
+                            PB_COMPANION_INTERVAL_TEXT, nullptr )
+    add_bool( "paintbrush-companion-voice", false, PB_COMPANION_VOICE_TEXT, nullptr )
+    add_bool( "paintbrush-kids-network", false, PB_ENABLED_TEXT, nullptr )
+
+    /* NAI Paintbrush AI assistant gateway (persisted). Defaults wire the
+     * in-app assistant to the local LiteLLM Edge gateway:
+     *   base URL : http://127.0.0.1:4000/v1
+     *   model    : differential_sseproxy (reasoning, text+image input)
+     * The limits and compaction policy mirror the model profile used by
+     * the AI SDK openai-compatible provider configuration. */
+    add_string( "paintbrush-assistant-base-url", "http://127.0.0.1:4000/v1",
+                PB_ASSISTANT_BASE_TEXT, PB_ASSISTANT_BASE_LONGTEXT )
+    add_string( "paintbrush-assistant-model", "differential_sseproxy",
+                PB_ASSISTANT_MODEL_TEXT, nullptr )
+    add_string( "paintbrush-assistant-api-key", NULL, PB_ASSISTANT_BASE_TEXT, nullptr )
+    add_integer_with_range( "paintbrush-assistant-timeout", 120, 5, 600,
+                            PB_ASSISTANT_TIMEOUT_TEXT, nullptr )
+    add_bool( "paintbrush-assistant-reasoning", true, PB_ASSISTANT_REASONING_TEXT, nullptr )
+    add_integer( "paintbrush-assistant-context-limit", 524288,
+                 PB_ASSISTANT_CONTEXT_TEXT, nullptr )
+    add_integer( "paintbrush-assistant-input-limit", 442368,
+                 PB_ASSISTANT_INPUT_TEXT, nullptr )
+    add_integer( "paintbrush-assistant-output-limit", 65536,
+                 PB_ASSISTANT_OUTPUT_TEXT, nullptr )
+    add_bool( "paintbrush-assistant-compaction-auto", true,
+              PB_ASSISTANT_COMPACTION_AUTO_TEXT, nullptr )
+    add_integer_with_range( "paintbrush-assistant-compaction-threshold", 90, 10, 100,
+                            PB_ASSISTANT_COMPACTION_THRESHOLD_TEXT, nullptr )
+    add_bool( "paintbrush-assistant-compaction-prune", true,
+              PB_ASSISTANT_COMPACTION_PRUNE_TEXT, nullptr )
+    add_integer_with_range( "paintbrush-assistant-compaction-tail-turns", 4, 1, 32,
+                            PB_ASSISTANT_COMPACTION_TAIL_TEXT, nullptr )
+    add_integer( "paintbrush-assistant-compaction-preserve-recent", 16536,
+                 PB_ASSISTANT_COMPACTION_PRESERVE_TEXT, nullptr )
+    add_integer( "paintbrush-assistant-compaction-reserved", 20000,
+                 PB_ASSISTANT_COMPACTION_RESERVED_TEXT, nullptr )
 
     add_bool( "qt-system-tray", true, SYSTRAY_TEXT, SYSTRAY_LONGTEXT)
 
@@ -839,6 +955,7 @@ static void *Thread( void *obj )
     Q_INIT_RESOURCE( maininterface_assets );
     Q_INIT_RESOURCE( medialibrary_assets );
     Q_INIT_RESOURCE( network_assets );
+    Q_INIT_RESOURCE( paintbrush_assets );
     Q_INIT_RESOURCE( player_assets );
     Q_INIT_RESOURCE( playercontrols_assets );
     Q_INIT_RESOURCE( playlist_assets );

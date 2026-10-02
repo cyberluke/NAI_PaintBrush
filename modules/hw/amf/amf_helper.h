@@ -8,6 +8,20 @@
 #ifndef VLC_AMF_HELPER_H
 #define VLC_AMF_HELPER_H
 
+/* The AMF headers use _configthreadlocale()/_ENABLE_PER_THREAD_LOCALE on
+ * Windows, which come from <locale.h>. mingw's locale.h only declares them
+ * for __MSVCRT_VERSION__ >= 0x0800, so temporarily raise the version around
+ * the include to make the declarations visible to the AMF headers. */
+#ifdef _WIN32
+#  pragma push_macro("__MSVCRT_VERSION__")
+#  undef __MSVCRT_VERSION__
+#  define __MSVCRT_VERSION__ 0x0800
+#  include <locale.h>
+#  pragma pop_macro("__MSVCRT_VERSION__")
+#else
+#  include <locale.h>
+#endif
+
 #include <AMF/core/Context.h>
 #include <AMF/core/Factory.h>
 

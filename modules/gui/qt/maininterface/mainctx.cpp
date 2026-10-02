@@ -105,6 +105,8 @@ static int IntfRaiseMainCB( vlc_object_t *p_this, const char *psz_variable,
 const QEvent::Type MainCtx::ToolbarsNeedRebuild =
         (QEvent::Type)QEvent::registerEventType();
 
+MainCtx* MainCtx::s_instance = nullptr;
+
 namespace
 {
 
@@ -135,6 +137,7 @@ MainCtx::MainCtx(qt_intf_t *_p_intf)
     : p_intf(_p_intf)
     , m_csdButtonModel {std::make_unique<CSDButtonModel>(this, this)}
 {
+    s_instance = this;
     // If `playlist-autostart` is set, and there are initial files
     // we don't bother loading main display just to unload it
     // immediately after. Instead, we directly load the player
@@ -308,6 +311,9 @@ MainCtx::MainCtx(qt_intf_t *_p_intf)
 
 MainCtx::~MainCtx()
 {
+    if (s_instance == this)
+        s_instance = nullptr;
+
     /* Save states */
 
     m_threadRunner->destroy();
@@ -431,6 +437,14 @@ void MainCtx::loadPrefs(const bool callSignals)
     /* Are we in the enhanced always-video mode or not ? */
     loadFromVLCOption(minimalMode, "qt-minimal-view", nullptr);
     setMinimalView(minimalMode);
+
+    /* NAI Paintbrush: --paintbrush starts the interface in the creative
+     * workspace. Respects the paintbrush-enabled feature flag. */
+    if (var_InheritBool(p_intf, "paintbrush-enabled"))
+    {
+        const bool startPaintbrush = var_InheritBool(p_intf, "paintbrush");
+        setPaintbrushView(startPaintbrush);
+    }
 
     loadFromVLCOption(m_bgCone, "qt-bgcone", &MainCtx::bgConeToggled);
 
@@ -708,6 +722,20 @@ void MainCtx::setPlayerView(bool enable)
 
     m_mainInterfaceModes.setFlag(MAININTERFACE_MODE_PLAYER, enable);
     emit mainInterfaceModesChanged(m_mainInterfaceModes);
+}
+
+void MainCtx::setPaintbrushView(bool enable)
+{
+    if (m_mainInterfaceModes.testFlag(MAININTERFACE_MODE_PAINTBRUSH) == enable)
+        return;
+
+    m_mainInterfaceModes.setFlag(MAININTERFACE_MODE_PAINTBRUSH, enable);
+    emit mainInterfaceModesChanged(m_mainInterfaceModes);
+}
+
+bool MainCtx::isPaintbrushEnabled() const
+{
+    return var_InheritBool(p_intf, "paintbrush-enabled");
 }
 
 void MainCtx::setShowRemainingTime( bool show )
@@ -1106,9 +1134,11 @@ MainCtx::MainInterfaceMode MainCtx::getEffectiveMainInterfaceMode() const {
     //priority applies across modes
     if (m_mainInterfaceModes & MainCtx::MAININTERFACE_MODE_MINIMAL)
         return MAININTERFACE_MODE_MINIMAL;
-    else if (m_mainInterfaceModes & MAININTERFACE_MODE_PLAYER)
+    else if (m_mainInterfaceModes & MainCtx::MAININTERFACE_MODE_PLAYER)
         return MAININTERFACE_MODE_PLAYER;
-    else if (m_mainInterfaceModes & MAININTERFACE_MODE_MAINDISPLAY)
+    else if (m_mainInterfaceModes & MainCtx::MAININTERFACE_MODE_PAINTBRUSH)
+        return MAININTERFACE_MODE_PAINTBRUSH;
+    else if (m_mainInterfaceModes & MainCtx::MAININTERFACE_MODE_MAINDISPLAY)
         return MAININTERFACE_MODE_MAINDISPLAY;
     else
         return MAININTERFACE_MODE_INVALID;

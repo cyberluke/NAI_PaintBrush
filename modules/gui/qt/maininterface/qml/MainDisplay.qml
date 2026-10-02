@@ -605,6 +605,15 @@ FocusScope {
                 console.assert(modelUri)
 
                 console.assert(item)
+                // NAI Paintbrush: the sidebar entry switches to the
+                // Paintbrush creative workspace instead of navigating.
+                if (modelUri.length === 1 && modelUri[0] === "paintbrush") {
+                    if (MainCtx.paintbrushEnabled) {
+                        MainCtx.playerView = false
+                        MainCtx.paintbrushView = true
+                    }
+                    return
+                }
                 if ((sidebar.state !== 'expanded') && item.expandable) {
                     // TODO: Investigate opening the menu on hover, if
                     //       we switch to `Popup.Item` type of menus.

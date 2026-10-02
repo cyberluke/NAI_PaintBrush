@@ -1,0 +1,295 @@
+/*****************************************************************************
+ * pb_canvas_item.hpp : NAI Paintbrush — tile-based raster canvas
+ *****************************************************************************
+ * Copyright (C) 2026 NAI Paintbrush authors
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation; either version 2.1 of the License, or
+ * (at your option) any later version.
+ *****************************************************************************/
+
+#ifndef PB_CANVAS_ITEM_HPP
+#define PB_CANVAS_ITEM_HPP
+
+#include "pb_common.hpp"
+#include "pb_history.hpp"
+#include "pb_document.hpp"
+
+#include <QQuickItem>
+#include <QColor>
+#include <QImage>
+#include <QPainterPath>
+#include <QPointF>
+#include <QHash>
+#include <QSet>
+#include <QPair>
+#include <QFont>
+#include <QTimer>
+
+class QSGNode;
+class QSGTransformNode;
+class QSGTexture;
+
+namespace paintbrush {
+
+class PaintbrushDocument;
+class PaintbrushController;
+
+/* The native high-performance canvas. Raster content lives in per-layer
+ * QImages (owned by the document); this item composites them into a tile
+ * backing store and uploads only dirty tiles to the scene graph, so a
+ * stroke never repaints or re-uploads the whole canvas. */
+class PaintbrushCanvasItem : public QQuickItem
+{
+    Q_OBJECT
+
+    Q_PROPERTY(int tool READ tool WRITE setTool NOTIFY toolChanged FINAL)
+    Q_PROPERTY(QColor fgColor READ fgColor WRITE setFgColor NOTIFY fgColorChanged FINAL)
+    Q_PROPERTY(QColor bgColor READ bgColor WRITE setBgColor NOTIFY bgColorChanged FINAL)
+    Q_PROPERTY(qreal brushSize READ brushSize WRITE setBrushSize NOTIFY brushSizeChanged FINAL)
+    Q_PROPERTY(qreal sprayDensity READ sprayDensity WRITE setSprayDensity NOTIFY sprayDensityChanged FINAL)
+    Q_PROPERTY(qreal sprayFlow READ sprayFlow WRITE setSprayFlow NOTIFY sprayFlowChanged FINAL)
+    Q_PROPERTY(qreal zoom READ zoom WRITE setZoom NOTIFY zoomChanged FINAL)
+    Q_PROPERTY(QPointF panOffset READ panOffset WRITE setPanOffset NOTIFY panOffsetChanged FINAL)
+    Q_PROPERTY(bool hasSelection READ hasSelection NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(bool objectSelectBusy READ objectSelectBusy NOTIFY objectSelectBusyChanged FINAL)
+    Q_PROPERTY(bool objectMaskVisible READ objectMaskVisible WRITE setObjectMaskVisible NOTIFY objectMaskVisibleChanged FINAL)
+    Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged FINAL)
+    Q_PROPERTY(qreal fillTolerance READ fillTolerance WRITE setFillTolerance NOTIFY fillToleranceChanged FINAL)
+
+public:
+    explicit PaintbrushCanvasItem(QQuickItem *parent = nullptr);
+    ~PaintbrushCanvasItem() override;
+
+    /* -- configuration (set by the controller) -------------------------- */
+    void setDocument(PaintbrushDocument *doc);
+    PaintbrushDocument *document() const { return m_doc; }
+    void setUndoStack(UndoStack *stack);
+    void setController(PaintbrushController *controller) { m_controller = controller; }
+
+    /* -- properties ------------------------------------------------------ */
+    int tool() const { return m_tool; }
+    void setTool(int tool);
+    QColor fgColor() const { return m_fgColor; }
+    void setFgColor(const QColor &color);
+    QColor bgColor() const { return m_bgColor; }
+    void setBgColor(const QColor &color);
+    qreal brushSize() const { return m_brushSize; }
+    void setBrushSize(qreal size);
+    qreal sprayDensity() const { return m_sprayDensity; }
+    void setSprayDensity(qreal density);
+    /* Spray flow (how much paint the can releases, 0.1–4.0). The mouse
+     * wheel adjusts it while the Spray tool is active. */
+    qreal sprayFlow() const { return m_sprayFlow; }
+    void setSprayFlow(qreal flow);
+    qreal zoom() const { return m_zoom; }
+    void setZoom(qreal zoom);
+    QPointF panOffset() const { return m_panOffset; }
+    void setPanOffset(const QPointF &offset);
+    bool hasSelection() const { return m_doc ? !m_doc->selectionPath().isEmpty() : false; }
+    bool objectSelectBusy() const { return m_objectSelectBusy; }
+    bool objectMaskVisible() const { return m_objectMaskVisible; }
+    void setObjectMaskVisible(bool visible);
+    QString statusText() const { return m_statusText; }
+    qreal fillTolerance() const { return m_fillTolerance; }
+    void setFillTolerance(qreal tolerance);
+
+    /* -- AI object selection --------------------------------------------- */
+    Q_INVOKABLE void setObjectMask(const QImage &mask, double score);
+    Q_INVOKABLE void clearObjectMask();
+    Q_INVOKABLE QImage currentObjectMask() const;
+    Q_INVOKABLE void cancelObjectSelection();
+    Q_INVOKABLE QRectF objectMaskBounds() const;
+    Q_INVOKABLE void setObjectSelectBusy(bool busy);
+
+    /* -- manual selection operations -------------------------------------- */
+    Q_INVOKABLE void selectionInvert();
+    Q_INVOKABLE void selectionClear();
+    Q_INVOKABLE void selectionGrow(int px);
+    Q_INVOKABLE void selectionShrink(int px);
+    Q_INVOKABLE void selectionFeather(int px);
+    Q_INVOKABLE void selectionFillHoles();
+    Q_INVOKABLE void cutSelection();
+    Q_INVOKABLE void copySelection();
+    Q_INVOKABLE void pasteClipboard(const QPointF &at);
+    Q_INVOKABLE void deleteSelection();
+    Q_INVOKABLE QRectF selectionBounds() const;
+
+    /* -- transform ---------------------------------------------------------- */
+    Q_INVOKABLE void flipHorizontal();
+    Q_INVOKABLE void flipVertical();
+    Q_INVOKABLE void rotate90(bool clockwise);
+    Q_INVOKABLE void cropToSelection();
+
+    /* -- text --------------------------------------------------------------- */
+    Q_INVOKABLE void applyText(const QString &text, const QPointF &at,
+                               const QFont &font, const QColor &color);
+
+    /* -- view ---------------------------------------------------------------- */
+    Q_INVOKABLE void zoomIn();
+    Q_INVOKABLE void zoomOut();
+    Q_INVOKABLE void fitToView();
+    Q_INVOKABLE void zoomTo(qreal zoom);
+
+    /* -- helpers -------------------------------------------------------------- */
+    Q_INVOKABLE QPointF canvasFromItem(const QPointF &itemPos) const;
+    Q_INVOKABLE QPointF itemFromCanvas(const QPointF &canvasPos) const;
+    Q_INVOKABLE QImage grabCanvasRegion(const QRectF &canvasRect) const;
+    Q_INVOKABLE QImage grabSelectionImage() const;
+    Q_INVOKABLE void setSelectionFromMask(const QImage &mask);
+    Q_INVOKABLE QImage selectionMaskImage() const;   /* binary mask of current selection */
+
+    /* -- painting entry points used by the controller ------------------------ */
+    void markCanvasDirty();          /* full re-composite */
+
+signals:
+    void toolChanged(int tool);
+    void fgColorChanged();
+    void bgColorChanged();
+    void brushSizeChanged();
+    void sprayDensityChanged();
+    void sprayFlowChanged();
+    void zoomChanged();
+    void panOffsetChanged();
+    void selectionChanged(bool hasSelection);
+    void objectSelectBusyChanged(bool busy);
+    void objectMaskVisibleChanged(bool visible);
+    void objectMaskReady(const QImage &mask, double score);
+    void objectSelectClick(QPointF canvasPos, bool positive, QPointF itemPos);
+    void strokeCommitted(const QRect &region);
+    void canvasModified();
+    void statusTextChanged();
+    void hoverCanvasChanged(bool hovered);
+    void colorPicked(const QColor &color);
+    void imageDropped(QUrl url, QPointF canvasPos);
+    void fillToleranceChanged();
+
+protected:
+    QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *data) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
+    void mouseDoubleClickEvent(QMouseEvent *event) override;
+    void hoverEnterEvent(QHoverEvent *event) override;
+    void hoverMoveEvent(QHoverEvent *event) override;
+    void hoverLeaveEvent(QHoverEvent *event) override;
+    void wheelEvent(QWheelEvent *event) override;
+    void keyPressEvent(QKeyEvent *event) override;
+    void dragEnterEvent(QDragEnterEvent *event) override;
+    void dropEvent(QDropEvent *event) override;
+    void geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry) override;
+    void itemChange(ItemChange change, const ItemChangeData &value) override;
+
+private:
+    static constexpr int TILE = 256;
+
+    struct TileKey { int x = 0; int y = 0; };
+    friend bool operator==(const TileKey &a, const TileKey &b)
+    { return a.x == b.x && a.y == b.y; }
+    friend size_t qHash(const TileKey &k, size_t seed = 0)
+    { return qHashMulti(seed, k.x, k.y); }
+
+    /* -- composite --------------------------------------------------------- */
+    void compositeTile(int tx, int ty, QImage &tile) const;
+    void compositeTileRegion(int tx, int ty, QImage &tile, const QRect &region) const;
+    void markTilesDirty(const QRect &canvasRect);
+    void markAllTilesDirty();
+    void compositeDirtyTiles();
+    QRect canvasRect() const;
+
+    /* -- painting ------------------------------------------------------------ */
+    void beginStroke(const QPointF &canvasPos, bool primary);
+    void continueStroke(const QPointF &canvasPos);
+    void endStroke(const QPointF &canvasPos, bool primary);
+    void strokeSegment(const QPointF &from, const QPointF &to);
+    void paintDot(const QPointF &center, qreal radius, bool erase);
+    void paintLineSegment(const QPointF &a, const QPointF &b);
+    void floodFillAt(const QPointF &canvasPos);
+    void sampleColorAt(const QPointF &canvasPos);
+    QPainterPath buildShapePath(const QPointF &a, const QPointF &b) const;
+    void commitShape(const QPainterPath &path, bool filled);
+    void captureBeforeRegion(const QRect &canvasRect);
+    void pushStrokeEntry(const QString &desc);
+    void maskStrokeToSelectionAndAlphaLock();
+    void notifyModified();
+    QPointF eventLastItemPos() const;
+
+    /* -- spray (graffiti physics) -------------------------------------------- */
+    void emitSprayPuff();            /* one paint emission, driven by the timer */
+    void resetSprayState();
+
+    /* -- selection ------------------------------------------------------------ */
+    void updateSelectionFromDrag(const QPointF &canvasPos);
+    void finishSelection();
+    void clearSelectionInternal();
+    void moveSelection(const QPointF &delta);
+
+    /* -- misc ------------------------------------------------------------------ */
+    void updateStatus(const QPointF &canvasPos);
+    void rebuildTransformNode(QSGTransformNode *root);
+    QRect tileRect(int tx, int ty) const;
+
+    PaintbrushDocument *m_doc = nullptr;
+    UndoStack *m_undoStack = nullptr;
+    PaintbrushController *m_controller = nullptr;
+
+    int m_tool = TOOL_BRUSH;
+    QColor m_fgColor = Qt::black;
+    QColor m_bgColor = Qt::white;
+    qreal m_brushSize = 6.0;
+    qreal m_sprayDensity = 24.0;
+    qreal m_sprayFlow = 1.0;
+    qreal m_fillTolerance = 0.0;
+    qreal m_zoom = 1.0;
+    QPointF m_panOffset;
+    QString m_statusText;
+    bool m_objectSelectBusy = false;
+    bool m_objectMaskVisible = false;
+
+    /* spray physics state (graffiti can) */
+    QTimer m_sprayTimer;             /* continuous emission while held */
+    QPointF m_sprayNozzle;           /* the can tip (canvas coords)      */
+    QPointF m_sprayTarget;           /* where the hand points now        */
+    QPointF m_sprayVel;              /* smoothed hand velocity           */
+    qreal m_sprayWobblePhase = 0.0;  /* hand-shake phase                 */
+    qreal m_sprayWobbleAmp = 0.0;    /* smoothed shake amplitude         */
+
+    QImage m_objectMask;               /* grayscale binary mask (canvas size) */
+    double m_objectScore = 0.0;
+
+    /* tiles */
+    QHash<TileKey, QImage> m_tiles;
+    QSet<TileKey> m_dirtyTiles;
+    QHash<TileKey, QSGTexture *> m_textures;
+    QHash<TileKey, QSGTransformNode *> m_tileNodes;
+    bool m_texturesNeedRebuild = false;
+
+    /* stroke state */
+    bool m_strokeActive = false;
+    bool m_strokePrimary = true;
+    QPointF m_lastCanvasPos;
+    QRect m_strokeUnion;
+    QList<QPair<QRect, QImage>> m_strokeBefore;
+    bool m_strokeHadPaint = false;
+
+    /* selection state */
+    QPointF m_dragStartCanvas;
+    QPointF m_dragLastCanvas;
+    bool m_dragging = false;
+    bool m_movingSelection = false;
+    QPainterPath m_pendingPath;        /* freeform build-up */
+    QPainterPath m_shapePreviewPath;   /* shape rubber band */
+    QRect m_prevPreviewRect;           /* previous preview area */
+    QImage m_clipboard;
+    QPointF m_clipboardAnchor;
+
+    bool m_hovered = false;
+    bool m_panning = false;
+    QPointF m_panLastItem;
+    QPointF m_lastItemPos;
+};
+
+} // namespace paintbrush
+
+#endif // PB_CANVAS_ITEM_HPP

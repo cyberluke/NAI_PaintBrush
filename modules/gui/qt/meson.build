@@ -12,14 +12,14 @@ qt_cppargs = []
 qt_link_args = [gc_sections_linkargs]
 
 qt6_dep = dependency('qt6',
-    # Note that Qt < 6.2.5 does not provide pc files!
-    version: '>=6.2',
-    modules: [
-        'Core', 'Gui', 'Widgets', 'Qml',
-        'Quick', 'QuickControls2'
-        ],
-    private_headers: true,
-    required: get_option('qt'))
+     # Note that Qt < 6.2.5 does not provide pc files!
+     version: '>=6.2',
+     modules: [
+         'Core', 'Gui', 'Widgets', 'Qml',
+         'Quick', 'QuickControls2', 'Network'
+         ],
+     private_headers: true,
+     required: get_option('qt'))
 
 # Qt module doesn't provide the framework path to moc executable, so we
 # need to help moc find them. It's needed for QtQml/ module registration.
@@ -168,6 +168,21 @@ moc_headers = files(
     'widgets/native/mlfolderseditor.hpp',
     'widgets/native/searchlineedit.hpp',
     'widgets/native/viewblockingrectangle.hpp',
+    'paintbrush/pb_common.hpp',
+    'paintbrush/pb_layer.hpp',
+    'paintbrush/pb_document.hpp',
+    'paintbrush/pb_history.hpp',
+    'paintbrush/pb_canvas_item.hpp',
+    'paintbrush/pb_controller.hpp',
+    'paintbrush/pb_frame_capture.hpp',
+    'paintbrush/pb_segmentation_service.hpp',
+    'paintbrush/pb_tracking_service.hpp',
+    'paintbrush/pb_vision_service.hpp',
+    'paintbrush/pb_generation_service.hpp',
+    'paintbrush/pb_assistant_service.hpp',
+    'paintbrush/pb_companion_service.hpp',
+    'paintbrush/pb_project_store.hpp',
+    'paintbrush/pb_export.hpp',
 )
 
 if host_system == 'windows'
@@ -537,6 +552,21 @@ qt_plugin_sources = files(
     'widgets/native/viewblockingrectangle.cpp',
     'widgets/native/viewblockingrectangle.hpp',
     'widgets/native/doubleclickignoringitem.hpp',
+    'paintbrush/pb_common.cpp',
+    'paintbrush/pb_layer.cpp',
+    'paintbrush/pb_document.cpp',
+    'paintbrush/pb_history.cpp',
+    'paintbrush/pb_canvas_item.cpp',
+    'paintbrush/pb_controller.cpp',
+    'paintbrush/pb_frame_capture.cpp',
+    'paintbrush/pb_segmentation_service.cpp',
+    'paintbrush/pb_tracking_service.cpp',
+    'paintbrush/pb_vision_service.cpp',
+    'paintbrush/pb_generation_service.cpp',
+    'paintbrush/pb_assistant_service.cpp',
+    'paintbrush/pb_companion_service.cpp',
+    'paintbrush/pb_project_store.cpp',
+    'paintbrush/pb_export.cpp',
 )
 
 if host_system == 'windows'
@@ -952,6 +982,22 @@ qml_modules += {
     ),
 }
 
+qml_modules += {
+    'name' : 'VLC.Paintbrush',
+    'target' : 'paintbrush',
+    'outdir' : 'VLC/Paintbrush',
+    'sources': files(
+        'paintbrush/qml/PaintbrushWorkspace.qml',
+        'paintbrush/qml/PaintbrushFirstLaunch.qml',
+        'paintbrush/qml/PaintbrushCanvasView.qml',
+        'paintbrush/qml/PaintbrushToolRail.qml',
+        'paintbrush/qml/PaintbrushPaletteBar.qml',
+        'paintbrush/qml/PaintbrushInspectorDock.qml',
+        'paintbrush/qml/PaintbrushMediaDrawer.qml',
+        'paintbrush/qml/PaintbrushAssistantDock.qml',
+    ),
+}
+
 qml_tests = {
     'tst_FSM': files('tests/tst_FSM.qml'),
 }
@@ -1090,6 +1136,7 @@ if qt6_dep.found()
         qt_extra_deps += [
             cc.find_library('dwmapi'),
             cc.find_library('comctl32'),
+            cc.find_library('winmm'), # MCI for eject.c (included from open_panels.cpp)
         ]
     endif
 
@@ -1263,6 +1310,17 @@ if qt6_dep.found()
         'enabled': xcb_dep.found() and xcb_render_dep.found() and xcb_xfixes_dep.found(),
     }
 
+    # NAI Paintbrush: optional SAM3 inference backend. When the contrib is
+    # available the segmentation/tracking services compile against the real
+    # sam3 API; otherwise they report an explicit "not compiled in" state.
+    paintbrush_sam3_dep = dependency('sam3', required: false)
+    paintbrush_extra_cppargs = []
+    paintbrush_extra_deps = []
+    if paintbrush_sam3_dep.found()
+        paintbrush_extra_cppargs += '-DHAVE_SAM3'
+        paintbrush_extra_deps += paintbrush_sam3_dep
+    endif
+
     qt6pre_files = qt6.preprocess(ui_files: ui_sources,
         moc_headers: moc_headers,
         moc_extra_arguments: qt_extra_flags,
@@ -1276,10 +1334,10 @@ if qt6_dep.found()
         'name' : 'qt',
         'sources' : [qt6pre_files, qt6pre_qrc, shader_targets, shaders_processed, qt_sources, qt_plugin_sources],
         'extra_files' : [shader_files],
-        'dependencies' : [qt_extra_deps, qt6_dep, corefoundation_dep],
+        'dependencies' : [qt_extra_deps, qt6_dep, corefoundation_dep, paintbrush_extra_deps],
         'include_directories' : qt_include_dir,
         'c_args' : qt_extra_flags,
-        'cpp_args' : [qt_extra_flags, qt_cppargs],
+        'cpp_args' : [qt_extra_flags, qt_cppargs, paintbrush_extra_cppargs],
         'link_args' : qt_link_args,
         'link_with' : qmllibs,
         'plugin_dir' : 'gui',

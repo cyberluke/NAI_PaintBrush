@@ -382,7 +382,22 @@ libqt_plugin_la_SOURCES = \
 	widgets/native/qvlcframe.hpp \
 	widgets/native/searchlineedit.cpp widgets/native/searchlineedit.hpp \
 	widgets/native/viewblockingrectangle.cpp widgets/native/viewblockingrectangle.hpp \
-	widgets/native/doubleclickignoringitem.hpp
+	widgets/native/doubleclickignoringitem.hpp \
+	paintbrush/pb_common.cpp paintbrush/pb_common.hpp \
+	paintbrush/pb_layer.cpp paintbrush/pb_layer.hpp \
+	paintbrush/pb_document.cpp paintbrush/pb_document.hpp \
+	paintbrush/pb_history.cpp paintbrush/pb_history.hpp \
+	paintbrush/pb_canvas_item.cpp paintbrush/pb_canvas_item.hpp \
+	paintbrush/pb_controller.cpp paintbrush/pb_controller.hpp \
+	paintbrush/pb_frame_capture.cpp paintbrush/pb_frame_capture.hpp \
+	paintbrush/pb_segmentation_service.cpp paintbrush/pb_segmentation_service.hpp \
+	paintbrush/pb_tracking_service.cpp paintbrush/pb_tracking_service.hpp \
+	paintbrush/pb_vision_service.cpp paintbrush/pb_vision_service.hpp \
+	paintbrush/pb_generation_service.cpp paintbrush/pb_generation_service.hpp \
+	paintbrush/pb_assistant_service.cpp paintbrush/pb_assistant_service.hpp \
+	paintbrush/pb_companion_service.cpp paintbrush/pb_companion_service.hpp \
+	paintbrush/pb_project_store.cpp paintbrush/pb_project_store.hpp \
+	paintbrush/pb_export.cpp paintbrush/pb_export.hpp
 
 # Meta-object compilation
 
@@ -538,7 +553,17 @@ nodist_libqt_plugin_la_SOURCES = \
 	widgets/native/navigation_attached.moc.cpp \
 	widgets/native/mlfolderseditor.moc.cpp \
 	widgets/native/searchlineedit.moc.cpp \
-	widgets/native/viewblockingrectangle.moc.cpp
+	widgets/native/viewblockingrectangle.moc.cpp \
+	paintbrush/pb_document.moc.cpp \
+	paintbrush/pb_history.moc.cpp \
+	paintbrush/pb_canvas_item.moc.cpp \
+	paintbrush/pb_controller.moc.cpp \
+	paintbrush/pb_segmentation_service.moc.cpp \
+	paintbrush/pb_tracking_service.moc.cpp \
+	paintbrush/pb_vision_service.moc.cpp \
+	paintbrush/pb_generation_service.moc.cpp \
+	paintbrush/pb_assistant_service.moc.cpp \
+	paintbrush/pb_companion_service.moc.cpp
 
 nodist_libqt_plugin_la_SOURCES += \
 	dialogs/extended/ui_equalizer.h \
@@ -1395,6 +1420,24 @@ libqml_module_widgets_a_SOURCES = $(QML_MODULE_widgets_SRC)
 nodist_libqml_module_widgets_a_SOURCES = widgets/qmlassets.cpp $(QML_MODULE_widgets_NODIST_EXTRA)
 QML_MODULE_LIBS += libqml_module_widgets.a
 
+libqml_module_paintbrush_a_Module = VLC.Paintbrush
+libqml_module_paintbrush_a_ModulePath = VLC/Paintbrush
+libqml_module_paintbrush_a_CXXFLAGS = $(libqt_plugin_la_CXXFLAGS)
+libqml_module_paintbrush_a_CPPFLAGS = $(libqt_plugin_la_CPPFLAGS)
+libqml_module_paintbrush_a_QML = \
+	paintbrush/qml/PaintbrushWorkspace.qml \
+	paintbrush/qml/PaintbrushFirstLaunch.qml \
+	paintbrush/qml/PaintbrushCanvasView.qml \
+	paintbrush/qml/PaintbrushToolRail.qml \
+	paintbrush/qml/PaintbrushPaletteBar.qml \
+	paintbrush/qml/PaintbrushInspectorDock.qml \
+	paintbrush/qml/PaintbrushMediaDrawer.qml \
+	paintbrush/qml/PaintbrushAssistantDock.qml
+libqml_module_paintbrush_a_Singleton_QML =
+libqml_module_paintbrush_a_SOURCES = $(QML_MODULE_paintbrush_SRC)
+nodist_libqml_module_paintbrush_a_SOURCES = paintbrush/qmlassets.cpp $(QML_MODULE_paintbrush_NODIST_EXTRA)
+QML_MODULE_LIBS += libqml_module_paintbrush.a
+
 if ENABLE_QT
 libqt_plugin_la_LIBADD += $(QML_MODULE_LIBS)
 noinst_LIBRARIES += $(QML_MODULE_LIBS)
@@ -1423,6 +1466,8 @@ QML_MODULE_util_SRC = $(libqml_module_util_a_QML) $(libqml_module_util_a_Singlet
 QML_MODULE_util_NODIST_EXTRA = util/qmlcache_loader.cpp
 QML_MODULE_widgets_SRC = $(libqml_module_widgets_a_QML) $(libqml_module_widgets_a_Singleton_QML)
 QML_MODULE_widgets_NODIST_EXTRA = widgets/qmlcache_loader.cpp
+QML_MODULE_paintbrush_SRC = $(libqml_module_paintbrush_a_QML) $(libqml_module_paintbrush_a_Singleton_QML)
+QML_MODULE_paintbrush_NODIST_EXTRA = paintbrush/qmlcache_loader.cpp
 endif
 
 
@@ -1432,6 +1477,7 @@ libqt_plugin_la_QML_MODULES = \
 	medialibrary \
 	menus \
 	network \
+	paintbrush \
 	player \
 	playercontrols \
 	playlist \
@@ -1445,6 +1491,7 @@ libqt_plugin_la_ALL_QML = \
 	$(libqml_module_medialibrary_a_QML) \
 	$(libqml_module_menus_a_QML) \
 	$(libqml_module_network_a_QML) \
+	$(libqml_module_paintbrush_a_QML) \
 	$(libqml_module_player_a_QML) \
 	$(libqml_module_player_a_Singleton_QML) \
 	$(libqml_module_playercontrols_a_QML) \

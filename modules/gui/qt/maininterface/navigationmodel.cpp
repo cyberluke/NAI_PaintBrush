@@ -19,6 +19,7 @@
 #include "navigationmodel.hpp"
 #include "qt.hpp"
 #include "style/vlcicons.hpp"
+#include "maininterface/mainctx.hpp"
 
 //hierachical model entry
 struct ModelEntry
@@ -290,6 +291,15 @@ public:
 
         discoverEntry.children.emplace_back(qtr("URL"), "url");
         m_model.children.push_back(std::move(discoverEntry));
+
+        // NAI Paintbrush creative workspace entry. Clicking it switches the
+        // main interface to the Paintbrush mode (see MainDisplay.qml).
+        if (var_InheritBool(MainCtx::instance()->getIntf(), "paintbrush-enabled"))
+        {
+            m_model.children.emplace_back(qtr("Paintbrush"), "paintbrush",
+                                          VLCIcons::topbar_discover,
+                                          QStringLiteral(":/icons/ic_fluent_paintbrush.svg"));
+        }
 
         m_model.visibleChildren = m_model.children.size();
     }

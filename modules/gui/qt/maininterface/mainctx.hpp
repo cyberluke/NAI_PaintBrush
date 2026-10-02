@@ -146,6 +146,10 @@ class MainCtx : public QObject
     Q_PROPERTY(bool minimalView READ isMinimalView WRITE setMinimalView NOTIFY mainInterfaceModesChanged FINAL)
     Q_PROPERTY(bool playerView READ isPlayerView WRITE setPlayerView NOTIFY mainInterfaceModesChanged FINAL)
 
+    // NAI Paintbrush creative workspace (exposed as its own interface mode)
+    Q_PROPERTY(bool paintbrushView READ isPaintbrushView WRITE setPaintbrushView NOTIFY mainInterfaceModesChanged FINAL)
+    Q_PROPERTY(bool paintbrushEnabled READ isPaintbrushEnabled CONSTANT FINAL)
+
     // This Property only works if hasAcrylicSurface is set
     Q_PROPERTY(bool acrylicActive READ acrylicActive WRITE setAcrylicActive NOTIFY acrylicActiveChanged FINAL)
 
@@ -167,6 +171,8 @@ public:
     /* tors */
     MainCtx(qt_intf_t *);
     virtual ~MainCtx();
+
+    static MainCtx *instance() { return s_instance; }
 
     static const QEvent::Type ToolbarsNeedRebuild;
     static constexpr double MIN_INTF_USER_SCALE_FACTOR = 0.3;
@@ -216,7 +222,8 @@ public:
         MAININTERFACE_MODE_INVALID = 0,
         MAININTERFACE_MODE_MAINDISPLAY = 1,
         MAININTERFACE_MODE_PLAYER = 2,
-        MAININTERFACE_MODE_MINIMAL = 4
+        MAININTERFACE_MODE_MINIMAL = 4,
+        MAININTERFACE_MODE_PAINTBRUSH = 8
     };
     Q_FLAG(MainInterfaceMode);
     Q_DECLARE_FLAGS(MainInterfaceModes, MainInterfaceMode)
@@ -267,6 +274,8 @@ public:
     inline bool isbgCone() const {return m_bgCone; }
     inline bool isMinimalView() const {return m_mainInterfaceModes & MAININTERFACE_MODE_MINIMAL; }
     inline bool isPlayerView() const {return m_mainInterfaceModes & MAININTERFACE_MODE_PLAYER; }
+    inline bool isPaintbrushView() const {return m_mainInterfaceModes & MAININTERFACE_MODE_PAINTBRUSH; }
+    bool isPaintbrushEnabled() const;
 
 
     inline bool windowSuportExtendedFrame() const { return m_windowSuportExtendedFrame; }
@@ -426,6 +435,8 @@ protected:
     qt_intf_t* p_intf = nullptr;
     vlc_preparser_t *m_network_preparser = nullptr;
 
+    static MainCtx *s_instance;
+
     bool m_hasEmbededVideo = false;
     VideoSurfaceProvider* m_videoSurfaceProvider = nullptr;
     bool m_showRemainingTime = false;
@@ -536,6 +547,7 @@ public slots:
 
     void setMinimalView(bool);
     void setPlayerView(bool);
+    void setPaintbrushView(bool);
 
     void sendHotkey(Qt::Key key, Qt::KeyboardModifiers modifiers );
     void sendVLCHotkey(int vlcHotkey);

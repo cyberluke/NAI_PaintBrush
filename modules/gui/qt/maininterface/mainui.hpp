@@ -21,6 +21,15 @@
 #include <QMessageBox>
 
 class VLCVarChoiceModel;
+namespace paintbrush {
+class PaintbrushController;
+class PaintbrushCanvasItem;
+class SegmentationService;
+class TrackingService;
+class VisionService;
+class GenerationService;
+class CompanionService;
+}
 
 class MainUI : public QObject
 {
@@ -49,6 +58,8 @@ private:
     QQuickItem* m_rootItem = nullptr;
 
     QPointer<QQmlEngine> m_engineBound;
+
+    paintbrush::PaintbrushController* m_paintbrushController = nullptr;
 };
 
 namespace vlc {
