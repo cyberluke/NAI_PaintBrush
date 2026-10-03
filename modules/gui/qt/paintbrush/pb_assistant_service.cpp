@@ -14,6 +14,7 @@
 #include <QBuffer>
 #include <QUrl>
 #include <QSslError>
+#include <QDateTime>
 
 namespace paintbrush {
 
@@ -291,6 +292,7 @@ void AssistantService::chat(const QString &text, const QImage &image,
     QNetworkReply *reply = m_network.post(request, buildPayload(text, image));
     reply->setProperty("pbConversationId", conversationId);
     reply->setProperty("pbRequestText", text);
+    reply->setProperty("pbStartedAt", QDateTime::currentMSecsSinceEpoch());
     m_replies.append(reply);
 
     /* local endpoints often use self-signed certificates; log instead of
@@ -314,6 +316,9 @@ void AssistantService::onReplyFinished()
         return;
     m_replies.removeAll(reply);
     const QString conversationId = reply->property("pbConversationId").toString();
+    const qint64 startedAt = reply->property("pbStartedAt").toLongLong();
+    const qint64 elapsed = startedAt > 0
+        ? QDateTime::currentMSecsSinceEpoch() - startedAt : 0;
 
     const QByteArray data = reply->readAll();
     const QNetworkReply::NetworkError error = reply->error();
@@ -323,6 +328,7 @@ void AssistantService::onReplyFinished()
         QString detail = QString::fromUtf8(data).left(300);
         if (detail.isEmpty())
             detail = reply->errorString();
+        pbLogRequest(m_obj, "assistant", conversationId, elapsed, false, detail);
         emit errorOccurred(conversationId,
                            QStringLiteral("The AI assistant failed: the chat endpoint did "
                                           "not respond (%1). %2")
@@ -333,12 +339,15 @@ void AssistantService::onReplyFinished()
         const QString content = extractContent(data);
         if (content.isEmpty())
         {
+            pbLogRequest(m_obj, "assistant", conversationId, elapsed, false,
+                         QStringLiteral("empty response"));
             emit errorOccurred(conversationId,
                                QStringLiteral("The AI assistant failed: the chat endpoint "
                                               "returned an empty response."));
         }
         else
         {
+            pbLogRequest(m_obj, "assistant", conversationId, elapsed, true);
             /* remember the successful exchange for follow-up turns */
             QJsonObject userMsg;
             userMsg[QStringLiteral("role")] = QStringLiteral("user");

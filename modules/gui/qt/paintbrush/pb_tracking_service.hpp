@@ -72,6 +72,7 @@ public:
     bool isAvailable() const { return m_available; }
     QString unavailableReason() const { return m_unavailableReason; }
     bool isTracking() const { return m_tracking; }
+    QString device() const { return m_device; }
     int progressDone() const { return m_done; }
     int progressTotal() const { return m_total; }
     QString statusText() const { return m_status; }

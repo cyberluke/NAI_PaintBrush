@@ -559,29 +559,36 @@ void TrackingService::runWorkerJob(const WorkerJob &job)
 
         case WorkerJob::Type::Propagate:
         {
+            /* NOTE: sam3_propagate_frame() encodes the frame internally
+             * ("The image is encoded, then each tracked instance is
+             * propagated"). Encoding here first would double the per-frame
+             * cost (~50 s extra on CPU), so we let the tracker do it and
+             * only keep the hash cache in sync afterwards. */
             const quint64 hash = fnvImageHash(job.frame);
-            if (hash != m_encodedHash)
-            {
-                const sam3_image img = toSamImage(job.frame);
-                if (!sam3_encode_image(*m_stateSam, *m_model, img))
-                {
-                    emit workerError(QStringLiteral("Tracking: frame encoding failed."));
-                    return;
-                }
-                m_encodedHash = hash;
-            }
-
             const sam3_image img = toSamImage(job.frame);
             const sam3_result result = sam3_propagate_frame(*m_tracker, *m_stateSam,
                                                             *m_model, img);
+            /* the state now holds this frame's embedding; remember it so a
+             * later refine/segment on the same frame skips re-encoding */
+            m_encodedHash = hash;
 
             QImage bestMask;
             float bestScore = 0.f;
+            /* Prefer the detection for our instance, but only if it actually
+             * overlaps the previous mask. After a scene cut the tracker can
+             * emit a same-id detection for a completely different object
+             * (mask teleports), which must not win. */
             for (const sam3_detection &det : result.detections)
             {
-                if (det.instance_id == m_instanceId)
+                if (det.instance_id != m_instanceId)
+                    continue;
+                const QImage m = maskFromSam(det.mask);
+                if (m.isNull())
+                    continue;
+                const float iou = maskIoU(m, m_lastMask);
+                if (iou >= 0.15f)
                 {
-                    bestMask = maskFromSam(det.mask);
+                    bestMask = m;
                     bestScore = det.iou_score;
                     break;
                 }

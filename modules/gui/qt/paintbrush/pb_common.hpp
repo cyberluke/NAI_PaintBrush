@@ -133,6 +133,13 @@ int pbConfigInt(vlc_object_t *obj, const char *name);
 /* Read an API key from the environment or VLC config (never logged). */
 QString pbApiKey(vlc_object_t *obj, const char *envVar, const char *configName);
 
+/* Log a completed AI request with its id, duration and outcome. Used by the
+ * network services so diagnostics/logs carry request IDs and timings
+ * (never keys or headers). */
+void pbLogRequest(vlc_object_t *obj, const char *kind,
+                  const QString &requestId, qint64 elapsedMs,
+                  bool ok, const QString &detail = {});
+
 } // namespace paintbrush
 
 #endif // PB_COMMON_HPP

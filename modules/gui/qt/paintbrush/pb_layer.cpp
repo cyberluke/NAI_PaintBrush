@@ -6,6 +6,8 @@
 
 #include "pb_layer.hpp"
 
+#include <QtMath>
+
 namespace paintbrush {
 
 CanvasLayer CanvasLayer::createRaster(const QSize &size, const QString &name)
@@ -61,9 +63,22 @@ QRect CanvasLayer::contentBounds() const
         return {};
     if (type == LAYER_IMAGE || type == LAYER_REFERENCE || type == LAYER_TEXT)
     {
-        /* image/reference layers: the whole raster is content, offset by position */
-        const QRect r = raster.rect();
-        return r.translated(position.toPoint());
+        /* image/reference layers: the whole raster is content, offset by
+         * position and scaled/rotated by the layer transform. The scaled
+         * size is exact; rotation is treated as its bounding box so the
+         * collage slot stays generous. */
+        QSizeF scaled = QSizeF(raster.size()) * (type == LAYER_IMAGE || type == LAYER_TEXT
+                                                     ? qMax<qreal>(0.001, scale) : 1.0);
+        QRectF r(position, scaled);
+        if (!qFuzzyIsNull(rotation))
+        {
+            const qreal rad = qDegreesToRadians(rotation);
+            const qreal c = qAbs(qCos(rad)), s = qAbs(qSin(rad));
+            const qreal w = scaled.width() * c + scaled.height() * s;
+            const qreal h = scaled.width() * s + scaled.height() * c;
+            r.setSize(QSizeF(w, h));
+        }
+        return r.toAlignedRect();
     }
 
     const int w = raster.width();

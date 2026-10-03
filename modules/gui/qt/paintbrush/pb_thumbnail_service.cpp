@@ -137,6 +137,8 @@ void ThumbnailService::startBatch(vlc_player_t *player, const QString &mediaKey,
     }
 
     m_cursor = -1;
+    m_suspended = false;
+    m_userSought = false;
     if (m_pendingTimes.isEmpty())
     {
         emit generationFinished();
@@ -151,8 +153,9 @@ void ThumbnailService::cancel()
     if (m_timer.isActive())
     {
         m_timer.stop();
-        /* restore the player to where it was before the batch started */
-        if (m_player && m_originalTimeMs > 0)
+        /* restore the player to where it was before the batch started,
+         * unless the user has moved the playhead themselves in the meantime */
+        if (m_player && m_originalTimeMs > 0 && !m_userSought)
         {
             PlayerLock lock(m_player);
             vlc_player_SetTime(m_player, m_originalTimeMs * 1000);
@@ -163,6 +166,31 @@ void ThumbnailService::cancel()
     m_pendingTimes.clear();
     m_cursor = -1;
     m_seekPhase = false;
+    m_suspended = false;
+    m_userSought = false;
+}
+
+void ThumbnailService::suspend()
+{
+    if (!m_suspended)
+    {
+        m_suspended = true;
+        if (m_timer.isActive())
+            m_timer.stop();
+    }
+}
+
+void ThumbnailService::resume()
+{
+    if (m_suspended)
+    {
+        m_suspended = false;
+        if (m_player && !m_pendingTimes.isEmpty() && !m_timer.isActive())
+        {
+            m_timer.start();
+            onTick();
+        }
+    }
 }
 
 void ThumbnailService::seekTo(qint64 timeMs)
@@ -185,8 +213,9 @@ void ThumbnailService::onTick()
     if (m_pendingTimes.isEmpty())
     {
         m_timer.stop();
-        /* restore the original position */
-        if (m_player && m_originalTimeMs > 0)
+        /* restore the original position, unless the user moved the playhead
+         * themselves while the batch was running */
+        if (m_player && m_originalTimeMs > 0 && !m_userSought)
         {
             PlayerLock lock(m_player);
             vlc_player_SetTime(m_player, m_originalTimeMs * 1000);
@@ -196,18 +225,15 @@ void ThumbnailService::onTick()
         return;
     }
 
-    /* only generate while paused; while playing, wait for the next tick */
-    if (m_player)
-    {
-        PlayerLock lock(m_player);
-        const vlc_player_state state = vlc_player_GetState(m_player);
-        if (state == VLC_PLAYER_STATE_PLAYING)
-            return;
-    }
+    if (m_suspended)
+        return; /* user is scrubbing; wait until resume() restarts the timer */
 
     if (!m_seekPhase)
     {
-        /* phase 1: seek to the next pending time */
+        /* phase 1: seek to the next pending time. Seeking while the player
+         * is playing is fine: the vout shows the requested frame on the next
+         * tick, we snapshot it, and the original position is restored when
+         * the batch finishes. */
         m_lastSeekedTime = m_pendingTimes.first();
         m_pendingTimes.removeFirst();
         seekTo(m_lastSeekedTime);

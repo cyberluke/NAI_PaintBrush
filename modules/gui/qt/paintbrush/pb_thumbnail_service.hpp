@@ -68,6 +68,19 @@ public:
     QList<Thumbnail> thumbnails() const { return m_thumbnails; }
     QImage cachedImage(const QString &mediaKey, qint64 timeMs) const;
 
+    /* The user is scrubbing the seek bar: pause generation (the batch keeps
+     * its state so it can be resumed) without touching the playhead. While
+     * suspended the service performs no seeks, so it cannot race a precise
+     * user seek and leave a partially-decoded frame on screen. */
+    void suspend();
+    void resume();
+    bool isSuspended() const { return m_suspended; }
+
+    /* Called by the controller whenever the user moves the playhead on their
+     * own. The batch will not restore the original position on finish or
+     * cancel afterwards: the user owns the playhead now. */
+    void noteUserSeek() { m_userSought = true; }
+
 signals:
     void thumbnailReady(int index, const QImage &image);
     void generationFinished();
@@ -89,6 +102,8 @@ private:
     QList<Thumbnail> m_thumbnails;     /* slots, in display order */
     int m_cursor = -1;                 /* current slot being generated */
     bool m_seekPhase = false;          /* false = seek, true = snapshot */
+    bool m_suspended = false;          /* user scrubbing: timer stopped */
+    bool m_userSought = false;         /* user moved the playhead themselves */
     qint64 m_lastSeekedTime = -1;      /* the timestamp we just seeked to */
     int m_retryCount = 0;              /* snapshot retries for the current slot */
     QHash<QString, QImage> m_cache;    /* mediaKey|timeMs -> thumbnail */

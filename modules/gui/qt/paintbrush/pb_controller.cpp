@@ -80,6 +80,18 @@ PaintbrushController::PaintbrushController(qt_intf_t *intf, QObject *parent)
     connect(&m_assistant, &AssistantService::availabilityChanged,
             this, [this](bool, const QString &) { emit serviceAvailabilityChanged(); });
 
+    connect(&m_lookup, &LookupService::lookupResult,
+            this, [this](int, const QVariantList &matches) {
+                m_lookupMatches = matches;
+                setStatus(QStringLiteral("Product identification ready"));
+                emit lookupChanged();
+                emit serviceAvailabilityChanged();
+            });
+    connect(&m_lookup, &LookupService::errorOccurred,
+            this, [this](const QString &message) { setStatus(message); });
+    connect(&m_lookup, &LookupService::availabilityChanged,
+            this, [this](bool, const QString &) { emit serviceAvailabilityChanged(); });
+
     connect(&m_thumbnails, &ThumbnailService::thumbnailReady,
             this, [this](int, const QImage &) { emit thumbnailsChanged(); });
     connect(&m_thumbnails, &ThumbnailService::generationFinished,
@@ -93,6 +105,8 @@ PaintbrushController::PaintbrushController(qt_intf_t *intf, QObject *parent)
             this, &PaintbrushController::canUndoChanged);
     connect(&m_undoStack, &UndoStack::canRedoChanged,
             this, &PaintbrushController::canRedoChanged);
+    connect(&m_undoStack, &UndoStack::maskRestored,
+            this, &PaintbrushController::onMaskRestored);
 
     /* a new blank canvas, like opening Paintbrush */
     m_document.resetDocument(QSize(1280, 720));
@@ -104,6 +118,15 @@ PaintbrushController::PaintbrushController(qt_intf_t *intf, QObject *parent)
 
     startAutosave();
     checkForRecovery();
+
+    /* welcome screen on a fresh start: show it whenever nothing is loaded
+     * and no crash recovery is pending, so the entry points (draw / open
+     * picture / play with a video) stay discoverable */
+    if (!m_recoveryAvailable && m_document.layerCount() == 0)
+    {
+        m_welcomeVisible = true;
+        emit welcomeChanged();
+    }
 }
 
 PaintbrushController::~PaintbrushController()
@@ -194,6 +217,10 @@ void PaintbrushController::setCanvasItem(QQuickItem *item)
 
     connect(m_canvas, &PaintbrushCanvasItem::objectSelectClick,
             this, &PaintbrushController::onCanvasObjectClick);
+    connect(m_canvas, &PaintbrushCanvasItem::maskRefineStarted,
+            this, &PaintbrushController::onMaskRefineStarted);
+    connect(m_canvas, &PaintbrushCanvasItem::objectMaskEdited,
+            this, &PaintbrushController::onObjectMaskEdited);
     connect(m_canvas, &PaintbrushCanvasItem::strokeCommitted,
             this, &PaintbrushController::onCanvasStrokeCommitted);
     connect(m_canvas, &PaintbrushCanvasItem::canvasModified,
@@ -255,6 +282,32 @@ void PaintbrushController::openImageFile(const QUrl &url)
         return;
     }
     openImageData(image, QFileInfo(path).completeBaseName());
+}
+
+void PaintbrushController::openVideoFile(const QUrl &url)
+{
+    const QString path = url.toLocalFile();
+    if (path.isEmpty())
+    {
+        setStatus(QStringLiteral("Cannot open that file."));
+        return;
+    }
+
+    /* A Paintbrush video session is the main VLC player: append the file to
+     * the playlist and start playing it, then the media drawer appears and
+     * frames can be captured/tracked. */
+    vlc::playlist::Media media(QUrl::fromLocalFile(path).toString(),
+                               QFileInfo(path).fileName());
+    m_intf->p_mainPlaylistController->append(
+        QVector<vlc::playlist::Media>{media}, true);
+    emit mediaStateChanged();
+    setStatus(QStringLiteral("Playing %1").arg(QFileInfo(path).fileName()));
+
+    if (m_welcomeVisible)
+    {
+        m_welcomeVisible = false;
+        emit welcomeChanged();
+    }
 }
 
 void PaintbrushController::openImageData(const QImage &image, const QString &name)
@@ -614,6 +667,11 @@ void PaintbrushController::autosaveNow()
     if (!var_InheritBool(m_intf, "paintbrush-autosave"))
         return;
 
+    /* nothing to recover on a pristine blank canvas: do not create a
+     * recovery file that would hide the welcome screen on next launch */
+    if (m_document.layerCount() == 0 && m_document.projectPath().isEmpty())
+        return;
+
     QString path = m_document.projectPath();
     if (path.isEmpty())
     {
@@ -828,6 +886,52 @@ void PaintbrushController::moveLayer(int index, int delta)
     emit documentChanged();
 }
 
+void PaintbrushController::transformLayer(int index, double scale, double rotation)
+{
+    QList<CanvasLayer> layers = m_document.layers();
+    if (index < 0 || index >= layers.size())
+        return;
+    CanvasLayer &layer = layers[index];
+    if (layer.type != LAYER_IMAGE && layer.type != LAYER_TEXT)
+        return;
+    scale = qBound(0.01, scale, 64.0);
+    rotation = qBound(-360.0, rotation, 360.0);
+    if (qFuzzyCompare(float(scale), layer.scale) &&
+        qFuzzyCompare(float(rotation), layer.rotation))
+        return;
+
+    const QByteArray before = m_document.layersSnapshot();
+    layer.scale = float(scale);
+    layer.rotation = float(rotation);
+    m_document.setLayers(layers);
+    const QByteArray after = m_document.layersSnapshot();
+    m_undoStack.pushStructure({before, after, QStringLiteral("Transform layer")});
+    if (m_canvas)
+        m_canvas->markCanvasDirty();
+    emit documentChanged();
+}
+
+void PaintbrushController::moveImageLayer(int index, const QPointF &position)
+{
+    QList<CanvasLayer> layers = m_document.layers();
+    if (index < 0 || index >= layers.size())
+        return;
+    CanvasLayer &layer = layers[index];
+    if (layer.type != LAYER_IMAGE && layer.type != LAYER_TEXT)
+        return;
+    if (layer.position == position)
+        return;
+
+    const QByteArray before = m_document.layersSnapshot();
+    layer.position = position;
+    m_document.setLayers(layers);
+    const QByteArray after = m_document.layersSnapshot();
+    m_undoStack.pushStructure({before, after, QStringLiteral("Move image layer")});
+    if (m_canvas)
+        m_canvas->markCanvasDirty();
+    emit documentChanged();
+}
+
 /* ------------------------------------------------------ object selection */
 
 void PaintbrushController::onCanvasObjectClick(QPointF canvasPos, bool positive,
@@ -852,6 +956,39 @@ void PaintbrushController::onCanvasObjectClick(QPointF canvasPos, bool positive,
         m_canvas->setObjectSelectBusy(true);
 
     m_segmentation.segment(currentAiSource(), m_posPoints, m_negPoints, {});
+}
+
+void PaintbrushController::onMaskRefineStarted(const QImage &mask)
+{
+    m_maskUndoBefore = mask;
+}
+
+void PaintbrushController::onObjectMaskEdited(const QImage &mask)
+{
+    const QImage before = std::move(m_maskUndoBefore);
+    m_maskUndoBefore = QImage();
+    m_objectMask = mask;
+    m_objectSelected = !mask.isNull();
+    updateObjectSelection();
+    emit objectSelectionChanged();
+    /* one mask-refine stroke == one undoable operation */
+    if (!before.isNull() && before != mask)
+        m_undoStack.pushMask({before, mask, QStringLiteral("Refine selection mask")});
+    setStatus(QStringLiteral("Selection mask refined with brush."));
+}
+
+void PaintbrushController::onMaskRestored(const QImage &mask)
+{
+    m_objectMask = mask;
+    m_objectSelected = !mask.isNull();
+    if (m_canvas)
+    {
+        m_canvas->setObjectMask(mask, 1.0);
+        m_canvas->markCanvasDirty();
+    }
+    updateObjectSelection();
+    emit objectSelectionChanged();
+    emit documentChanged();
 }
 
 void PaintbrushController::onSegmentationMaskReady(const QImage &mask, double score,
@@ -902,9 +1039,128 @@ void PaintbrushController::updateObjectSelection()
         : QString();
 }
 
+void PaintbrushController::setObjectMaskEdgeHard()
+{
+    if (m_objectMask.isNull())
+        return;
+    QImage mask = m_objectMask.convertToFormat(QImage::Format_Grayscale8);
+    const int w = mask.width(), h = mask.height();
+    for (int y = 0; y < h; ++y)
+    {
+        uchar *line = mask.scanLine(y);
+        for (int x = 0; x < w; ++x)
+            line[x] = line[x] >= 128 ? 255 : 0;
+    }
+    m_objectMask = mask;
+    m_objectMaskSoftEdge = false;
+    if (m_canvas)
+    {
+        m_canvas->setObjectMask(mask, 1.0);
+        m_canvas->markCanvasDirty();
+    }
+    emit objectMaskEdgeChanged();
+    emit objectSelectionChanged();
+    setStatus(QStringLiteral("Object mask edge set to hard."));
+}
+
+void PaintbrushController::setObjectMaskEdgeSoft()
+{
+    if (m_objectMask.isNull())
+        return;
+    /* Binarize, then distance-feather the boundary band into a smooth
+     * alpha edge: interior stays 255, exterior stays 0, the shell becomes
+     * a graded transition. This is genuine alpha-edge generation (a blur
+     * of the mask boundary), NOT semantic hair matting. */
+    QImage mask = m_objectMask.convertToFormat(QImage::Format_Grayscale8);
+    const int w = mask.width(), h = mask.height();
+    QImage bin(w, h, QImage::Format_Grayscale8);
+    for (int y = 0; y < h; ++y)
+    {
+        const uchar *src = mask.constScanLine(y);
+        uchar *dst = bin.scanLine(y);
+        for (int x = 0; x < w; ++x)
+            dst[x] = src[x] >= 128 ? 255 : 0;
+    }
+    /* box-blur passes give a soft edge; 2 passes ~= small feather */
+    QImage blurred = bin;
+    constexpr int passes = 3;
+    for (int p = 0; p < passes; ++p)
+    {
+        QImage tmp = blurred;
+        const int r = 2; /* blur radius 2 -> ~4px transition band */
+        for (int y = 0; y < h; ++y)
+        {
+            for (int x = 0; x < w; ++x)
+            {
+                int sum = 0, n = 0;
+                for (int dy = -r; dy <= r; ++dy)
+                {
+                    const int yy = y + dy;
+                    if (yy < 0 || yy >= h) continue;
+                    const uchar *sline = tmp.constScanLine(yy);
+                    for (int dx = -r; dx <= r; ++dx)
+                    {
+                        const int xx = x + dx;
+                        if (xx < 0 || xx >= w) continue;
+                        sum += sline[xx];
+                        ++n;
+                    }
+                }
+                blurred.scanLine(y)[x] = static_cast<uchar>(sum / n);
+            }
+        }
+    }
+    /* clamp interior/exterior so the core stays opaque and the hole stays clear */
+    for (int y = 0; y < h; ++y)
+    {
+        const uchar *bline = bin.constScanLine(y);
+        uchar *oline = blurred.scanLine(y);
+        for (int x = 0; x < w; ++x)
+        {
+            if (bline[x] >= 128)
+                oline[x] = qMax<uchar>(oline[x], 200);
+            else
+                oline[x] = qMin<uchar>(oline[x], 60);
+        }
+    }
+    m_objectMask = blurred;
+    m_objectMaskSoftEdge = true;
+    if (m_canvas)
+    {
+        m_canvas->setObjectMask(blurred, 1.0);
+        m_canvas->markCanvasDirty();
+    }
+    emit objectMaskEdgeChanged();
+    emit objectSelectionChanged();
+    setStatus(QStringLiteral("Object mask edge set to soft."));
+}
+
+QImage PaintbrushController::pristineSourceFrame() const
+{
+    /* The reference layer holds the true captured video frame. The canvas
+     * composite mixes user strokes and generated layers over it, so AI
+     * operations must read the reference raster directly — otherwise the
+     * VLM/segmenter is shown a synthetic reconstruction, not the frame. */
+    const auto &layers = m_document.layers();
+    for (const CanvasLayer &layer : layers)
+    {
+        if (layer.type == LAYER_REFERENCE && !layer.raster.isNull())
+            return layer.raster;
+    }
+    return {};
+}
+
 QImage PaintbrushController::currentAiSource() const
 {
     /* the media frame reference layer is the true AI source when present */
+    const QImage frame = pristineSourceFrame();
+    if (!frame.isNull())
+    {
+        if (frame.size() != m_document.canvasSize())
+            return frame.scaled(m_document.canvasSize(), Qt::KeepAspectRatio,
+                                Qt::SmoothTransformation);
+        return frame;
+    }
     if (m_canvas)
         return m_canvas->grabCanvasRegion(QRectF(QPointF(0, 0),
                                                  m_document.canvasSize()));
@@ -918,7 +1174,23 @@ QImage PaintbrushController::objectCrop() const
     const QRectF bounds = m_canvas->objectMaskBounds();
     if (bounds.isEmpty())
         return {};
-    QImage region = m_canvas->grabCanvasRegion(bounds);
+
+    /* Crop the true video pixels, not the canvas composite: the mask
+     * coordinates live in canvas space, so scale the pristine frame to the
+     * canvas size first (1:1 when the canvas was sized to the frame). */
+    QImage region;
+    QImage frame = pristineSourceFrame();
+    if (!frame.isNull())
+    {
+        if (frame.size() != m_document.canvasSize())
+            frame = frame.scaled(m_document.canvasSize(), Qt::KeepAspectRatio,
+                                 Qt::SmoothTransformation);
+        region = frame.copy(bounds.toAlignedRect().intersected(frame.rect()));
+    }
+    else
+    {
+        region = m_canvas->grabCanvasRegion(bounds);
+    }
     /* apply the mask as alpha for a clean object crop */
     const QImage mask = m_objectMask.copy(bounds.toAlignedRect());
     return applyMaskAsAlpha(region, mask);
@@ -965,6 +1237,73 @@ void PaintbrushController::addObjectToCanvas()
     triggerCompanionEvent(QStringLiteral("cutout-added"));
 }
 
+void PaintbrushController::extractObject()
+{
+    /* the collage main feature: pull the selected object out of the video
+     * frame onto its own transparent canvas, ready to be placed anywhere */
+    const QImage cutout = objectCrop();
+    if (cutout.isNull())
+    {
+        setStatus(QStringLiteral("Select an object first (Object Select tool)."));
+        return;
+    }
+    const int w = qBound(16, cutout.width() + 128, 8192);
+    const int h = qBound(16, cutout.height() + 128, 8192);
+    m_document.resetDocument(QSize(w, h));
+    addImageLayer(cutout, QPointF(64, 64), QStringLiteral("Extracted object"),
+                  LAYER_IMAGE);
+    if (m_canvas)
+    {
+        m_canvas->markCanvasDirty();
+        m_canvas->fitToView();
+    }
+    setStatus(QStringLiteral("Object extracted to a new canvas"));
+    triggerCompanionEvent(QStringLiteral("object-extracted"));
+}
+
+QImage PaintbrushController::selectionCrop() const
+{
+    if (!m_canvas || !m_canvas->hasSelection())
+        return {};
+    const QImage mask = m_canvas->selectionMaskImage();
+    if (mask.isNull())
+        return {};
+
+    const QRect b = m_document.selectionPath().boundingRect().toAlignedRect()
+                        .intersected(mask.rect());
+    if (b.isEmpty())
+        return {};
+
+    /* Prefer the pristine media frame over the canvas composite, exactly
+     * like objectCrop(): the user's freehand selection over a video frame
+     * should feed the VLM the true pixels, not strokes composited on top. */
+    QImage source;
+    QImage frame = pristineSourceFrame();
+    if (!frame.isNull())
+    {
+        if (frame.size() != m_document.canvasSize())
+            frame = frame.scaled(m_document.canvasSize(), Qt::KeepAspectRatio,
+                                 Qt::SmoothTransformation);
+        source = frame;
+    }
+    else
+    {
+        source = m_canvas->grabSelectionImage();
+        /* grabSelectionImage already applies the selection mask */
+        return source;
+    }
+
+    QImage result(b.size(), QImage::Format_ARGB32);
+    result.fill(Qt::transparent);
+    QPainter p(&result);
+    p.setCompositionMode(QPainter::CompositionMode_Source);
+    p.drawImage(0, 0, source, b.x(), b.y(), b.width(), b.height());
+    p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+    p.drawImage(0, 0, mask, b.x(), b.y(), b.width(), b.height());
+    p.end();
+    return result;
+}
+
 void PaintbrushController::askAboutObject(const QString &question)
 {
     if (!m_vision.isConfigured())
@@ -1002,7 +1341,7 @@ void PaintbrushController::askAboutSelection(const QString &question)
                                  .arg(QDateTime::currentMSecsSinceEpoch());
     m_visionHasResult = false;
     emit visionStateChanged();
-    m_vision.ask(m_canvas->grabSelectionImage(), currentAiSource(), question,
+    m_vision.ask(selectionCrop(), currentAiSource(), question,
                  m_visionConversationId);
 }
 
@@ -1028,6 +1367,27 @@ void PaintbrushController::askAboutObjectFollowUp(const QString &question)
     emit visionStateChanged();
     m_vision.ask(objectCrop(), currentAiSource(), question, m_visionConversationId);
     setStatus(QStringLiteral("Asking a follow-up…"));
+}
+
+void PaintbrushController::findProduct()
+{
+    if (!m_lookup.isConfigured())
+    {
+        setStatus(m_lookup.unavailableReason());
+        return;
+    }
+    if (m_objectMask.isNull())
+    {
+        setStatus(QStringLiteral("Select an object first."));
+        return;
+    }
+    m_lookupMatches.clear();
+    emit lookupChanged();
+    setStatus(QStringLiteral("Identifying the selected object…"));
+    /* OCR text is not produced by the integrated build yet; pass an empty
+     * string. The vision question that produced the current answer, if any,
+     * is not reused here — the crop itself is the evidence. */
+    m_lookup.lookup(objectCrop(), {}, {}, {});
 }
 
 void PaintbrushController::copyVisionAnswer()
@@ -1330,6 +1690,316 @@ QString PaintbrushController::exportTrackedSticker(int trackId, const QUrl &dirU
     return dir;
 }
 
+/* --------------------------------------------------- animated sticker editor */
+
+static const ObjectTrack *findTrack(const QVector<ObjectTrack> &tracks, int trackId)
+{
+    for (const ObjectTrack &track : tracks)
+        if (track.id == trackId)
+            return &track;
+    return nullptr;
+}
+
+/* Render a keyframe cutout with optional outline/shadow/scale. Shared by the
+ * preview data URLs and the optioned export so what you see is what exports. */
+static QImage renderStickerFrame(const QImage &frame, const QImage &mask,
+                                 int outline, const QColor &outlineColor,
+                                 bool shadow, double scale)
+{
+    QImage maskScaled = mask.isNull() ? QImage() : mask;
+    if (!maskScaled.isNull() && maskScaled.size() != frame.size())
+        maskScaled = maskScaled.scaled(frame.size(), Qt::IgnoreAspectRatio,
+                                       Qt::FastTransformation);
+    if (!maskScaled.isNull())
+        maskScaled = maskScaled.convertToFormat(QImage::Format_Grayscale8);
+
+    QImage cutout(frame.size(), QImage::Format_ARGB32);
+    cutout.fill(Qt::transparent);
+    {
+        QPainter p(&cutout);
+        p.drawImage(0, 0, frame);
+        if (!maskScaled.isNull())
+        {
+            p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+            p.drawImage(0, 0, maskScaled);
+        }
+        p.end();
+    }
+
+    /* trim to non-empty bounds */
+    int minX = cutout.width(), minY = cutout.height();
+    int maxX = -1, maxY = -1;
+    for (int y = 0; y < cutout.height(); ++y)
+    {
+        const QRgb *line = reinterpret_cast<const QRgb *>(cutout.constScanLine(y));
+        for (int x = 0; x < cutout.width(); ++x)
+            if (qAlpha(line[x]) != 0)
+            {
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+            }
+    }
+    if (maxX < 0)
+        return {};
+    QImage trimmed = cutout.copy(QRect(minX, minY, maxX - minX + 1, maxY - minY + 1));
+
+    if (scale != 1.0)
+    {
+        const QSize scaledSize(qMax(1, int(trimmed.width() * scale)),
+                               qMax(1, int(trimmed.height() * scale)));
+        trimmed = trimmed.scaled(scaledSize, Qt::KeepAspectRatio,
+                                 Qt::SmoothTransformation);
+    }
+
+    if (outline <= 0 && !shadow)
+        return trimmed;
+
+    /* shadow: dark silhouette offset below-right */
+    QImage result(trimmed.size(), QImage::Format_ARGB32);
+    result.fill(Qt::transparent);
+    {
+        QPainter p(&result);
+        if (shadow)
+        {
+            QImage shadowMask(trimmed.size(), QImage::Format_ARGB32);
+            shadowMask.fill(Qt::transparent);
+            QImage alpha = trimmed.convertToFormat(QImage::Format_Alpha8);
+            QPainterPath path;
+            QImage gray = alpha.convertToFormat(QImage::Format_Grayscale8);
+            path = maskToPath(gray);
+            QPainter sp(&shadowMask);
+            sp.setPen(QPen(QColor(0, 0, 0, 160), 6, Qt::SolidLine,
+                           Qt::RoundCap, Qt::RoundJoin));
+            sp.setBrush(QColor(0, 0, 0, 160));
+            sp.drawPath(path);
+            sp.end();
+            p.drawImage(QPoint(4, 4), shadowMask);
+        }
+        if (outline > 0)
+        {
+            QPainterPath path;
+            QImage alpha = trimmed.convertToFormat(QImage::Format_Alpha8);
+            QImage gray = alpha.convertToFormat(QImage::Format_Grayscale8);
+            path = maskToPath(gray);
+            QPainter op(&result);
+            op.setPen(QPen(outlineColor, outline * 2 + 1, Qt::SolidLine,
+                           Qt::RoundCap, Qt::RoundJoin));
+            op.setBrush(outlineColor);
+            op.drawPath(path);
+            op.end();
+        }
+        p.drawImage(0, 0, trimmed);
+        p.end();
+    }
+    return result;
+}
+
+int PaintbrushController::stickerEditorKeyframeCount(int trackId) const
+{
+    const ObjectTrack *track = findTrack(m_document.tracks(), trackId);
+    return track ? track->keyframes.size() : 0;
+}
+
+QString PaintbrushController::stickerEditorFrameDataUrl(int trackId, int frameIndex) const
+{
+    const ObjectTrack *track = findTrack(m_document.tracks(), trackId);
+    if (!track || frameIndex < 0 || frameIndex >= track->keyframes.size())
+        return {};
+    const TrackKeyframe &kf = track->keyframes[frameIndex];
+    if (kf.mask.isNull())
+        return {};
+    QImage frame = kf.mask.convertToFormat(QImage::Format_Grayscale8);
+    QByteArray png;
+    QBuffer buffer(&png);
+    buffer.open(QIODevice::WriteOnly);
+    if (!frame.save(&buffer, "PNG"))
+        return {};
+    return QStringLiteral("data:image/png;base64,%1")
+        .arg(QString::fromLatin1(png.toBase64()));
+}
+
+QString PaintbrushController::stickerEditorPreviewDataUrl(int trackId, int frameIndex,
+                                                          int outline,
+                                                          const QString &outlineColor,
+                                                          bool shadow, double scale) const
+{
+    const ObjectTrack *track = findTrack(m_document.tracks(), trackId);
+    if (!track || frameIndex < 0 || frameIndex >= track->keyframes.size())
+        return {};
+    const TrackKeyframe &kf = track->keyframes[frameIndex];
+    if (kf.mask.isNull())
+        return {};
+    /* the true frame pixels are re-captured from the player on export; for
+     * the preview we render the mask shape with a neutral fill so the trim/
+     * outline/shadow settings are visible without re-seeking the player. */
+    QImage frame(kf.mask.size(), QImage::Format_ARGB32);
+    frame.fill(QColor(200, 200, 210));
+    QImage rendered = renderStickerFrame(frame, kf.mask, outline,
+                                         QColor(outlineColor), shadow, scale);
+    if (rendered.isNull())
+        return {};
+    QByteArray png;
+    QBuffer buffer(&png);
+    buffer.open(QIODevice::WriteOnly);
+    if (!rendered.save(&buffer, "PNG"))
+        return {};
+    return QStringLiteral("data:image/png;base64,%1")
+        .arg(QString::fromLatin1(png.toBase64()));
+}
+
+QString PaintbrushController::exportTrackedStickerOptions(int trackId, const QUrl &dirUrl,
+                                                          int startFrame, int endFrame,
+                                                          int outline,
+                                                          const QString &outlineColor,
+                                                          bool shadow, double scale,
+                                                          int speed)
+{
+    const QString dir = dirUrl.toLocalFile();
+    if (dir.isEmpty())
+        return QStringLiteral("Choose a folder first.");
+
+    const ObjectTrack *track = findTrack(m_document.tracks(), trackId);
+    if (!track)
+        return QStringLiteral("Track not found.");
+    if (track->keyframes.isEmpty())
+        return QStringLiteral("This track has no keyframes yet.");
+
+    startFrame = qBound(0, startFrame, track->keyframes.size() - 1);
+    endFrame = qBound(startFrame, endFrame, track->keyframes.size() - 1);
+    speed = qBound(1, speed, 8);
+
+    vlc_player_t *player = m_intf->p_mainPlayerController->getPlayer();
+    if (!player)
+        return QStringLiteral("The source media is no longer loaded.");
+
+    const qint64 originalTime = FrameCaptureService::currentTimeMs(player);
+    QDir().mkpath(dir);
+    int written = 0;
+    int exported = 0;
+    QSize lastSize;
+    const QColor oc(outlineColor);
+
+    for (int i = startFrame; i <= endFrame; ++i)
+    {
+        const TrackKeyframe &kf = track->keyframes[i];
+        /* seek the player to the keyframe time and grab the real frame */
+        {
+            PlayerLock lock(player);
+            vlc_player_SetTime(player, kf.timeMs * 1000);
+        }
+        QElapsedTimer wait;
+        wait.start();
+        QImage frame;
+        while (wait.elapsed() < 3000)
+        {
+            frame = FrameCaptureService::captureCurrentFrame(player);
+            if (!frame.isNull())
+                break;
+            QThread::msleep(60);
+        }
+        if (frame.isNull())
+            continue;
+
+        QImage sticker = renderStickerFrame(frame, kf.mask, outline, oc,
+                                            shadow, scale);
+        if (sticker.isNull())
+            continue;
+        lastSize = sticker.size();
+
+        /* speed > 1 keeps every speed-th frame (playback speed control) */
+        if (speed > 1 && (exported % speed) != 0)
+        {
+            ++exported;
+            continue;
+        }
+        ++exported;
+
+        const QString path = dir + QStringLiteral("/sticker_%1.png")
+                                     .arg(kf.frameIndex, 4, 10, QLatin1Char('0'));
+        if (!sticker.save(path, "PNG"))
+            return QStringLiteral("Failed to write %1").arg(path);
+        ++written;
+    }
+
+    if (written > 0 && originalTime > 0)
+    {
+        PlayerLock lock(player);
+        vlc_player_SetTime(player, originalTime * 1000);
+    }
+
+    if (written == 0)
+        return QStringLiteral("No frames could be exported.");
+    setStatus(QStringLiteral("Sticker sequence: %1 frames (%2x%3) in %4")
+                  .arg(written).arg(lastSize.width()).arg(lastSize.height()).arg(dir));
+    return dir;
+}
+
+void PaintbrushController::placeStickerFrame(int trackId, int frameIndex, int outline,
+                                             const QString &outlineColor, bool shadow,
+                                             double scale)
+{
+    const ObjectTrack *track = findTrack(m_document.tracks(), trackId);
+    if (!track || frameIndex < 0 || frameIndex >= track->keyframes.size())
+    {
+        setStatus(QStringLiteral("Choose a track frame first."));
+        return;
+    }
+    const TrackKeyframe &kf = track->keyframes[frameIndex];
+    if (kf.mask.isNull())
+    {
+        setStatus(QStringLiteral("This frame has no mask (evicted to save memory). Re-track or use a corrected frame."));
+        return;
+    }
+    vlc_player_t *player = m_intf->p_mainPlayerController->getPlayer();
+    QImage frame;
+    if (player)
+    {
+        const qint64 originalTime = FrameCaptureService::currentTimeMs(player);
+        {
+            PlayerLock lock(player);
+            vlc_player_SetTime(player, kf.timeMs * 1000);
+        }
+        QElapsedTimer wait;
+        wait.start();
+        while (wait.elapsed() < 3000)
+        {
+            frame = FrameCaptureService::captureCurrentFrame(player);
+            if (!frame.isNull())
+                break;
+            QThread::msleep(60);
+        }
+        if (originalTime > 0)
+        {
+            PlayerLock lock(player);
+            vlc_player_SetTime(player, originalTime * 1000);
+        }
+    }
+    if (frame.isNull())
+    {
+        setStatus(QStringLiteral("Could not capture the frame; place it from a still instead."));
+        return;
+    }
+    QImage sticker = renderStickerFrame(frame, kf.mask, outline,
+                                        QColor(outlineColor), shadow, scale);
+    if (sticker.isNull())
+    {
+        setStatus(QStringLiteral("The selected frame produced an empty cutout."));
+        return;
+    }
+    const QPointF pos = kf.mask.isNull()
+        ? QPointF(0, 0)
+        : QPointF((m_document.canvasSize().width() - sticker.width()) / 2.0,
+                  (m_document.canvasSize().height() - sticker.height()) / 2.0);
+    addImageLayer(sticker, pos, QStringLiteral("Animated sticker frame"),
+                  LAYER_IMAGE);
+    if (m_canvas)
+        m_canvas->markCanvasDirty();
+    setStatus(QStringLiteral("Sticker frame placed on the canvas."));
+    triggerCompanionEvent(QStringLiteral("sticker-made"));
+}
+
 void PaintbrushController::onTrackKeyframe(int frameIndex, qint64 timeMs,
                                            const QImage &mask, float confidence)
 {
@@ -1342,7 +2012,69 @@ void PaintbrushController::onTrackKeyframe(int frameIndex, qint64 timeMs,
     kf.confidence = confidence;
     m_pendingTrack[0].keyframes.append(kf);
     m_pendingTrack[0].endMs = timeMs;
+    /* keep tracked-mask memory bounded as the track grows */
+    enforceTrackMaskMemoryBudget();
     emit trackingStateChanged();
+}
+
+qint64 PaintbrushController::trackedMaskBytes() const
+{
+    qint64 bytes = 0;
+    const auto countTrack = [&](const ObjectTrack &track) {
+        for (const TrackKeyframe &kf : track.keyframes)
+            if (!kf.mask.isNull())
+                bytes += qint64(kf.mask.sizeInBytes());
+    };
+    for (const ObjectTrack &track : m_document.tracks())
+        countTrack(track);
+    for (const ObjectTrack &track : m_pendingTrack)
+        countTrack(track);
+    return bytes;
+}
+
+qint64 PaintbrushController::enforceTrackMaskMemoryBudget()
+{
+    /* Bounded caching: if tracked masks exceed the budget, evict the oldest
+     * non-user-corrected mask content (keep frame metadata + corrected
+     * keyframes) so a long 4K track cannot grow memory without limit. The
+     * default budget is generous (512 MiB) and covers many dozens of frames;
+     * exports read from the remaining masks. */
+    const qint64 budget = qint64(512) * 1024 * 1024;
+    const qint64 before = trackedMaskBytes();
+    if (before <= budget)
+        return before;
+
+    /* gather candidate frames oldest-first across all tracks + pending */
+    QList<TrackKeyframe *> candidates;
+    auto collect = [&candidates](QVector<ObjectTrack> &tracks) {
+        for (ObjectTrack &track : tracks)
+            for (TrackKeyframe &kf : track.keyframes)
+                if (!kf.corrected && !kf.mask.isNull())
+                    candidates.append(&kf);
+    };
+    QVector<ObjectTrack> all = m_document.tracks();
+    // pending track lives separately; operate through references below
+    for (ObjectTrack &track : m_pendingTrack)
+        for (TrackKeyframe &kf : track.keyframes)
+            if (!kf.corrected && !kf.mask.isNull())
+                candidates.append(&kf);
+    std::sort(candidates.begin(), candidates.end(),
+              [](const TrackKeyframe *a, const TrackKeyframe *b) {
+                  return a->frameIndex < b->frameIndex;
+              });
+
+    qint64 cur = before;
+    for (TrackKeyframe *kf : candidates)
+    {
+        if (cur <= budget)
+            break;
+        if (!kf->mask.isNull())
+        {
+            cur -= qint64(kf->mask.sizeInBytes());
+            kf->mask = QImage();   /* evict content, keep metadata */
+        }
+    }
+    return cur;
 }
 
 void PaintbrushController::onTrackFinished(bool complete, bool cancelled,
@@ -1573,6 +2305,10 @@ void PaintbrushController::autoCollage(int preset)
 
     QList<QPointF> newPositions;
     newPositions.reserve(n);
+    QList<qreal> newScales;      /* per-piece scale factor */
+    QList<qreal> newRotations;   /* per-piece rotation (scrapbook only) */
+    newScales.fill(1.0, n);
+    newRotations.fill(0.0, n);
 
     switch (preset)
     {
@@ -1592,6 +2328,7 @@ void PaintbrushController::autoCollage(int preset)
             const qreal w = b.width() * scale, h = b.height() * scale;
             newPositions.append(QPointF(margin + c * cellW + (cellW - w) / 2,
                                         margin + r * cellH + (cellH - h) / 2));
+            newScales[i] = scale;
         }
         break;
     }
@@ -1613,8 +2350,9 @@ void PaintbrushController::autoCollage(int preset)
                                      slotH / qMax(1.0, b.height()));
             const qreal w = b.width() * scale, h = b.height() * scale;
             newPositions.append(QPointF(colX + (colW - w) / 2,
-                                        margin + (i - 1) * (slotH + margin) +
-                                            (slotH - h) / 2));
+                                            margin + (i - 1) * (slotH + margin) +
+                                                (slotH - h) / 2));
+            newScales[i] = scale;
         }
         break;
     }
@@ -1632,6 +2370,9 @@ void PaintbrushController::autoCollage(int preset)
             const qreal x = margin + rnd(seed, i * 3 + 1) * (areaW - w);
             const qreal y = margin + rnd(seed, i * 3 + 2) * (areaH - h);
             newPositions.append(QPointF(x, y));
+            newScales[i] = scale;
+            /* scrapbook jitter: ±10 degrees keeps it playful but readable */
+            newRotations[i] = (rnd(seed, i * 3 + 3) - 0.5) * 20.0;
         }
         break;
     }
@@ -1647,6 +2388,7 @@ void PaintbrushController::autoCollage(int preset)
             newPositions.append(QPointF(margin + (areaW - w) / 2,
                                         margin + i * (slotH + margin) +
                                             (slotH - h) / 2));
+            newScales[i] = scale;
         }
         break;
     }
@@ -1662,6 +2404,7 @@ void PaintbrushController::autoCollage(int preset)
             newPositions.append(QPointF(margin + i * (slotW + margin) +
                                             (slotW - w) / 2,
                                         margin + (areaH - h) / 2));
+            newScales[i] = scale;
         }
         break;
     }
@@ -1678,15 +2421,16 @@ void PaintbrushController::autoCollage(int preset)
             const qreal x = margin + rnd(seed, i * 7 + 1) * (areaW - w);
             const qreal y = margin + rnd(seed, i * 7 + 2) * (areaH - h);
             newPositions.append(QPointF(x, y));
+            newScales[i] = scale;
         }
         break;
     }
     }
 
     /* apply as one undoable structure change: raster layers are converted to
-     * positioned image layers (cut to content), image/generated layers are
-     * rescaled and repositioned — every piece stays an independent editable
-     * layer. */
+     * positioned image layers (cut to content); image/generated layers keep
+     * their raster and are scaled/rotated via the layer transform — every
+     * piece stays an independent editable layer with real transforms. */
     const QByteArray before = m_document.layersSnapshot();
     QList<CanvasLayer> layers = m_document.layers();
     for (int i = 0; i < pieces.size(); ++i)
@@ -1708,9 +2452,11 @@ void PaintbrushController::autoCollage(int preset)
         }
         else
         {
-            /* image/generated layer: move it into its slot */
+            /* image/generated layer: keep raster, apply transform */
             l.position = newPos;
         }
+        l.scale = float(newScales[i]);
+        l.rotation = float(newRotations[i]);
     }
     m_document.setLayers(layers);
     const QByteArray after = m_document.layersSnapshot();
@@ -1840,7 +2586,18 @@ void PaintbrushController::addResultLayer(const QImage &image, const QString &na
 
 QImage PaintbrushController::flattenedPreview() const
 {
-    return m_document.flattenedImage();
+    QImage flat = m_document.flattenedImage();
+    if (flat.isNull())
+        return {};
+    /* The AI sees an opaque image: composite the (possibly transparent)
+     * canvas onto white so sparse black strokes are visible. A fully
+     * transparent flatten would be seen as a blank/black canvas. */
+    QImage preview(flat.size(), QImage::Format_ARGB32);
+    preview.fill(Qt::white);
+    QPainter p(&preview);
+    p.drawImage(0, 0, flat);
+    p.end();
+    return preview;
 }
 
 QString PaintbrushController::fileDialogFilter() const
@@ -1884,12 +2641,14 @@ qint64 PaintbrushController::playerLengthMs() const
 
 void PaintbrushController::playerFrameNext()
 {
+    m_thumbnails.noteUserSeek();
     m_intf->p_mainPlayerController->frameNext();
     emit mediaStateChanged();
 }
 
 void PaintbrushController::playerFramePrev()
 {
+    m_thumbnails.noteUserSeek();
     m_intf->p_mainPlayerController->framePrev();
     emit mediaStateChanged();
 }
@@ -1902,8 +2661,31 @@ void PaintbrushController::playerPlayPause()
 
 void PaintbrushController::playerSeek(qint64 timeMs)
 {
+    /* the user took over the playhead: the thumbnail batch must not restore
+     * its original position when it finishes. (During a slider drag the
+     * batch is also suspended via playerSeekBegin/playerSeekEnd so it cannot
+     * seek the player underneath the drag.) */
+    m_thumbnails.noteUserSeek();
+
     m_intf->p_mainPlayerController->setTime(VLCTime(timeMs * 1000));
     emit mediaStateChanged();
+}
+
+void PaintbrushController::playerSeekBegin()
+{
+    /* user pressed the seek slider: stop the thumbnail batch from seeking
+     * the player underneath the drag */
+    m_thumbnails.suspend();
+}
+
+void PaintbrushController::playerSeekEnd()
+{
+    /* user released the seek slider. The suspended thumbnail batch is NOT
+     * resumed here: resuming would seek the player immediately and race the
+     * final precise seek issued on release. onMediaTimer() resumes the batch
+     * a moment later, only while the video is actually playing — when paused,
+     * generation stays suspended so it cannot disturb the exact frame the
+     * user is inspecting. */
 }
 
 /* ---------------------------------------------------------- thumbnails */
@@ -2017,6 +2799,34 @@ void PaintbrushController::playerStop()
 void PaintbrushController::onMediaTimer()
 {
     emit mediaStateChanged();
+
+    /* A batch suspended by a paused scrub resumes as soon as playback
+     * starts: generation then no longer disturbs the exact frame a paused
+     * user was inspecting. */
+    if (m_thumbnails.isSuspended()
+        && m_intf->p_mainPlayerController->getPlayingState()
+               == PlayerController::PLAYING_STATE_PLAYING)
+        m_thumbnails.resume();
+
+    /* Auto-fill the thumbnail timeline: as soon as a video with a known
+     * length is loaded, start generating thumbnails once (the service seeks
+     * the player to each slot, snapshots it, then restores the original
+     * position). This makes the timeline populated instead of empty even if
+     * the user never touches the "Generate thumbnails" button. */
+    if (playerHasVideo())
+    {
+        const QString mrl = currentMediaMRL();
+        const qint64 duration = playerLengthMs();
+        if (!mrl.isEmpty() && duration > 0
+            && m_thumbnailsAutoMedia != mrl
+            && !m_thumbnails.isGenerating()
+            && !m_thumbnails.isSuspended()
+            && m_thumbnails.count() == 0)
+        {
+            m_thumbnailsAutoMedia = mrl;
+            generateThumbnails();
+        }
+    }
 }
 
 /* --------------------------------------------------------------- signals */
@@ -2079,12 +2889,12 @@ QString PaintbrushController::diagnosticsText() const
         lines << QStringLiteral("  reason: %1").arg(m_vision.unavailableReason());
 
     lines << QStringLiteral("Image provider: %1 (%2)")
-                 .arg(m_generation.isConfigured() ? m_generation.baseUrl()
-                                                  : QStringLiteral("unavailable"),
-                      m_generation.model().isEmpty() ? QStringLiteral("default model")
+                 .arg(m_generation.hasProvider() ? m_generation.baseUrl()
+                                                 : QStringLiteral("local inpainting fallback"),
+                      m_generation.model().isEmpty() ? QStringLiteral("no external model")
                                                      : m_generation.model());
     if (!m_generation.unavailableReason().isEmpty())
-        lines << QStringLiteral("  reason: %1").arg(m_generation.unavailableReason());
+        lines << QStringLiteral("  note: %1").arg(m_generation.unavailableReason());
 
     lines << QStringLiteral("AI assistant: %1 (%2, %3)")
                  .arg(m_assistant.isConfigured() ? m_assistant.baseUrl()
@@ -2101,9 +2911,29 @@ QString PaintbrushController::diagnosticsText() const
                  .arg(m_assistant.outputLimit())
                  .arg(m_assistant.conversationMessageCount());
 
+    lines << QStringLiteral("Lookup: %1 (%2)")
+                 .arg(m_lookup.isConfigured() ? QStringLiteral("available")
+                                              : QStringLiteral("unavailable"),
+                      m_lookup.providerName());
+
     lines << QStringLiteral("Tracking: %1").arg(m_tracking.isConfigured()
                                                     ? QStringLiteral("available")
                                                     : QStringLiteral("unavailable"));
+    lines << QStringLiteral("  backend: %1 (%2)")
+                 .arg(m_tracking.isConfigured() ? QStringLiteral("SAM3")
+                                                : QStringLiteral("none"),
+                      m_tracking.isConfigured() && !m_tracking.device().isEmpty()
+                          ? m_tracking.device()
+                          : QStringLiteral("cpu"));
+    {
+        int totalFrames = 0;
+        for (const ObjectTrack &track : m_document.tracks())
+            totalFrames += track.keyframes.size();
+        const qint64 cacheBytes = qMax<qint64>(0, trackedMaskBytes());
+        lines << QStringLiteral("  tracked frames: %1, mask cache: %2 MiB")
+                     .arg(totalFrames)
+                     .arg(cacheBytes / (1024 * 1024));
+    }
     lines << QStringLiteral("Companion: mode %1, talk %2, %3")
                  .arg(m_companion.mode())
                  .arg(m_companion.talkLevel())

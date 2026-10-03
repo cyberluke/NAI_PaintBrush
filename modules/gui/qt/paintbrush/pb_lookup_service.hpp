@@ -16,17 +16,20 @@
 #include <QString>
 #include <QImage>
 #include <QVariantList>
+#include <QNetworkAccessManager>
+#include <QList>
 
 struct vlc_object_t;
 
 namespace paintbrush {
 
-/* Object lookup extension point ("what handbag is this?").
+/* Object lookup ("what handbag is this?").
  *
- * The editor itself is deliberately decoupled from any shopping/search
- * vendor: a future provider plugs in here and returns candidate matches.
- * The default state is *unavailable unless configured*, so the "Find
- * product" action is never a silent fake.
+ * The default provider is the configured assistant gateway (the same chat
+ * endpoint the companion uses): the object crop is sent as an image part and
+ * the model returns a JSON identification {title, description, confidence,
+ * evidence, metadata}. A dedicated shopping/search vendor can later replace
+ * the provider without touching the editor.
  *
  * Input : object crop + VLM description + optional OCR + optional query.
  * Output: candidate matches with confidence/evidence/metadata/source URLs.
@@ -55,7 +58,7 @@ public:
     QString providerName() const { return m_providerName; }
 
     /* Returns false when the provider is unavailable; when available, the
-     * provider should emit lookupResult/errorOccurred asynchronously. */
+     * provider emits lookupResult/errorOccurred asynchronously. */
     bool lookup(const QImage &objectCrop, const QString &vlmDescription,
                 const QString &ocrText, const QString &query);
 
@@ -67,10 +70,22 @@ signals:
     void availabilityChanged(bool available, const QString &reason);
 
 private:
+    void onReplyFinished(int requestId);
+
+    vlc_object_t *m_obj = nullptr;
     bool m_configured = false;
     QString m_providerName;
     QString m_unavailableReason;
     QVariantList m_matches;
+
+    QString m_baseUrl;
+    QString m_model;
+    QString m_apiKey;
+    int m_timeoutMs = 120000;
+    int m_requestId = 0;
+
+    QNetworkAccessManager m_network;
+    QList<QNetworkReply *> m_replies;
 };
 
 } // namespace paintbrush

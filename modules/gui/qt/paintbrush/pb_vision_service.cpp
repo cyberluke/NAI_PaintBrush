@@ -13,9 +13,11 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QBuffer>
+#include <QPainter>
 #include <QTimer>
 #include <QUrl>
 #include <QSslError>
+#include <QDateTime>
 
 namespace paintbrush {
 
@@ -41,6 +43,18 @@ void VisionService::configure(vlc_object_t *obj)
 
     if (m_baseUrl.isEmpty())
     {
+        /* No dedicated VLM endpoint: fall back to the assistant gateway.
+         * It is configured out of the box (LiteLLM Edge) and the default
+         * model accepts image parts, so "Ask about this" works immediately. */
+        m_baseUrl = pbConfigString(obj, "paintbrush-assistant-base-url").trimmed();
+        m_model = pbConfigString(obj, "paintbrush-assistant-model").trimmed();
+        if (m_apiKey.isEmpty())
+            m_apiKey = pbApiKey(obj, "PAINTBRUSH_ASSISTANT_API_KEY",
+                                "paintbrush-assistant-api-key");
+    }
+
+    if (m_baseUrl.isEmpty())
+    {
         m_unavailableReason =
             QStringLiteral("Ask about this is unavailable: vision endpoint is not configured.");
         emit availabilityChanged(false, m_unavailableReason);
@@ -60,6 +74,23 @@ static QImage capped(const QImage &image, int maxEdge)
     return image.scaled(qMax(1, int(image.width() * scale)),
                         qMax(1, int(image.height() * scale)),
                         Qt::KeepAspectRatio, Qt::SmoothTransformation);
+}
+
+/* The AI sees an opaque image: a transparent canvas/crop would be read as
+ * a blank (or black) picture by the vision sidecar. Composite onto white. */
+static QImage opaque(const QImage &image)
+{
+    if (image.isNull())
+        return {};
+    if (image.format() == QImage::Format_RGB32 ||
+        image.format() == QImage::Format_RGB888)
+        return image;
+    QImage out(image.size(), QImage::Format_ARGB32);
+    out.fill(Qt::white);
+    QPainter p(&out);
+    p.drawImage(0, 0, image);
+    p.end();
+    return out;
 }
 
 static QByteArray pngDataUrl(const QImage &image)
@@ -87,6 +118,9 @@ QByteArray VisionService::buildPayload(const QImage &crop, const QImage &context
             "- what you can see (visible evidence),\n"
             "- what you are inferring (likely),\n"
             "- when you are not sure (uncertainty).\n"
+            "Look for specific identifying details and report them when visible: logos and printed "
+            "text (read letter-by-letter, e.g. an 'M' emblem, brand names), character or clothing "
+            "attributes (hat, color, pattern, accessories), colors, shapes, and materials.\n"
             "For brand/product questions, only name a specific model/SKU when the visible "
             "evidence supports it; otherwise describe the category. Do not invent details.\n"
             "Reply in JSON with exactly three fields: {\"answer\": \"...\", \"evidence\": \"...\", "
@@ -101,7 +135,7 @@ QByteArray VisionService::buildPayload(const QImage &crop, const QImage &context
         imgPart[QStringLiteral("type")] = QStringLiteral("image_url");
         QJsonObject urlObj;
         urlObj[QStringLiteral("url")] =
-            QString::fromLatin1(pngDataUrl(capped(crop, 768)));
+            QString::fromLatin1(pngDataUrl(capped(opaque(crop), 768)));
         imgPart[QStringLiteral("image_url")] = urlObj;
         content.append(imgPart);
     }
@@ -111,7 +145,7 @@ QByteArray VisionService::buildPayload(const QImage &crop, const QImage &context
         imgPart[QStringLiteral("type")] = QStringLiteral("image_url");
         QJsonObject urlObj;
         urlObj[QStringLiteral("url")] =
-            QString::fromLatin1(pngDataUrl(capped(context, 1024)));
+            QString::fromLatin1(pngDataUrl(capped(opaque(context), 1024)));
         imgPart[QStringLiteral("image_url")] = urlObj;
         content.append(imgPart);
     }
@@ -208,6 +242,8 @@ void VisionService::ask(const QImage &objectCrop, const QImage &contextFrame,
                                                                 contextFrame,
                                                                 question));
     reply->setProperty("pbConversationId", conversationId);
+    reply->setProperty("pbStartedAt",
+                       QDateTime::currentMSecsSinceEpoch());
     m_replies.append(reply);
 
     /* local endpoints often use self-signed certificates; log instead of
@@ -231,6 +267,9 @@ void VisionService::onReplyFinished()
         return;
     m_replies.removeAll(reply);
     const QString conversationId = reply->property("pbConversationId").toString();
+    const qint64 startedAt = reply->property("pbStartedAt").toLongLong();
+    const qint64 elapsed = startedAt > 0
+        ? QDateTime::currentMSecsSinceEpoch() - startedAt : 0;
 
     const QByteArray data = reply->readAll();
     const QNetworkReply::NetworkError error = reply->error();
@@ -240,6 +279,7 @@ void VisionService::onReplyFinished()
         QString detail = QString::fromUtf8(data).left(300);
         if (detail.isEmpty())
             detail = reply->errorString();
+        pbLogRequest(m_obj, "vision", conversationId, elapsed, false, detail);
         emit errorOccurred(conversationId,
                            QStringLiteral("Ask about this failed: vision endpoint did not respond (%1). %2")
                                .arg(int(error)).arg(detail));
@@ -249,12 +289,15 @@ void VisionService::onReplyFinished()
         const QString content = extractContent(data);
         if (content.isEmpty())
         {
+            pbLogRequest(m_obj, "vision", conversationId, elapsed, false,
+                         QStringLiteral("empty response"));
             emit errorOccurred(conversationId,
                                QStringLiteral("Ask about this failed: the vision endpoint "
                                               "returned an empty response."));
         }
         else
         {
+            pbLogRequest(m_obj, "vision", conversationId, elapsed, true);
             QString answer, evidence, uncertainty;
             parseStructured(content, &answer, &evidence, &uncertainty);
             emit responseReady(conversationId, answer, evidence, uncertainty,

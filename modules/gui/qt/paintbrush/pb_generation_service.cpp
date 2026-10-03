@@ -18,6 +18,11 @@
 #include <QBuffer>
 #include <QUrl>
 #include <QSslError>
+#include <QPainter>
+#include <QImage>
+#include <QVector>
+#include <QtMath>
+#include <QDateTime>
 
 namespace paintbrush {
 
@@ -41,11 +46,16 @@ void GenerationService::configure(vlc_object_t *obj)
 
     if (m_baseUrl.isEmpty())
     {
+        /* No external image provider: the local inpainting fallback still
+         * makes Remove object / Generative fill / Replace background work.
+         * Availability stays true so the actions are usable out of the box. */
         m_unavailableReason =
-            QStringLiteral("Image generation is unavailable: image provider is not configured.");
-        emit availabilityChanged(false, m_unavailableReason);
+            QStringLiteral("No image provider configured — using the local "
+                           "inpainting fallback.");
+        emit availabilityChanged(true, m_unavailableReason);
         return;
     }
+    m_unavailableReason.clear();
     emit availabilityChanged(true, {});
 }
 
@@ -101,15 +111,184 @@ QImage GenerationService::resultFromJson(const QByteArray &json)
     return {};
 }
 
+/* ------------------------------------------------------------------ local */
+
+namespace {
+
+/* Fill the masked region (white in `mask`) by multi-source propagation:
+ * boundary pixels are filled from their already-known neighbours, then the
+ * newly filled pixels become the source for the next layer. This is the
+ * classic onion-peel inpaint, but done with a FIFO queue so the total work
+ * is O(mask area) instead of O(mask radius x image size). */
+static QImage localInpaint(const QImage &src, const QImage &mask)
+{
+    QImage img = src.convertToFormat(QImage::Format_ARGB32);
+    const int w = img.width(), h = img.height();
+    if (w <= 0 || h <= 0)
+        return img;
+
+    const QImage m8 = mask.convertToFormat(QImage::Format_Grayscale8);
+    if (m8.size() != img.size())
+        return img;
+
+    /* state: 0 = known, 1 = masked, 2 = queued/filled */
+    QVector<quint8> state(w * h);
+    QVector<int> queue;
+    queue.reserve(w * h);
+
+    const int dx[4] = {1, -1, 0, 0};
+    const int dy[4] = {0, 0, 1, -1};
+
+    for (int y = 0; y < h; ++y)
+    {
+        const quint8 *line = m8.constScanLine(y);
+        for (int x = 0; x < w; ++x)
+        {
+            const int i = y * w + x;
+            if (line[x] >= 128)
+            {
+                state[i] = 1;
+                /* seed: any masked pixel adjacent to a known pixel */
+                bool nearKnown = false;
+                for (int k = 0; k < 4 && !nearKnown; ++k)
+                {
+                    const int nx = x + dx[k], ny = y + dy[k];
+                    if (nx < 0 || ny < 0 || nx >= w || ny >= h)
+                        continue;
+                    const quint8 nv = m8.constScanLine(ny)[nx];
+                    if (nv < 128)
+                        nearKnown = true;
+                }
+                if (nearKnown)
+                {
+                    state[i] = 2;
+                    queue.append(i);
+                }
+            }
+        }
+    }
+
+    int head = 0;
+    while (head < queue.size())
+    {
+        const int i = queue[head++];
+        const int x = i % w, y = i / w;
+        if (state[i] != 2)
+            continue;
+
+        qint64 r = 0, g = 0, b = 0, a = 0;
+        int n = 0;
+        for (int k = 0; k < 4; ++k)
+        {
+            const int nx = x + dx[k], ny = y + dy[k];
+            if (nx < 0 || ny < 0 || nx >= w || ny >= h)
+                continue;
+            /* only pixels that are already known/filled (state 0) are valid
+             * colour sources; queued (2) and masked (1) are not */
+            if (state[ny * w + nx] != 0)
+                continue;
+            const QRgb c = img.pixel(nx, ny);
+            r += qRed(c); g += qGreen(c); b += qBlue(c); a += qAlpha(c);
+            ++n;
+        }
+        if (n > 0)
+        {
+            img.setPixel(x, y, qRgba(int(r / n), int(g / n), int(b / n),
+                                     int(a / n)));
+            state[i] = 0; /* filled; becomes a source for the next layer */
+
+            /* newly exposed masked neighbours join the queue */
+            for (int k = 0; k < 4; ++k)
+            {
+                const int nx = x + dx[k], ny = y + dy[k];
+                if (nx < 0 || ny < 0 || nx >= w || ny >= h)
+                    continue;
+                const int ni = ny * w + nx;
+                if (state[ni] == 1)
+                {
+                    state[ni] = 2;
+                    queue.append(ni);
+                }
+            }
+        }
+    }
+    return img;
+}
+
+/* Soften everything except the subject: the "replace background" local
+ * fallback. Keeps the subject sharp and turns the rest into a gentle blur. */
+static QImage replaceBackgroundLocal(const QImage &src, const QImage &objectMask)
+{
+    QImage img = src.convertToFormat(QImage::Format_ARGB32);
+    const QImage m8 = objectMask.convertToFormat(QImage::Format_Grayscale8);
+    if (m8.size() != img.size())
+        return img;
+
+    /* heavy box blur (two passes, radius 12 => cheap 3x3 repeated) */
+    QImage blurred = img;
+    for (int pass = 0; pass < 4; ++pass)
+    {
+        QImage next = blurred;
+        const int w = blurred.width(), h = blurred.height();
+        for (int y = 1; y < h - 1; ++y)
+            for (int x = 1; x < w - 1; ++x)
+            {
+                qint64 r = 0, g = 0, b = 0, a = 0;
+                for (int dy = -1; dy <= 1; ++dy)
+                    for (int dx = -1; dx <= 1; ++dx)
+                    {
+                        const QRgb c = blurred.pixel(x + dx, y + dy);
+                        r += qRed(c); g += qGreen(c); b += qBlue(c); a += qAlpha(c);
+                    }
+                next.setPixel(x, y, qRgba(int(r / 9), int(g / 9), int(b / 9),
+                                          int(a / 9)));
+            }
+        blurred = next;
+    }
+
+    /* composite: subject from the original, background from the blur */
+    QImage out = img;
+    QPainter p(&out);
+    p.drawImage(0, 0, blurred);
+    p.end();
+
+    /* blend: where mask is white keep original, else keep blurred */
+    for (int y = 0; y < out.height(); ++y)
+    {
+        const quint8 *ml = m8.constScanLine(y);
+        QRgb *line = reinterpret_cast<QRgb *>(out.scanLine(y));
+        const QRgb *orig = reinterpret_cast<const QRgb *>(img.constScanLine(y));
+        const QRgb *blur = reinterpret_cast<const QRgb *>(blurred.constScanLine(y));
+        for (int x = 0; x < out.width(); ++x)
+        {
+            const int v = ml[x];
+            if (v >= 128)
+                line[x] = orig[x];
+            else if (v > 0)
+            {
+                /* soft edge between subject and background */
+                const int keep = v;
+                const int mix = 255 - keep;
+                const QRgb o = orig[x], b = blur[x];
+                line[x] = qRgba(
+                    (qRed(o) * keep + qRed(b) * mix) / 255,
+                    (qGreen(o) * keep + qGreen(b) * mix) / 255,
+                    (qBlue(o) * keep + qBlue(b) * mix) / 255,
+                    255);
+            }
+            else
+                line[x] = blur[x];
+        }
+    }
+    return out;
+}
+
+} // namespace
+
 void GenerationService::generate(Action action, const QImage &image,
                                  const QImage &mask, const QString &prompt,
                                  const QString &requestId)
 {
-    if (!isConfigured())
-    {
-        emit errorOccurred(requestId, m_unavailableReason);
-        return;
-    }
     if (image.isNull())
     {
         emit errorOccurred(requestId,
@@ -117,6 +296,43 @@ void GenerationService::generate(Action action, const QImage &image,
         return;
     }
 
+    /* local fallback when no external provider is configured */
+    if (m_baseUrl.isEmpty())
+    {
+        QImage result;
+        if (action == ACTION_REPLACE_BACKGROUND)
+        {
+            /* mask here is the inverse of the subject; pass the subject mask */
+            QImage subjectMask = mask.convertToFormat(QImage::Format_Grayscale8);
+            subjectMask.invertPixels();
+            result = replaceBackgroundLocal(image, subjectMask);
+        }
+        else
+        {
+            /* remove object / generative fill: inpaint the masked region */
+            result = localInpaint(image, mask);
+        }
+
+        if (result.isNull())
+        {
+            emit errorOccurred(requestId,
+                               QStringLiteral("Local inpainting produced no result."));
+            return;
+        }
+        if (!m_busy)
+        {
+            m_busy = true;
+            emit busyChanged(true);
+        }
+        QMetaObject::invokeMethod(this, [this, requestId, result]() {
+            m_busy = false;
+            emit busyChanged(false);
+            emit resultReady(requestId, result);
+        }, Qt::QueuedConnection);
+        return;
+    }
+
+    /* external provider path */
     QUrl url(m_baseUrl);
     QString path = url.path();
     if (!path.endsWith(QStringLiteral("/images/edits")))
@@ -166,6 +382,7 @@ void GenerationService::generate(Action action, const QImage &image,
     QNetworkReply *reply = m_network.post(request, multi);
     multi->setParent(reply);
     reply->setProperty("pbRequestId", requestId);
+    reply->setProperty("pbStartedAt", QDateTime::currentMSecsSinceEpoch());
     m_replies.append(reply);
 
     connect(reply, &QNetworkReply::sslErrors, reply, [reply](const QList<QSslError> &) {
@@ -187,6 +404,9 @@ void GenerationService::onReplyFinished()
         return;
     m_replies.removeAll(reply);
     const QString requestId = reply->property("pbRequestId").toString();
+    const qint64 startedAt = reply->property("pbStartedAt").toLongLong();
+    const qint64 elapsed = startedAt > 0
+        ? QDateTime::currentMSecsSinceEpoch() - startedAt : 0;
 
     const QByteArray data = reply->readAll();
     const QNetworkReply::NetworkError error = reply->error();
@@ -196,6 +416,7 @@ void GenerationService::onReplyFinished()
         QString detail = QString::fromUtf8(data).left(300);
         if (detail.isEmpty())
             detail = reply->errorString();
+        pbLogRequest(m_obj, "generation", requestId, elapsed, false, detail);
         emit errorOccurred(requestId,
                            QStringLiteral("Image generation failed: provider did not respond (%1). %2")
                                .arg(int(error)).arg(detail));
@@ -205,12 +426,15 @@ void GenerationService::onReplyFinished()
         QImage result = resultFromJson(data);
         if (result.isNull())
         {
+            pbLogRequest(m_obj, "generation", requestId, elapsed, false,
+                         QStringLiteral("unreadable result"));
             emit errorOccurred(requestId,
                                QStringLiteral("Image generation failed: provider returned "
                                               "an unreadable result."));
         }
         else
         {
+            pbLogRequest(m_obj, "generation", requestId, elapsed, true);
             emit resultReady(requestId, result);
         }
     }

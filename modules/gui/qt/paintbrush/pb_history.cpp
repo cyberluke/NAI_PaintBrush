@@ -38,6 +38,16 @@ qint64 UndoStack::paintBytes(const PaintUndoEntry &entry) const
     return bytes;
 }
 
+qint64 UndoStack::maskBytes(const MaskUndoEntry &entry) const
+{
+    qint64 bytes = 0;
+    if (!entry.before.isNull())
+        bytes += qint64(entry.before.sizeInBytes());
+    if (!entry.after.isNull())
+        bytes += qint64(entry.after.sizeInBytes());
+    return bytes;
+}
+
 void UndoStack::pushPaint(const PaintUndoEntry &entry)
 {
     if (entry.layerIndex < 0)
@@ -82,6 +92,29 @@ void UndoStack::pushStructure(const StructureUndoEntry &entry)
     emit canRedoChanged();
 }
 
+void UndoStack::pushMask(const MaskUndoEntry &entry)
+{
+    if (entry.before.isNull() && entry.after.isNull())
+        return;
+
+    while (m_entries.size() > m_undoIndex)
+    {
+        m_totalBytes -= m_entries.last().bytes;
+        m_entries.removeLast();
+    }
+
+    Entry e;
+    e.kind = Kind::Mask;
+    e.mask = entry;
+    e.bytes = maskBytes(entry);
+    m_entries.append(e);
+    m_undoIndex++;
+    m_totalBytes += e.bytes;
+    enforceBounds();
+    emit canUndoChanged();
+    emit canRedoChanged();
+}
+
 void UndoStack::dropOldest()
 {
     while (m_entries.size() > m_maxEntries || m_totalBytes > m_byteBudget)
@@ -116,18 +149,24 @@ QString UndoStack::undoText() const
 {
     if (!canUndo())
         return {};
-    return m_entries[m_undoIndex - 1].kind == Kind::Paint
-               ? m_entries[m_undoIndex - 1].paint.description
-               : m_entries[m_undoIndex - 1].structure.description;
+    const Entry &e = m_entries[m_undoIndex - 1];
+    if (e.kind == Kind::Paint)
+        return e.paint.description;
+    if (e.kind == Kind::Mask)
+        return e.mask.description;
+    return e.structure.description;
 }
 
 QString UndoStack::redoText() const
 {
     if (!canRedo())
         return {};
-    return m_entries[m_undoIndex].kind == Kind::Paint
-               ? m_entries[m_undoIndex].paint.description
-               : m_entries[m_undoIndex].structure.description;
+    const Entry &e = m_entries[m_undoIndex];
+    if (e.kind == Kind::Paint)
+        return e.paint.description;
+    if (e.kind == Kind::Mask)
+        return e.mask.description;
+    return e.structure.description;
 }
 
 void UndoStack::restoreRegion(CanvasLayer &layer, const QRect &rect,
@@ -163,6 +202,10 @@ bool UndoStack::undo(PaintbrushDocument &doc)
             doc.setDirty(true);
         }
     }
+    else if (entry.kind == Kind::Mask)
+    {
+        emit maskRestored(entry.mask.before);
+    }
     else
     {
         doc.restoreLayersSnapshot(entry.structure.before);
@@ -187,6 +230,10 @@ bool UndoStack::redo(PaintbrushDocument &doc)
             restoreRegion(*layer, entry.paint.unionRect, entry.paint.after);
             doc.setDirty(true);
         }
+    }
+    else if (entry.kind == Kind::Mask)
+    {
+        emit maskRestored(entry.mask.after);
     }
     else
     {

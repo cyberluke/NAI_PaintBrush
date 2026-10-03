@@ -128,6 +128,14 @@ public:
     Q_INVOKABLE QRectF objectMaskBounds() const;
     Q_INVOKABLE void setObjectSelectBusy(bool busy);
 
+    /* Freehand mask refinement: paint add (true) or subtract (false) into
+     * the current object mask with the active brush size. Emits
+     * objectMaskEdited() after the stroke completes. */
+    Q_INVOKABLE void paintObjectMask(const QPointF &canvasPos, bool subtract);
+    Q_INVOKABLE void paintObjectMaskSegment(const QPointF &from, const QPointF &to,
+                                            bool subtract);
+    Q_INVOKABLE void endObjectMaskStroke();
+
     /* -- manual selection operations -------------------------------------- */
     Q_INVOKABLE void selectionInvert();
     Q_INVOKABLE void selectionClear();
@@ -190,6 +198,8 @@ signals:
     void objectSelectBusyChanged(bool busy);
     void objectMaskVisibleChanged(bool visible);
     void objectMaskReady(const QImage &mask, double score);
+    void objectMaskEdited(const QImage &mask);
+    void maskRefineStarted(const QImage &mask);
     void objectSelectClick(QPointF canvasPos, bool positive, QPointF itemPos);
     void strokeCommitted(const QRect &region);
     void canvasModified();
@@ -305,6 +315,13 @@ private:
 
     QImage m_objectMask;               /* grayscale binary mask (canvas size) */
     double m_objectScore = 0.0;
+
+    /* freehand mask refinement stroke state */
+    bool m_maskPaintActive = false;
+    bool m_maskPaintSubtract = false;
+    bool m_maskPaintDirty = false;  /* a dot was actually painted (drag, not click) */
+    QPointF m_maskPaintLastPos;
+    QRect m_maskPaintUnion;
 
     /* tiles */
     QHash<TileKey, QImage> m_tiles;

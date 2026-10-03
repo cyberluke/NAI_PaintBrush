@@ -112,6 +112,15 @@ void VideoWindowHandler::setVideoSize(unsigned int w, unsigned int h, Qt::Window
          */
         if (m_autoresize)
         {
+            /* NAI Paintbrush: the creative workspace has its own fixed
+             * layout (top bar, tool rail, palette, media drawer) and the
+             * video is only a frame source there. Autoresizing the whole
+             * interface window to the video size (2190x1262 etc.) makes
+             * the window taller than the desktop, which pushes the media
+             * drawer and modal dialogs below the visible screen area. */
+            if (m_intf->p_mi && m_intf->p_mi->isPaintbrushView())
+                return;
+
             QRect screen = m_window->screen()->availableGeometry();
             qreal factor = m_window->devicePixelRatio();
             if( (float)h / factor > screen.height() )

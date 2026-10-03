@@ -49,7 +49,11 @@ public:
     ~GenerationService() override;
 
     void configure(vlc_object_t *obj);
-    bool isConfigured() const { return !m_baseUrl.isEmpty(); }
+    /* Always true: the local inpainting fallback makes the generative
+     * actions usable even without an external image provider. When a
+     * provider IS configured the network path is preferred. */
+    bool isConfigured() const { return true; }
+    bool hasProvider() const { return !m_baseUrl.isEmpty(); }
     bool isBusy() const { return m_busy; }
     QString baseUrl() const { return m_baseUrl; }
     QString model() const { return m_model; }

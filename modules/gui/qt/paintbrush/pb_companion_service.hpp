@@ -87,7 +87,8 @@ private slots:
 
 private:
     bool analysisAllowed() const;
-    void runAnalysis(const QString &prompt, const QImage &preview);
+    void runAnalysis(const QString &prompt, const QImage &preview,
+                     bool force = false);
     QString buildObservationPrompt(const QString &event) const;
     QString buildQuestionPrompt(const QString &question) const;
 

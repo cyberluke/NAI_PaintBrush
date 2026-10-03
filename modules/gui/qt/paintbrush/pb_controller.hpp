@@ -108,6 +108,7 @@ class PaintbrushController : public QObject
     Q_PROPERTY(QString diagnosticsText READ diagnosticsText NOTIFY serviceAvailabilityChanged FINAL)
     Q_PROPERTY(bool lookupAvailable READ lookupAvailable NOTIFY serviceAvailabilityChanged FINAL)
     Q_PROPERTY(QString lookupUnavailableReason READ lookupUnavailableReason NOTIFY serviceAvailabilityChanged FINAL)
+    Q_PROPERTY(QVariantList lookupMatches READ lookupMatches NOTIFY lookupChanged FINAL)
     Q_PROPERTY(QVariantList recentProjects READ recentProjects NOTIFY recentProjectsChanged FINAL)
     Q_PROPERTY(QVariantList activeJobs READ activeJobs NOTIFY activeJobsChanged FINAL)
     Q_PROPERTY(bool recoveryAvailable READ recoveryAvailable NOTIFY recoveryStateChanged FINAL)
@@ -131,6 +132,7 @@ public:
     Q_INVOKABLE void newBlankCanvas(int width, int height);
     Q_INVOKABLE void openImageFile(const QUrl &url);
     Q_INVOKABLE void openImageData(const QImage &image, const QString &name);
+    Q_INVOKABLE void openVideoFile(const QUrl &url);
     Q_INVOKABLE void captureVideoFrame();
     Q_INVOKABLE void pasteImageFromClipboard();
     Q_INVOKABLE void saveProject(const QUrl &url);
@@ -157,14 +159,28 @@ public:
     Q_INVOKABLE void moveLayer(int index, int delta);
     Q_INVOKABLE void setLayerVisible(int index, bool visible);
     Q_INVOKABLE void setCurrentLayer(int index);
+    /* Image-layer transforms (scale/rotation/pivot at content center),
+     * one undoable operation each, persisted with the project. */
+    Q_INVOKABLE void transformLayer(int index, double scale, double rotation);
+    Q_INVOKABLE void moveImageLayer(int index, const QPointF &position);
 
     /* -- object selection ------------------------------------------------ */
     Q_INVOKABLE void refineObjectByText(const QString &textPrompt);
     Q_INVOKABLE void cutOutObject();
     Q_INVOKABLE void addObjectToCanvas();
+    Q_INVOKABLE void extractObject();
+    /* Selection edge modes for the object mask (false-positive-resistant).
+     * Hard re-binarizes at the 128 threshold; Soft feathers the boundary
+     * band into a genuine alpha edge. Hair/fine-edge is NOT provided because
+     * no real semantic hair-matting algorithm exists in-tree (per Phase 3). */
+    Q_INVOKABLE void setObjectMaskEdgeHard();
+    Q_INVOKABLE void setObjectMaskEdgeSoft();
+    Q_PROPERTY(bool objectMaskSoftEdge READ objectMaskSoftEdge NOTIFY objectMaskEdgeChanged FINAL)
+    bool objectMaskSoftEdge() const { return m_objectMaskSoftEdge; }
     Q_INVOKABLE void askAboutObject(const QString &question);
     Q_INVOKABLE void askAboutSelection(const QString &question);
     Q_INVOKABLE void askAboutObjectFollowUp(const QString &question);
+    Q_INVOKABLE void findProduct();
     Q_INVOKABLE void copyVisionAnswer();
     Q_INVOKABLE void addVisionAnswerAsText();
     Q_INVOKABLE void clearVisionResult();
@@ -181,6 +197,23 @@ public:
      * string (may be a path prefix on success). */
     Q_INVOKABLE QString exportTrackedSticker(int trackId, const QUrl &dir);
     Q_INVOKABLE void makeSticker();
+
+    /* Animated sticker editor: preview keyframes of a track, configure
+     * trim/outline/shadow/scale/speed, place a cutout on the canvas, or
+     * export the trimmed sequence. */
+    Q_INVOKABLE int stickerEditorTrackCount() const { return m_document.trackCount(); }
+    Q_INVOKABLE int stickerEditorKeyframeCount(int trackId) const;
+    Q_INVOKABLE QString stickerEditorFrameDataUrl(int trackId, int frameIndex) const;
+    Q_INVOKABLE QString stickerEditorPreviewDataUrl(int trackId, int frameIndex,
+                                                    int outline, const QString &outlineColor,
+                                                    bool shadow, double scale) const;
+    Q_INVOKABLE QString exportTrackedStickerOptions(int trackId, const QUrl &dir,
+                                                    int startFrame, int endFrame,
+                                                    int outline, const QString &outlineColor,
+                                                    bool shadow, double scale, int speed);
+    Q_INVOKABLE void placeStickerFrame(int trackId, int frameIndex, int outline,
+                                       const QString &outlineColor, bool shadow,
+                                       double scale);
     Q_INVOKABLE void removeObject(const QString &prompt);
     Q_INVOKABLE void generativeFill(const QString &prompt);
     Q_INVOKABLE void replaceBackground(const QString &prompt);
@@ -204,6 +237,8 @@ public:
     Q_INVOKABLE void playerFramePrev();
     Q_INVOKABLE void playerPlayPause();
     Q_INVOKABLE void playerSeek(qint64 timeMs);
+    Q_INVOKABLE void playerSeekBegin();
+    Q_INVOKABLE void playerSeekEnd();
     Q_INVOKABLE void playerStop();
 
     /* -- helpers ----------------------------------------------------------- */
@@ -229,6 +264,7 @@ public:
     QString assistantUnavailableReason() const { return m_assistant.unavailableReason(); }
     bool lookupAvailable() const { return m_lookup.isConfigured(); }
     QString lookupUnavailableReason() const { return m_lookup.unavailableReason(); }
+    QVariantList lookupMatches() const { return m_lookupMatches; }
     QString objectThumbnailDataUrl() const;
     bool thumbnailsGenerating() const { return m_thumbnails.isGenerating(); }
     int thumbnailCount() const { return m_thumbnails.count(); }
@@ -287,6 +323,7 @@ signals:
     void documentChanged();
     void serviceAvailabilityChanged();
     void objectSelectionChanged();
+    void objectMaskEdgeChanged();
     void trackingStateChanged();
     void visionStateChanged();
     void generationStateChanged();
@@ -296,11 +333,15 @@ signals:
     void recoveryStateChanged();
     void recentProjectsChanged();
     void activeJobsChanged();
+    void lookupChanged();
     void assistantMessageAppended(const QString &role, const QString &text);
     void welcomeChanged();
 
 private slots:
     void onCanvasObjectClick(QPointF canvasPos, bool positive, QPointF itemPos);
+    void onMaskRefineStarted(const QImage &mask);
+    void onObjectMaskEdited(const QImage &mask);
+    void onMaskRestored(const QImage &mask);
     void onSegmentationMaskReady(const QImage &mask, double score, const QString &method);
     void onSegmentationError(const QString &message);
     void onSegmentationAvailability(bool available, const QString &reason);
@@ -331,9 +372,16 @@ private:
     void buildTrackObject();
     void triggerCompanionEvent(const QString &event);
     QImage objectCrop() const;
+    QImage selectionCrop() const;
     QImage currentAiSource() const;
+    QImage pristineSourceFrame() const;
     QVector<QPointF> positivePointsForTracking() const;
     void startAutosave();
+    /* Total bytes held by tracked-object masks and a bounded-eviction pass
+     * used while a track grows (memory hardening). Returns bytes after
+     * eviction. */
+    qint64 trackedMaskBytes() const;
+    qint64 enforceTrackMaskMemoryBudget();
 
     qt_intf_t *m_intf = nullptr;
     PaintbrushDocument m_document;
@@ -356,6 +404,8 @@ private:
     QString m_objectMaskBoundsText;
     bool m_objectSelectBusy = false;
     QImage m_objectMask;
+    QImage m_maskUndoBefore;   /* mask captured when a refine stroke arms */
+    bool m_objectMaskSoftEdge = false;
 
     QString m_visionConversationId;
     QString m_visionAnswer;
@@ -372,6 +422,7 @@ private:
     QVector<QPointF> m_negPoints;
 
     QVariantList m_assistantMessages;
+    QVariantList m_lookupMatches;
     QString m_companionModeOffReason;
     /* recovery autosave state */
     bool m_recoveryAvailable = false;
@@ -384,6 +435,9 @@ private:
 
     QTimer m_mediaTimer;
     QTimer m_autosaveTimer;
+    /* MRL for which the thumbnail timeline was auto-started, so the timer
+     * does not restart generation on every tick for the same media */
+    QString m_thumbnailsAutoMedia;
 };
 
 } // namespace paintbrush

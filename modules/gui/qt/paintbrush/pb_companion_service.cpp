@@ -70,7 +70,9 @@ bool CompanionService::analysisAllowed() const
 {
     if (m_mode == MODE_OFF)
         return false;
-    if (!m_networkAllowed)
+    /* Kids mode keeps content local unless a responsible adult explicitly
+     * enables network AI; the other modes use the configured assistant. */
+    if (m_mode == MODE_KIDS && !m_networkAllowed)
         return false;
     if (!m_assistant || !m_assistant->isConfigured())
         return false;
@@ -143,13 +145,15 @@ QString CompanionService::buildQuestionPrompt(const QString &question) const
     return prompt;
 }
 
-void CompanionService::runAnalysis(const QString &prompt, const QImage &preview)
+void CompanionService::runAnalysis(const QString &prompt, const QImage &preview,
+                                   bool force)
 {
     if (!analysisAllowed())
         return;
 
-    /* throttle: respect the minimum interval between analyses */
-    if (m_hasLastAnalysis && m_lastAnalysis.elapsed() < m_minIntervalMs)
+    /* throttle: respect the minimum interval between analyses. Explicit
+     * user questions are never throttled — the user asked, we answer. */
+    if (!force && m_hasLastAnalysis && m_lastAnalysis.elapsed() < m_minIntervalMs)
         return;
     m_lastAnalysis.restart();
     m_hasLastAnalysis = true;
@@ -200,7 +204,7 @@ void CompanionService::ask(const QString &question, const QImage &preview)
 {
     if (m_mode == MODE_OFF)
         return;
-    runAnalysis(buildQuestionPrompt(question), preview);
+    runAnalysis(buildQuestionPrompt(question), preview, /*force=*/true);
 }
 
 void CompanionService::onAssistantResponse(const QString &conversationId,

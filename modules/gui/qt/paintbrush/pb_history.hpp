@@ -46,6 +46,15 @@ struct StructureUndoEntry
     QString description;
 };
 
+/* Object-mask refine entry: before/after binary grayscale masks so a
+ * freehand mask stroke is a single undoable operation. */
+struct MaskUndoEntry
+{
+    QImage before;
+    QImage after;
+    QString description;
+};
+
 class UndoStack : public QObject
 {
     Q_OBJECT
@@ -53,10 +62,11 @@ class UndoStack : public QObject
 public:
     explicit UndoStack(QObject *parent = nullptr);
 
-    enum class Kind { Paint, Structure };
+    enum class Kind { Paint, Structure, Mask };
 
     void pushPaint(const PaintUndoEntry &entry);
     void pushStructure(const StructureUndoEntry &entry);
+    void pushMask(const MaskUndoEntry &entry);
 
     bool canUndo() const { return m_undoIndex > 0; }
     bool canRedo() const { return m_undoIndex < m_entries.size(); }
@@ -77,6 +87,9 @@ public:
 signals:
     void canUndoChanged();
     void canRedoChanged();
+    /* Fired on undo/redo of a Mask entry; the controller re-syncs the
+     * active object mask (document + canvas) to `mask`. */
+    void maskRestored(const QImage &mask);
 
 private:
     struct Entry
@@ -84,6 +97,7 @@ private:
         Kind kind = Kind::Paint;
         PaintUndoEntry paint;
         StructureUndoEntry structure;
+        MaskUndoEntry mask;
         qint64 bytes = 0;
     };
 
@@ -92,6 +106,7 @@ private:
     static void restoreRegion(CanvasLayer &layer, const QRect &rect,
                               const QImage &image);
     qint64 paintBytes(const PaintUndoEntry &entry) const;
+    qint64 maskBytes(const MaskUndoEntry &entry) const;
 
     QList<Entry> m_entries;
     int m_undoIndex = 0;

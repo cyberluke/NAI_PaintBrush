@@ -52,6 +52,9 @@ public:
     QImage mask;            /* optional layer mask (gray) */
     QString text;           /* text layer content */
     QPointF position;       /* image layer placement */
+    /* image-layer transform (pivot at the layer content center) */
+    float scale = 1.0f;     /* uniform scale factor */
+    float rotation = 0.0f;  /* degrees, clockwise */
 };
 
 } // namespace paintbrush

@@ -197,6 +197,8 @@ QByteArray PaintbrushDocument::layersSnapshot() const
         obj[QStringLiteral("text")] = layer.text;
         obj[QStringLiteral("posX")] = layer.position.x();
         obj[QStringLiteral("posY")] = layer.position.y();
+        obj[QStringLiteral("scale")] = layer.scale;
+        obj[QStringLiteral("rotation")] = layer.rotation;
 
         QByteArray png;
         QBuffer buffer(&png);
@@ -239,6 +241,8 @@ void PaintbrushDocument::restoreLayersSnapshot(const QByteArray &data)
         layer.text = obj[QStringLiteral("text")].toString();
         layer.position = QPointF(obj[QStringLiteral("posX")].toDouble(0),
                                  obj[QStringLiteral("posY")].toDouble(0));
+        layer.scale = float(obj[QStringLiteral("scale")].toDouble(1.0));
+        layer.rotation = float(obj[QStringLiteral("rotation")].toDouble(0.0));
 
         const QByteArray png = QByteArray::fromBase64(
             obj[QStringLiteral("image")].toString().toLatin1());

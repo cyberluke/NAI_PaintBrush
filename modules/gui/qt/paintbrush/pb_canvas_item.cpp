@@ -103,7 +103,11 @@ void PaintbrushCanvasItem::setTool(int tool)
     /* leaving object select clears the pending AI mask so stale overlays
      * never confuse the user */
     if (tool != TOOL_OBJECT_SELECT)
+    {
+        m_maskPaintActive = false;
+        m_maskPaintUnion = QRect();
         clearObjectMask();
+    }
     emit toolChanged(tool);
     updateStatus(m_lastCanvasPos);
 }
@@ -401,42 +405,107 @@ static void compositeLayer(QImage &tile, const CanvasLayer &layer,
     if (layer.raster.isNull() || !layer.visible)
         return;
 
-    QRect srcRect = tileCanvasRect;
-    if (layer.type == LAYER_IMAGE || layer.type == LAYER_TEXT)
-        srcRect = tileCanvasRect.translated(-layer.position.toPoint());
+    const bool transformed =
+        (layer.type == LAYER_IMAGE || layer.type == LAYER_TEXT) &&
+        (!qFuzzyCompare(layer.scale, 1.0f) || !qFuzzyIsNull(layer.rotation));
 
-    const QRect layerRect = layer.raster.rect();
-    const QRect validSrc = srcRect.intersected(layerRect);
-    if (validSrc.isEmpty())
+    if (!transformed)
+    {
+        QRect srcRect = tileCanvasRect;
+        if (layer.type == LAYER_IMAGE || layer.type == LAYER_TEXT)
+            srcRect = tileCanvasRect.translated(-layer.position.toPoint());
+
+        const QRect layerRect = layer.raster.rect();
+        const QRect validSrc = srcRect.intersected(layerRect);
+        if (validSrc.isEmpty())
+            return;
+
+        const QRect dstRect = validSrc.translated(-tileCanvasRect.topLeft());
+        const QRect srcLocal = validSrc.translated(-layer.position.toPoint());
+
+        QImage layerPart(dstRect.size(), QImage::Format_ARGB32);
+        layerPart.fill(Qt::transparent);
+        {
+            QPainter p(&layerPart);
+            p.setCompositionMode(QPainter::CompositionMode_Source);
+            p.drawImage(QPoint(0, 0), layer.raster, srcLocal);
+            p.end();
+        }
+
+        if (!layer.mask.isNull())
+        {
+            QImage mask = layer.mask.scaled(layer.raster.size(),
+                                            Qt::IgnoreAspectRatio,
+                                            Qt::FastTransformation);
+            QPainter p(&layerPart);
+            p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+            p.drawImage(QPoint(0, 0), maskToImage(mask), validSrc.translated(-layer.position.toPoint()));
+            p.end();
+        }
+
+        QPainter p(&tile);
+        p.setOpacity(layer.opacity);
+        p.setCompositionMode(toCompositionMode(layer.blendMode));
+        p.drawImage(dstRect.topLeft(), layerPart);
+        p.end();
         return;
+    }
 
-    const QRect dstRect = validSrc.translated(-tileCanvasRect.topLeft());
-    const QRect srcLocal = validSrc.translated(-layer.position.toPoint());
-
-    QImage layerPart(dstRect.size(), QImage::Format_ARGB32);
+    /* Transformed image/text layer: render the whole content once with
+     * scale + rotation (pivot at the content center), then composite it at
+     * `position`. Cheap for typical sticker/cutout sizes. */
+    const QRect layerRect = layer.raster.rect();
+    const QPointF contentCenter(layerRect.center());
+    QImage layerPart(layerRect.size(), QImage::Format_ARGB32);
     layerPart.fill(Qt::transparent);
     {
         QPainter p(&layerPart);
         p.setCompositionMode(QPainter::CompositionMode_Source);
-        p.drawImage(QPoint(0, 0), layer.raster, srcLocal);
+        p.drawImage(QPoint(0, 0), layer.raster);
+        if (!layer.mask.isNull())
+        {
+            QImage mask = layer.mask.scaled(layerRect.size(),
+                                            Qt::IgnoreAspectRatio,
+                                            Qt::FastTransformation);
+            p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+            p.drawImage(QPoint(0, 0), maskToImage(mask));
+        }
         p.end();
     }
 
-    if (!layer.mask.isNull())
+    /* transform around the content center */
+    QTransform tf;
+    tf.translate(contentCenter.x(), contentCenter.y());
+    tf.rotate(layer.rotation);
+    tf.scale(layer.scale, layer.scale);
+    tf.translate(-contentCenter.x(), -contentCenter.y());
+
+    QImage drawn = layerPart.transformed(tf, Qt::SmoothTransformation);
+    /* anchor the transformed content at `position` (position = top-left of
+     * the *original* content; keep that corner visually stable under scale
+     * so a small scale does not jump the cutout) */
+    const QPointF drawAt = layer.position;
+
+    /* source rectangle of the transformed image that lands in this tile */
+    const QRect drawRect(drawAt.toPoint(), drawn.size());
+    const QRect tileRectC = tileCanvasRect;
+    const QRect visible = drawRect.intersected(tileRectC);
+    if (visible.isEmpty())
+        return;
+
+    QImage tilePart(visible.size(), QImage::Format_ARGB32);
+    tilePart.fill(Qt::transparent);
     {
-        QImage mask = layer.mask.scaled(layer.raster.size(),
-                                        Qt::IgnoreAspectRatio,
-                                        Qt::FastTransformation);
-        QPainter p(&layerPart);
-        p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
-        p.drawImage(QPoint(0, 0), maskToImage(mask), validSrc.translated(-layer.position.toPoint()));
+        QPainter p(&tilePart);
+        p.setCompositionMode(QPainter::CompositionMode_Source);
+        p.drawImage(QPoint(0, 0), drawn, visible.translated(-drawRect.topLeft()));
         p.end();
     }
 
     QPainter p(&tile);
     p.setOpacity(layer.opacity);
     p.setCompositionMode(toCompositionMode(layer.blendMode));
-    p.drawImage(dstRect.topLeft(), layerPart);
+    p.drawImage(visible.topLeft() - tileRectC.topLeft(), tilePart);
     p.end();
 }
 
@@ -889,7 +958,23 @@ void PaintbrushCanvasItem::beginStroke(const QPointF &canvasPos, bool primary)
 
     case TOOL_OBJECT_SELECT:
         if (primary)
-            emit objectSelectClick(canvasPos, true, itemFromCanvas(canvasPos));
+        {
+            if (!m_objectMask.isNull())
+            {
+                /* freehand add onto the existing mask: arm the stroke but
+                 * wait for real movement so a plain click stays a SAM
+                 * point refinement */
+                m_strokeActive = true;
+                m_maskPaintActive = true;
+                m_maskPaintSubtract = false;
+                m_maskPaintDirty = false;
+                m_maskPaintUnion = QRect();
+                m_maskPaintLastPos = canvasPos;
+                emit maskRefineStarted(m_objectMask);
+            }
+            else
+                emit objectSelectClick(canvasPos, true, itemFromCanvas(canvasPos));
+        }
         break;
 
     case TOOL_PAN_ZOOM:
@@ -957,6 +1042,26 @@ void PaintbrushCanvasItem::continueStroke(const QPointF &canvasPos)
                 updateSelectionFromDrag(canvasPos);
                 m_dragLastCanvas = canvasPos;
             }
+        }
+        break;
+
+    case TOOL_OBJECT_SELECT:
+        if (m_maskPaintActive)
+        {
+            if (!m_maskPaintDirty)
+            {
+                /* first real movement: paint from the press point */
+                if ((canvasPos - m_maskPaintLastPos).manhattanLength() < 3.0)
+                    break; /* still a click, keep waiting */
+                paintObjectMaskSegment(m_maskPaintLastPos, canvasPos,
+                                       m_maskPaintSubtract);
+            }
+            else
+            {
+                paintObjectMaskSegment(m_maskPaintLastPos, canvasPos,
+                                       m_maskPaintSubtract);
+            }
+            m_maskPaintLastPos = canvasPos;
         }
         break;
 
@@ -1049,6 +1154,29 @@ void PaintbrushCanvasItem::endStroke(const QPointF &canvasPos, bool primary)
                 finishSelection();
             }
             markAllTilesDirty();
+        }
+        break;
+
+    case TOOL_OBJECT_SELECT:
+        if (m_maskPaintActive)
+        {
+            const bool painted = m_maskPaintDirty;
+            if (painted)
+            {
+                paintObjectMaskSegment(m_maskPaintLastPos, canvasPos,
+                                       m_maskPaintSubtract);
+                m_maskPaintLastPos = canvasPos;
+            }
+            endObjectMaskStroke();
+            if (!painted)
+            {
+                /* click without movement: SAM point refinement (positive =
+                 * primary, negative = alt/right, which armed the stroke) */
+                m_strokeActive = false;
+                emit objectSelectClick(canvasPos, !m_maskPaintSubtract,
+                                       itemFromCanvas(canvasPos));
+            }
+            updateStatus(canvasPos);
         }
         break;
 
@@ -2037,6 +2165,9 @@ void PaintbrushCanvasItem::clearObjectMask()
 {
     m_objectMask = QImage();
     m_objectScore = 0.0;
+    m_maskPaintActive = false;
+    m_maskPaintDirty = false;
+    m_maskPaintUnion = QRect();
     setObjectMaskVisible(false);
     markAllTilesDirty();
 }
@@ -2085,6 +2216,77 @@ void PaintbrushCanvasItem::setObjectSelectBusy(bool busy)
     m_objectSelectBusy = busy;
     emit objectSelectBusyChanged(busy);
     update();
+}
+
+/* Freehand mask refinement. The mask is a binary grayscale image in canvas
+ * coordinates; painting stamps a circular brush into it (add = raise to 255,
+ * subtract = drop to 0) and dirties only the touched tiles. Stroke lifecycle
+ * (active/subtract/dirty) is managed by the input handlers so a plain click
+ * can still fall back to a SAM point refinement. */
+void PaintbrushCanvasItem::paintObjectMask(const QPointF &canvasPos, bool subtract)
+{
+    if (m_objectMask.isNull())
+        return;
+    if (m_objectMask.format() != QImage::Format_Grayscale8)
+        m_objectMask = maskToImage(m_objectMask);
+
+    const qreal pressure = pressureFactor();
+    const qreal radius = qMax(qreal(1.0), m_brushSize * 0.5 * pressure);
+    const QRectF af = QRectF(canvasPos.x() - radius, canvasPos.y() - radius,
+                             radius * 2.0, radius * 2.0);
+    const QRect affected = af.toAlignedRect().intersected(m_objectMask.rect());
+    if (affected.isEmpty())
+        return;
+
+    const qreal r2 = radius * radius;
+    for (int y = affected.top(); y <= affected.bottom(); ++y)
+    {
+        uchar *line = m_objectMask.scanLine(y);
+        for (int x = affected.left(); x <= affected.right(); ++x)
+        {
+            const qreal dx = (x + 0.5) - canvasPos.x();
+            const qreal dy = (y + 0.5) - canvasPos.y();
+            if (dx * dx + dy * dy <= r2)
+            {
+                if (subtract)
+                    line[x] = 0;
+                else
+                    line[x] = 255;
+            }
+        }
+    }
+    m_maskPaintDirty = true;
+    m_maskPaintUnion = m_maskPaintUnion.isNull()
+        ? affected : m_maskPaintUnion.united(affected);
+    markTilesDirty(affected);
+}
+
+void PaintbrushCanvasItem::paintObjectMaskSegment(const QPointF &from,
+                                                  const QPointF &to,
+                                                  bool subtract)
+{
+    const QLineF seg(from, to);
+    const qreal len = seg.length();
+    const qreal step = qMax(qreal(1.0), m_brushSize * 0.25);
+    const int n = qMax(1, int(qCeil(len / step)));
+    const QPointF delta = to - from;
+    for (int i = 0; i <= n; ++i)
+    {
+        const qreal t = n ? qreal(i) / qreal(n) : 0.0;
+        paintObjectMask(from + delta * t, subtract);
+    }
+}
+
+void PaintbrushCanvasItem::endObjectMaskStroke()
+{
+    if (!m_maskPaintActive)
+        return;
+    m_maskPaintActive = false;
+    const bool painted = m_maskPaintDirty;
+    m_maskPaintDirty = false;
+    m_maskPaintUnion = QRect();
+    if (painted && !m_objectMask.isNull())
+        emit objectMaskEdited(m_objectMask);
 }
 
 /* ------------------------------------------------------------------ view */
@@ -2173,10 +2375,24 @@ void PaintbrushCanvasItem::mousePressEvent(QMouseEvent *event)
     const bool primary = event->button() == Qt::LeftButton;
     const bool alt = event->modifiers().testFlag(Qt::AltModifier);
 
-    /* Object Select: right-click / alt-click adds a negative point */
+    /* Object Select: right-click / alt-click adds a negative point, or
+     * paints subtract onto an existing mask (freehand refinement) */
     if (m_tool == TOOL_OBJECT_SELECT &&
         (event->button() == Qt::RightButton || alt))
     {
+        if (!m_objectMask.isNull())
+        {
+            /* arm a subtract stroke; a plain click stays a negative SAM point */
+            m_strokeActive = true;
+            m_maskPaintActive = true;
+            m_maskPaintSubtract = true;
+            m_maskPaintDirty = false;
+            m_maskPaintUnion = QRect();
+            m_maskPaintLastPos = canvasPos;
+            emit maskRefineStarted(m_objectMask);
+            event->accept();
+            return;
+        }
         emit objectSelectClick(canvasPos, false, itemFromCanvas(canvasPos));
         event->accept();
         return;
@@ -2396,7 +2612,14 @@ void PaintbrushCanvasItem::updateStatus(const QPointF &canvasPos)
     if (m_tabletActive)
         text += QStringLiteral("   pen %1").arg(m_currentPressure, 0, 'f', 2);
     if (m_objectMaskVisible)
-        text += QStringLiteral("   object selected");
+    {
+        if (m_tool == TOOL_OBJECT_SELECT && m_maskPaintActive)
+            text += QStringLiteral("   refining mask (%1)  radius %2 px").arg(
+                m_maskPaintSubtract ? QStringLiteral("erase") : QStringLiteral("paint"))
+                .arg(qMax<qreal>(1.0, m_brushSize * 0.5));
+        else
+            text += QStringLiteral("   object selected");
+    }
     if (m_statusText == text)
         return;
     m_statusText = text;
