@@ -29,6 +29,13 @@ Item {
         colorSet: ColorContext.View
     }
 
+    /* The video output is a native window layered behind this (transparent)
+     * QML view. Instead of a full-cover opaque background (which would hide
+     * the video completely), the chrome elements below each paint their own
+     * opaque background; the central canvas area stays transparent so the
+     * playing video is visible there as the frame source/desktop while the
+     * tool rail, palette, docks and media drawer remain readable. */
+
     /* Client-side decoration is the default on Windows (frameless window):
      * the workspace top bar must provide the drag surface and the window
      * control buttons itself. */
@@ -49,6 +56,16 @@ Item {
         onAccepted: {
             if (selectedFile)
                 PaintbrushCtx.openImageFile(selectedFile)
+        }
+    }
+
+    FileDialog {
+        id: openVideoDialog
+        title: qsTr("Open a video")
+        nameFilters: ["Video files (*.mp4 *.mkv *.avi *.mov *.webm *.ts *.m4v)", "All files (*)"]
+        onAccepted: {
+            if (selectedFile)
+                PaintbrushCtx.openVideoFile(selectedFile)
         }
     }
 
@@ -93,6 +110,7 @@ Item {
         id: projectInfoDialog
         title: qsTr("Project info")
         modal: true
+        width: Math.min(Overlay.overlay ? Overlay.overlay.width : 640, VLCStyle.dp(520, VLCStyle.scale))
         x: Overlay.overlay ? Math.round((Overlay.overlay.width - width) / 2) : 0
         y: Overlay.overlay ? Math.round((Overlay.overlay.height - height) / 2) : 0
         standardButtons: Dialog.Close
@@ -199,6 +217,11 @@ Item {
                 onClicked: openImageDialog.open()
             }
             Widgets.IconToolButton {
+                text: VLCIcons.topbar_video
+                description: qsTr("Open video…")
+                onClicked: openVideoDialog.open()
+            }
+            Widgets.IconToolButton {
                 text: VLCIcons.ic_fluent_document_add_24_regular
                 description: qsTr("Save project")
                 enabled: PaintbrushCtx.hasOpenDocument
@@ -288,7 +311,9 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        height: visible ? VLCStyle.dp(140, VLCStyle.scale) : 0
+        /* size to the content (transport + media + tracked lane + timeline)
+         * instead of a fixed height, so the timeline never overflows */
+        height: visible ? implicitHeight : 0
         visible: PaintbrushCtx.playerHasVideo
     }
 
@@ -297,6 +322,7 @@ Item {
         anchors.fill: mainRow
         visible: PaintbrushCtx.welcomeVisible
         z: 10
+        onOpenVideoRequested: openVideoDialog.open()
     }
 
     /* crash recovery banner */
@@ -367,6 +393,6 @@ Item {
     Shortcut { sequence: "Ctrl+Right"; onActivated: PaintbrushCtx.playerFrameNext() }
     Shortcut { sequence: "Ctrl+Space"; onActivated: PaintbrushCtx.playerPlayPause() }
     Shortcut { sequence: "Ctrl+U"; onActivated: PaintbrushCtx.captureVideoFrame() }
-    Shortcut { sequence: "Ctrl+I"; onActivated: assistantDock.visible = !assistantDock.visible }
-    Shortcut { sequence: "Escape"; onActivated: PaintbrushCtx.cancelTracking(); PaintbrushCtx.cancelGeneration(); PaintbrushCtx.cancelThumbnails() }
+    Shortcut { sequence: "Ctrl+I"; onActivated: PaintbrushCtx.setCompanionMode(PaintbrushCtx.companionMode === 0 ? 2 : 0) }
+    Shortcut { sequence: "Escape"; onActivated: { PaintbrushCtx.cancelTracking(); PaintbrushCtx.cancelGeneration(); PaintbrushCtx.cancelThumbnails() } }
 }

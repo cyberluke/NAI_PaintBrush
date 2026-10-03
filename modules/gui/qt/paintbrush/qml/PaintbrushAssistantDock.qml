@@ -7,6 +7,7 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
+import QtQuick.Controls.Basic as Basic
 
 import VLC.MainInterface
 import VLC.Widgets as Widgets
@@ -70,7 +71,7 @@ Item {
                     { mode: 2, label: qsTr("Buddy") },
                     { mode: 3, label: qsTr("Kids") }
                 ]
-                Button {
+                Basic.Button {
                     Layout.fillWidth: true
                     text: modelData.label
                     checkable: true
@@ -106,7 +107,7 @@ Item {
                     { level: 1, label: qsTr("Talk less") },
                     { level: 2, label: qsTr("Talk") }
                 ]
-                Button {
+                Basic.Button {
                     Layout.fillWidth: true
                     text: modelData.label
                     checkable: true
@@ -156,16 +157,24 @@ Item {
                     color: modelData.role === "user"
                            ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.12)
                            : Qt.rgba(0.5, 0.5, 0.5, 0.12)
-                    implicitHeight: msgText.implicitHeight + VLCStyle.margin_xsmall * 2
+                    implicitHeight: msgText.contentHeight + VLCStyle.margin_xsmall * 2
 
-                    Widgets.LabelExt {
+                    /* read-only TextEdit so the message text can be selected
+                     * and copied (Label/Text do not support selection) */
+                    TextEdit {
                         id: msgText
                         anchors.fill: parent
                         anchors.margins: VLCStyle.margin_xsmall
                         text: modelData.text
+                        readOnly: true
+                        selectByMouse: true
                         color: theme.fg.primary
+                        selectionColor: Qt.rgba(theme.accent.r, theme.accent.g,
+                                                theme.accent.b, 0.35)
+                        selectedTextColor: theme.fg.primary
                         font.pixelSize: VLCStyle.fontSize_small
                         wrapMode: Text.WordWrap
+                        persistentSelection: true
                     }
                 }
             }

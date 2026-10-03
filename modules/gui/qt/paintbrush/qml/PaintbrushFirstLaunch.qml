@@ -17,6 +17,10 @@ import VLC.Paintbrush
 Item {
     id: root
 
+    /* ask the workspace to open the video file picker (a video must be
+     * loaded in the main player before frames can be captured) */
+    signal openVideoRequested()
+
     ColorContext {
         id: theme
         colorSet: ColorContext.View
@@ -74,9 +78,14 @@ Item {
             Layout.alignment: Qt.AlignHCenter
             Layout.preferredWidth: parent.width * 0.55
             Layout.preferredHeight: VLCStyle.dp(72, VLCStyle.scale)
-            text: qsTr("Play with a video")
-            enabled: PaintbrushCtx.playerHasVideo
-            onClicked: PaintbrushCtx.captureVideoFrame()
+            text: PaintbrushCtx.playerHasVideo ? qsTr("Capture video frame")
+                                               : qsTr("Play with a video…")
+            onClicked: {
+                if (PaintbrushCtx.playerHasVideo)
+                    PaintbrushCtx.captureVideoFrame()
+                else
+                    root.openVideoRequested()
+            }
         }
 
         Widgets.LabelExt {

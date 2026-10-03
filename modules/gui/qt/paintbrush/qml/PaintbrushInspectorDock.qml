@@ -152,6 +152,43 @@ Item {
             }
         }
 
+        /* image-layer transform (scale / rotation; pivot at content center) */
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: VLCStyle.margin_xsmall
+
+            Widgets.LabelExt {
+                text: qsTr("Scale")
+                color: theme.fg.secondary
+                font.pixelSize: VLCStyle.fontSize_xxxsmall
+            }
+            Widgets.SpinBoxExt {
+                id: layerScaleSpin
+                Layout.fillWidth: true
+                from: 1
+                to: 400
+                value: 100
+                onValueModified: PaintbrushCtx.transformLayer(
+                                     layerList.currentIndex, value / 100.0,
+                                     layerRotSpin.value)
+            }
+            Widgets.LabelExt {
+                text: qsTr("Rot")
+                color: theme.fg.secondary
+                font.pixelSize: VLCStyle.fontSize_xxxsmall
+            }
+            Widgets.SpinBoxExt {
+                id: layerRotSpin
+                Layout.preferredWidth: VLCStyle.dp(64, VLCStyle.scale)
+                from: -180
+                to: 180
+                value: 0
+                onValueModified: PaintbrushCtx.transformLayer(
+                                     layerList.currentIndex, layerScaleSpin.value / 100.0,
+                                     value)
+            }
+        }
+
         Widgets.LabelExt {
             text: qsTr("Selection")
             color: theme.fg.secondary
@@ -237,6 +274,12 @@ Item {
             }
             Widgets.ActionButtonPrimary {
                 Layout.fillWidth: true
+                text: qsTr("Extract object…")
+                enabled: PaintbrushCtx.objectSelected
+                onClicked: PaintbrushCtx.extractObject()
+            }
+            Widgets.ActionButtonPrimary {
+                Layout.fillWidth: true
                 text: qsTr("Replace background…")
                 enabled: PaintbrushCtx.objectSelected && PaintbrushCtx.generationConfigured
                 onClicked: bgPromptDialog.open()
@@ -251,13 +294,45 @@ Item {
                 Layout.fillWidth: true
                 text: qsTr("Find product…")
                 enabled: PaintbrushCtx.lookupAvailable && PaintbrushCtx.objectSelected
-                onClicked: PaintbrushCtx.companionAsk(
-                               qsTr("What brand or product is the selected object, if the visual evidence supports it?"))
+                onClicked: PaintbrushCtx.findProduct()
             }
             Widgets.ActionButtonPrimary {
                 Layout.fillWidth: true
                 text: qsTr("Auto collage…")
                 onClicked: collageDialog.open()
+            }
+
+            /* freehand mask refinement hint (Object Select tool) */
+            Widgets.LabelExt {
+                Layout.fillWidth: true
+                text: qsTr("Object Select: drag on the mask to paint it in, Alt-drag or right-drag to erase it. Brush size is used.")
+                color: theme.fg.secondary
+                font.pixelSize: VLCStyle.fontSize_xxxsmall
+                wrapMode: Text.WordWrap
+                visible: PaintbrushCtx.objectSelected
+            }
+
+            /* object mask edge mode (Hard = crisp boundary, Soft = feathered alpha) */
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: VLCStyle.margin_xsmall
+                visible: PaintbrushCtx.objectSelected
+
+                Widgets.LabelExt {
+                    text: qsTr("Edge")
+                    color: theme.fg.secondary
+                    font.pixelSize: VLCStyle.fontSize_xsmall
+                    Layout.fillWidth: true
+                }
+                Widgets.IconToolButton {
+                    text: PaintbrushCtx.objectMaskSoftEdge ? VLCIcons.ic_fluent_arrow_sync_24_regular : VLCIcons.ic_fluent_full_screen_maximize
+                    description: qsTr("Soft edge (feathered alpha)")
+                    checkable: true
+                    checked: PaintbrushCtx.objectMaskSoftEdge
+                    onClicked: PaintbrushCtx.objectMaskSoftEdge
+                               ? PaintbrushCtx.setObjectMaskEdgeHard()
+                               : PaintbrushCtx.setObjectMaskEdgeSoft()
+                }
             }
         }
 
@@ -339,6 +414,61 @@ Item {
                     Button {
                         text: qsTr("Clear")
                         onClicked: PaintbrushCtx.clearVisionResult()
+                    }
+                }
+            }
+        }
+
+        /* "Find product" result */
+        Rectangle {
+            Layout.fillWidth: true
+            radius: VLCStyle.margin_xsmall
+            color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.08)
+            visible: PaintbrushCtx.lookupMatches.length > 0
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: VLCStyle.margin_small
+                spacing: VLCStyle.margin_xxxsmall
+
+                Repeater {
+                    model: PaintbrushCtx.lookupMatches
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 0
+                        Widgets.LabelExt {
+                            Layout.fillWidth: true
+                            text: modelData.title
+                            color: theme.fg.primary
+                            font.pixelSize: VLCStyle.fontSize_small
+                            font.bold: true
+                            wrapMode: Text.WordWrap
+                        }
+                        Widgets.LabelExt {
+                            Layout.fillWidth: true
+                            text: modelData.description
+                            color: theme.fg.secondary
+                            font.pixelSize: VLCStyle.fontSize_xsmall
+                            wrapMode: Text.WordWrap
+                        }
+                        Widgets.LabelExt {
+                            Layout.fillWidth: true
+                            text: {
+                                const md = modelData.metadata
+                                let parts = []
+                                if (md && md.category) parts.push(md.category)
+                                if (md && md.brand) parts.push(md.brand)
+                                if (md && md.model) parts.push(md.model)
+                                if (modelData.confidence > 0)
+                                    parts.push(qsTr("%1% confident")
+                                               .arg(Math.round(modelData.confidence * 100)))
+                                return parts.join(" · ")
+                            }
+                            visible: text.length > 0
+                            color: theme.accent
+                            font.pixelSize: VLCStyle.fontSize_xxxsmall
+                            wrapMode: Text.WordWrap
+                        }
                     }
                 }
             }
@@ -466,6 +596,7 @@ Item {
         id: textPromptDialog
         title: qsTr("Find by words")
         modal: true
+        width: Math.min(Overlay.overlay ? Overlay.overlay.width : 640, VLCStyle.dp(480, VLCStyle.scale))
         x: Overlay.overlay ? Math.round((Overlay.overlay.width - width) / 2) : 0
         y: Overlay.overlay ? Math.round((Overlay.overlay.height - height) / 2) : 0
         standardButtons: Dialog.Ok | Dialog.Cancel
@@ -476,6 +607,7 @@ Item {
                 text: qsTr("Describe the object, e.g. “handbag”, “red lipstick”, “microphone”")
                 color: theme.fg.secondary
                 wrapMode: Text.WordWrap
+                Layout.fillWidth: true
             }
             TextField {
                 id: textPromptField
@@ -491,6 +623,7 @@ Item {
         id: bgPromptDialog
         title: qsTr("Replace background")
         modal: true
+        width: Math.min(Overlay.overlay ? Overlay.overlay.width : 640, VLCStyle.dp(480, VLCStyle.scale))
         x: Overlay.overlay ? Math.round((Overlay.overlay.width - width) / 2) : 0
         y: Overlay.overlay ? Math.round((Overlay.overlay.height - height) / 2) : 0
         standardButtons: Dialog.Ok | Dialog.Cancel
@@ -501,6 +634,7 @@ Item {
                 text: qsTr("Describe the new background (empty = gentle gradient)")
                 color: theme.fg.secondary
                 wrapMode: Text.WordWrap
+                Layout.fillWidth: true
             }
             TextField {
                 id: bgPromptField
@@ -516,6 +650,7 @@ Item {
         id: fillPromptDialog
         title: qsTr("Generative fill")
         modal: true
+        width: Math.min(Overlay.overlay ? Overlay.overlay.width : 640, VLCStyle.dp(480, VLCStyle.scale))
         x: Overlay.overlay ? Math.round((Overlay.overlay.width - width) / 2) : 0
         y: Overlay.overlay ? Math.round((Overlay.overlay.height - height) / 2) : 0
         standardButtons: Dialog.Ok | Dialog.Cancel
@@ -526,6 +661,7 @@ Item {
                 text: qsTr("What should fill the selection?")
                 color: theme.fg.secondary
                 wrapMode: Text.WordWrap
+                Layout.fillWidth: true
             }
             TextField {
                 id: fillPromptField
@@ -541,6 +677,7 @@ Item {
         id: collageDialog
         title: qsTr("Auto collage")
         modal: true
+        width: Math.min(Overlay.overlay ? Overlay.overlay.width : 640, VLCStyle.dp(480, VLCStyle.scale))
         x: Overlay.overlay ? Math.round((Overlay.overlay.width - width) / 2) : 0
         y: Overlay.overlay ? Math.round((Overlay.overlay.height - height) / 2) : 0
         standardButtons: Dialog.Close
@@ -552,6 +689,7 @@ Item {
                 text: qsTr("Arrange the content layers into a layout. Every piece stays an editable layer.")
                 color: theme.fg.secondary
                 wrapMode: Text.WordWrap
+                Layout.fillWidth: true
             }
 
             GridLayout {

@@ -15,44 +15,62 @@ import VLC.Style
 import VLC.Paintbrush
 
 /* The canvas area: checkered transparency background, the tile canvas item
- * and the contextual selection/object toolbar that appears when something
- * is selected. The canvas item itself is owned by the workspace root and
- * is reparented here so it can be shared with the tool rail and palette. */
-Item {
-    id: root
+     * and the contextual selection/object toolbar that appears when something
+     * is selected. The canvas item itself is owned by the workspace root and
+     * is reparented here so it can be shared with the tool rail and palette.
+     *
+     * When a video is loaded the video output (a native window layered behind
+     * this transparent QML view) is anchored to this area by the VideoSurface
+     * below, and the checkerboard is hidden so the playing video shows through
+     * the blank canvas as the frame source. The chrome (tool rail, top bar,
+     * palette, docks, media drawer) paints its own opaque background, so the
+     * video stays confined to the canvas area. */
+    Item {
+        id: root
 
-    required property PaintbrushCanvas canvas
+        required property PaintbrushCanvas canvas
 
-    ColorContext {
-        id: theme
-        colorSet: ColorContext.View
-    }
+        ColorContext {
+            id: theme
+            colorSet: ColorContext.View
+        }
 
-    Component.onCompleted: {
-        canvas.parent = root
-        canvas.anchors.fill = root
-        canvas.visible = true
-    }
+        Component.onCompleted: {
+            canvas.parent = root
+            canvas.anchors.fill = root
+            canvas.visible = true
+        }
 
-    /* checkerboard behind transparent content */
-    Grid {
-        id: checkerGrid
+        /* anchors the native video window to the canvas area */
+        VideoSurface {
+            id: videoSurface
+            anchors.fill: parent
+            renderingEnabled: false
+            videoSurfaceProvider: MainCtx.videoSurfaceProvider
+            visible: PaintbrushCtx.playerHasVideo
+        }
 
-        anchors.fill: parent
-        columns: Math.max(1, Math.ceil(width / 16))
-        rows: Math.max(1, Math.ceil(height / 16))
+        /* checkerboard behind transparent content; hidden while a video is
+         * loaded so the video picture serves as the canvas backdrop */
+        Grid {
+            id: checkerGrid
 
-        Repeater {
-            model: checkerGrid.columns * checkerGrid.rows
-            Rectangle {
-                width: 16
-                height: 16
-                color: (Math.floor(index / checkerGrid.columns) + index % checkerGrid.columns) % 2 === 0
-                       ? theme.bg.primary
-                       : Qt.darker(theme.bg.primary, 1.06)
+            anchors.fill: parent
+            visible: !PaintbrushCtx.playerHasVideo
+            columns: Math.max(1, Math.ceil(width / 16))
+            rows: Math.max(1, Math.ceil(height / 16))
+
+            Repeater {
+                model: checkerGrid.columns * checkerGrid.rows
+                Rectangle {
+                    width: 16
+                    height: 16
+                    color: (Math.floor(index / checkerGrid.columns) + index % checkerGrid.columns) % 2 === 0
+                           ? theme.bg.primary
+                           : Qt.darker(theme.bg.primary, 1.06)
+                }
             }
         }
-    }
 
     /* contextual toolbar: selection / object actions */
     Rectangle {

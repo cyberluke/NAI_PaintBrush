@@ -7,6 +7,7 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
+import QtQuick.Controls.Basic as Basic
 
 import VLC.MainInterface
 import VLC.Widgets as Widgets
@@ -41,7 +42,7 @@ Item {
         Component {
             id: toolButton
 
-            Button {
+            Basic.Button {
                 id: btn
 
                 property int toolId: 0

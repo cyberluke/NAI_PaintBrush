@@ -15,9 +15,16 @@ import VLC.Style
 import VLC.Paintbrush
 
 /* Bottom drawer: transport controls, timestamp, frame stepping, seek bar,
- * "use this frame", and the tracked-object lane. */
+ * "use this frame", and the tracked-object lane. The drawer sizes itself
+ * to its content (implicitHeight) so the thumbnail timeline never
+ * overflows the panel. */
 Item {
     id: root
+
+    /* content-driven height: transport + media + tracked lane (when
+     * visible) + thumbnail timeline (when a video with a known length is
+     * loaded), plus margins/spacing */
+    implicitHeight: contentColumn.implicitHeight
 
     ColorContext {
         id: theme
@@ -32,6 +39,7 @@ Item {
     }
 
     ColumnLayout {
+        id: contentColumn
         anchors.fill: parent
         anchors.margins: VLCStyle.margin_small
         spacing: VLCStyle.margin_xsmall
@@ -68,7 +76,28 @@ Item {
                 Layout.alignment: Qt.AlignVCenter
                 from: 0
                 to: Math.max(1, PaintbrushCtx.playerLengthMs)
-                onMoved: PaintbrushCtx.playerSeek(value)
+
+                /* While the user drags, suspend the thumbnail batch so it
+                 * cannot seek the player underneath the drag (each competing
+                 * precise seek flushes the decoder mid-GOP and leaves a
+                 * partially-decoded frame on screen). Seeking itself is
+                 * debounced so a fast drag does not fire a dozen precise
+                 * seeks per second; the final position is applied on release. */
+                onPressedChanged: {
+                    if (pressed)
+                        PaintbrushCtx.playerSeekBegin()
+                    else {
+                        PaintbrushCtx.playerSeekEnd()
+                        PaintbrushCtx.playerSeek(seekSlider.value)
+                    }
+                }
+                onMoved: seekThrottle.restart()
+
+                Timer {
+                    id: seekThrottle
+                    interval: 80
+                    onTriggered: PaintbrushCtx.playerSeek(seekSlider.value)
+                }
 
                 /* Follow playback time, but pause the binding while the
                  * user drags so the slider does not fight the model and
@@ -209,19 +238,15 @@ Item {
 
                 Widgets.IconToolButton {
                     text: VLCIcons.add
-                    description: qsTr("Make animated sticker from the last track")
+                    description: qsTr("Make animated sticker from a track")
                     visible: PaintbrushCtx.document.trackCount > 0
-                    onClicked: stickerDirDialog.open()
+                    onClicked: {
+                        stickerEditor.trackId = 0
+                        stickerEditor.startFrame = 0
+                        stickerEditor.endFrame = Math.max(0, PaintbrushCtx.stickerEditorKeyframeCount(0) - 1)
+                        stickerEditor.open()
+                    }
                 }
-            }
-        }
-
-        FolderDialog {
-            id: stickerDirDialog
-            title: qsTr("Choose a folder for the animated sticker sequence")
-            onAccepted: {
-                if (currentFolder)
-                    PaintbrushCtx.exportTrackedSticker(0, currentFolder)
             }
         }
 
@@ -318,6 +343,194 @@ Item {
                     }
                 }
             }
+        }
+    }
+
+    /* Animated sticker editor: preview loop, trim, outline, shadow,
+     * scale, speed; place a frame on the canvas or export the trimmed
+     * transparent PNG sequence. Declared at the drawer root (not inside the
+     * content column) so opening it never changes the drawer height. */
+    Dialog {
+        id: stickerEditor
+        title: qsTr("Animated sticker")
+        modal: true
+        width: Math.min(Overlay.overlay ? Overlay.overlay.width : 640, VLCStyle.dp(520, VLCStyle.scale))
+        x: Overlay.overlay ? Math.round((Overlay.overlay.width - width) / 2) : 0
+        y: Overlay.overlay ? Math.round((Overlay.overlay.height - height) / 2) : 0
+
+        property int trackId: 0
+        property int startFrame: 0
+        property int endFrame: 0
+        property int previewFrame: 0
+
+        function frameCount() { return PaintbrushCtx.stickerEditorKeyframeCount(trackId) }
+        function stepPreview() {
+            const n = frameCount()
+            if (n <= 0) return
+            if (previewFrame > endFrame || previewFrame < startFrame)
+                previewFrame = startFrame
+            else
+                previewFrame = (previewFrame + 1 <= endFrame) ? previewFrame + 1 : startFrame
+        }
+
+        onOpened: {
+            previewFrame = startFrame
+            previewTimer.start()
+        }
+        onClosed: previewTimer.stop()
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: VLCStyle.margin_normal
+            spacing: VLCStyle.margin_small
+
+            /* preview loop */
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: VLCStyle.dp(140, VLCStyle.scale)
+                color: Qt.rgba(theme.bg.primary.r, theme.bg.primary.g, theme.bg.primary.b, 0.6)
+                border.width: 1
+                border.color: theme.border
+                radius: VLCStyle.margin_xsmall
+
+                Image {
+                    anchors.centerIn: parent
+                    width: Math.min(parent.width - 20, parent.height - 20)
+                    height: parent.height - 20
+                    fillMode: Image.PreserveAspectFit
+                    source: stickerEditor.frameCount() > 0
+                            ? PaintbrushCtx.stickerEditorPreviewDataUrl(
+                                  stickerEditor.trackId, stickerEditor.previewFrame,
+                                  outlineSpin.value, outlineColorField.text,
+                                  shadowCheck.checked, scaleSpin.value / 100.0)
+                            : ""
+                    asynchronous: true
+                }
+                Widgets.LabelExt {
+                    anchors.bottom: parent.bottom
+                    anchors.right: parent.right
+                    anchors.margins: VLCStyle.margin_xsmall
+                    text: stickerEditor.frameCount() > 0
+                          ? qsTr("%1 / %2").arg(stickerEditor.previewFrame + 1)
+                                            .arg(stickerEditor.frameCount())
+                          : qsTr("No keyframes")
+                    color: theme.fg.secondary
+                    font.pixelSize: VLCStyle.fontSize_xxxsmall
+                }
+            }
+            Timer {
+                id: previewTimer
+                interval: 120
+                repeat: true
+                running: stickerEditor.visible
+                onTriggered: stickerEditor.stepPreview()
+            }
+
+            /* trim range */
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: VLCStyle.margin_xsmall
+                Widgets.LabelExt { text: qsTr("Trim"); color: theme.fg.secondary }
+                Widgets.SpinBoxExt {
+                    id: trimStartSpin
+                    Layout.fillWidth: true
+                    from: 0
+                    to: Math.max(0, stickerEditor.frameCount() - 1)
+                    value: stickerEditor.startFrame
+                    onValueModified: stickerEditor.startFrame = value
+                }
+                Widgets.LabelExt { text: qsTr("–"); color: theme.fg.secondary }
+                Widgets.SpinBoxExt {
+                    id: trimEndSpin
+                    Layout.fillWidth: true
+                    from: trimStartSpin.value
+                    to: Math.max(trimStartSpin.value, stickerEditor.frameCount() - 1)
+                    value: stickerEditor.endFrame
+                    onValueModified: stickerEditor.endFrame = value
+                }
+                Widgets.LabelExt {
+                    text: qsTr("of %1").arg(stickerEditor.frameCount())
+                    color: theme.fg.secondary
+                }
+            }
+
+            /* outline */
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: VLCStyle.margin_xsmall
+                Widgets.LabelExt { text: qsTr("Outline"); color: theme.fg.secondary }
+                Widgets.SpinBoxExt {
+                    id: outlineSpin
+                    Layout.preferredWidth: VLCStyle.dp(70, VLCStyle.scale)
+                    from: 0
+                    to: 20
+                    value: 3
+                }
+                TextField {
+                    id: outlineColorField
+                    Layout.preferredWidth: VLCStyle.dp(90, VLCStyle.scale)
+                    text: "#FFFFFF"
+                    placeholderText: qsTr("color")
+                }
+                Widgets.LabelExt { text: qsTr("Shadow"); color: theme.fg.secondary }
+                Widgets.CheckButton {
+                    id: shadowCheck
+                    checked: false
+                }
+                Widgets.LabelExt { text: qsTr("Scale"); color: theme.fg.secondary }
+                Widgets.SpinBoxExt {
+                    id: scaleSpin
+                    Layout.preferredWidth: VLCStyle.dp(70, VLCStyle.scale)
+                    from: 10
+                    to: 400
+                    value: 100
+                }
+                Widgets.LabelExt { text: qsTr("Speed"); color: theme.fg.secondary }
+                Widgets.SpinBoxExt {
+                    id: speedSpin
+                    Layout.preferredWidth: VLCStyle.dp(60, VLCStyle.scale)
+                    from: 1
+                    to: 8
+                    value: 1
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: VLCStyle.margin_xsmall
+
+                Widgets.ActionButtonPrimary {
+                    Layout.fillWidth: true
+                    text: qsTr("Place frame on canvas")
+                    enabled: stickerEditor.frameCount() > 0
+                    onClicked: {
+                        PaintbrushCtx.placeStickerFrame(
+                            stickerEditor.trackId, stickerEditor.previewFrame,
+                            outlineSpin.value, outlineColorField.text,
+                            shadowCheck.checked, scaleSpin.value / 100.0)
+                    }
+                }
+                Widgets.ActionButtonPrimary {
+                    Layout.fillWidth: true
+                    text: qsTr("Export sequence…")
+                    enabled: stickerEditor.frameCount() > 0
+                    onClicked: stickerDirDialog.open()
+                }
+            }
+        }
+    }
+
+    FolderDialog {
+        id: stickerDirDialog
+        title: qsTr("Choose a folder for the animated sticker sequence")
+        onAccepted: {
+            if (currentFolder)
+                PaintbrushCtx.exportTrackedStickerOptions(
+                    stickerEditor.trackId, currentFolder,
+                    trimStartSpin.value, trimEndSpin.value,
+                    outlineSpin.value, outlineColorField.text,
+                    shadowCheck.checked, scaleSpin.value / 100.0,
+                    speedSpin.value)
         }
     }
 
