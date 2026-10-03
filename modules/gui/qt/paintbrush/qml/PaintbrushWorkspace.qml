@@ -395,4 +395,9 @@ Item {
     Shortcut { sequence: "Ctrl+U"; onActivated: PaintbrushCtx.captureVideoFrame() }
     Shortcut { sequence: "Ctrl+I"; onActivated: PaintbrushCtx.setCompanionMode(PaintbrushCtx.companionMode === 0 ? 2 : 0) }
     Shortcut { sequence: "Escape"; onActivated: { PaintbrushCtx.cancelTracking(); PaintbrushCtx.cancelGeneration(); PaintbrushCtx.cancelThumbnails() } }
+
+    /* Fit to the desktop so the bottom chrome (palette + media drawer)
+     * is never hidden behind the taskbar when the window was restored
+     * larger than the current screen. */
+    Component.onCompleted: PaintbrushCtx.fitInterfaceToDesktop()
 }

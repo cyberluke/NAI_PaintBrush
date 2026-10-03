@@ -219,9 +219,11 @@ bool MainUI::setup(QQmlEngine* engine)
         engine->addImageProvider(MLCustomCover::providerId, new MLCustomCover(m_mainCtx->getMediaLibrary()));
     }
 
-#if QT_VERSION < QT_VERSION_CHECK(6, 5, 0)
+/* Always add the qrc import path for the VLC QML modules. Qt >= 6.5
+     * auto-scans qrc:/qt/qml, but adding it explicitly is harmless and
+     * makes module resolution deterministic (including on Windows where
+     * native-separator lookups would otherwise break qrc resource URLs). */
     engine->addImportPath(":/qt/qml");
-#endif
 
     if (!EffectsImageProvider::instance(engine, engine))
         new EffectsImageProvider(engine);

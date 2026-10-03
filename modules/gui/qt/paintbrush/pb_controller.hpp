@@ -128,6 +128,13 @@ public:
     Q_INVOKABLE void setCanvasItem(QQuickItem *item);
     PaintbrushCanvasItem *canvas() const { return m_canvas; }
 
+    /* -- window fitting --------------------------------------------------- */
+    /* Clamp the Paintbrush interface window to the screen's available
+     * geometry so the bottom chrome (palette + media drawer) never falls
+     * behind the taskbar when the window was restored larger than the
+     * current desktop (e.g. saved 4K geometry shown on a smaller screen). */
+    Q_INVOKABLE void fitInterfaceToDesktop();
+
     /* -- document --------------------------------------------------------- */
     Q_INVOKABLE void newBlankCanvas(int width, int height);
     Q_INVOKABLE void openImageFile(const QUrl &url);

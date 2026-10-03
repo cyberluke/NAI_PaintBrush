@@ -24,8 +24,11 @@
 #include <QPainter>
 #include <QDateTime>
 #include <QVariantMap>
+#include <QWindow>
+#include <QScreen>
 
 #include "qt.hpp"
+#include "maininterface/mainctx.hpp"
 #include "player/player_controller.hpp"
 #include "playlist/playlist_controller.hpp"
 #include <vlc_player.h>
@@ -227,6 +230,44 @@ void PaintbrushController::setCanvasItem(QQuickItem *item)
             this, &PaintbrushController::onCanvasModified);
     connect(m_canvas, &PaintbrushCanvasItem::imageDropped,
             this, &PaintbrushController::onLayerDrop);
+}
+
+void PaintbrushController::fitInterfaceToDesktop()
+{
+    /* Clamp the Paintbrush interface window to the current screen so the
+     * bottom chrome (palette bar + media drawer) is always visible. When the
+     * window was restored larger than the desktop (e.g. saved geometry from a
+     * bigger/4K display, or a DPI/virtual-screen mismatch), the bottom UX
+     * would otherwise fall behind the taskbar and look "cut off". */
+    if (!m_intf || !m_intf->p_mi)
+        return;
+    QWindow *window = m_intf->p_mi->intfMainWindow();
+    if (!window || !window->screen())
+        return;
+
+    const QScreen *screen = window->screen();
+    const QRect avail = screen->availableGeometry();
+    const QRect win = window->geometry();
+    if (win.isEmpty())
+        return;
+
+    /* device pixel ratio: geometry() is in native pixels; availableGeometry()
+     * is in device-independent pixels. Scale the available frame to native
+     * units so both sides are compared in the same space. */
+    const qreal dpr = window->devicePixelRatio();
+    const QRect availNative = QRect(avail.topLeft() * dpr, avail.size() * dpr);
+
+    /* Only shrink if the window is meaningfully larger than the screen;
+     * never make it smaller than the screen, never grow it. */
+    if (win.size().width() <= availNative.width()
+        && win.size().height() <= availNative.height())
+        return;
+
+    QSize fit = win.size();
+    fit = fit.boundedTo(availNative.size());
+    /* keep at least a usable canvas area */
+    fit = fit.expandedTo(QSize(availNative.width() / 2, availNative.height() / 2));
+    window->resize(fit);
 }
 
 void PaintbrushController::setStatus(const QString &message)
