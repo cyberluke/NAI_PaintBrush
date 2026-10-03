@@ -151,24 +151,47 @@ Demo mode: add `--paintbrush-demo-mode` (preloads `sample.npb` if present).
 
 ## 8. Git state
 
-- Branch `master`; base `e4f2d3a399`; Phase 1 checkpoint `d7b3d33e82`.
-- **Phase 2 + Phase 3 changes are uncommitted at writing time** (modified + untracked):
-  - New (Phase 2): `pb_thumbnail_service.{hpp,cpp}`, `pb_lookup_service.{hpp,cpp}`, `BUILDING.md`, `HANDOFF.md` (this file).
-  - Modified (Phase 2): `pb_canvas_item.{hpp,cpp}`, `pb_companion_service.{hpp,cpp}`, `pb_controller.{hpp,cpp}`, `pb_export.{hpp,cpp}`, `pb_segmentation_service.{hpp,cpp}`, `pb_tracking_service.{hpp,cpp}`, 7 QML files, `qt.cpp`, `meson.build`, `Makefile.am`.
-  - Modified (Phase 3): `pb_canvas_item.{hpp,cpp}` (freehand mask painting), `pb_controller.{hpp,cpp}` (`openVideoFile`, `extractObject`, `pristineSourceFrame`, `currentAiSource`/`objectCrop`/`selectionCrop` pristine-frame path, wizard/autosave recovery fixes, `onObjectMaskEdited`, `playerSeekBegin/End` + slider-seek wiring), `pb_thumbnail_service.{hpp,cpp}` (seek-suspension + user-seek guard — pixelation fix), `pb_vision_service.cpp` (letter-by-letter prompt), `video_window_handler.cpp` (no paintbrush autoresize), `pb_generation_service.{hpp,cpp}`/`pb_lookup_service.{hpp,cpp}`/`pb_companion_service.{hpp,cpp}`/`pb_tracking_service.cpp` (Phase 2+3 polish), QML: `PaintbrushWorkspace.qml` (opaque bg, Open video, dialog widths, wizard signal), `PaintbrushFirstLaunch.qml` (`openVideoRequested`), `PaintbrushInspectorDock.qml` (Extract object, dialog widths, mask-refine hint), `PaintbrushAssistantDock.qml` (TextEdit fix), `PaintbrushToolRail.qml`, `PaintbrushMediaDrawer.qml` (debounced seek slider).
+- Branch `master`; base `e4f2d3a399`; Phase 1 checkpoint `d7b3d33e82`; Phase 2 checkpoint `bf1c6b3dcb`.
+- **Phase 2 + Phase 3 are committed** as three logical commits (all on `master`):
+  - `d4257d11bf` **paintbrush: Phase 3 core services — real-video AI path and freehand mask refinement** (25 files)
+  - `268dc265bd` **paintbrush: Phase 3 QML — opaque workspace, Open video, dialogs, debounced seek** (7 files)
+  - `1e7ea118b2` **paintbrush: Phase 3 handoff docs and launch scripts** (docs + `scripts/`)
+- The one remaining untracked incidental file is `vlc-help.txt` (a captured `vlc --help` dump; not meant for commit).
 - No secrets, no binaries, no build artifacts staged (`.gitignore` covers `.kilo/`, win64-meson build dir, autosave temp files). SAM3 model file and test media are outside the repo.
-- Recommended commit: `paintbrush: complete Phase 2 polish, Phase 3 real-video validation, freehand mask refinement, and seek-drag pixelation fix`.
 
 ## 9. Rollback
 
-1. Discard the untracked files: `pb_thumbnail_service.*`, `pb_lookup_service.*`, `BUILDING.md`, `HANDOFF.md`.
-2. `git checkout -- <modified files>` — or `git reset --hard d7b3d33e82` to drop all Phase 2 + Phase 3 changes while keeping the Phase 1 checkpoint.
+1. Discard the untracked incidental file: `vlc-help.txt` (CLI help dump).
+2. To drop all Phase 3 work: `git reset --hard bf1c6b3dcb` (the Phase 2 checkpoint) — this discards the
+   three Phase 3 commits `d4257d11bf`/`268dc265bd`/`1e7ea118b2` while keeping the whole feature from Phase 1 `d7b3d33e82` onward.
 3. To disable the feature entirely: `--no-paintbrush` / unset `paintbrush` config; the module is gated by `paintbrush-enabled`.
 
 ## 10. Suggested next work (maintainer)
 
-1. Commit Phase 2 + Phase 3 (recommended message above).
-2. Exercise end-to-end with the model + video now on disk: open video → capture frame → object select → drag-refine mask → track → sticker export → collage.
-3. Wire STT/TTS providers and the optional lookup provider.
-4. Add slot-scaling for collage image layers.
-5. Consider WebM-alpha sticker export when an alpha-capable encoder is confirmed.
+Phase 2 + Phase 3 are now committed as three logical commits on `master`:
+`d4257d11bf` (core services), `268dc265bd` (QML), `1e7ea118b2` (handoff docs + launch scripts).
+SAM3 inference and tracking are verified *at the API level* (seg + track probes, real model, real frames);
+the remaining end-to-end work needs a human driving the live UI (model can't grade vision output):
+
+1. Drive the live end-to-end demo with the model + video on disk: open video → capture frame →
+   object select (point click) → drag-refine mask → track across frames → sticker export → collage.
+   Note: on this CPU-only build each SAM frame encode is ~75 s (8 threads), so interactive clicks
+   are slow but do work; a GPU build (`--paintbrush-sam-device=...` with a CUDA build) would make it fast.
+2. Wire STT/TTS providers and the optional lookup provider (config extension points exist).
+3. Add slot-scaling for collage image layers (positions + content cut work; pixel-perfect rescale is partial).
+4. Consider WebM-alpha sticker export when an alpha-capable encoder is confirmed
+   (currently an honest transparent PNG sequence).
+5. Optional: `vlc-help.txt` at the repo root is an incidental CLI help dump (left untracked).
+
+## 11. Remaining items (honest, what is NOT done / NOT verified)
+
+- **Not verified:** VLM/generation *answer quality* (provider returns 200; grading needs the user's eyes),
+  animated sticker *decode timing* in a real tracked clip (PNG sequence export path is proven by
+  the track probe; the in-UI sticker flow needs a human), tablet pressure (no tablet hardware).
+- **Not implemented / by design:** track effects (blur/dim/spotlight/outline/attach), object lookup
+  vendor, STT/TTS voices, WebM-alpha export, global hotkey/menu item, full `paintbrush.*` log hierarchy,
+  thumbnails-while-playing (paused-only by design), pen hover/eraser pressure mapping, pixel-perfect
+  collage slot scaling.
+- **Explicitly kept honest:** `activeJobs()` (segmentation/tracking/vision/generation/assistant/thumbnails
+  with resource class) and `cancelActiveJob()` route to each service's cancel — code-reviewed, not yet
+  exercised through the live diagnostics UI.
