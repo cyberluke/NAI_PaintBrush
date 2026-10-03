@@ -25,8 +25,10 @@ if __name__ == "__main__":
     parser.add_argument("--sources", action='append', default=[], nargs='*', metavar=("FILE"), help="file to embed")
 
     args = parser.parse_args()
-    files = [os.path.join(args.srcdir, relpath) for relpath in args.sources[0]]
-    prefix = os.path.join("/", args.prefix)
+    # --sources is nargs='*' with action='append'; flatten all occurrences.
+    all_sources = [s for group in args.sources for s in group]
+    files = [os.path.join(args.srcdir, relpath) for relpath in all_sources]
+    prefix = os.path.join("/", args.prefix).replace(os.sep, "/")
 
     #ensure outdir exists
     os.makedirs(os.path.dirname(args.output), exist_ok=True)

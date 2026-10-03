@@ -29,9 +29,16 @@ if __name__ == "__main__":
     parser.add_argument("--sources", action='append', default=[], nargs='*', metavar=("CLASS"), help="mark CLASS as a singleton")
 
     args = parser.parse_args()
-    prefix = os.path.join("/", args.prefix, *args.module.split("."))
-    singletons = [os.path.join(args.srcdir, s) for s in args.singletons[0]]
-    files = [os.path.join(args.srcdir, relpath) for relpath in args.sources[0]]
+    # The `prefer` path is a qrc resource path and must always use forward
+    # slashes, even on Windows (os.path.join would produce backslashes that
+    # break qrc resource lookup for sibling types in the module).
+    prefix = os.path.join("/", args.prefix, *args.module.split(".")).replace(os.sep, "/")
+    # --sources/--singletons are nargs='*' with action='append'; flatten all
+    # occurrences and tolerate being absent entirely.
+    all_sources = [s for group in args.sources for s in group]
+    all_singletons = [s for group in args.singletons for s in group]
+    singletons = [os.path.join(args.srcdir, s) for s in all_singletons]
+    files = [os.path.join(args.srcdir, relpath) for relpath in all_sources]
 
     #ensure outdir exists
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
