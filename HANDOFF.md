@@ -101,6 +101,9 @@ UI Automation tree confirms all 15 tools + new buttons instantiate, zero QML err
 ## 5. Verification performed (Phase 2 + Phase 3)
 
 - **Builds:** `ninja modules/libqt_plugin.dll` — clean (only pre-existing `-Wsfinae-incomplete` warning). Plugin cache regenerated with `vlc-cache-gen.exe` (after each Phase 3 rebuild).
+  - **Build-system caveat (this session):** a `meson` regeneration under meson 1.12.1 fails on `modules/lua/meson.build` (`custom_target output` with a path segment). Workaround: back up `win64-meson/build.ninja` (`build.ninja.regbak`), comment out the `build build.ninja: REGENERATE_BUILD` rule (lines `#build build.ninja:` + `# pool = console`) and rebuild with the existing ninja file. Do NOT run `meson setup --reconfigure` (it will fail and leave generated qrc/qmldir stale).
+  - **QML type-resolution regression (root-caused + fixed this session):** after a meson regen, all 12 VLC QML modules failed to load (`Widgets.ToolTipExt is not a type`, `Widgets.PointingTooltip unavailable`) because `genqmldir.py` built the module `prefer` path with `os.path.join()` → Windows backslashes (`prefer :/qt/qml\VLC\Widgets/`) which broke qrc resource lookup. Fixed in `scripts/genqmldir.py` (force `/` on the prefer path; flatten `nargs='*'` append lists) and `scripts/genqrc.py` (same). Regenerated all `res.qrc`/`qmldir`/`qmldir.qrc` from `meson.build` authoritative source lists (includes singletons, e.g. `PlayerControlbarControls` is a singleton of `VLC.Player`). `mainui.cpp` now always adds `:/qt/qml` import path. Verified: app launches, all 15 tools render, zero QML errors.
+  - **Decoder note:** `--avcodec-hw=none` does NOT disable the D3D11VA decoder in VLC 4 (option was removed; `d3d11va: Using D3D11VA` still appears). Software decode test launcher kept in `scripts/launch-pb-software-decode.ps1` (converter falls back to swscale but HW decoder still selected).
 - **Runtime smoke (real launch):** `vlc.exe --paintbrush --no-media-library --no-qt-privacy-ask --no-qt-updates-notif --paintbrush-sam-model=D:\_SATIN_AI\models\sam3-q4_0.ggml --paintbrush-sam-device=cpu --verbose=2 -I qt`
   - Process alive, no assertions, no crashes; UI Automation tree shows all 15 tools + new controls instantiated.
   - **Zero QML errors**: no `TypeError`, `Cannot read property`, `Unable to assign`, or `ReferenceError` (all new UI — thumbnail strip, collage dialog, recovery banner, refine buttons, talk-level selector, project info, diagnostics actions, Open video, Extract object, mask-refine hint — instantiated cleanly).
@@ -152,10 +155,13 @@ Demo mode: add `--paintbrush-demo-mode` (preloads `sample.npb` if present).
 ## 8. Git state
 
 - Branch `master`; base `e4f2d3a399`; Phase 1 checkpoint `d7b3d33e82`; Phase 2 checkpoint `bf1c6b3dcb`.
-- **Phase 2 + Phase 3 are committed** as three logical commits (all on `master`):
+- **Phase 2 + Phase 3 are committed** as logical commits (all on `master`):
   - `d4257d11bf` **paintbrush: Phase 3 core services — real-video AI path and freehand mask refinement** (25 files)
   - `268dc265bd` **paintbrush: Phase 3 QML — opaque workspace, Open video, dialogs, debounced seek** (7 files)
   - `1e7ea118b2` **paintbrush: Phase 3 handoff docs and launch scripts** (docs + `scripts/`)
+  - `7bbf8bdae9` **qt: fix qml module qrc path generation on Windows (qmldir prefer + qrc prefixes)**
+  - `f185f7e935` **paintbrush: fit interface window to desktop and fix qml import path**
+  - `61c919ed39` **paintbrush: add software-decode launch variant for testing (avcodec-hw=none)**
 - The one remaining untracked incidental file is `vlc-help.txt` (a captured `vlc --help` dump; not meant for commit).
 - No secrets, no binaries, no build artifacts staged (`.gitignore` covers `.kilo/`, win64-meson build dir, autosave temp files). SAM3 model file and test media are outside the repo.
 
