@@ -51,24 +51,28 @@ import VLC.Paintbrush
         }
 
         /* checkerboard behind transparent content; hidden while a video is
-         * loaded so the video picture serves as the canvas backdrop */
-        Grid {
+         * loaded so the video picture serves as the canvas backdrop.
+         * Cells are positioned manually (not via Grid/Repeater) so the number
+         * of items is always consistent, avoiding QML "Grid contains more
+         * visible items than rows*columns" warnings when the area is resized. */
+        Repeater {
             id: checkerGrid
 
-            anchors.fill: parent
             visible: !PaintbrushCtx.playerHasVideo
-            columns: Math.max(1, Math.ceil(width / 16))
-            rows: Math.max(1, Math.ceil(height / 16))
 
-            Repeater {
-                model: checkerGrid.columns * checkerGrid.rows
-                Rectangle {
-                    width: 16
-                    height: 16
-                    color: (Math.floor(index / checkerGrid.columns) + index % checkerGrid.columns) % 2 === 0
-                           ? theme.bg.primary
-                           : Qt.darker(theme.bg.primary, 1.06)
-                }
+            readonly property int cellSize: 16
+            readonly property int cols: Math.max(1, Math.ceil(parent.width / cellSize))
+            readonly property int rows: Math.max(1, Math.ceil(parent.height / cellSize))
+
+            model: checkerGrid.cols * checkerGrid.rows
+            delegate: Rectangle {
+                width: checkerGrid.cellSize
+                height: checkerGrid.cellSize
+                x: (index % checkerGrid.cols) * checkerGrid.cellSize
+                y: Math.floor(index / checkerGrid.cols) * checkerGrid.cellSize
+                color: (Math.floor(index / checkerGrid.cols) + index % checkerGrid.cols) % 2 === 0
+                       ? theme.bg.primary
+                       : Qt.darker(theme.bg.primary, 1.06)
             }
         }
 

@@ -160,7 +160,7 @@ Item {
             Widgets.LabelExt {
                 text: qsTr("Scale")
                 color: theme.fg.secondary
-                font.pixelSize: VLCStyle.fontSize_xxxsmall
+                font.pixelSize: VLCStyle.fontSize_xsmall
             }
             Widgets.SpinBoxExt {
                 id: layerScaleSpin
@@ -175,7 +175,7 @@ Item {
             Widgets.LabelExt {
                 text: qsTr("Rot")
                 color: theme.fg.secondary
-                font.pixelSize: VLCStyle.fontSize_xxxsmall
+                font.pixelSize: VLCStyle.fontSize_xsmall
             }
             Widgets.SpinBoxExt {
                 id: layerRotSpin
@@ -307,7 +307,7 @@ Item {
                 Layout.fillWidth: true
                 text: qsTr("Object Select: drag on the mask to paint it in, Alt-drag or right-drag to erase it. Brush size is used.")
                 color: theme.fg.secondary
-                font.pixelSize: VLCStyle.fontSize_xxxsmall
+                font.pixelSize: VLCStyle.fontSize_xsmall
                 wrapMode: Text.WordWrap
                 visible: PaintbrushCtx.objectSelected
             }
@@ -371,7 +371,7 @@ Item {
                         Widgets.LabelExt {
                             text: qsTr("Likely identification")
                             color: theme.fg.secondary
-                            font.pixelSize: VLCStyle.fontSize_xxxsmall
+                            font.pixelSize: VLCStyle.fontSize_xsmall
                         }
                         Widgets.LabelExt {
                             Layout.fillWidth: true
@@ -466,7 +466,7 @@ Item {
                             }
                             visible: text.length > 0
                             color: theme.accent
-                            font.pixelSize: VLCStyle.fontSize_xxxsmall
+                            font.pixelSize: VLCStyle.fontSize_xsmall
                             wrapMode: Text.WordWrap
                         }
                     }

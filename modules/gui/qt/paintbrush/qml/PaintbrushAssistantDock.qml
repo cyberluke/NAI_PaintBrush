@@ -117,7 +117,7 @@ Item {
 
                     contentItem: Text {
                         text: parent.text
-                        font.pixelSize: VLCStyle.fontSize_xxxsmall
+                        font.pixelSize: VLCStyle.fontSize_xsmall
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
                         color: parent.checked ? theme.accent : theme.fg.primary

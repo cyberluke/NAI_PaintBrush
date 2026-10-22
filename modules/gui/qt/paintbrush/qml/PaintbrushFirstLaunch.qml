@@ -123,7 +123,7 @@ Item {
         Widgets.LabelExt {
             Layout.alignment: Qt.AlignHCenter
             text: qsTr("You can also drop an image or video onto the canvas.")
-            font.pixelSize: VLCStyle.fontSize_xxxsmall
+            font.pixelSize: VLCStyle.fontSize_xsmall
             color: theme.fg.secondary
         }
     }

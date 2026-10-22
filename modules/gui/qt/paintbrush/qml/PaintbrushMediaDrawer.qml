@@ -212,7 +212,7 @@ Item {
                                 Widgets.LabelExt {
                                     text: modelData.label
                                     color: theme.fg.primary
-                                    font.pixelSize: VLCStyle.fontSize_xxxsmall
+                                    font.pixelSize: VLCStyle.fontSize_xsmall
                                     elide: Text.ElideRight
                                 }
                                 Widgets.LabelExt {
@@ -220,7 +220,7 @@ Item {
                                           .arg(modelData.keyframes)
                                           .arg(modelData.corrections)
                                     color: theme.fg.secondary
-                                    font.pixelSize: VLCStyle.fontSize_xxxsmall
+                                    font.pixelSize: VLCStyle.fontSize_xsmall
                                 }
                             }
                             Widgets.IconToolButton {
@@ -330,7 +330,7 @@ Item {
                                   ? root.formatTime(model.timeMs)
                                   : ""
                             color: theme.fg.primary
-                            font.pixelSize: VLCStyle.fontSize_xxxsmall
+                            font.pixelSize: VLCStyle.fontSize_xsmall
                         }
 
                         MouseArea {
@@ -415,7 +415,7 @@ Item {
                                             .arg(stickerEditor.frameCount())
                           : qsTr("No keyframes")
                     color: theme.fg.secondary
-                    font.pixelSize: VLCStyle.fontSize_xxxsmall
+                    font.pixelSize: VLCStyle.fontSize_xsmall
                 }
             }
             Timer {
