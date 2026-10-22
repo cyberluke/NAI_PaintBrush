@@ -221,6 +221,17 @@ public:
     Q_INVOKABLE void placeStickerFrame(int trackId, int frameIndex, int outline,
                                        const QString &outlineColor, bool shadow,
                                        double scale);
+    /* Track effects: blur/dim/spotlight/outline/attach. Applied at render
+     * time (sticker preview/export/placement). Persisted in the project. */
+    Q_INVOKABLE int trackEffectType(int trackId) const;
+    Q_INVOKABLE int trackEffectIntensity(int trackId) const;
+    Q_INVOKABLE QString trackEffectColor(int trackId) const;
+    Q_INVOKABLE void setTrackEffect(int trackId, int type, int intensity,
+                                    const QString &color);
+    Q_INVOKABLE QString trackEffectPreviewDataUrl(int trackId, int frameIndex,
+                                                  int outline,
+                                                  const QString &outlineColor,
+                                                  bool shadow, double scale) const;
     Q_INVOKABLE void removeObject(const QString &prompt);
     Q_INVOKABLE void generativeFill(const QString &prompt);
     Q_INVOKABLE void replaceBackground(const QString &prompt);

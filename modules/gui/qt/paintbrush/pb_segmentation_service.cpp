@@ -51,6 +51,9 @@ void SegmentationService::configure(vlc_object_t *obj)
     m_obj = obj;
     m_modelPath = pbConfigString(obj, "paintbrush-sam-model").trimmed();
     m_device = pbConfigString(obj, "paintbrush-sam-device").trimmed();
+    pbLogInfo(obj, "segmentation",
+              "configured model=%s device=%s",
+              qUtf8Printable(m_modelPath), qUtf8Printable(m_device));
     if (m_device.isEmpty())
         m_device = QStringLiteral("auto");
 
@@ -104,6 +107,7 @@ void SegmentationService::initialize()
 
     m_running = true;
     m_worker = std::thread([this]() { workerLoop(); });
+    pbLogInfo(m_obj, "segmentation", "worker started");
 }
 
 void SegmentationService::clearCache()

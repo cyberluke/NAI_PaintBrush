@@ -347,6 +347,8 @@ void PaintbrushController::openVideoFile(const QUrl &url)
         QVector<vlc::playlist::Media>{media}, true);
     emit mediaStateChanged();
     setStatus(QStringLiteral("Playing %1").arg(QFileInfo(path).fileName()));
+    pbLogInfo(VLC_OBJECT(m_intf), "media", "opened %s (software decode)",
+              qUtf8Printable(path));
 
     if (m_welcomeVisible)
     {
@@ -1570,6 +1572,8 @@ void PaintbrushController::trackObject(int direction, int frames)
     m_tracking.startTrack(player, currentAiSource(), m_objectMask,
                           positivePointsForTracking(), direction, frames);
     emit trackingStateChanged();
+    pbLogInfo(VLC_OBJECT(m_intf), "tracking", "track started id=%d dir=%d",
+              track.id, direction);
 }
 
 QVector<QPointF> PaintbrushController::positivePointsForTracking() const
@@ -1777,11 +1781,13 @@ static const ObjectTrack *findTrack(const QVector<ObjectTrack> &tracks, int trac
     return nullptr;
 }
 
-/* Render a keyframe cutout with optional outline/shadow/scale. Shared by the
- * preview data URLs and the optioned export so what you see is what exports. */
+/* Render a keyframe cutout with optional outline/shadow/scale and an
+ * optional track effect. Shared by the preview data URLs and the optioned
+ * export so what you see is what exports. */
 static QImage renderStickerFrame(const QImage &frame, const QImage &mask,
                                  int outline, const QColor &outlineColor,
-                                 bool shadow, double scale)
+                                 bool shadow, double scale,
+                                 const TrackEffect *effect = nullptr)
 {
     QImage maskScaled = mask.isNull() ? QImage() : mask;
     if (!maskScaled.isNull() && maskScaled.size() != frame.size())
@@ -1801,6 +1807,105 @@ static QImage renderStickerFrame(const QImage &frame, const QImage &mask,
             p.drawImage(0, 0, maskScaled);
         }
         p.end();
+    }
+
+    /* -- track effect pass (applied to the masked cutout) ------------------ */
+    if (effect != nullptr && effect->type != TrackEffect::None)
+    {
+        const float t = qBound(0.f, float(effect->intensity) / 100.f, 1.f);
+        switch (effect->type)
+        {
+        case TrackEffect::Blur:
+        {
+            /* soften the cutout: blur the mask-shaped cutout */
+            QImage blurred = cutout;
+            const int radius = qMax(1, int(t * 10.f));
+            for (int pass = 0; pass < radius; ++pass)
+            {
+                QImage tmp = blurred;
+                QPainter bp(&tmp);
+                bp.setRenderHint(QPainter::SmoothPixmapTransform);
+                bp.drawImage(0, 0, blurred.scaled(qMax(1, blurred.width() / 2),
+                                                  qMax(1, blurred.height() / 2),
+                                                  Qt::IgnoreAspectRatio,
+                                                  Qt::SmoothTransformation)
+                                                      .scaled(blurred.size()));
+                bp.end();
+                blurred = tmp;
+            }
+            cutout = blurred;
+            break;
+        }
+        case TrackEffect::Dim:
+        {
+            QPainter p(&cutout);
+            p.setCompositionMode(QPainter::CompositionMode_SourceIn);
+            p.fillRect(cutout.rect(),
+                       QColor(0, 0, 0, int(255 * t * 0.65f)));
+            p.end();
+            break;
+        }
+        case TrackEffect::Spotlight:
+        {
+            /* brighten the cutout (saturate toward white) */
+            QImage bright = cutout;
+            for (int y = 0; y < bright.height(); ++y)
+            {
+                QRgb *line = reinterpret_cast<QRgb *>(bright.scanLine(y));
+                for (int x = 0; x < bright.width(); ++x)
+                {
+                    const QRgb px = line[x];
+                    if (qAlpha(px) == 0)
+                        continue;
+                    const int a = qAlpha(px);
+                    const int r = qMin(255, qRed(px) + int(96 * t));
+                    const int g = qMin(255, qGreen(px) + int(96 * t));
+                    const int b = qMin(255, qBlue(px) + int(96 * t));
+                    line[x] = qRgba(r, g, b, a);
+                }
+            }
+            cutout = bright;
+            break;
+        }
+        case TrackEffect::Outline:
+        {
+            QColor oc = effect->color.isEmpty()
+                            ? QColor(255, 255, 255)
+                            : QColor(effect->color);
+            if (!oc.isValid())
+                oc = QColor(255, 255, 255);
+            const int width = qMax(1, int(t * 12.f) + 1);
+            QImage alpha = cutout.convertToFormat(QImage::Format_Alpha8);
+            QImage gray = alpha.convertToFormat(QImage::Format_Grayscale8);
+            QPainterPath path = maskToPath(gray);
+            QImage result(cutout.size(), QImage::Format_ARGB32);
+            result.fill(Qt::transparent);
+            QPainter p(&result);
+            p.setPen(QPen(oc, width, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            p.setBrush(oc);
+            p.drawPath(path);
+            p.end();
+            QPainter c(&result);
+            c.drawImage(0, 0, cutout);
+            c.end();
+            cutout = result;
+            break;
+        }
+        case TrackEffect::Attach:
+        {
+            /* composite the cutout back over the source frame at the mask
+             * position: the result is the full frame with the object
+             * re-attached (and the rest of the frame preserved). */
+            QImage composited = frame;
+            QPainter p(&composited);
+            p.drawImage(0, 0, cutout);
+            p.end();
+            cutout = composited;
+            break;
+        }
+        default:
+            break;
+        }
     }
 
     /* trim to non-empty bounds */
@@ -1914,7 +2019,8 @@ QString PaintbrushController::stickerEditorPreviewDataUrl(int trackId, int frame
     QImage frame(kf.mask.size(), QImage::Format_ARGB32);
     frame.fill(QColor(200, 200, 210));
     QImage rendered = renderStickerFrame(frame, kf.mask, outline,
-                                         QColor(outlineColor), shadow, scale);
+                                         QColor(outlineColor), shadow, scale,
+                                         &track->effect);
     if (rendered.isNull())
         return {};
     QByteArray png;
@@ -1980,7 +2086,7 @@ QString PaintbrushController::exportTrackedStickerOptions(int trackId, const QUr
             continue;
 
         QImage sticker = renderStickerFrame(frame, kf.mask, outline, oc,
-                                            shadow, scale);
+                                            shadow, scale, &track->effect);
         if (sticker.isNull())
             continue;
         lastSize = sticker.size();
@@ -2010,6 +2116,10 @@ QString PaintbrushController::exportTrackedStickerOptions(int trackId, const QUr
         return QStringLiteral("No frames could be exported.");
     setStatus(QStringLiteral("Sticker sequence: %1 frames (%2x%3) in %4")
                   .arg(written).arg(lastSize.width()).arg(lastSize.height()).arg(dir));
+    pbLogInfo(VLC_OBJECT(m_intf), "export",
+              "sticker track=%d frames=%d size=%dx%d effect=%d dir=%s",
+              trackId, written, lastSize.width(), lastSize.height(),
+              track->effect.type, qUtf8Printable(dir));
     return dir;
 }
 
@@ -2059,7 +2169,8 @@ void PaintbrushController::placeStickerFrame(int trackId, int frameIndex, int ou
         return;
     }
     QImage sticker = renderStickerFrame(frame, kf.mask, outline,
-                                        QColor(outlineColor), shadow, scale);
+                                        QColor(outlineColor), shadow, scale,
+                                        &track->effect);
     if (sticker.isNull())
     {
         setStatus(QStringLiteral("The selected frame produced an empty cutout."));
@@ -2075,6 +2186,75 @@ void PaintbrushController::placeStickerFrame(int trackId, int frameIndex, int ou
         m_canvas->markCanvasDirty();
     setStatus(QStringLiteral("Sticker frame placed on the canvas."));
     triggerCompanionEvent(QStringLiteral("sticker-made"));
+}
+
+/* ------------------------------------------------------- track effects ---- */
+
+int PaintbrushController::trackEffectType(int trackId) const
+{
+    const ObjectTrack *track = findTrack(m_document.tracks(), trackId);
+    return track ? track->effect.type : 0;
+}
+
+int PaintbrushController::trackEffectIntensity(int trackId) const
+{
+    const ObjectTrack *track = findTrack(m_document.tracks(), trackId);
+    return track ? track->effect.intensity : 50;
+}
+
+QString PaintbrushController::trackEffectColor(int trackId) const
+{
+    const ObjectTrack *track = findTrack(m_document.tracks(), trackId);
+    return track ? track->effect.color : QString();
+}
+
+void PaintbrushController::setTrackEffect(int trackId, int type, int intensity,
+                                          const QString &color)
+{
+    QVector<ObjectTrack> tracks = m_document.tracks();
+    int idx = -1;
+    for (int i = 0; i < tracks.size(); ++i)
+        if (tracks[i].id == trackId)
+        {
+            idx = i;
+            break;
+        }
+    if (idx < 0)
+        return;
+    tracks[idx].effect.type = qBound(0, type, int(TrackEffect::Attach));
+    tracks[idx].effect.intensity = qBound(0, intensity, 100);
+    tracks[idx].effect.color = color;
+    m_document.setTracks(tracks); /* emits tracksChanged + dirtyChanged */
+    setStatus(QStringLiteral("Track effect updated."));
+}
+
+QString PaintbrushController::trackEffectPreviewDataUrl(int trackId, int frameIndex,
+                                                       int outline,
+                                                       const QString &outlineColor,
+                                                       bool shadow, double scale) const
+{
+    const ObjectTrack *track = findTrack(m_document.tracks(), trackId);
+    if (!track || frameIndex < 0 || frameIndex >= track->keyframes.size())
+        return {};
+    const TrackKeyframe &kf = track->keyframes[frameIndex];
+    if (kf.mask.isNull())
+        return {};
+    /* neutral fill so the effect + trim/outline/shadow are visible without
+     * re-seeking the player (matches stickerEditorPreviewDataUrl) */
+    QImage frame(kf.mask.size(), QImage::Format_ARGB32);
+    frame.fill(QColor(200, 200, 210));
+    QImage rendered = renderStickerFrame(frame, kf.mask, outline,
+                                         QColor(outlineColor), shadow, scale,
+                                         &track->effect);
+    if (rendered.isNull())
+        return {};
+    QByteArray png;
+    QBuffer buffer(&png);
+    buffer.open(QIODevice::WriteOnly);
+    if (!rendered.save(&buffer, "PNG"))
+        return {};
+    return QStringLiteral("data:image/png;base64,%1")
+        .arg(QString::fromLatin1(png.toBase64()));
 }
 
 void PaintbrushController::onTrackKeyframe(int frameIndex, qint64 timeMs,

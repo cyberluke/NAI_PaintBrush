@@ -191,18 +191,29 @@ QString pbApiKey(vlc_object_t *obj, const char *envVar, const char *configName)
     return pbConfigString(obj, configName);
 }
 
+void pbLogMsg(vlc_object_t *obj, int prio, const char *category,
+              const char *file, unsigned line, const char *func,
+              const char *format, ...)
+{
+    va_list ap;
+    va_start(ap, format);
+    vlc_object_vaLog(VLC_OBJECT(obj), prio, category, file, line, func,
+                     format, ap);
+    va_end(ap);
+}
+
 void pbLogRequest(vlc_object_t *obj, const char *kind,
                   const QString &requestId, qint64 elapsedMs,
                   bool ok, const QString &detail)
 {
     /* Log only ids, durations and outcomes — never keys, headers or bodies. */
     if (ok)
-        msg_Dbg(obj, "paintbrush %s request %s ok in %lld ms",
-                kind, qUtf8Printable(requestId), (long long)elapsedMs);
+        pbLogDebug(obj, "network", "%s request %s ok in %lld ms",
+                   kind, qUtf8Printable(requestId), (long long)elapsedMs);
     else
-        msg_Warn(obj, "paintbrush %s request %s failed in %lld ms: %s",
-                 kind, qUtf8Printable(requestId), (long long)elapsedMs,
-                 qUtf8Printable(detail));
+        pbLogWarn(obj, "network", "%s request %s failed in %lld ms: %s",
+                  kind, qUtf8Printable(requestId), (long long)elapsedMs,
+                  qUtf8Printable(detail));
 }
 
 } // namespace paintbrush

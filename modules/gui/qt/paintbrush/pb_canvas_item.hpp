@@ -51,6 +51,7 @@ class PaintbrushCanvasItem : public QQuickItem
     Q_PROPERTY(qreal sprayDensity READ sprayDensity WRITE setSprayDensity NOTIFY sprayDensityChanged FINAL)
     Q_PROPERTY(qreal sprayFlow READ sprayFlow WRITE setSprayFlow NOTIFY sprayFlowChanged FINAL)
     Q_PROPERTY(bool gridVisible READ gridVisible WRITE setGridVisible NOTIFY gridVisibleChanged FINAL)
+    Q_PROPERTY(bool rulersVisible READ rulersVisible WRITE setRulersVisible NOTIFY rulersVisibleChanged FINAL)
     Q_PROPERTY(int gridSpacing READ gridSpacing WRITE setGridSpacing NOTIFY gridSpacingChanged FINAL)
     Q_PROPERTY(bool snapToGrid READ snapToGrid WRITE setSnapToGrid NOTIFY snapToGridChanged FINAL)
     Q_PROPERTY(bool pressureEnabled READ pressureEnabled WRITE setPressureEnabled NOTIFY pressureEnabledChanged FINAL)
@@ -93,6 +94,10 @@ public:
     /* Precision drawing: optional canvas grid (display + snap). */
     bool gridVisible() const { return m_gridVisible; }
     void setGridVisible(bool visible);
+    /* Pixel-coordinate rulers along the canvas edges. Independent from the
+     * grid so a user can keep the grid off and still read coordinates. */
+    bool rulersVisible() const { return m_rulersVisible; }
+    void setRulersVisible(bool visible);
     int gridSpacing() const { return m_gridSpacing; }
     void setGridSpacing(int spacing);
     bool snapToGrid() const { return m_snapToGrid; }
@@ -186,6 +191,7 @@ signals:
     void sprayDensityChanged();
     void sprayFlowChanged();
     void gridVisibleChanged();
+    void rulersVisibleChanged();
     void gridSpacingChanged();
     void snapToGridChanged();
     void pressureEnabledChanged();
@@ -295,8 +301,9 @@ private:
     bool m_objectSelectBusy = false;
     bool m_objectMaskVisible = false;
 
-    /* precision drawing: grid display/snap, tablet pressure */
+    /* precision drawing: grid display/snap, rulers, tablet pressure */
     bool m_gridVisible = false;
+    bool m_rulersVisible = false;
     int m_gridSpacing = 32;
     bool m_snapToGrid = false;
     bool m_pressureEnabled = false;

@@ -1,11 +1,11 @@
-# NAI Paintbrush — Handoff Document (Phase 4: upstream merge + hardening)
+# NAI Paintbrush — Handoff Document (Phase 5: decoder policy + polish)
 
 **Date:** 2026-10-22
 **Author:** implementation agent (handoff to maintainer)
 **Spec source:** `C:\Users\lukes.COREI9\Downloads\NAI_Paintbrush_VLC4_Full_Scope_One_Run_Spec (1).md` (Phase 1) + Phase 2 One-Run Implementation Spec
 **Repo:** `D:\_SATIN_AI\NAI-OS\vlc` — VLC 4.0.0-dev
 **Branch:** `master`
-**Commits:** `e4f2d3a399` (base) → `d7b3d33e82` (Phase 1) → `f20dcf8952` (Phase 2+3) → `7578484635` (merge upstream 265 commits) → `9378df875a` (Phase 4 hardening + gaps)
+**Commits:** `e4f2d3a399` (base) → `d7b3d33e82` (Phase 1) → `f20dcf8952` (Phase 2+3) → `7578484635` (merge upstream 265 commits) → `9378df875a` (Phase 4 hardening + gaps) → `b4298d8883` (avcodec hardware-decoding policy) → (Phase 5, this session)
 **Build tree:** `win64-meson\` (native MSYS2/MINGW64 Meson build, 408 modules)
 
 ---
@@ -119,6 +119,29 @@ interface (not paintbrush — paintbrush sets both `text` and `description`).
 Closed HANDOFF gaps (section 4): auto collage slot scaling (baked, pixel-perfect),
 grid rulers, and the recovery "Open copy" flow.
 
+## 3d. Phase 5: decoder pixelation fix + remaining polish (this session)
+
+The user's core complaint — pixelated frames when scrubbing the seek slider
+while paused — was root-caused to **hardware decoding** (VLC's D3D11VA
+integration emits compressed/artifacted frames on random seeks). Fix per the
+user's directive: a **tri-state hardware-decoding policy** instead of the
+obsolete `--avcodec-hw` flag.
+
+| Item | Fix |
+|---|---|
+| Pixelation on scrubbed paused frames | `avcodec-hwdec` option: `Auto` (0, default) / `Disabled` (1) / `Required` (2). When Disabled, `ffmpeg_GetFormat()` skips every hardware output format (d3d11va_vld, d3d11, dxva2_vld, cuda, vulkan) and decodes software (`yuv420p`); `InitVideoHwDec()` also refuses so AV1 falls back to software; Required fails decode if no hardware backend opens. Committed at `b4298d8883` |
+| Paintbrush media must use exact random-access frames | `openVideoFile()` now appends the media with `:avcodec-hwdec=1` (software decode), while normal VLC playback keeps Auto. Verified live: the paintbrush log shows all five hardware formats skipped and `yuv420p` used |
+| Track effects (blur/dim/spotlight/outline/attach) | `TrackEffect` struct on `ObjectTrack` (type/intensity/color), persisted in `.npb` (old files default to None). Applied in `renderStickerFrame()` — shared by preview, export and canvas placement. Sticker editor gains an Effect combo (None/Blur/Dim/Spotlight/Outline/Attach to frame) + intensity + color, with a live preview |
+| `paintbrush.*` log-category hierarchy | `pbLogMsg()` calls `vlc_object_Log()` with dotted module names so paintbrush lines are separable from `[qt]`. Wired into configure/init/segment/track/media-open/export/network paths (`paintbrush.segmentation`, `paintbrush.tracking`, `paintbrush.media`, `paintbrush.export`, `paintbrush.network`, …) |
+| Show/Hide rulers independent of grid | New `rulersVisible` property on the canvas item; rulers bind to it; `R` shortcut toggles rulers, `G` stays grid-only; "Rulers" toggle button added to the palette bar |
+
+Verification: both plugins rebuild clean; plugin cache regenerated; full E2E
+against the real SAM3 model on a real video — launch (zero QML errors) → open
+video (software decode confirmed in log) → pause → "Use this frame" → Object
+Select → SAM3 inference (~75 s CPU) → mask produced (Extract enabled) → Extract
+object → new canvas with the cutout. Decoder A/B on the CLI confirms Auto uses
+D3D11VA while `avcodec-hwdec=1` uses `yuv420p`.
+
 ## 4. Remaining gaps (actual, honest)
 
 | Item | State |
@@ -129,10 +152,10 @@ grid rulers, and the recovery "Open copy" flow.
 | STT/TTS providers | Config extension points exist; no provider wired (voice optional, core unaffected) |
 | Animated sticker as WebM/alpha video | Only transparent PNG sequence export; WebM-alpha needs an encoder that supports it (not claimed) |
 | Object lookup provider | Interface + unavailable state only; no vendor wired (by design) |
-| Track effects (blur/dim/spotlight/outline/attach) | Not implemented (track data model supports metadata) |
+| Track effects (blur/dim/spotlight/outline/attach) | **Done (Phase 5):** per-track effect persisted in `.npb`, rendered in sticker preview/export/placement; editor combo + intensity + color in the sticker dialog |
 | Automatic menu "Open in Paintbrush" / global hotkey | Sidebar + CLI + drag/drop + clipboard only |
-| Grid ruler/coordinate feedback | **Done (Phase 4):** pixel-coordinate rulers along the top/left canvas edges (tied to the grid toggle, stay aligned with the document while panning/zooming); status bar still shows cursor/selection/zoom/snap/grid |
-| Full log-category hierarchy (`paintbrush.*`) | `msg_*` logging only |
+| Grid ruler/coordinate feedback | **Done (Phase 4):** pixel-coordinate rulers along the top/left canvas edges; **Phase 5:** rulers now have their own `rulersVisible` toggle + `R` shortcut, independent of the grid (`G`) |
+| Full log-category hierarchy (`paintbrush.*`) | **Done (Phase 5):** `pbLog*` helpers call `vlc_object_Log()` with dotted category names (`paintbrush.segmentation`, `paintbrush.tracking`, `paintbrush.media`, `paintbrush.export`, `paintbrush.network`, …) so paintbrush lines are separable/filterable from `[qt]` |
 | Recovery "Open copy" flow | **Done (Phase 4):** `openRecoveryCopy()` loads the recovered autosave as an unsaved copy and leaves the original recovery file untouched; banner no longer opens the save dialog |
 
 ## 5. Verification performed (Phase 2 + Phase 3)
@@ -185,6 +208,7 @@ Demo mode: add `--paintbrush-demo-mode` (preloads `sample.npb` if present).
 
 - Branch `master`; base `e4f2d3a399`; Phase 1 checkpoint `d7b3d33e82`; Phase 2/3 committed (`bf1c6b3dcb` … `f20dcf8952`).
 - **Phase 4 (this session), in order:** `7578484635` merge upstream `master` (265 commits); `e6d71d2cb3` + `2fa7963b0c` Windows build regressions (lua path, WiX/nsProcess guards, backslash-escape defines); `7856bdac86` paintbrush QML hardening (`fontSize_xxxsmall`, checkerboard); `9378df875a` paintbrush HANDOFF gaps (recovery "Open copy", baked collage scaling, rulers).
+- **Phase 5 (this session), in order:** `b4298d8883` avcodec hardware-decoding policy (`avcodec-hwdec` Auto/Disabled/Required + paintbrush `:avcodec-hwdec=1`); then the paintbrush polish commit (track effects, `paintbrush.*` log categories, rulers `R` shortcut).
 - Untracked (pre-existing, not ours): `scripts/launch-pb-noskip.ps1`, `vlc-help.txt`.
 - No secrets, no binaries, no build artifacts staged (`.gitignore` covers `.kilo/`, win64-meson build dir, autosave temp files). SAM3 model file and test media are outside the repo.
 
@@ -196,7 +220,7 @@ Demo mode: add `--paintbrush-demo-mode` (preloads `sample.npb` if present).
 
 ## 10. Suggested next work (maintainer)
 
-1. Exercise end-to-end with the model + video now on disk: open video → capture frame → object select → drag-refine mask → track → sticker export → collage (confirms the baked collage scaling and rulers feel right interactively).
-2. Wire STT/TTS providers and the optional lookup provider.
-3. Consider WebM-alpha sticker export when an alpha-capable encoder is confirmed.
-4. Add the remaining low-risk polish: `paintbrush.*` log-category hierarchy, track effects (blur/dim/spotlight/outline/attach), and a Show/Hide rulers shortcut independent of the grid toggle.
+1. Interactive quality pass with the user's eyes: track an object across frames (SAM3 CPU inference ~75 s/frame), export an animated sticker, build a collage — confirm the baked collage scaling, rulers, and track effects feel right interactively.
+2. Wire STT/TTS providers and the optional lookup provider (extension points exist; only the interface is shipped).
+3. Consider WebM-alpha sticker export when an alpha-capable encoder is confirmed (PNG sequence export is the honest current state).
+4. Optional: a separate `PaintbrushFrameProvider` that serves exact software-decoded frames directly to thumbnail/SAM/VLM paths (today they reuse the main player's `:avcodec-hwdec=1` media, which is sufficient).

@@ -137,6 +137,11 @@ QString ProjectStore::saveToBytes(PaintbrushDocument *doc, QByteArray *out) cons
         t[QStringLiteral("endMs")] = track.endMs;
         t[QStringLiteral("label")] = track.label;
         t[QStringLiteral("complete")] = track.complete;
+        QJsonObject effect;
+        effect[QStringLiteral("type")] = track.effect.type;
+        effect[QStringLiteral("intensity")] = track.effect.intensity;
+        effect[QStringLiteral("color")] = track.effect.color;
+        t[QStringLiteral("effect")] = effect;
         QJsonArray keyframes;
         for (const TrackKeyframe &kf : track.keyframes)
         {
@@ -249,6 +254,13 @@ QString ProjectStore::loadFromBytes(PaintbrushDocument *doc,
         track.endMs = qint64(t[QStringLiteral("endMs")].toDouble());
         track.label = t[QStringLiteral("label")].toString();
         track.complete = t[QStringLiteral("complete")].toBool(true);
+        const QJsonObject effect = t[QStringLiteral("effect")].toObject();
+        if (!effect.isEmpty())
+        {
+            track.effect.type = effect[QStringLiteral("type")].toInt();
+            track.effect.intensity = effect[QStringLiteral("intensity")].toInt(50);
+            track.effect.color = effect[QStringLiteral("color")].toString();
+        }
         const QJsonArray kfArray = t[QStringLiteral("keyframes")].toArray();
         for (const QJsonValue &kfv : kfArray)
         {

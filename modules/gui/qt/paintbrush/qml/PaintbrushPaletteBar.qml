@@ -118,6 +118,13 @@ Item { Layout.fillWidth: true }
             checked: canvas.gridVisible
             onClicked: canvas.gridVisible = !canvas.gridVisible
         }
+        Button {
+            Layout.alignment: Qt.AlignVCenter
+            text: qsTr("Rulers")
+            checkable: true
+            checked: canvas.rulersVisible
+            onClicked: canvas.rulersVisible = !canvas.rulersVisible
+        }
         Slider {
             id: gridSpacingSlider
             Layout.preferredWidth: VLCStyle.dp(70, VLCStyle.scale)

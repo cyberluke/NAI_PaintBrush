@@ -196,7 +196,7 @@ import VLC.Paintbrush
         anchors.right: parent.right
         height: VLCStyle.dp(18, VLCStyle.scale)
         z: 6
-        visible: canvas.gridVisible
+        visible: canvas.rulersVisible
         antialiasing: true
 
         readonly property int step: root.rulerStep(canvas.zoom)
@@ -256,7 +256,7 @@ import VLC.Paintbrush
         anchors.bottom: parent.bottom
         width: VLCStyle.dp(18, VLCStyle.scale)
         z: 6
-        visible: canvas.gridVisible
+        visible: canvas.rulersVisible
         antialiasing: true
 
         readonly property int step: root.rulerStep(canvas.zoom)

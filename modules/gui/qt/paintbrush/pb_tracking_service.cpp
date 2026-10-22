@@ -45,6 +45,8 @@ void TrackingService::configure(vlc_object_t *obj)
     m_device = pbConfigString(obj, "paintbrush-sam-device").trimmed();
     if (m_device.isEmpty())
         m_device = QStringLiteral("auto");
+    pbLogInfo(obj, "tracking", "configured model=%s device=%s",
+              qUtf8Printable(m_modelPath), qUtf8Printable(m_device));
 
     if (m_modelPath.isEmpty())
     {
@@ -151,6 +153,8 @@ void TrackingService::startTrack(vlc_player_t *player, const QImage &startFrame,
             vlc_player_Pause(m_player);
     }
 
+    pbLogInfo(m_obj, "tracking", "start dir=%d max=%d",
+              direction, m_total);
     beginTracking();
 }
 

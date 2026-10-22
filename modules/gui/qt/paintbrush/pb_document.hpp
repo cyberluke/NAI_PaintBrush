@@ -41,6 +41,26 @@ struct TrackKeyframe
     bool corrected = false; /* user corrected this keyframe        */
 };
 
+/* Visual effect applied to a tracked object when rendered (sticker preview,
+ * export and canvas placement). Honest subset of common compositing effects;
+ * "attach" composites the cutout back over the source frame at the mask
+ * position. */
+struct TrackEffect
+{
+    enum Type
+    {
+        None = 0,
+        Blur,       /* soften the cutout edges/pixels            */
+        Dim,        /* darken the cutout                         */
+        Spotlight,  /* brighten the cutout, dim nothing else     */
+        Outline,    /* colored contour around the cutout         */
+        Attach,     /* composite cutout over the source frame    */
+    };
+    int type = None;
+    int intensity = 50;   /* 0..100: blur radius / dim factor / spotlight boost */
+    QString color;        /* outline color (QColor name), when applicable       */
+};
+
 struct ObjectTrack
 {
     int id = 0;
@@ -49,6 +69,7 @@ struct ObjectTrack
     qint64 endMs = 0;
     QString label;                        /* initial text prompt, if any  */
     QVector<TrackKeyframe> keyframes;
+    TrackEffect effect;
     bool complete = false;
     bool cancelled = false;
     QString error;

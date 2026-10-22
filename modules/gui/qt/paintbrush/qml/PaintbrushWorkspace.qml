@@ -383,6 +383,7 @@ Item {
     Shortcut { sequence: "O"; onActivated: paintbrushCanvas.tool = 3 }
     Shortcut { sequence: "T"; onActivated: paintbrushCanvas.tool = 14 }
     Shortcut { sequence: "G"; onActivated: paintbrushCanvas.gridVisible = !paintbrushCanvas.gridVisible }
+    Shortcut { sequence: "R"; onActivated: paintbrushCanvas.rulersVisible = !paintbrushCanvas.rulersVisible }
     Shortcut { sequence: "Shift+G"; onActivated: paintbrushCanvas.snapToGrid = !paintbrushCanvas.snapToGrid }
     Shortcut { sequence: "+"; onActivated: paintbrushCanvas.zoomIn() }
     Shortcut { sequence: "-"; onActivated: paintbrushCanvas.zoomOut() }

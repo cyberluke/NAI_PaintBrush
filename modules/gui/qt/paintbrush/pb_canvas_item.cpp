@@ -167,6 +167,14 @@ void PaintbrushCanvasItem::setGridVisible(bool visible)
     update(); /* grid is a scene-graph overlay; it never dirties the raster */
 }
 
+void PaintbrushCanvasItem::setRulersVisible(bool visible)
+{
+    if (m_rulersVisible == visible)
+        return;
+    m_rulersVisible = visible;
+    emit rulersVisibleChanged(); /* the QML rulers are plain items */
+}
+
 void PaintbrushCanvasItem::setGridSpacing(int spacing)
 {
     spacing = qBound(4, spacing, 512);

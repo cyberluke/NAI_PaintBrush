@@ -375,6 +375,9 @@ Item {
 
         onOpened: {
             previewFrame = startFrame
+            effectCombo.currentIndex = PaintbrushCtx.trackEffectType(trackId)
+            effectIntensitySpin.value = PaintbrushCtx.trackEffectIntensity(trackId)
+            effectColorField.text = PaintbrushCtx.trackEffectColor(trackId)
             previewTimer.start()
         }
         onClosed: previewTimer.stop()
@@ -399,7 +402,7 @@ Item {
                     height: parent.height - 20
                     fillMode: Image.PreserveAspectFit
                     source: stickerEditor.frameCount() > 0
-                            ? PaintbrushCtx.stickerEditorPreviewDataUrl(
+                            ? PaintbrushCtx.trackEffectPreviewDataUrl(
                                   stickerEditor.trackId, stickerEditor.previewFrame,
                                   outlineSpin.value, outlineColorField.text,
                                   shadowCheck.checked, scaleSpin.value / 100.0)
@@ -492,6 +495,59 @@ Item {
                     from: 1
                     to: 8
                     value: 1
+                }
+            }
+
+            /* track effect (blur / dim / spotlight / outline / attach) */
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: VLCStyle.margin_xsmall
+                Widgets.LabelExt { text: qsTr("Effect"); color: theme.fg.secondary }
+                Widgets.ComboBoxExt {
+                    id: effectCombo
+                    Layout.fillWidth: true
+                    model: [
+                        { text: qsTr("None"), value: 0 },
+                        { text: qsTr("Blur"), value: 1 },
+                        { text: qsTr("Dim"), value: 2 },
+                        { text: qsTr("Spotlight"), value: 3 },
+                        { text: qsTr("Outline"), value: 4 },
+                        { text: qsTr("Attach to frame"), value: 5 }
+                    ]
+                    textRole: "text"
+                    valueRole: "value"
+                    currentIndex: 0
+                    onCurrentIndexChanged: {
+                        if (stickerEditor.opened && stickerEditor.trackId >= 0)
+                            PaintbrushCtx.setTrackEffect(
+                                stickerEditor.trackId, effectCombo.currentValue,
+                                effectIntensitySpin.value, effectColorField.text)
+                    }
+                }
+                Widgets.SpinBoxExt {
+                    id: effectIntensitySpin
+                    Layout.preferredWidth: VLCStyle.dp(70, VLCStyle.scale)
+                    from: 0
+                    to: 100
+                    value: PaintbrushCtx.trackEffectIntensity(stickerEditor.trackId)
+                    onValueModified: {
+                        if (stickerEditor.opened && stickerEditor.trackId >= 0)
+                            PaintbrushCtx.setTrackEffect(
+                                stickerEditor.trackId, effectCombo.currentValue,
+                                value, effectColorField.text)
+                    }
+                }
+                TextField {
+                    id: effectColorField
+                    Layout.preferredWidth: VLCStyle.dp(90, VLCStyle.scale)
+                    text: PaintbrushCtx.trackEffectColor(stickerEditor.trackId)
+                    placeholderText: qsTr("color")
+                    onEditingFinished: {
+                        if (stickerEditor.opened && stickerEditor.trackId >= 0)
+                            PaintbrushCtx.setTrackEffect(
+                                stickerEditor.trackId, effectCombo.currentValue,
+                                effectIntensitySpin.value, text)
+                    }
                 }
             }
 

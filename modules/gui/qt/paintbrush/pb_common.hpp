@@ -140,6 +140,32 @@ void pbLogRequest(vlc_object_t *obj, const char *kind,
                   const QString &requestId, qint64 elapsedMs,
                   bool ok, const QString &detail = {});
 
+/* paintbrush.* log-category hierarchy. The paintbrush sources compile inside
+ * the qt module (MODULE_STRING=qt), so the msg_* macros would tag every line
+ * as [qt]. These helpers call vlc_object_Log() with an explicit category
+ * module string ("paintbrush.<category>") so the log lines carry a real
+ * hierarchy: paintbrush, paintbrush.segmentation, paintbrush.tracking,
+ * paintbrush.vision, paintbrush.generation, paintbrush.assistant,
+ * paintbrush.companion, paintbrush.lookup, paintbrush.thumbnails,
+ * paintbrush.export. The category is a dotted path, matching how VLC log
+ * filters (--verbose=2, logcat) match on the module name. */
+void pbLogMsg(vlc_object_t *obj, int prio, const char *category,
+              const char *file, unsigned line, const char *func,
+              const char *format, ...) VLC_FORMAT(7, 8);
+
+#define pbLogDebug(obj, category, ...) \
+    pbLogMsg(VLC_OBJECT(obj), VLC_MSG_DBG, "paintbrush." category, \
+             __FILE__, __LINE__, __func__, __VA_ARGS__)
+#define pbLogInfo(obj, category, ...) \
+    pbLogMsg(VLC_OBJECT(obj), VLC_MSG_INFO, "paintbrush." category, \
+             __FILE__, __LINE__, __func__, __VA_ARGS__)
+#define pbLogWarn(obj, category, ...) \
+    pbLogMsg(VLC_OBJECT(obj), VLC_MSG_WARN, "paintbrush." category, \
+             __FILE__, __LINE__, __func__, __VA_ARGS__)
+#define pbLogError(obj, category, ...) \
+    pbLogMsg(VLC_OBJECT(obj), VLC_MSG_ERR, "paintbrush." category, \
+             __FILE__, __LINE__, __func__, __VA_ARGS__)
+
 } // namespace paintbrush
 
 #endif // PB_COMMON_HPP
