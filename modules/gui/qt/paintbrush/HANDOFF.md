@@ -1,11 +1,11 @@
-# NAI Paintbrush — Handoff Document (Phase 3: real video validation)
+# NAI Paintbrush — Handoff Document (Phase 4: upstream merge + hardening)
 
-**Date:** 2026-10-02
+**Date:** 2026-10-22
 **Author:** implementation agent (handoff to maintainer)
 **Spec source:** `C:\Users\lukes.COREI9\Downloads\NAI_Paintbrush_VLC4_Full_Scope_One_Run_Spec (1).md` (Phase 1) + Phase 2 One-Run Implementation Spec
 **Repo:** `D:\_SATIN_AI\NAI-OS\vlc` — VLC 4.0.0-dev
 **Branch:** `master`
-**Commits:** `e4f2d3a399` (base, before Paintbrush) → `d7b3d33e82` (Phase 1 checkpoint) → `*pending*` (Phase 2 + Phase 3, uncommitted at writing time)
+**Commits:** `e4f2d3a399` (base) → `d7b3d33e82` (Phase 1) → `f20dcf8952` (Phase 2+3) → `7578484635` (merge upstream 265 commits) → `9378df875a` (Phase 4 hardening + gaps)
 **Build tree:** `win64-meson\` (native MSYS2/MINGW64 Meson build, 408 modules)
 
 ---
@@ -81,21 +81,59 @@ feedback cycle drove these fixes:
 Verification: plugin rebuilds clean (`ninja modules/libqt_plugin.dll`), cache regenerated,
 UI Automation tree confirms all 15 tools + new buttons instantiate, zero QML errors on launch.
 
+## 3c. Phase 4: upstream VLC merge + paintbrush hardening (this session)
+
+Merged upstream `master` (265 commits) into the paintbrush branch. The 7 files
+that overlapped with our edits (`Makefile.am`, `mainctx.{hpp,cpp}`,
+`MainDisplay.qml`, `MainInterface.qml`, `meson.build`, `qt.cpp`) merged cleanly
+with every paintbrush addition preserved (paintbrush entries in meson.build,
+config options + `Q_INIT_RESOURCE(paintbrush_assets)` in qt.cpp,
+`MAININTERFACE_MODE_PAINTBRUSH`/`paintbrushView`/`s_instance` in mainctx.hpp,
+paintbrush controller + QML type registrations in mainui.cpp).
+
+The full tree rebuilt end-to-end on Windows after fixing three upstream build
+regressions that the merge surfaced:
+
+| Upstream regression | Fix |
+|---|---|
+| `modules/lua/meson.build` split `m.full_path()` on `/` but Windows returns backslash paths, so `custom_target output:` kept a path segment that modern meson rejects | Normalize to forward slashes before splitting bin/meson.build + test/meson.build + modules/lua/meson.build |
+| `-DTOP_BUILDDIR/-DTOP_SRCDIR/-DSRCDIR` embedded Windows paths raw into C literals; the `\N`/`\w`/`\_` sequences break newer GCC (`incomplete universal character name`) | Normalize those defines to forward slashes (valid in putenv paths) |
+| NSIS `nsProcess` built a `shared_library` with no sources when the i686 cross toolchain is absent, failing to link; WiX MSI targets crashed configure when WiX/Wine were missing | Guard the nsProcess target and the WiX block on the tools actually being present |
+
+Paintbrush module hardening (all pre-existing latent issues, surfaced now that
+QML warnings are captured):
+
+- **Invalid `VLCStyle.fontSize_xxxsmall`** (does not exist upstream): replaced
+  with `fontSize_xsmall` in 11 places across 4 QML files — this removed every
+  "`Unable to assign [undefined] to int`" warning.
+- **Checkerboard Grid overflow** (`Grid contains more visible items than
+  rows*columns`): checkerboard cells are now positioned explicitly instead of
+  via a `Grid`+`Repeater`, so item count always matches the area.
+
+Result: after the merge, `vlc --paintbrush` launches with **zero paintbrush QML
+warnings/errors** and zero plugin-load errors (a stale `src/plugins` cache path
+noise line aside). The only remaining Qt log noise is an upstream
+`IconToolButton.qml:81` `console.assert("text is empty")` from the standard
+interface (not paintbrush — paintbrush sets both `text` and `description`).
+
+Closed HANDOFF gaps (section 4): auto collage slot scaling (baked, pixel-perfect),
+grid rulers, and the recovery "Open copy" flow.
+
 ## 4. Remaining gaps (actual, honest)
 
 | Item | State |
 |---|---|
 | Pen hover/eraser pressure mapping | Pressure maps to size + optional opacity; hover/eraser pressure not separately mapped (mouse default unchanged) |
 | Thumbnail generation while playing | Generates only while paused (by design); playing idles with placeholders |
-| Auto collage scaling | Pieces are repositioned and raster→image-converted; pixel-perfect slot *scaling* of image layers is limited (positions + content cut; rescaling to slot is partial for image layers) |
+| Auto collage scaling | **Done (Phase 4):** scale/rotation are now baked into each piece's raster so image/generated layers land exactly in their slot (pixel-perfect; previously a render-time scale with an ambiguous pivot) |
 | STT/TTS providers | Config extension points exist; no provider wired (voice optional, core unaffected) |
 | Animated sticker as WebM/alpha video | Only transparent PNG sequence export; WebM-alpha needs an encoder that supports it (not claimed) |
 | Object lookup provider | Interface + unavailable state only; no vendor wired (by design) |
 | Track effects (blur/dim/spotlight/outline/attach) | Not implemented (track data model supports metadata) |
 | Automatic menu "Open in Paintbrush" / global hotkey | Sidebar + CLI + drag/drop + clipboard only |
-| Grid ruler/coordinate feedback | Status bar shows cursor/selection/zoom/snap/grid; ruler widgets not added |
+| Grid ruler/coordinate feedback | **Done (Phase 4):** pixel-coordinate rulers along the top/left canvas edges (tied to the grid toggle, stay aligned with the document while panning/zooming); status bar still shows cursor/selection/zoom/snap/grid |
 | Full log-category hierarchy (`paintbrush.*`) | `msg_*` logging only |
-| Recovery "Open copy" flow | Banner offers Restore/Discard; "Open copy" saves via Save dialog (manual) |
+| Recovery "Open copy" flow | **Done (Phase 4):** `openRecoveryCopy()` loads the recovered autosave as an unsaved copy and leaves the original recovery file untouched; banner no longer opens the save dialog |
 
 ## 5. Verification performed (Phase 2 + Phase 3)
 
@@ -145,24 +183,20 @@ Demo mode: add `--paintbrush-demo-mode` (preloads `sample.npb` if present).
 
 ## 8. Git state
 
-- Branch `master`; base `e4f2d3a399`; Phase 1 checkpoint `d7b3d33e82`.
-- **Phase 2 + Phase 3 changes are uncommitted at writing time** (modified + untracked):
-  - New (Phase 2): `pb_thumbnail_service.{hpp,cpp}`, `pb_lookup_service.{hpp,cpp}`, `BUILDING.md`, `HANDOFF.md` (this file).
-  - Modified (Phase 2): `pb_canvas_item.{hpp,cpp}`, `pb_companion_service.{hpp,cpp}`, `pb_controller.{hpp,cpp}`, `pb_export.{hpp,cpp}`, `pb_segmentation_service.{hpp,cpp}`, `pb_tracking_service.{hpp,cpp}`, 7 QML files, `qt.cpp`, `meson.build`, `Makefile.am`.
-  - Modified (Phase 3): `pb_canvas_item.{hpp,cpp}` (freehand mask painting), `pb_controller.{hpp,cpp}` (`openVideoFile`, `extractObject`, `pristineSourceFrame`, `currentAiSource`/`objectCrop`/`selectionCrop` pristine-frame path, wizard/autosave recovery fixes, `onObjectMaskEdited`), `pb_vision_service.cpp` (letter-by-letter prompt), `video_window_handler.cpp` (no paintbrush autoresize), `pb_generation_service.{hpp,cpp}`/`pb_lookup_service.{hpp,cpp}`/`pb_companion_service.{hpp,cpp}`/`pb_tracking_service.cpp` (Phase 2+3 polish), QML: `PaintbrushWorkspace.qml` (opaque bg, Open video, dialog widths, wizard signal), `PaintbrushFirstLaunch.qml` (`openVideoRequested`), `PaintbrushInspectorDock.qml` (Extract object, dialog widths, mask-refine hint), `PaintbrushAssistantDock.qml` (TextEdit fix), `PaintbrushToolRail.qml`.
+- Branch `master`; base `e4f2d3a399`; Phase 1 checkpoint `d7b3d33e82`; Phase 2/3 committed (`bf1c6b3dcb` … `f20dcf8952`).
+- **Phase 4 (this session), in order:** `7578484635` merge upstream `master` (265 commits); `e6d71d2cb3` + `2fa7963b0c` Windows build regressions (lua path, WiX/nsProcess guards, backslash-escape defines); `7856bdac86` paintbrush QML hardening (`fontSize_xxxsmall`, checkerboard); `9378df875a` paintbrush HANDOFF gaps (recovery "Open copy", baked collage scaling, rulers).
+- Untracked (pre-existing, not ours): `scripts/launch-pb-noskip.ps1`, `vlc-help.txt`.
 - No secrets, no binaries, no build artifacts staged (`.gitignore` covers `.kilo/`, win64-meson build dir, autosave temp files). SAM3 model file and test media are outside the repo.
-- Recommended commit: `paintbrush: complete Phase 2 polish, Phase 3 real-video validation and freehand mask refinement`.
 
 ## 9. Rollback
 
-1. Discard the untracked files: `pb_thumbnail_service.*`, `pb_lookup_service.*`, `BUILDING.md`, `HANDOFF.md`.
-2. `git checkout -- <modified files>` — or `git reset --hard d7b3d33e82` to drop all Phase 2 + Phase 3 changes while keeping the Phase 1 checkpoint.
+1. To drop only the Phase 4 upstream merge + hardening: `git reset --hard f20dcf8952` (keep the pre-merge paintbrush commits).
+2. To drop the entire paintbrush feature back to upstream VLC: reset onto `7578484635^` (the merged upstream tip) or `git reset --hard <upstream>`, then re-apply only the paintbrush commits you want to keep.
 3. To disable the feature entirely: `--no-paintbrush` / unset `paintbrush` config; the module is gated by `paintbrush-enabled`.
 
 ## 10. Suggested next work (maintainer)
 
-1. Commit Phase 2 + Phase 3 (recommended message above).
-2. Exercise end-to-end with the model + video now on disk: open video → capture frame → object select → drag-refine mask → track → sticker export → collage.
-3. Wire STT/TTS providers and the optional lookup provider.
-4. Add slot-scaling for collage image layers.
-5. Consider WebM-alpha sticker export when an alpha-capable encoder is confirmed.
+1. Exercise end-to-end with the model + video now on disk: open video → capture frame → object select → drag-refine mask → track → sticker export → collage (confirms the baked collage scaling and rulers feel right interactively).
+2. Wire STT/TTS providers and the optional lookup provider.
+3. Consider WebM-alpha sticker export when an alpha-capable encoder is confirmed.
+4. Add the remaining low-risk polish: `paintbrush.*` log-category hierarchy, track effects (blur/dim/spotlight/outline/attach), and a Show/Hide rulers shortcut independent of the grid toggle.

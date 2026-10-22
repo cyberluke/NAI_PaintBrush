@@ -1,9 +1,9 @@
 # NAI Paintbrush — 21-step end-to-end demo checklist
 
 A human-driven walkthrough of the Phase 3 feature set against a real video + SAM3
-model. The implementation agent validated every step's underlying service path
-(see `HANDOFF.md` §5); the live clicks below need a human because video/AI output
-grading requires eyes and because the offscreen-automation harness cannot judge vision.
+model (Phase 4 additions noted inline). The implementation agent validated every step's
+underlying service path (see `HANDOFF.md` §5); the live clicks below need a human
+because video/AI output grading requires eyes and because the offscreen-automation harness cannot judge vision.
 
 **Setup (once):**
 - Build: `cd win64-meson && export PATH=/mingw64/bin:/usr/bin:<contrib>/bin && ninja modules/libqt_plugin.dll`
@@ -70,7 +70,12 @@ service health + active jobs; cancel a job from the diagnostics list.
 
 ## 16. Save project, then crash-recovery
 Save project → then force-close the app → relaunch → the recovery banner appears
-(Restore / Open copy… / Discard). Restore reloads the unsaved work (validated this session).
+(Restore / Open copy… / Discard).
+- **Restore** reloads the unsaved work.
+- **Open copy…** (Phase 4) opens the recovered autosave as an unsaved copy and
+  *keeps the original recovery file on disk*, so the autosave is not consumed by
+  merely viewing a copy.
+- **Discard** removes the recovery data.
 
 ## 17. Export image (PNG/JPEG, scale, presets)
 "Export image…" → pick PNG/JPEG, set scale or a preset (Canvas / Transparent Sticker / Social Post /
@@ -99,3 +104,13 @@ the log stays clean (no `TypeError`, `Cannot read property`, or SAM model-load f
   ~370–450 ms, tracking instance stable across 4 frames.
 - The `21` steps map onto the full feature surface; steps 3, 5–9, 14, 16–18 are where a human
   eyes-on confirmation adds the most value.
+
+## Phase 4 additions (post-merge, built and launched clean this session)
+- **Coordinate rulers** — top/left pixel-coordinate rulers appear at the canvas edges (they share
+  the grid toggle, `G`). Ticks stay aligned with the document while you pan/zoom; density adapts to
+  the zoom level.
+- **Pixel-perfect collage scaling** — auto collage now bakes each piece's scale/rotation into its
+  raster, so image/generated layers land exactly in their slot (previously the scale was only a
+  render-time transform with an ambiguous pivot).
+- **Recovery "Open copy…"** — wired to open the recovered autosave as an unsaved copy while keeping
+  the original recovery file on disk (see step 16).
