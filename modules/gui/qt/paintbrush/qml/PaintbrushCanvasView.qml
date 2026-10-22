@@ -30,6 +30,18 @@ import VLC.Paintbrush
 
         required property PaintbrushCanvas canvas
 
+        /* pick a "nice" ruler tick interval (in document pixels) so ticks are
+         * not closer than ~40 view pixels at the current zoom */
+        function rulerStep(zoom) {
+            const targetPx = 40
+            const steps = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000, 10000]
+            for (let i = 0; i < steps.length; ++i) {
+                if (steps[i] / Math.max(zoom, 0.0001) >= targetPx)
+                    return steps[i]
+            }
+            return 10000
+        }
+
         ColorContext {
             id: theme
             colorSet: ColorContext.View
@@ -171,6 +183,127 @@ import VLC.Paintbrush
                 visible: canvas.hasSelection
                 onClicked: canvas.selectionClear()
             }
+        }
+    }
+
+    /* pixel-coordinate rulers along the top and left edges. The canvas item
+     * fills this view, so a document point (dx, dy) maps to the view at
+     * (dx * zoom + panOffset.x, dy * zoom + panOffset.y). */
+    Canvas {
+        id: hRuler
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        height: VLCStyle.dp(18, VLCStyle.scale)
+        z: 6
+        visible: canvas.gridVisible
+        antialiasing: true
+
+        readonly property int step: root.rulerStep(canvas.zoom)
+
+        onStepChanged: requestPaint()
+        Connections {
+            target: canvas
+            function onZoomChanged() { hRuler.requestPaint() }
+            function onPanOffsetChanged() { hRuler.requestPaint() }
+        }
+        onWidthChanged: requestPaint()
+
+        onPaint: {
+            const ctx = getContext("2d")
+            ctx.clearRect(0, 0, width, height)
+            ctx.fillStyle = Qt.rgba(0.08, 0.08, 0.09, 0.92)
+            ctx.fillRect(0, 0, width, height)
+
+            const stepPx = step * canvas.zoom
+            // first tick at or before the left edge
+            let first = Math.floor(-canvas.panOffset.x / stepPx) * step
+            ctx.strokeStyle = "white"
+            ctx.fillStyle = "white"
+            ctx.font = (VLCStyle.fontSize_xsmall) + "px sans-serif"
+            ctx.lineWidth = 1
+            const labelEvery = stepPx >= 50 ? step : 100
+            for (let dx = first; ; dx += step) {
+                const vx = dx * canvas.zoom + canvas.panOffset.x
+                if (vx > width) break
+                if (vx < -10) continue
+                if (dx % labelEvery === 0) {
+                    ctx.beginPath()
+                    ctx.moveTo(vx + 0.5, 12)
+                    ctx.lineTo(vx + 0.5, height)
+                    ctx.stroke()
+                    ctx.fillText(String(dx), vx + 2, 8)
+                } else if (stepPx >= 28) {
+                    ctx.beginPath()
+                    ctx.moveTo(vx + 0.5, 14)
+                    ctx.lineTo(vx + 0.5, height)
+                    ctx.stroke()
+                }
+            }
+            // thin divider line at the bottom
+            ctx.strokeStyle = Qt.rgba(0, 0, 0, 0.5)
+            ctx.beginPath()
+            ctx.moveTo(0, height - 0.5)
+            ctx.lineTo(width, height - 0.5)
+            ctx.stroke()
+        }
+    }
+
+    Canvas {
+        id: vRuler
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.bottom: parent.bottom
+        width: VLCStyle.dp(18, VLCStyle.scale)
+        z: 6
+        visible: canvas.gridVisible
+        antialiasing: true
+
+        readonly property int step: root.rulerStep(canvas.zoom)
+
+        onStepChanged: requestPaint()
+        Connections {
+            target: canvas
+            function onZoomChanged() { vRuler.requestPaint() }
+            function onPanOffsetChanged() { vRuler.requestPaint() }
+        }
+        onHeightChanged: requestPaint()
+
+        onPaint: {
+            const ctx = getContext("2d")
+            ctx.clearRect(0, 0, width, height)
+            ctx.fillStyle = Qt.rgba(0.08, 0.08, 0.09, 0.92)
+            ctx.fillRect(0, 0, width, height)
+
+            const stepPx = step * canvas.zoom
+            let first = Math.floor(-canvas.panOffset.y / stepPx) * step
+            ctx.strokeStyle = "white"
+            ctx.fillStyle = "white"
+            ctx.font = (VLCStyle.fontSize_xsmall) + "px sans-serif"
+            ctx.lineWidth = 1
+            const labelEvery = stepPx >= 50 ? step : 100
+            for (let dy = first; ; dy += step) {
+                const vy = dy * canvas.zoom + canvas.panOffset.y
+                if (vy > height) break
+                if (vy < -10) continue
+                if (dy % labelEvery === 0) {
+                    ctx.beginPath()
+                    ctx.moveTo(12, vy + 0.5)
+                    ctx.lineTo(width, vy + 0.5)
+                    ctx.stroke()
+                    ctx.fillText(String(dy), 2, vy - 2)
+                } else if (stepPx >= 28) {
+                    ctx.beginPath()
+                    ctx.moveTo(14, vy + 0.5)
+                    ctx.lineTo(width, vy + 0.5)
+                    ctx.stroke()
+                }
+            }
+            ctx.strokeStyle = Qt.rgba(0, 0, 0, 0.5)
+            ctx.beginPath()
+            ctx.moveTo(width - 0.5, 0)
+            ctx.lineTo(width - 0.5, height)
+            ctx.stroke()
         }
     }
 

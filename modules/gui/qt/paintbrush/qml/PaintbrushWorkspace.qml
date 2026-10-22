@@ -354,7 +354,7 @@ Item {
             }
             Button {
                 text: qsTr("Open copy…")
-                onClicked: saveProjectDialog.open()
+                onClicked: PaintbrushCtx.openRecoveryCopy()
             }
             Button {
                 text: qsTr("Discard")

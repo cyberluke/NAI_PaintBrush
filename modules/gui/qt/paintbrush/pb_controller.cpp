@@ -813,6 +813,38 @@ void PaintbrushController::discardRecovery()
     emit recoveryStateChanged();
 }
 
+void PaintbrushController::openRecoveryCopy()
+{
+    /* Open the recovered autosave as a *copy*: load its content into an
+     * unsaved, non-project document but leave the recovery file untouched on
+     * disk, so the original autosave is never consumed by merely viewing a
+     * copy of it. The banner is dismissed for this session because the content
+     * is now visible on the canvas. */
+    if (m_recoveryPath.isEmpty())
+        return;
+    const QString err = m_projectStore.load(&m_document, m_recoveryPath);
+    if (!err.isEmpty())
+    {
+        setStatus(QStringLiteral("Open copy failed: %1").arg(err));
+        return;
+    }
+    m_document.setProjectPath({});
+    m_document.setDirty(true);
+    if (m_canvas)
+    {
+        m_canvas->markCanvasDirty();
+        m_canvas->setTool(m_canvas->tool());
+    }
+    m_undoStack.clear();
+    /* Do NOT remove m_recoveryPath: this is a copy, the original stays on disk. */
+    m_recoveryAvailable = false;
+    m_recoveryPath.clear();
+    m_recoveryDescription.clear();
+    emit documentChanged();
+    emit recoveryStateChanged();
+    setStatus(QStringLiteral("Opened a copy of the recovered project (original kept)"));
+}
+
 void PaintbrushController::undo()
 {
     if (m_undoStack.undo(m_document) && m_canvas)
@@ -2468,10 +2500,11 @@ void PaintbrushController::autoCollage(int preset)
     }
     }
 
-    /* apply as one undoable structure change: raster layers are converted to
-     * positioned image layers (cut to content); image/generated layers keep
-     * their raster and are scaled/rotated via the layer transform — every
-     * piece stays an independent editable layer with real transforms. */
+    /* apply as one undoable structure change. Every piece is baked to its
+     * final size/orientation so it lands exactly in its slot (pixel-perfect
+     * scaling for image/generated layers, which otherwise only stored a
+     * render-time scale with an ambiguous pivot). Raster layers are cut to
+     * content and converted to positioned image layers. */
     const QByteArray before = m_document.layersSnapshot();
     QList<CanvasLayer> layers = m_document.layers();
     for (int i = 0; i < pieces.size(); ++i)
@@ -2480,6 +2513,8 @@ void PaintbrushController::autoCollage(int preset)
         const QRectF b = pieces[i].bounds;
         CanvasLayer &l = layers[idx];
         const QPointF newPos = newPositions[i];
+        const qreal scale = newScales[i];
+        const qreal rot = newRotations[i];
 
         if (l.type == LAYER_RASTER)
         {
@@ -2488,16 +2523,48 @@ void PaintbrushController::autoCollage(int preset)
             if (content.isNull())
                 continue;
             l.raster = content;
-            l.position = newPos;
             l.type = LAYER_IMAGE;
+        }
+
+        /* Bake scale + rotation into the raster (and mask) so the piece's
+         * top-left matches `newPos` exactly. A layer that already carried a
+         * render-time scale/rotation is compounded with the collage transform
+         * (uniform scale and rotation around the same center commute, so the
+         * result is a single scale = product, rotation = sum). The footprint
+         * is the exact slot computed by the preset, so scaling is pixel-perfect
+         * (no render-time pivot ambiguity). */
+        const qreal totalScale = qFuzzyIsNull(rot) && qFuzzyCompare(scale, 1.0)
+                                     ? scale
+                                     : scale * l.scale;
+        const qreal totalRot = (qFuzzyIsNull(rot) && qFuzzyCompare(l.rotation, 0.0))
+                                   ? 0.0
+                                   : rot + l.rotation;
+
+        if (!qFuzzyCompare(totalScale, 1.0) || !qFuzzyIsNull(totalRot))
+        {
+            QTransform tf;
+            const QPointF center(l.raster.width() / 2.0, l.raster.height() / 2.0);
+            tf.translate(center.x(), center.y());
+            tf.rotate(totalRot);
+            tf.scale(totalScale, totalScale);
+            tf.translate(-center.x(), -center.y());
+
+            QImage baked = l.raster.transformed(tf, Qt::SmoothTransformation);
+            if (!l.mask.isNull())
+                l.mask = l.mask.scaled(l.raster.size(), Qt::IgnoreAspectRatio,
+                                       Qt::FastTransformation)
+                             .transformed(tf, Qt::SmoothTransformation);
+            l.raster = baked;
+            l.scale = 1.0f;
+            l.rotation = 0.0f;
         }
         else
         {
-            /* image/generated layer: keep raster, apply transform */
-            l.position = newPos;
+            l.scale = 1.0f;
+            l.rotation = 0.0f;
         }
-        l.scale = float(newScales[i]);
-        l.rotation = float(newRotations[i]);
+
+        l.position = newPos;
     }
     m_document.setLayers(layers);
     const QByteArray after = m_document.layersSnapshot();

@@ -290,6 +290,7 @@ public:
     /* Crash recovery */
     Q_INVOKABLE void checkForRecovery();
     Q_INVOKABLE void restoreRecovery();
+    Q_INVOKABLE void openRecoveryCopy();
     Q_INVOKABLE void discardRecovery();
     bool recoveryAvailable() const { return m_recoveryAvailable; }
     QString recoveryDescription() const { return m_recoveryDescription; }
