@@ -457,6 +457,15 @@ ucrt_version_test = '''
         # DEP, ASLR, NO SEH
         add_project_link_arguments('-Wl,--nxcompat', '-Wl,--no-seh', '-Wl,--dynamicbase',
             language: ['c', 'cpp'])
+
+        if host_machine.cpu_family() == 'x86_64' or host_machine.cpu_family() == 'aarch64' or host_machine.cpu() == 'arm64'
+            if cc.has_link_argument('-Wl,--high-entropy-va')
+                add_project_link_arguments('-Wl,--high-entropy-va', language: ['c', 'cpp'])
+            endif
+            if cc.has_link_argument('-Wl,--image-base,0x140000000')
+                add_project_link_arguments('-Wl,--image-base,0x140000000', language: ['c', 'cpp'])
+            endif
+        endif
     endif
 
     # Check if we are building for Windows Store
@@ -871,6 +880,20 @@ if host_system != 'os/2'
         language: ['c'])
 endif
 
+if get_option('optimization') != '0'
+    add_project_arguments(cc.get_supported_arguments([
+        '-fno-math-errno', '-funsafe-math-optimizations',
+        '-fno-rounding-math', '-fno-signaling-nans', '-fcx-limited-range'
+    ]), language: ['c', 'cpp'])
+    if cc.has_argument('-funroll-loops')
+        add_project_arguments('-funroll-loops', language: ['c', 'objc'])
+    endif
+    if cpp.has_argument('-funroll-loops')
+        add_project_arguments('-funroll-loops', language: ['cpp'])
+    endif
+endif
+
+
 # Stack smashing protection (default enabled for optimized builds)
 if (get_option('ssp')
     .disable_auto_if(get_option('optimization') == '0')
@@ -907,10 +930,16 @@ endif
 # Drops unused symbols.
 # ELF linkers use --gc-sections, while Mach-O uses -dead_strip.
 gc_sections_linkargs = []
+if get_option('split_sections').allowed()
 if cc.has_link_argument('-Wl,--gc-sections')
     gc_sections_linkargs += '-Wl,--gc-sections'
 elif cc.has_link_argument('-Wl,-dead_strip')
     gc_sections_linkargs += '-Wl,-dead_strip'
+endif
+
+add_project_arguments(cc.get_supported_arguments([
+    '-fdata-sections', '-ffunction-sections'
+]), language: ['c', 'cpp'])
 endif
 
 # Check for struct sockaddr_storage type
@@ -1075,14 +1104,6 @@ vlc_about = custom_target('vlc_about.h',
                                    '@INPUT2@',
                                    '@OUTPUT@'])
 
-if host_system == 'windows'
-    windows_rc = import('windows')
-    # not quoted values
-    rc_conf = cdata
-    rc_conf.set('VERSION', vlc_version)
-    rc_conf.set('COPYRIGHT_YEARS', vlc_copyright_years)
-endif
-
 # Enable stream outputs
 if get_option('stream_outputs')
     cdata.set('ENABLE_SOUT', 1)
@@ -1141,7 +1162,7 @@ if get_option('default_monospace_font_family') != ''
 endif
 
 gcrypt_dep = dependency('libgcrypt',
-                         version: '>= 1.6.0',
+                         version: '>= 1.8.5',
                          required: get_option('libgcrypt'))
 if gcrypt_dep.found()
     cdata.set('HAVE_GCRYPT', 1)
@@ -1171,6 +1192,26 @@ subdir('compat')
 
 # Headers
 subdir('include')
+
+if host_system == 'windows'
+    if host_machine.cpu_family() == 'aarch64' or host_machine.cpu() == 'arm64'
+        manifest_arch = 'arm64'
+    elif host_machine.cpu_family() == 'x86_64'
+        manifest_arch = 'amd64'
+    elif host_machine.cpu_family() == 'arm'
+        manifest_arch = 'arm'
+    else
+        manifest_arch = 'x86'
+    endif
+    cdata.set('MANIFEST_ARCH', manifest_arch)
+
+    windows_rc = import('windows')
+    # not quoted values
+    rc_conf = configuration_data()
+    rc_conf.merge_from(cdata)
+    rc_conf.set('VERSION', vlc_version)
+    rc_conf.set('COPYRIGHT_YEARS', vlc_copyright_years)
+endif
 
 # libvlccore
 subdir('src')

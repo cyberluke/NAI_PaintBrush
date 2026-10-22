@@ -16,7 +16,6 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 import QtQuick
-import QtQuick.Controls
 import QtQml.Models
 import QtQuick.Layouts
 
@@ -407,5 +406,9 @@ ListViewExt {
         }
 
         onContainsDragChanged: root.updateItemContainsDrag(this, containsDrag)
+
+        Component.onCompleted: {
+            root.delegateInstantiated(tableDelegate)
+        }
     }
 }

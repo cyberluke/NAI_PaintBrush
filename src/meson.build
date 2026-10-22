@@ -487,13 +487,19 @@ if host_system == 'windows'
         configuration: rc_conf,
         install: false,
     )
+
+    vlc_core_manifest = configure_file(
+        input: files('../extras/package/win32/libvlccore.dll.manifest.in'),
+        output: 'libvlccore.dll.manifest',
+        configuration: rc_conf,
+    )
+
     libvlccore_sources += windows_rc.compile_resources(
         libvlccore_rc,
         include_directories: [
             vlc_src_root / 'share',
-            vlc_src_root / 'extras/package/win32',
         ],
-        depend_files: files('../extras/package/win32/libvlccore.dll.manifest'),
+        depend_files: [vlc_core_manifest],
     )
 endif
 
@@ -507,7 +513,7 @@ libvlccore = library(
     libvlccore_sources, vlc_about, fourcc, rev_target,
     include_directories: vlc_include_dirs,
     c_args: vlccore_cargs,
-    link_args: libvlccore_link_args,
+    link_args: [libvlccore_link_args, gc_sections_linkargs],
     link_with: [vlc_libcompat],
     dependencies: libvlccore_deps,
     install: true,

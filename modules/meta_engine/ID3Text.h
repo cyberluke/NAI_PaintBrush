@@ -22,26 +22,35 @@
 
 #include <vlc_charset.h>
 
+/* Text encoding byte of the ID3v2 frames */
+enum
+{
+    ID3_ENCODING_ISO_8859_1 = 0x00, // ISO-8859-1
+    ID3_ENCODING_UTF16      = 0x01, // UTF-16 with BOM
+    ID3_ENCODING_UTF16BE    = 0x02, // UTF-16BE without BOM, ID3v2.4
+    ID3_ENCODING_UTF8       = 0x03, // UTF-8, ID3v2.4
+};
+
 static const char * ID3TextConv( const uint8_t *p_buf, size_t i_buf,
                                  uint8_t i_charset, char **ppsz_allocated )
 {
     char *p_alloc = NULL;
     const char *psz = p_alloc;
-    if( i_buf > 0 && i_charset < 0x04 )
+    if( i_buf > 0 && i_charset <= ID3_ENCODING_UTF8 )
     {
         switch( i_charset )
         {
-            case 0x00:
+            case ID3_ENCODING_ISO_8859_1:
                 psz = p_alloc = FromCharset( "ISO_8859-1", p_buf, i_buf );
                 break;
-            case 0x01:
-                psz = p_alloc = FromCharset( "UTF-16LE", p_buf, i_buf );
+            case ID3_ENCODING_UTF16:
+                psz = p_alloc = FromCharset( "UTF-16", p_buf, i_buf );
                 break;
-            case 0x02:
+            case ID3_ENCODING_UTF16BE:
                 psz = p_alloc = FromCharset( "UTF-16BE", p_buf, i_buf );
                 break;
             default:
-            case 0x03:
+            case ID3_ENCODING_UTF8:
                 if( p_buf[ i_buf - 1 ] != 0x00 )
                 {
                     psz = p_alloc = (char *) malloc( i_buf + 1 );
@@ -71,6 +80,31 @@ static inline const char * ID3TextConvert( const uint8_t *p_buf, size_t i_buf,
         return NULL;
     }
     return ID3TextConv( &p_buf[1], i_buf - 1, p_buf[0], ppsz_allocated );
+}
+
+/* Size in bytes of the terminator of a string: UTF-16 strings end with a
+ * null code unit */
+static inline size_t ID3TextTerminatorSize( uint8_t i_charset )
+{
+    return ( i_charset == ID3_ENCODING_UTF16 ||
+             i_charset == ID3_ENCODING_UTF16BE ) ? 2 : 1;
+}
+
+/* Length in bytes of the first string of the buffer, terminator excluded,
+ * or -1 if it is not terminated */
+static inline ssize_t ID3TextLength( const uint8_t *p_buf, size_t i_buf,
+                                     uint8_t i_charset )
+{
+    if( ID3TextTerminatorSize( i_charset ) == 2 )
+    {
+        for( size_t i = 0; i + 1 < i_buf; i += 2 )
+            if( GetWBE( &p_buf[i] ) == 0 )
+                return i;
+        return -1;
+    }
+
+    const size_t i_len = strnlen( (const char *) p_buf, i_buf );
+    return i_len < i_buf ? (ssize_t) i_len : -1;
 }
 
 #endif

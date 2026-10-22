@@ -21,42 +21,31 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <psapi.h>
-#include "pluginapi.h"
+#include "nsis/pluginapi.h"
 #include <stdlib.h>
 
 /* Defines */
 #define NSIS_MAX_STRLEN 1024
 
 
-/* Global variables */
-TCHAR szBuf[NSIS_MAX_STRLEN];
-
 /* Funtions prototypes and macros */
-int FIND_PROC_BY_NAME(TCHAR *szProcessName, BOOL bTerminate, BOOL bClose);
+int FIND_PROC_BY_NAME(const TCHAR *szProcessName, BOOL bTerminate);
 
 /* NSIS functions code */
 void __declspec(dllexport) _FindProcess(HWND hwndParent, int string_size,
                                       TCHAR *variables, stack_t **stacktop, extra_parameters *extra)
 {
+  (void)hwndParent;
+  (void)extra;
   EXDLL_INIT();
   {
     int nError;
+    TCHAR szBuf[NSIS_MAX_STRLEN];
 
-    popstringn(szBuf, NSIS_MAX_STRLEN);
-    nError=FIND_PROC_BY_NAME(szBuf, FALSE, FALSE);
-    pushint(nError);
-  }
-}
-
-void __declspec(dllexport) _KillProcess(HWND hwndParent, int string_size,
-                                      TCHAR *variables, stack_t **stacktop, extra_parameters *extra)
-{
-  EXDLL_INIT();
-  {
-    int nError=0;
-
-    popstringn(szBuf, NSIS_MAX_STRLEN);
-    nError=FIND_PROC_BY_NAME(szBuf, TRUE, FALSE);
+    if (popstringn(szBuf, NSIS_MAX_STRLEN))
+      nError = 612;
+    else
+      nError=FIND_PROC_BY_NAME(szBuf, FALSE);
     pushint(nError);
   }
 }
@@ -64,24 +53,19 @@ void __declspec(dllexport) _KillProcess(HWND hwndParent, int string_size,
 void __declspec(dllexport) _CloseProcess(HWND hwndParent, int string_size,
                                       TCHAR *variables, stack_t **stacktop, extra_parameters *extra)
 {
+  (void)hwndParent;
+  (void)extra;
   EXDLL_INIT();
   {
     int nError=0;
+    TCHAR szBuf[NSIS_MAX_STRLEN];
 
-    popstringn(szBuf, NSIS_MAX_STRLEN);
-    nError=FIND_PROC_BY_NAME(szBuf, TRUE, TRUE);
+    if (popstringn(szBuf, NSIS_MAX_STRLEN))
+      nError = 612;
+    else
+      nError=FIND_PROC_BY_NAME(szBuf, TRUE);
     pushint(nError);
   }
-}
-
-void __declspec(dllexport) _Unload(HWND hwndParent, int string_size,
-                                      TCHAR *variables, stack_t **stacktop, extra_parameters *extra)
-{
-}
-
-BOOL WINAPI DllMain(HANDLE hInst, ULONG ul_reason_for_call, LPVOID lpReserved)
-{
-  return TRUE;
 }
 
 struct win_id
@@ -90,7 +74,7 @@ struct win_id
     HWND prev_hwnd;
 };
 
-BOOL CALLBACK EnumWindowsProc(          HWND hwnd,
+static BOOL CALLBACK EnumWindowsProc(          HWND hwnd,
     LPARAM lParam
 )
 {
@@ -105,7 +89,7 @@ BOOL CALLBACK EnumWindowsProc(          HWND hwnd,
 	return TRUE;
 }
 
-void NiceTerminate(DWORD id, BOOL bClose, BOOL *bSuccess, BOOL *bFailed)
+static void NiceTerminate(DWORD id, BOOL *bSuccess, BOOL *bFailed)
 {
   HANDLE hProc;
   DWORD ec;
@@ -114,8 +98,7 @@ void NiceTerminate(DWORD id, BOOL bClose, BOOL *bSuccess, BOOL *bFailed)
   {
 	struct win_id window = { id, NULL };
 
-	if (bClose)
-		EnumWindows(EnumWindowsProc, (LPARAM)&window);
+	EnumWindows(EnumWindowsProc, (LPARAM)&window);
 	if (window.prev_hwnd != NULL)
 	{
 	  if (GetExitCodeProcess(hProc,&ec) && ec == STILL_ACTIVE)
@@ -141,7 +124,7 @@ void NiceTerminate(DWORD id, BOOL bClose, BOOL *bSuccess, BOOL *bFailed)
   }
 }
 
-int FIND_PROC_BY_NAME(TCHAR *szProcessName, BOOL bTerminate, BOOL bClose)
+int FIND_PROC_BY_NAME(const TCHAR *szProcessName, BOOL bTerminate)
 // Find the process "szProcessName" if it is currently running.
 // This works for Win95/98/ME and also WinNT/2000/XP.
 // The process name is case-insensitive, i.e. "notepad.exe" and "NOTEPAD.EXE"
@@ -196,7 +179,6 @@ int FIND_PROC_BY_NAME(TCHAR *szProcessName, BOOL bTerminate, BOOL bClose)
   TCHAR szName[MAX_PATH];
   OSVERSIONINFO osvi;
   HANDLE hProc;
-  ULONG uError;
   BOOL bFound=FALSE;
   BOOL bSuccess=FALSE;
   BOOL bFailed=FALSE;
@@ -258,7 +240,7 @@ int FIND_PROC_BY_NAME(TCHAR *szProcessName, BOOL bTerminate, BOOL bClose)
 
             if (bTerminate == TRUE)
             {
-              NiceTerminate(processIDs[i], bClose, &bSuccess, &bFailed);
+              NiceTerminate(processIDs[i], &bSuccess, &bFailed);
             }
             else break;
           }

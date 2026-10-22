@@ -17,7 +17,6 @@
  *****************************************************************************/
 
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Templates as T
 import QtQuick.Layouts
 import QtQml.Models
@@ -41,7 +40,9 @@ T.ToolBar {
     // Not strictly necessary to set
     property PlaylistPane plListView: null
 
-    property bool _showCSD: MainCtx.clientSideDecoration && !(MainCtx.intfMainWindow.visibility === Window.FullScreen)
+    property bool _showCSD: MainCtx.clientSideDecoration
+                            && !(MainCtx.intfMainWindow.visibility === Window.FullScreen)
+                            && MainCtx.hasToolbarMenu
 
     hoverEnabled: true
 

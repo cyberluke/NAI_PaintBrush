@@ -399,22 +399,26 @@ int foo() { return my_array[0]; }
             aarch64)
                 HAVE_WIN64="1"
                 WINDOWS_ARCH="arm64"
+                MANIFEST_ARCH="arm64"
                 PROGRAMFILES="PROGRAMFILES64"
                 LDFLAGS="${LDFLAGS} -Wl,--high-entropy-va -Wl,--image-base,0x140000000"
             ;;
             amd64|x86_64)
                 HAVE_WIN64="1"
                 WINDOWS_ARCH="x64"
+                MANIFEST_ARCH="amd64"
                 PROGRAMFILES="PROGRAMFILES64"
                 LDFLAGS="${LDFLAGS} -Wl,--high-entropy-va -Wl,--image-base,0x140000000"
                 X86ASMFLAGS="-f win64"
             ;;
             armv7)
                 WINDOWS_ARCH="arm"
+                MANIFEST_ARCH="arm"
                 PROGRAMFILES="PROGRAMFILES"
             ;;
             i?86)
                 WINDOWS_ARCH="x86"
+                MANIFEST_ARCH="x86"
                 PROGRAMFILES="PROGRAMFILES"
                 X86ASMFLAGS="-f win32"
                 X86ASMDEFS="${X86ASMDEFS} -DPREFIX"
@@ -425,6 +429,7 @@ int foo() { return my_array[0]; }
             ;;
         esac
         AC_SUBST([WINDOWS_ARCH])
+        AC_SUBST([MANIFEST_ARCH])
         AC_SUBST([PROGRAMFILES])
 
     fi
@@ -511,6 +516,25 @@ AS_IF([test -n "${GC_SECTIONS_LDFLAGS}"],
     [AC_MSG_RESULT([${GC_SECTIONS_LDFLAGS}])],
     [AC_MSG_RESULT([none])])
 AC_SUBST([GC_SECTIONS_LDFLAGS])
+
+AC_ARG_ENABLE([split-sections],
+     AS_HELP_STRING([--split-sections],
+                    [Split compiled sections and remove unused ones (default enabled)]))
+AS_IF([test "${enable_split_sections}" != "no" ], [
+  AS_IF([test -z "${GC_SECTIONS_LDFLAGS}"], [
+    AS_IF([test -n "${enable_split_sections}"], [
+      AC_MSG_ERROR([Split sections enabled but not supported by linker!])
+    ],[
+      AC_MSG_WARN([Split sections enabled but not supported by linker.])
+    ])
+  ],[
+    AX_APPEND_FLAG([${GC_SECTIONS_LDFLAGS}], [LDFLAGS])
+    AX_CHECK_COMPILE_FLAG([-fdata-sections -ffunction-sections], [
+        AX_APPEND_FLAG([-fdata-sections -ffunction-sections], [CFLAGS])
+        AX_APPEND_FLAG([-fdata-sections -ffunction-sections], [CXXFLAGS])
+    ])
+  ])
+])
 
 dnl WinRT
 AC_ARG_ENABLE([winstore_app],
@@ -2481,7 +2505,6 @@ have_amf_scaler="no"
 AS_IF([test "$enable_amf_scaler" != "no"], [
   AC_CHECK_HEADERS([AMF/core/PropertyStorage.h AMF/components/HQScaler.h], [
     have_amf_scaler="yes"
-    AC_DEFINE(HAVE_AMF_SCALER, 1, AMD HQScaler supported)
   ])
 ])
 AM_CONDITIONAL([HAVE_AMF_SCALER], [test "${have_amf_scaler}" != "no"])
@@ -4636,6 +4659,16 @@ dnl  MacOS X gui module
 dnl
 AC_ARG_ENABLE([macosx],
   AS_HELP_STRING([--enable-macosx], [Mac OS X gui support (default enabled on Mac OS X)]))
+AC_ARG_ENABLE([macosx-ui-shaders],
+  AS_HELP_STRING([--disable-macosx-ui-shaders], [macOS UI Metal shaders (default: enabled if macOS UI is enabled)]),
+  [],
+  [
+    AS_IF([test -z "$enable_macosx"], [
+      AS_IF([test "${SYS}" = "darwin"], [enable_macosx_ui_shaders = "yes"])
+    ], [
+      enable_macosx_ui_shaders="$enable_macosx"
+    ])
+])
 enable_macosx_xctests="no"
 if test "${enable_macosx}" != "no" -a "${SYS}" = "darwin"
 then
@@ -4661,41 +4694,54 @@ then
   ])
 
   dnl
-  dnl If possible, use xcrun to find the right metal tool
+  dnl MacOS X gui module metal shaders
   dnl
 
-  AS_IF([test ! "${XCRUN}" = "no"], [
-    AC_MSG_CHECKING([for metal (using xcrun)])
-    METAL="$(eval $XCRUN --toolchain metal -f metal 2>/dev/null || eval $XCRUN -f metal 2>/dev/null || echo no)"
-    AC_MSG_RESULT([${METAL}])
-  ], [
-    AC_MSG_WARN([Looking for tools without using xcrun])
-  ])
+  AS_IF([test "${enable_macosx_ui_shaders}" != "no"], [
+    dnl Find Metal, first try xcrun, fallback to normal lookup
+    AS_IF([test ! "${XCRUN}" = "no"], [
+      AC_MSG_CHECKING([for metal (using xcrun)])
+      METAL="$(eval $XCRUN --toolchain metal -f metal 2>/dev/null || eval $XCRUN -f metal 2>/dev/null || echo no)"
+      AC_MSG_RESULT([${METAL}])
+    ], [
+      AC_MSG_WARN([Looking for tools without using xcrun])
+    ])
 
-  AS_IF([test "${METAL}" = "no"], [
-    AC_PATH_PROG(METAL, [metal], [no])
     AS_IF([test "${METAL}" = "no"], [
-      AC_MSG_ERROR([metal was not found, but is required for --enable-macosx])
+      AC_PATH_PROG([METAL], [metal], [no])
+      AS_IF([test "${METAL}" = "no"], [
+        AS_IF([test "${enable_macosx_ui_shaders}" = "yes"], [
+          AC_MSG_ERROR([metal was not found, required for macosx-ui-shaders])
+        ], [
+          AC_MSG_WARN([metal was not found, macosx-ui-shaders will be disabled])
+        ])
+        enable_macosx_ui_shaders="no"
+      ])
     ])
-  ])
 
-  dnl
-  dnl If possible, use xcrun to find the right metallib tool
-  dnl
+    dnl Find metallib, first try xcrun, fallback to normal lookup
+    AS_IF([test ! "${XCRUN}" = "no"], [
+      AC_MSG_CHECKING([for metallib (using xcrun)])
+      METALLIB="$(eval $XCRUN --toolchain metal -f metallib 2>/dev/null || eval $XCRUN -f metallib 2>/dev/null || echo no)"
+      AC_MSG_RESULT([${METALLIB}])
+    ], [
+      AC_MSG_WARN([Looking for tools without using xcrun])
+    ])
 
-  AS_IF([test ! "${XCRUN}" = "no"], [
-    AC_MSG_CHECKING([for metallib (using xcrun)])
-    METALLIB="$(eval $XCRUN --toolchain metal -f metallib 2>/dev/null || eval $XCRUN -f metallib 2>/dev/null || echo no)"
-    AC_MSG_RESULT([${METALLIB}])
-  ], [
-    AC_MSG_WARN([Looking for tools without using xcrun])
-  ])
-
-  AS_IF([test "${METALLIB}" = "no"], [
-    AC_PATH_PROG(METALLIB, [metallib], [no])
     AS_IF([test "${METALLIB}" = "no"], [
-      AC_MSG_ERROR([metallib was not found, but is required for --enable-macosx, try xcodebuild -downloadComponent MetalToolchain])
+      AC_PATH_PROG([METALLIB], [metallib], [no])
+      AS_IF([test "${METALLIB}" = "no"], [
+        AS_IF([test "${enable_macosx_ui_shaders}" = "yes"], [
+          AC_MSG_ERROR([metallib was not found, required for macosx-ui-shaders, try disabling or install it with: xcodebuild -downloadComponent MetalToolchain])
+        ], [
+          AC_MSG_WARN([metallib was not found, macosx-ui-shaders will be disabled])
+        ])
+        enable_macosx_ui_shaders="no"
+      ])
     ])
+  ])
+  AS_IF([test "${enable_macosx_ui_shaders}" != "no"], [
+    AC_DEFINE([ENABLE_MACOSX_UI_SHADERS], [1], [Define to 1 if macOS UI Metal shaders are enabled.])
   ])
 
   dnl
@@ -4742,24 +4788,8 @@ then
       enable_macosx_xctests="yes"
     ])
   ])
-
-  dnl
-  dnl  MacOS X gui module metal shaders
-  dnl
-  _enable_macosx_ui_shaders_default="yes"
-
-  AC_ARG_ENABLE([macosx-ui-shaders],
-    AS_HELP_STRING([--disable-macosx-ui-shaders], [Disable macOS UI Metal shaders (default: enabled if macOS UI is active)]),
-    [], [enable_macosx_ui_shaders="${_enable_macosx_ui_shaders_default}"]
-  )
-
-  if test "${enable_macosx_ui_shaders}" != "no"
-  then
-    dnl Tool checks for metal and metallib are already performed above if enable_macosx is true.
-    dnl We assume they are found if we reach this point and shaders are enabled.
-    AC_DEFINE([ENABLE_MACOSX_UI_SHADERS], [1], [Define to 1 if macOS UI Metal shaders are enabled.])
-  fi
 fi
+
 AM_CONDITIONAL([ENABLE_MACOSX_UI_SHADERS], [test "${enable_macosx_ui_shaders}" != "no" -a "${enable_macosx}" != "no" -a "${SYS}" = "darwin"])
 AM_CONDITIONAL([ENABLE_MACOSX_UI], [test "$enable_macosx" != "no" -a "${SYS}" = "darwin"])
 AM_CONDITIONAL([ENABLE_MACOSX_XCTESTS], [test "${enable_macosx_xctests}" = "yes"])
@@ -4976,51 +5006,18 @@ dnl libgcrypt
 dnl
 AC_ARG_ENABLE([libgcrypt],
   AS_HELP_STRING([--disable-libgcrypt], [gcrypt support (default enabled)]))
-AC_ARG_VAR([GCRYPT_CFLAGS], [C compiler flags for gcrypt])
-AC_ARG_VAR([GCRYPT_LIBS], [linker flags flags for gcrypt])
-
-# require libgcrypt >= 1.6.0
+have_gcrypt="no"
 AS_IF([test "${enable_libgcrypt}" != "no"], [
-  AC_CACHE_CHECK([for gcrypt 1.6.0 or later], [ac_cv_lib_gcrypt], [
-    VLC_SAVE_FLAGS
-    CFLAGS="${CFLAGS} ${GCRYPT_CFLAGS}"
-    AC_COMPILE_IFELSE([AC_LANG_PROGRAM([
-[#include <gcrypt.h>
-#if GCRYPT_VERSION_NUMBER < 0x010600
-#error
-#endif]])], [
-      ac_cv_lib_gcrypt=yes
-    ], [
-      ac_cv_lib_gcrypt=no
-    ])
-    VLC_RESTORE_FLAGS
-  ])
-
-  AS_IF([test "${ac_cv_lib_gcrypt}" = "yes"], [
+  PKG_CHECK_MODULES([GCRYPT], [libgcrypt >= 1.8.5], [
+    have_gcrypt="yes"
     AC_DEFINE([HAVE_GCRYPT], 1, [Defined if having gcrypt])
-    PKG_CHECK_MODULES([GPGERROR], [gpg-error], [
-      have_gpg_error="yes"
-    ], [
-      have_gpg_error="no"
-    ])
   ], [
     AS_IF([test "${enable_libgcrypt}" = "yes"], [
-      AC_MSG_ERROR([libgcrypt version 1.6.0 or higher not found. Install libgcrypt or pass --disable-libgcrypt.])
+      AC_MSG_ERROR([libgcrypt version 1.8.5 or higher not found. Install libgcrypt or pass --disable-libgcrypt.])
     ])
   ])
 ])
-
-AS_IF([test -z "$GCRYPT_LIBS"], [
-  AS_IF([test "${have_gpg_error}" = "yes"],[
-    GCRYPT_LIBS="-lgcrypt ${GPGERROR_LIBS}"
-  ],[
-    GCRYPT_LIBS="-lgcrypt -lgpg-error"
-  ])
-])
-
-AC_SUBST([GCRYPT_CFLAGS])
-AC_SUBST([GCRYPT_LIBS])
-AM_CONDITIONAL([HAVE_GCRYPT], [test "${ac_cv_lib_gcrypt}" = "yes"])
+AM_CONDITIONAL([HAVE_GCRYPT], [test "${have_gcrypt}" = "yes"])
 
 dnl
 dnl TLS/SSL
@@ -5076,7 +5073,7 @@ AC_ARG_ENABLE([update-check],
   AS_HELP_STRING([--enable-update-check], [update checking system (default disabled)]))
 if test "${enable_update_check}" = "yes"
 then
- AS_IF([test "${ac_cv_lib_gcrypt}" != "yes"],[
+ AS_IF([test "${have_gcrypt}" != "yes"],[
     AC_MSG_ERROR([libgcrypt is required for update checking system]) ])
 fi
 AM_CONDITIONAL([UPDATE_CHECK], [test "${enable_update_check}" = "yes"])
@@ -5307,10 +5304,16 @@ AM_COND_IF([KDE_SOLID], [
 ])
 
 AM_COND_IF([HAVE_WIN32], [
+  PREFIX_PATH="vlc-${VERSION}/"
+  AC_SUBST([PREFIX_PATH])
+
   AC_CONFIG_FILES([
     extras/package/win32/NSIS/spad.nsi
     extras/package/win32/NSIS/vlc.win32.nsi
     extras/package/win32/msi/config.wxi
+    extras/package/win32/libvlc.dll.manifest
+    extras/package/win32/libvlccore.dll.manifest
+    extras/package/win32/vlc.exe.manifest
   ])
 ])
 

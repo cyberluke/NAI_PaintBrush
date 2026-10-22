@@ -17,7 +17,6 @@
  *****************************************************************************/
 import QtQuick
 import QtQuick.Window
-import QtQuick.Controls
 import QtQuick.Templates as T
 import QtQml.Models
 import QtQml
@@ -96,6 +95,8 @@ Widgets.PageExt {
     function setCurrentItemFocus(reason) {
         if (foldersSection.visible)
             foldersSection.setCurrentItemFocus(reason);
+        else if (computerSection.visible)
+            computerSection.setCurrentItemFocus(reason);
         else if (deviceSection.visible)
             deviceSection.setCurrentItemFocus(reason);
         else if (lanSection.visible)
@@ -111,9 +112,8 @@ Widgets.PageExt {
     T.Label {
         anchors.centerIn: parent
 
-        visible: (foldersSection.model.count === 0 && deviceSection.model.count === 0
-                  &&
-                  lanSection.model.count === 0)
+        visible: [foldersSection, computerSection, deviceSection, lanSection]
+                 .every(section => !section.model.loading && section.model.count === 0)
 
         font.pixelSize: VLCStyle.fontHeight_xxlarge
         color: root.activeFocus ? theme.accent : theme.fg.primary
@@ -128,7 +128,7 @@ Widgets.PageExt {
         anchors.leftMargin: root.leftPadding
         anchors.rightMargin: root.rightPadding
 
-        ScrollBar.vertical: Widgets.ScrollBarExt { }
+        T.ScrollBar.vertical: Widgets.ScrollBarExt { }
 
         flickableDirection: Flickable.AutoFlickIfNeeded
         boundsBehavior: Flickable.StopAtBounds

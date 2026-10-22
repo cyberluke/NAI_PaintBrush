@@ -277,6 +277,30 @@ static csv_parser *csv_parser_init(void *data, char *psz_url, int max_fields)
     return parser;
 }
 
+/* Radio Browser's CSV API serializes missing optional values as "null". */
+static bool FieldHasValue(csv_parser *parser, int index)
+{
+    return index >= 0 && parser->fields[index] != NULL &&
+           parser->fields[index][0] != '\0' &&
+           strcmp(parser->fields[index], "null") != 0;
+}
+
+static void SetMetaFromField(input_item_t *item, csv_parser *parser, int index, vlc_meta_type_t type)
+{
+    if (!FieldHasValue(parser, index))
+        return;
+
+    input_item_SetMeta(item, type, parser->fields[index]);
+}
+
+static void SetMetaExtraFromField(input_item_t *item, csv_parser *parser, int index, const char *name)
+{
+    if (!FieldHasValue(parser, index))
+        return;
+
+    input_item_SetMetaExtra(item, name, parser->fields[index]);
+}
+
 static void *Run(void *data)
 {
 
@@ -308,6 +332,7 @@ static void *Run(void *data)
     }
     int name_index = csv_parser_get_field_index(parser, "name");
     int iso_3166_1_index = csv_parser_get_field_index(parser, "iso_3166_1");
+    int stationcount_index = csv_parser_get_field_index(parser, "stationcount");
 
     if (name_index < 0 || iso_3166_1_index < 0)
     {
@@ -347,6 +372,7 @@ static void *Run(void *data)
         char flag[256];
         snprintf(flag, sizeof(flag), "https://flags.videolan.org/%s/flat/64.png", parser->fields[iso_3166_1_index]);
         input_item_SetMeta(country_node, vlc_meta_ArtworkURL, flag);
+        SetMetaExtraFromField(country_node, parser, stationcount_index, "stationcount");
 
         services_discovery_AddItem(p_sd, country_node);
     }
@@ -389,30 +415,6 @@ static void Close(vlc_object_t *p_this)
     vlc_join(p_sys->thread, NULL);
     vlc_interrupt_destroy(p_sys->interrupt);
     free(p_sys);
-}
-
-/* Radio Browser's CSV API serializes missing optional values as "null". */
-static bool FieldHasValue(csv_parser *parser, int index)
-{
-    return index >= 0 && parser->fields[index] != NULL &&
-           parser->fields[index][0] != '\0' &&
-           strcmp(parser->fields[index], "null") != 0;
-}
-
-static void SetMetaFromField(input_item_t *item, csv_parser *parser, int index, vlc_meta_type_t type)
-{
-    if (!FieldHasValue(parser, index))
-        return;
-
-    input_item_SetMeta(item, type, parser->fields[index]);
-}
-
-static void SetMetaExtraFromField(input_item_t *item, csv_parser *parser, int index, const char *name)
-{
-    if (!FieldHasValue(parser, index))
-        return;
-
-    input_item_SetMetaExtra(item, name, parser->fields[index]);
 }
 
 static int ReadDirectory(stream_t *p_access, input_item_node_t *p_node)
@@ -458,6 +460,10 @@ static int ReadDirectory(stream_t *p_access, input_item_node_t *p_node)
         int language_index = csv_parser_get_field_index(parser, "language");
         int codec_index = csv_parser_get_field_index(parser, "codec");
         int bitrate_index = csv_parser_get_field_index(parser, "bitrate");
+        int votes_index = csv_parser_get_field_index(parser, "votes");
+        int clickcount_index = csv_parser_get_field_index(parser, "clickcount");
+        int state_index = csv_parser_get_field_index(parser, "state");
+        int countrycode_index = csv_parser_get_field_index(parser, "countrycode");
         if (name_index < 0 || url_index < 0)
         {
             msg_Err(p_access, "Missing required fields in station data");
@@ -499,8 +505,12 @@ static int ReadDirectory(stream_t *p_access, input_item_node_t *p_node)
             SetMetaFromField(station_item, parser, tags_index, vlc_meta_Genre);
             SetMetaFromField(station_item, parser, language_index, vlc_meta_Language);
 
-            SetMetaExtraFromField(station_item, parser, codec_index, "Codec");
-            SetMetaExtraFromField(station_item, parser, bitrate_index, "Bitrate (kb/s)");
+            SetMetaExtraFromField(station_item, parser, codec_index, "codec");
+            SetMetaExtraFromField(station_item, parser, bitrate_index, "bitrate");
+            SetMetaExtraFromField(station_item, parser, votes_index, "votes");
+            SetMetaExtraFromField(station_item, parser, clickcount_index, "clickcount");
+            SetMetaExtraFromField(station_item, parser, state_index, "state");
+            SetMetaExtraFromField(station_item, parser, countrycode_index, "countrycode");
 
             input_item_node_AppendItem(p_node, station_item);
             input_item_Release(station_item);

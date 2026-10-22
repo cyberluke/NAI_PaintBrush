@@ -19,7 +19,6 @@
  *****************************************************************************/
 
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
 import QtQml.Models
 
@@ -517,13 +516,6 @@ MainViewLoader {
 
                 titleCover_radius: (isMusic) ? VLCStyle.trackListAlbumCover_radius
                                              : VLCStyle.listAlbumCover_radius
-
-                //---------------------------------------------------------------------------------
-
-                // NOTE: This makes sure we display the playlist count on the item.
-                function titlecoverLabels(model) {
-                    return [];
-                }
             }
         }
     }

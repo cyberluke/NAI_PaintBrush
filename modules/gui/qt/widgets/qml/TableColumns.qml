@@ -16,7 +16,6 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
 
 
@@ -40,12 +39,6 @@ Item {
     property int titleCover_width: VLCStyle.trackListAlbumCover_width
     property int titleCover_height: VLCStyle.trackListAlbumCover_heigth
     property int titleCover_radius: VLCStyle.trackListAlbumCover_radius
-
-    // function (model) -> [string...]
-    // implement this function to show labels in title Cover
-    property var titlecoverLabels: function(model) {
-        return []
-    }
 
     // function (rowModel, colModel) -> string
     // implement this function for providing custom text for title column
@@ -128,23 +121,6 @@ Item {
                     }
                     function onPooled() {
                         cover.releaseResources()
-                    }
-                }
-
-                imageOverlay: Item {
-                    width: cover.width
-                    height: cover.height
-
-                    Widgets.VideoQualityLabels {
-                        anchors {
-                            top: parent.top
-                            right: parent.right
-                            topMargin: VLCStyle.margin_xxsmall
-                            leftMargin: VLCStyle.margin_xxsmall
-                            rightMargin: VLCStyle.margin_xxsmall
-                        }
-
-                        labels: root.titlecoverLabels(titleDel.rowModel)
                     }
                 }
 

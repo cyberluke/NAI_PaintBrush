@@ -675,6 +675,7 @@ qml_modules += {
         'maininterface/qml/MainViewLoader.qml',
         'maininterface/qml/MainDisplay.qml',
         'maininterface/qml/NoMedialibHome.qml',
+        'maininterface/qml/OpenFileSplitButton.qml',
         qml_maininterface_extra_files,
         'maininterface/qml/SideNavigationPane.qml',
         'maininterface/qml/SideNavigationDelegate.qml',
@@ -854,7 +855,6 @@ qml_modules += {
     'sources': files(
         'playlist/qml/PlaylistDelegate.qml',
         'playlist/qml/PlaylistPane.qml',
-        'playlist/qml/PlaylistToolbar.qml',
         'playlist/qml/PlaylistDetachedWindow.qml',
     ),
 }
@@ -945,6 +945,7 @@ qml_modules += {
         'widgets/qml/NavigableRow.qml',
         'widgets/qml/PlayCover.qml',
         'widgets/qml/RoundButtonExt.qml',
+        'widgets/qml/SplitButton.qml',
         'widgets/qml/ScaledImage.qml',
         'widgets/qml/TextAutoScroller.qml',
         'widgets/qml/SearchBox.qml',
@@ -1422,6 +1423,25 @@ if qt6_dep.found()
             'dependencies': [qt6_dep, qt_extra_deps, qtest_qt6_dep]
         }
 
+        vlc_tests += {
+            'name': 'test_qt_csd_button_model',
+            'sources': files(
+                'tests/vlc_stub_modules.cpp',
+                'tests/test_qt_csd_button_model.cpp',
+                'util/csdbuttonmodel.hpp',
+                'util/csdbuttonmodel.cpp'
+            ),
+            'moc_sources': files(
+                'tests/test_qt_csd_button_model.cpp'
+            ),
+            'moc_headers': files(
+                'util/csdbuttonmodel.hpp'
+            ),
+            'suite': ['qt'],
+            'include_directories' : qt_include_dir,
+            'link_with': [libvlccore, libvlc],
+            'dependencies': [qt6_dep, qt_extra_deps, qtest_qt6_dep]
+        }
 
         vlc_tests += {
             'name': 'test_qt_renderer_manager',

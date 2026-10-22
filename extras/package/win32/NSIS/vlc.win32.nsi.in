@@ -45,8 +45,8 @@ Var 32bitPath
 
 Name "${PRODUCT_NAME}"
 @HAVE_WIN64_FALSE@                   OutFile ..\vlc-${VERSION}-win32.exe
-@HAVE_WIN64_TRUE@@HAVE_ARM64_FALSE@  OutFile ..\vlc-${VERSION}-win64.exe
-@HAVE_WIN64_TRUE@@HAVE_ARM64_TRUE@   OutFile ..\vlc-${VERSION}-winarm64.exe
+@HAVE_WIN64_TRUE@ @HAVE_ARM64_FALSE@ OutFile ..\vlc-${VERSION}-win64.exe
+@HAVE_WIN64_TRUE@ @HAVE_ARM64_TRUE@  OutFile ..\vlc-${VERSION}-winarm64.exe
 InstallDir "$@PROGRAMFILES@\${PRODUCT_PUBLISHER}\VLC"
 !ifdef NSIS_LZMA_COMPRESS_WHOLE
 SetCompressor lzma
@@ -317,7 +317,7 @@ skip_uninstall32_cleanup:
 
   ; Subfolders
   !insertmacro InstallFolder plugins
-  !insertmacro InstallFolderOptional locale
+@HAVE_NLS_TRUE@ !insertmacro InstallFolderOptional locale
   !insertmacro InstallFolder hrtfs
 @BUILD_SKINS_TRUE@   !insertmacro InstallFolder skins
 @BUILD_LUA_TRUE@     !insertmacro InstallFolder lua
@@ -345,7 +345,7 @@ skip_uninstall32_cleanup:
   WriteRegStr HKCR Applications\vlc.exe\shell\Open "" "$(ContextMenuEntry_PlayWith)"
   WriteRegStr HKCR Applications\vlc.exe\shell\Open\command "" '"$INSTDIR\vlc.exe" --started-from-file "%1"'
   !insertmacro MacroAllExtensions RegisterExtensionMacro
-  !insertmacro MacroSkinExtensions RegisterSkinExtensionMacro
+@BUILD_SKINS_TRUE@   !insertmacro MacroSkinExtensions RegisterSkinExtensionMacro
 
   ; Add VLC to "App Paths" to run VLC from ShellExecute/ShellExecuteEx/run dialog without giving a full path
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\App Paths\vlc.exe" "" "$INSTDIR\vlc.exe"

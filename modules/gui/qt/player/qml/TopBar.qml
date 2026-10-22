@@ -17,7 +17,6 @@
  *****************************************************************************/
 
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Templates as T
 import QtQuick.Layouts
 import QtQuick.Window
@@ -26,6 +25,7 @@ import QtQuick.Window
 import VLC.MainInterface
 import VLC.Style
 import VLC.PlayerControls
+import VLC.Playlist
 import VLC.Widgets as Widgets
 import VLC.Menus as Menus
 import VLC.Util
@@ -36,6 +36,10 @@ FocusScope{
     // Properties
 
     required property int textWidth
+
+    // For now, used for d&d functionality
+    // Not strictly necessary to set
+    property Item plListView
 
     property int reservedHeight: 0
 
@@ -475,7 +479,7 @@ FocusScope{
             }
         }
 
-        Widgets.IconToolButton {
+        PlaylistPane.PlaylistToggleButton {
             id: playlistButton
 
             anchors.verticalCenter: parent.verticalCenter
@@ -491,6 +495,8 @@ FocusScope{
             width: VLCStyle.bannerButton_width
             height: VLCStyle.bannerButton_height
 
+            plListView: root.plListView
+            
             Navigation.parentItem: root
             Navigation.leftItem: menuSelector.visible ? menuSelector : backBtn
 

@@ -16,7 +16,6 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
 import QtQml.Models
 import QtQuick.Window
@@ -963,6 +962,15 @@ FocusScope {
         showToolbar: MainCtx.hasToolbarMenu && (MainCtx.intfMainWindow.visibility !== Window.FullScreen)
         playlistVisible: playlistVisibility.isPlaylistVisible
 
+        plListView: {
+            if (playlistpopup.active)
+                return playlistpopup.item
+            else if (playlistWindowLoader?.status === Loader.Ready)
+                return playlistWindowLoader.item.playlistView
+            else
+                return null
+        }
+
         Navigation.parentItem: rootPlayer
         Navigation.downItem: {
             if (playlistVisibility.isPlaylistVisible)
@@ -1108,10 +1116,13 @@ FocusScope {
                     // NOTE: We increase the padding accordingly to avoid overlapping the TopBar.
                     return topBar.reservedHeight
             }
+            bottomPadding: 0
 
             background: Rectangle {
                 color: windowTheme.bg.primary.alpha(0.8)
             }
+
+            view.fadingEdge.pixelAlignedForDPR: !controlBar.visible
 
             Navigation.parentItem: rootPlayer
             Navigation.upItem: topBar

@@ -23,8 +23,8 @@ import QtQml
 import QtQml.Models
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Controls.Basic
 import QtQuick.Templates
-import QtQuick.Controls
 import QtQuick.Window
 
 import VLC.MainInterface
@@ -380,9 +380,6 @@ Item {
         // size than the window to compensate. If you want bigger blur radius, either decrease the compensation
         // factor which can lead to visible clipping, or increase the window extended margin:
         blurRadius: (MainCtx.windowExtendedMargin / effect.compensationFactor)
-
-        // 2.0 (default) compensation factor makes clipping obvious, especially with white background
-        implicitCompensationFactor: 3.0
 
         compensationFactor: MainCtx.intfMainWindow.active ? (implicitCompensationFactor)
                                                           : (implicitCompensationFactor * 2)

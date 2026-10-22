@@ -129,9 +129,9 @@ static char * MP4_Time2Str( stime_t i_duration, uint32_t i_scale )
 #define MP4_GET8BYTESLE( dst ) MP4_GETX_PRIVATE( dst, GetQWLE(p_peek), 8 )
 #define MP4_GETFOURCC( dst )   MP4_GET4BYTESLE( dst )
 
-#define MP4_GETVERSIONFLAGS( p_void ) \
+#define MP4_GETVERSIONFLAGS( p_void ) do { \
     MP4_GET1BYTE( p_void->i_version ); \
-    MP4_GET3BYTES( p_void->i_flags )
+    MP4_GET3BYTES( p_void->i_flags ); } while (0)
 
 #define READ_SAMPLE_DESC_COMMON_8BYTES_HEADER \
     do\
@@ -1763,19 +1763,19 @@ static int MP4_ReadBox_cslg( stream_t *p_stream, MP4_Box_t *p_box )
     union { int32_t s; uint32_t u; } u32;
     union { int64_t s; uint64_t u; } u64;
 #define DOREAD_CSLG( readbytes, temp, member ) \
-        { readbytes( temp.u ); member = temp.s; }
+        do { readbytes( temp.u ); member = temp.s; } while (0)
 
-#define READ_CSLG( readbytes, temp ) {\
+#define READ_CSLG( readbytes, temp ) do {\
     DOREAD_CSLG( readbytes, temp, p_box->data.p_cslg->ct_to_dts_shift );\
     DOREAD_CSLG( readbytes, temp, p_box->data.p_cslg->i_least_delta );\
     DOREAD_CSLG( readbytes, temp, p_box->data.p_cslg->i_max_delta );\
     DOREAD_CSLG( readbytes, temp, p_box->data.p_cslg->i_composition_starttime );\
-    DOREAD_CSLG( readbytes, temp, p_box->data.p_cslg->i_composition_endtime ); }
+    DOREAD_CSLG( readbytes, temp, p_box->data.p_cslg->i_composition_endtime ); } while (0)
 
     if( i_version == 0 )
-        READ_CSLG( MP4_GET4BYTES, u32 )
+        READ_CSLG( MP4_GET4BYTES, u32 );
     else
-        READ_CSLG( MP4_GET8BYTES, u64 )
+        READ_CSLG( MP4_GET8BYTES, u64 );
 
     MP4_READBOX_EXIT( 1 );
 }
@@ -2204,13 +2204,15 @@ static int MP4_ReadBox_strf( stream_t *p_stream, MP4_Box_t *p_box )
     MP4_GET4BYTESLE( p_strf->bmiHeader.biClrUsed );
     MP4_GET4BYTESLE( p_strf->bmiHeader.biClrImportant );
 
+    if( i_read > UINT32_MAX )
+        goto error;
     p_strf->i_extra = i_read;
     if ( p_strf->i_extra )
     {
         p_strf->p_extra = malloc( p_strf->i_extra );
         if ( ! p_strf->p_extra )
             goto error;
-        memcpy( p_strf->p_extra, p_peek, i_read );
+        memcpy( p_strf->p_extra, p_peek, p_strf->i_extra );
     }
 
     MP4_READBOX_EXIT( 1 );
@@ -2568,9 +2570,13 @@ static int MP4_ReadBox_dvc1( stream_t *p_stream, MP4_Box_t *p_box )
 
     MP4_Box_data_dvc1_t *p_dvc1 = p_box->data.p_dvc1;
     MP4_GET1BYTE( p_dvc1->i_profile_level );
+    if( i_read > UINT32_MAX )
+        MP4_READBOX_EXIT( 0 );
     p_dvc1->i_vc1 = i_read; /* Header + profile_level */
-    if( p_dvc1->i_vc1 > 0 && (p_dvc1->p_vc1 = malloc( p_dvc1->i_vc1 )) )
-        memcpy( p_dvc1->p_vc1, p_peek, i_read );
+    p_dvc1->p_vc1 = malloc( p_dvc1->i_vc1 );
+    if( p_dvc1->p_vc1 == NULL )
+        MP4_READBOX_EXIT( 0 );
+    memcpy( p_dvc1->p_vc1, p_peek, p_dvc1->i_vc1 );
 
 #ifdef MP4_VERBOSE
     uint8_t i_profile = (p_dvc1->i_profile_level & 0xf0) >> 4;

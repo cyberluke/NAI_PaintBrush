@@ -17,7 +17,6 @@
  *****************************************************************************/
 
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
 import QtQml.Models
 
@@ -67,7 +66,6 @@ MainViewLoader {
     // function(model) -> [strings....]
     // used to get grid labels per model item
     property var gridLabels: getLabel
-    property var listLabels: getLabel
 
     property bool showGroupCountColumn: false
 
@@ -236,8 +234,6 @@ MainViewLoader {
             onRightClick: (_,_,globalMousePos) => {
                 root.contextMenu.popup(selectionModel.selectedIndexes, globalMousePos)
             }
-
-            coverLabels: root.listLabels
 
             showGroupCountColumn: root.showGroupCountColumn
 

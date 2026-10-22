@@ -41,6 +41,7 @@ def generate_id(prefix='', file=''):
     return prefix + pbHash.upper()
 
 args.out.write('<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n')
+args.out.write('<?include extras/package/win32/msi/config.wxi?>\r\n')
 args.out.write('<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">\r\n')
 args.out.write('    <Fragment>\r\n')
 args.out.write('        <DirectoryRef Id="{}">\r\n'.format(args.directory_reference))
@@ -63,12 +64,12 @@ def outputDir(top, parent: str, dir: str):
         for file in cwd.iterdir():
             if not file.is_dir():
                 # args.out.write('          file   <{}>\r\n'.format(file))
-                if not file.name.endswith('.pdb'):
+                if not file.name.endswith('.pdb') and not file.name.endswith('.dll.a'):
                     outname = os.path.join(top.name, str(file.relative_to(top)))
                     fileId = generate_id('cmp', outname)
                     args.out.write('                    <Component Id="{}" Guid="*">\r\n'.format(fileId))
                     fileIdList.append(fileId)
-                    args.out.write('                        <File Id="{}" Name="{}" KeyPath="yes" Source="{}"/>\r\n'.format(generate_id('fil', outname), file.name, outname))
+                    args.out.write('                        <File Id="{}" Name="{}" KeyPath="yes" Source="$(var.VlcInstallPrefix){}"/>\r\n'.format(generate_id('fil', outname), file.name, outname))
                     args.out.write('                    </Component>\r\n')
         # then sub directories
         for file in cwd.iterdir():

@@ -344,18 +344,20 @@ void InterfaceWindowHandler::onVideoEmbedChanged(bool embed)
 }
 
 
-void InterfaceWindowHandler::toggleWindowVisibility()
+void InterfaceWindowHandler::toggleWindowVisibility(bool _requestActivate)
 {
     switch ( m_window->visibility() )
     {
     case QWindow::Hidden:
         /* If hidden, show it */
         setInterfaceShown();
-        requestActivate();
+        if (_requestActivate)
+            requestActivate();
         break;
     case QWindow::Minimized:
         setInterfaceNormal();
-        requestActivate();
+        if (_requestActivate)
+            requestActivate();
         break;
     default:
         setInterfaceHiden();
@@ -364,7 +366,7 @@ void InterfaceWindowHandler::toggleWindowVisibility()
 }
 
 
-void InterfaceWindowHandler::setInterfaceVisible(bool visible)
+void InterfaceWindowHandler::setInterfaceVisible(bool visible, bool _requestActivate)
 {
     if (visible)
     {
@@ -372,14 +374,17 @@ void InterfaceWindowHandler::setInterfaceVisible(bool visible)
         {
         case QWindow::Hidden:
             setInterfaceShown();
+            if (_requestActivate)
+                requestActivate();
             break;
         case QWindow::Minimized:
             setInterfaceNormal();
+            if (_requestActivate)
+                requestActivate();
             break;
         default:
             break;
         }
-        requestActivate();
     }
     else
     {
@@ -401,6 +406,21 @@ void InterfaceWindowHandler::setInterfaceFullScreen( bool fs )
 
 void InterfaceWindowHandler::setRaise()
 {
+    assert(m_window);
+
+    switch ( m_window->visibility() )
+    {
+    case QWindow::Hidden:
+        /* If hidden, show it */
+        setInterfaceShown();
+        break;
+    case QWindow::Minimized:
+        setInterfaceNormal();
+        break;
+    default:
+        break;
+    }
+
     requestActivate();
     m_window->raise();
 }
@@ -432,7 +452,7 @@ void InterfaceWindowHandler::setInterfaceHiden()
         // type() == WaylandCompositor is not used because any video embedding methodology may
         // depend on window resources:
         const bool ret = qGuiApp->platformName().startsWith(QLatin1String("wayland")) &&
-                         dynamic_cast<vlc::CompositorVideo*>(intf->p_compositor.get());
+                         (intf->p_compositor && (intf->p_compositor->type() != vlc::Compositor::DummyCompositor));
         if (ret)
             msg_Warn(intf, "In this configuration, the interface window can not get hidden.");
         return ret;
