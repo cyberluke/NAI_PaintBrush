@@ -79,40 +79,46 @@ foreach heat : heat_dirs
     wxs_files += [ [ wxs, W_MSIBUILDDIR ] ]
 endforeach
 
-compiled_wxs = []
-compiled_winpath = []
-foreach wxsobj : wxs_files
-    outfile = fs.replace_suffix(wxsobj[0], '.wixobj')
-    outname = fs.name(outfile)
-    out_winpath = run_command(cygpath, '-w', outfile, check: true).stdout().strip()
+# The MSI targets only make sense when the WiX toolchain (and Wine, to run the
+# x86 tooling under WoW64) are available. When they are not installed we still
+# want the rest of the build to configure, so only define these targets when
+# the required external programs are present.
+if x86_runner.found() and candlex86.found() and lightx86.found()
+    compiled_wxs = []
+    compiled_winpath = []
+    foreach wxsobj : wxs_files
+        outfile = fs.replace_suffix(wxsobj[0], '.wixobj')
+        outname = fs.name(outfile)
+        out_winpath = run_command(cygpath, '-w', outfile, check: true).stdout().strip()
 
-    wixobj = custom_target(
-        command: [x86_runner, candlex86.full_path(), '-nologo',
-            '-out', out_winpath, '-arch', WIX_WINDOWS_ARCH, '-I' + W_TOPBUILDDIR, '-ext', 'WiXUtilExtension',
-            wxsobj[1] + '\\' + '@PLAINNAME@'
+        wixobj = custom_target(
+            command: [x86_runner, candlex86.full_path(), '-nologo',
+                '-out', out_winpath, '-arch', WIX_WINDOWS_ARCH, '-I' + W_TOPBUILDDIR, '-ext', 'WiXUtilExtension',
+                wxsobj[1] + '\\' + '@PLAINNAME@'
+            ],
+            output: outname,
+            input: wxsobj[0],
+            depend_files: [vlc_wix],
+            build_always_stale: true,
+            build_by_default: false,
+            console: true,
+        )
+        compiled_wxs += wixobj
+        compiled_winpath += out_winpath
+    endforeach
+
+    msi_name = 'vlc-' + vlc_version + '-' + winstaller_suffix + '.msi'
+    msi_output = custom_target(
+        command: [x86_runner, lightx86, '-nologo',
+            '-sval', '-spdb', '-ext', 'WixUIExtension', '-ext', 'WixUtilExtension', '-cultures:en-us',
+            '-out', msi_name, compiled_winpath
         ],
-        output: outname,
-        input: wxsobj[0],
-        depend_files: [vlc_wix],
+        input: compiled_wxs,
+        output: msi_name, # real name but root build folder
         build_always_stale: true,
         build_by_default: false,
         console: true,
     )
-    compiled_wxs += wixobj
-    compiled_winpath += out_winpath
-endforeach
 
-msi_name = 'vlc-' + vlc_version + '-' + winstaller_suffix + '.msi'
-msi_output = custom_target(
-    command: [x86_runner, lightx86, '-nologo',
-        '-sval', '-spdb', '-ext', 'WixUIExtension', '-ext', 'WixUtilExtension', '-cultures:en-us',
-        '-out', msi_name, compiled_winpath
-    ],
-    input: compiled_wxs,
-    output: msi_name, # real name but root build folder
-    build_always_stale: true,
-    build_by_default: false,
-    console: true,
-)
-
-alias_target('package-msi', msi_output)
+    alias_target('package-msi', msi_output)
+endif

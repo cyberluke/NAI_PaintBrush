@@ -122,7 +122,10 @@ if lua_dep.found() and get_option('lua').allowed()
   )
 
   foreach m : lua_modules
-    module_path = m.full_path().replace(vlc_src_root / 'share/lua/', '')
+    # On Windows `full_path()` returns backslash-separated paths. Normalize to
+    # forward slashes so that the basename/subdir splitting below works on every
+    # platform (otherwise `output` retains a path segment and meson rejects it).
+    module_path = m.full_path().replace('\\', '/').replace((vlc_src_root + '/share/lua/').replace('\\', '/'), '')
     build_name = module_path.replace('.lua', '').underscorify()
     splitpath = module_path.split('/')
     output = splitpath.get(splitpath.length() - 1).replace('.lua', '.luac')
