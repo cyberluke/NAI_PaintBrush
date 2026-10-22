@@ -43,16 +43,24 @@ else
     # for each architecture
     nsProcess_src = nsProcess_sources
 endif
-nsProcess = shared_library('nsProcess',
-                           nsProcess_src,
-                           c_args: nsProcess_cargs,
-                           link_args: nsProcess_link_args,
-                           objects: nsProcess_obj,
-                           vs_module_defs: 'nsProcess.def',
-                           name_prefix: '',
-                           link_language: 'c',  # avoid using nasm linker and miss the .dll.a
-                           install: true,
-                           install_dir: 'NSIS')
+# nsProcess.dll needs to be a 32-bit DLL; on a non-x86 host it requires the
+# i686 cross toolchain (and a linker that accepts --target=i686-w64-mingw32).
+# When neither is available there is no way to build it, so skip the target
+# rather than emitting a shared_library with no sources (which fails to link).
+has_nsprocess_src = (host_machine.cpu_family() != 'x86' and nsProcess_obj.length() > 0) or nsProcess_src.length() > 0
+
+if has_nsprocess_src
+    nsProcess = shared_library('nsProcess',
+                               nsProcess_src,
+                               c_args: nsProcess_cargs,
+                               link_args: nsProcess_link_args,
+                               objects: nsProcess_obj,
+                               vs_module_defs: 'nsProcess.def',
+                               name_prefix: '',
+                               link_language: 'c',  # avoid using nasm linker and miss the .dll.a
+                               install: true,
+                               install_dir: 'NSIS')
+endif
 
 vlc_nsi = configure_file(
   input: 'vlc.win32.nsi.in',

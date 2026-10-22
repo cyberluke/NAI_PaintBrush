@@ -57,8 +57,12 @@ if build_vlc and (host_system != 'darwin' or have_osx) and not have_win_store an
         win_subsystem: 'windows'
     )
 
-    vlc_top_builddir_def = '-DTOP_BUILDDIR="@0@"'.format(vlc_build_root)
-    vlc_top_srcdir_def = '-DTOP_SRCDIR="@0@"'.format(vlc_src_root)
+    # Use forward slashes so the value is safe as a C string literal. A Windows
+    # path (e.g. D:\_SATIN_AI\NAI-OS\vlc\...) would otherwise embed invalid
+    # escape sequences such as \N (universal character name) and fail to compile
+    # with newer GCC. putenv() paths with forward slashes work fine on Windows.
+    vlc_top_builddir_def = '-DTOP_BUILDDIR="@0@"'.format(vlc_build_root.replace('\\', '/'))
+    vlc_top_srcdir_def = '-DTOP_SRCDIR="@0@"'.format(vlc_src_root.replace('\\', '/'))
 
     executable('vlc-static',
         vlc_sources,

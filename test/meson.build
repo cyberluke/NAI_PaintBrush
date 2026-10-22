@@ -43,9 +43,9 @@ foreach vlc_test: vlc_tests
     endif
 
     common_args = [
-        '-DSRCDIR="@0@"'.format(vlc_src_root + '/test/'),
-        '-DTOP_BUILDDIR="@0@"'.format(vlc_build_root),
-        '-DTOP_SRCDIR="@0@"'.format(vlc_src_root),
+        '-DSRCDIR="@0@"'.format((vlc_src_root + '/test/').replace('\\', '/')),
+        '-DTOP_BUILDDIR="@0@"'.format(vlc_build_root.replace('\\', '/')),
+        '-DTOP_SRCDIR="@0@"'.format(vlc_src_root.replace('\\', '/')),
     ]
 
     disabled_dependencies = []
