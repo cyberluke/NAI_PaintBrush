@@ -56,6 +56,10 @@ static const int  nloopf_list[] = { 0, 1, 2, 3, 4 };
 static const char *const nloopf_list_text[] =
   { N_("None"), N_("Non-ref"), N_("Bidir"), N_("Non-key"), N_("All") };
 
+static const int  hwdec_list[] = { 0, 1, 2 };
+static const char *const hwdec_list_text[] =
+  { N_("Auto"), N_("Disabled"), N_("Required") };
+
 #ifdef ENABLE_SOUT
 static const char *const enc_hq_list[] = { "rd", "bits", "simple" };
 static const char *const enc_hq_list_text[] = {
@@ -125,6 +129,8 @@ vlc_module_begin ()
     add_integer( "avcodec-debug", 0, DEBUG_TEXT, DEBUG_LONGTEXT )
     add_string( "avcodec-codec", NULL, CODEC_TEXT, CODEC_LONGTEXT )
     add_obsolete_string( "avcodec-hw" ) /* removed since 4.0.0 */
+    add_integer( "avcodec-hwdec", 0, HWDEC_TEXT, HWDEC_LONGTEXT )
+        change_integer_list( hwdec_list, hwdec_list_text )
     add_integer( "avcodec-threads", 0, THREADS_TEXT, THREADS_LONGTEXT )
     add_string( "avcodec-options", NULL, AV_OPTIONS_TEXT, AV_OPTIONS_LONGTEXT )
 

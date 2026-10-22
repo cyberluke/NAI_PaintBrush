@@ -88,6 +88,14 @@ int ffmpeg_OpenCodec( decoder_t *p_dec, AVCodecContext *, const AVCodec * );
 #define THREADS_TEXT N_( "Threads" )
 #define THREADS_LONGTEXT N_( "Number of threads used for decoding, 0 meaning auto" )
 
+#define HWDEC_TEXT N_( "Hardware decoding" )
+#define HWDEC_LONGTEXT N_( \
+    "Controls which hardware decoding policy applies to this decoder. " \
+    "\"Auto\" enables hardware acceleration when a compatible backend is " \
+    "available, \"Disabled\" forces software decoding (useful for editing " \
+    "workflows that require exact random-access frames), and \"Required\" " \
+    "only uses hardware acceleration and fails otherwise." )
+
 /*
  * Encoder options
  */

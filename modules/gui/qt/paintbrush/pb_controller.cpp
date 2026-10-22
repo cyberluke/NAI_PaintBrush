@@ -336,9 +336,13 @@ void PaintbrushController::openVideoFile(const QUrl &url)
 
     /* A Paintbrush video session is the main VLC player: append the file to
      * the playlist and start playing it, then the media drawer appears and
-     * frames can be captured/tracked. */
+     * frames can be captured/tracked. Software decoding is forced for this
+     * media: Paintbrush needs exact random-access frames, and hardware
+     * decoders can emit compressed/artifacted frames on seeks (see the
+     * avcodec-hwdec policy). */
     vlc::playlist::Media media(QUrl::fromLocalFile(path).toString(),
-                               QFileInfo(path).fileName());
+                               QFileInfo(path).fileName(),
+                               QStringList{QStringLiteral(":avcodec-hwdec=1")});
     m_intf->p_mainPlaylistController->append(
         QVector<vlc::playlist::Media>{media}, true);
     emit mediaStateChanged();

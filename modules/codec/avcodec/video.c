@@ -91,6 +91,8 @@ typedef struct
     bool b_show_corrupted;
     bool b_from_preroll;
     bool b_hardware_only;
+    /* Hardware decoding policy: 0=auto, 1=disabled, 2=required */
+    int i_hwdec;
     /* Some codecs carry their whole state (image canvas and/or palette) forward
      * as deltas and have no recoverable keyframes. Never drop frames for those,
      * regardless of lateness. */
@@ -595,6 +597,7 @@ static int InitVideoDecCommon( decoder_t *p_dec )
     /* ***** libavcodec frame skipping ***** */
     p_sys->b_hurry_up = var_CreateGetBool( p_dec, "avcodec-hurry-up" );
     p_sys->b_show_corrupted = var_CreateGetBool( p_dec, "avcodec-corrupted" );
+    p_sys->i_hwdec = var_CreateGetInteger( p_dec, "avcodec-hwdec" );
     p_sys->b_no_frame_drop = ffmpeg_CodecForbidsFrameDrop( p_codec->id );
     if( p_sys->b_no_frame_drop )
         msg_Dbg( p_dec, "frame dropping disabled for this codec (stateful, "
@@ -910,6 +913,15 @@ int InitVideoHwDec( vlc_object_t *obj )
 
     if (p_dec->fmt_in->i_codec != VLC_CODEC_AV1)
         return VLC_EGENERIC;
+
+    /* Policy: hardware decoding disabled -> fall back to the software
+     * decoder (also for AV1, which is otherwise hardware-only here). */
+    if (var_InheritInteger( p_dec, "avcodec-hwdec" ) == 1)
+    {
+        msg_Dbg( p_dec, "hardware decoding disabled by policy, using software "
+                        "decoder" );
+        return VLC_EGENERIC;
+    }
 
     decoder_sys_t *p_sys = calloc(1, sizeof(*p_sys));
     if( unlikely(p_sys == NULL) )
@@ -2070,6 +2082,14 @@ static enum AVPixelFormat ffmpeg_GetFormat( AVCodecContext *p_context,
             if (defaultfmt == pi_fmt[i])
                 defaultfmt = AV_PIX_FMT_NONE;
 
+            if (p_sys->i_hwdec == 1)
+            {
+                /* Policy: hardware decoding disabled (e.g. editing
+                 * workflows that need exact random-access frames). */
+                msg_Dbg( p_dec, "skipping %s (hardware decoding disabled)", dsc->name );
+                continue;
+            }
+
             can_hwaccel = true;
         }
         else if (swfmt == AV_PIX_FMT_NONE && !p_sys->b_hardware_only)
@@ -2156,7 +2176,15 @@ no_reuse:
     p_sys->level = p_context->level;
 
     if (!can_hwaccel)
+    {
+        if (p_sys->i_hwdec == 2)
+        {
+            msg_Err( p_dec, "hardware decoding required but no compatible "
+                            "hardware output format is available" );
+            return AV_PIX_FMT_NONE;
+        }
         return swfmt;
+    }
 
     const AVPixFmtDescriptor *src_desc = av_pix_fmt_desc_get(swfmt);
 
@@ -2187,6 +2215,12 @@ no_reuse:
     }
 
     /* Fallback to default behaviour */
+    if (p_sys->i_hwdec == 2)
+    {
+        msg_Err( p_dec, "hardware decoding required but no hardware decoder "
+                        "could be opened" );
+        return AV_PIX_FMT_NONE;
+    }
     p_sys->pix_fmt = swfmt;
     return swfmt;
 }
