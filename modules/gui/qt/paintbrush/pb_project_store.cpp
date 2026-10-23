@@ -16,6 +16,7 @@
 #include <QSaveFile>
 #include <QDateTime>
 #include <QDir>
+#include <QMetaType>
 
 namespace paintbrush {
 
@@ -39,6 +40,40 @@ static QString layerToJson(const CanvasLayer &layer)
     obj[QStringLiteral("posY")] = layer.position.y();
     obj[QStringLiteral("scale")] = layer.scale;
     obj[QStringLiteral("rotation")] = layer.rotation;
+
+    /* sticker provenance (FrameRef + seed mask). Only JSON-native values
+     * are written; anything exotic is skipped. */
+    if (!layer.metadata.isEmpty())
+    {
+        QJsonObject meta;
+        for (auto it = layer.metadata.constBegin();
+             it != layer.metadata.constEnd(); ++it)
+        {
+            const QVariant &v = it.value();
+            switch (v.typeId())
+            {
+            case QMetaType::QString:
+                meta[it.key()] = v.toString();
+                break;
+            case QMetaType::Bool:
+                meta[it.key()] = v.toBool();
+                break;
+            case QMetaType::Int:
+                meta[it.key()] = v.toInt();
+                break;
+            case QMetaType::Double:
+                meta[it.key()] = v.toDouble();
+                break;
+            case QMetaType::LongLong:
+                meta[it.key()] = v.toLongLong();
+                break;
+            default:
+                break;
+            }
+        }
+        if (!meta.isEmpty())
+            obj[QStringLiteral("metadata")] = meta;
+    }
 
     if (!layer.raster.isNull())
     {
@@ -96,6 +131,10 @@ static QList<CanvasLayer> layersFromJson(const QJsonArray &array)
             obj[QStringLiteral("mask")].toString().toLatin1());
         if (!maskPng.isEmpty())
             layer.mask.loadFromData(maskPng, "PNG");
+
+        const QJsonObject meta = obj[QStringLiteral("metadata")].toObject();
+        for (auto it = meta.constBegin(); it != meta.constEnd(); ++it)
+            layer.metadata[it.key()] = it.value().toVariant();
 
         layers.append(std::move(layer));
     }
@@ -178,28 +217,15 @@ QString ProjectStore::save(PaintbrushDocument *doc, const QString &path)
     if (!err.isEmpty())
         return err;
 
-    /* Atomic crash-safe write: temp file in the same directory, then
-     * replace the destination. */
-    const QFileInfo info(path);
-    const QString tmpPath = info.absolutePath() + QLatin1Char('/') +
-                            info.completeBaseName() + QStringLiteral(".tmp");
-
-    {
-        QFile tmp(tmpPath);
-        if (!tmp.open(QIODevice::WriteOnly | QIODevice::Truncate))
-            return QStringLiteral("Cannot write %1: %2").arg(tmpPath, tmp.errorString());
-        tmp.write(data);
-        tmp.flush();
-        if (tmp.error() != QFileDevice::NoError)
-            return QStringLiteral("Write failed for %1: %2").arg(tmpPath, tmp.errorString());
-    }
-
-    QFile::remove(path);
-    if (!QFile::rename(tmpPath, path))
-    {
-        QFile::remove(tmpPath);
-        return QStringLiteral("Cannot replace %1").arg(path);
-    }
+    /* Atomic crash-safe write: QSaveFile writes a temp file in the same
+     * directory and atomically replaces the destination on commit() — the
+     * old file is never deleted before the new one is in place, so a
+     * failed write can never lose the previous project. */
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly))
+        return QStringLiteral("Cannot write %1: %2").arg(path, file.errorString());
+    if (file.write(data) != data.size() || !file.commit())
+        return QStringLiteral("Cannot replace %1: %2").arg(path, file.errorString());
     return {};
 }
 

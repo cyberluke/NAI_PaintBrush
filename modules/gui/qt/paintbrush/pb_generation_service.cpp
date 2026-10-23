@@ -21,8 +21,11 @@
 #include <QPainter>
 #include <QImage>
 #include <QVector>
+#include <QPointer>
 #include <QtMath>
 #include <QDateTime>
+
+#include <thread>
 
 namespace paintbrush {
 
@@ -43,15 +46,20 @@ void GenerationService::configure(vlc_object_t *obj)
     m_model = pbConfigString(obj, "paintbrush-image-model").trimmed();
     m_apiKey = pbApiKey(obj, "PAINTBRUSH_IMAGE_API_KEY", "paintbrush-image-api-key");
     m_timeoutMs = 120000;
+    /* A7: TLS validation stays ON unless the operator explicitly opts into
+     * self-signed local endpoints (per-service or shared dev flag). */
+    m_insecureTls = pbConfigBool(obj, "paintbrush-image-insecure")
+                 || pbConfigBool(obj, "paintbrush-dev-insecure");
 
     if (m_baseUrl.isEmpty())
     {
-        /* No external image provider: the local inpainting fallback still
-         * makes Remove object / Generative fill / Replace background work.
-         * Availability stays true so the actions are usable out of the box. */
+        /* No external image provider: the local CPU fallbacks (onion-peel
+         * inpaint / box blur) keep the actions usable, but they are NOT
+         * generative — capability() reports local-heal / local-blur and the
+         * UI must present them as such (A3/A4). */
         m_unavailableReason =
-            QStringLiteral("No image provider configured — using the local "
-                           "inpainting fallback.");
+            QStringLiteral("No image provider configured — the local heal / blur "
+                           "fallback is active (pixel operations, not generative).");
         emit availabilityChanged(true, m_unavailableReason);
         return;
     }
@@ -83,32 +91,38 @@ QString GenerationService::defaultPrompt(Action action, const QString &userPromp
     return userPrompt;
 }
 
-QImage GenerationService::resultFromJson(const QByteArray &json)
+QJsonObject GenerationService::firstDataObject(const QByteArray &json)
 {
     const QJsonDocument doc = QJsonDocument::fromJson(json);
     if (!doc.isObject())
         return {};
-    const QJsonObject root = doc.object();
-    const QJsonArray data = root[QStringLiteral("data")].toArray();
+    const QJsonArray data = doc.object().value(QStringLiteral("data")).toArray();
     if (data.isEmpty())
         return {};
+    return data.first().toObject();
+}
 
-    const QJsonObject first = data.first().toObject();
-    const QString b64 = first[QStringLiteral("b64_json")].toString();
-    if (!b64.isEmpty())
+CapabilityReport GenerationService::capability(Action action) const
+{
+    /* A3: remote-generation is claimed ONLY when a provider is configured.
+     * Without a provider the report names the actual local fallback — never
+     * "generative fill" (A4). */
+    if (!m_baseUrl.isEmpty())
+        return remoteGenerationReport(m_baseUrl, m_model);
+
+    if (action == ACTION_REPLACE_BACKGROUND)
     {
-        QImage image;
-        image.loadFromData(QByteArray::fromBase64(b64.toLatin1()));
-        return image;
+        return localGenerationReport(
+            CapabilityReport::LocalBlur,
+            QStringLiteral("No image provider configured — local box-blur "
+                           "background replace is active. This is a pixel "
+                           "filter, not a generative model."));
     }
-    const QString url = first[QStringLiteral("url")].toString();
-    if (!url.isEmpty())
-    {
-        QImage image;
-        image.load(url);
-        return image;
-    }
-    return {};
+    return localGenerationReport(
+        CapabilityReport::LocalHeal,
+        QStringLiteral("No image provider configured — local onion-peel "
+                       "inpaint heal is active. This is pixel propagation, "
+                       "not a generative model."));
 }
 
 /* ------------------------------------------------------------------ local */
@@ -299,36 +313,49 @@ void GenerationService::generate(Action action, const QImage &image,
     /* local fallback when no external provider is configured */
     if (m_baseUrl.isEmpty())
     {
-        QImage result;
-        if (action == ACTION_REPLACE_BACKGROUND)
-        {
-            /* mask here is the inverse of the subject; pass the subject mask */
-            QImage subjectMask = mask.convertToFormat(QImage::Format_Grayscale8);
-            subjectMask.invertPixels();
-            result = replaceBackgroundLocal(image, subjectMask);
-        }
-        else
-        {
-            /* remove object / generative fill: inpaint the masked region */
-            result = localInpaint(image, mask);
-        }
+        /* A5: the CPU inpaint / box blur runs on a worker thread so
+         * generate() returns immediately and the GUI thread never blocks.
+         * resultReady is delivered back on the GUI thread through a queued
+         * invocation once the worker finishes. */
+        setBusy(true);
 
-        if (result.isNull())
-        {
-            emit errorOccurred(requestId,
-                               QStringLiteral("Local inpainting produced no result."));
-            return;
-        }
-        if (!m_busy)
-        {
-            m_busy = true;
-            emit busyChanged(true);
-        }
-        QMetaObject::invokeMethod(this, [this, requestId, result]() {
-            m_busy = false;
-            emit busyChanged(false);
-            emit resultReady(requestId, result);
-        }, Qt::QueuedConnection);
+        QImage imageCopy = image;
+        QImage maskCopy = mask;
+        imageCopy.detach(); /* deep copies: the GUI thread may keep using */
+        maskCopy.detach();  /* the caller's images while we read these     */
+
+        const Action actionCopy = action;
+        const QString id = requestId;
+        const quint64 epoch = m_cancelEpoch;
+        QPointer<GenerationService> self(this);
+
+        std::thread([self, id, actionCopy, imageCopy, maskCopy, epoch]() {
+            QImage result;
+            if (actionCopy == ACTION_REPLACE_BACKGROUND)
+            {
+                /* mask here is the inverse of the subject; pass the subject mask */
+                QImage subjectMask = maskCopy.convertToFormat(QImage::Format_Grayscale8);
+                subjectMask.invertPixels();
+                result = replaceBackgroundLocal(imageCopy, subjectMask);
+            }
+            else
+            {
+                /* remove object / generative fill: inpaint the masked region */
+                result = localInpaint(imageCopy, maskCopy);
+            }
+
+            QMetaObject::invokeMethod(self, [self, id, result, epoch]() {
+                if (!self || epoch != self->m_cancelEpoch)
+                    return; /* service destroyed or generation cancelled */
+                self->m_busy = false;
+                emit self->busyChanged(false);
+                if (result.isNull())
+                    emit self->errorOccurred(
+                        id, QStringLiteral("Local inpainting produced no result."));
+                else
+                    emit self->resultReady(id, result);
+            }, Qt::QueuedConnection);
+        }).detach();
         return;
     }
 
@@ -385,15 +412,9 @@ void GenerationService::generate(Action action, const QImage &image,
     reply->setProperty("pbStartedAt", QDateTime::currentMSecsSinceEpoch());
     m_replies.append(reply);
 
-    connect(reply, &QNetworkReply::sslErrors, reply, [reply](const QList<QSslError> &) {
-        reply->ignoreSslErrors();
-    });
+    handleSslErrors(reply);
 
-    if (!m_busy)
-    {
-        m_busy = true;
-        emit busyChanged(true);
-    }
+    setBusy(true);
     connect(reply, &QNetworkReply::finished, this, &GenerationService::onReplyFinished);
 }
 
@@ -407,6 +428,8 @@ void GenerationService::onReplyFinished()
     const qint64 startedAt = reply->property("pbStartedAt").toLongLong();
     const qint64 elapsed = startedAt > 0
         ? QDateTime::currentMSecsSinceEpoch() - startedAt : 0;
+    const bool imageFetch = reply->property("pbIsImageFetch").toBool();
+    const char *kind = imageFetch ? "generation-image" : "generation";
 
     const QByteArray data = reply->readAll();
     const QNetworkReply::NetworkError error = reply->error();
@@ -416,17 +439,58 @@ void GenerationService::onReplyFinished()
         QString detail = QString::fromUtf8(data).left(300);
         if (detail.isEmpty())
             detail = reply->errorString();
-        pbLogRequest(m_obj, "generation", requestId, elapsed, false, detail);
-        emit errorOccurred(requestId,
-                           QStringLiteral("Image generation failed: provider did not respond (%1). %2")
-                               .arg(int(error)).arg(detail));
+
+        /* A7: TLS validation failures are surfaced truthfully instead of
+         * being silently ignored. (Qt5/Qt6-safe: the failure detail is
+         * recorded by the sslErrors handler, never read back from a
+         * getter that only Qt5 had.) */
+        const QString sslDetail = reply->property("pbSslDetail").toString();
+        const bool tlsFailure = !sslDetail.isEmpty() ||
+                                error == QNetworkReply::SslHandshakeFailedError;
+
+        if (tlsFailure)
+        {
+            pbLogRequest(m_obj, kind, requestId, elapsed, false,
+                         QStringLiteral("TLS: %1").arg(sslDetail));
+            emit errorOccurred(requestId,
+                QStringLiteral("Image generation failed: TLS certificate validation "
+                               "failed. %1 Enable the paintbrush-dev-insecure option "
+                               "only for trusted self-signed local endpoints.")
+                    .arg(sslDetail.isEmpty() ? detail : sslDetail));
+        }
+        else
+        {
+            pbLogRequest(m_obj, kind, requestId, elapsed, false, detail);
+            emit errorOccurred(requestId,
+                               QStringLiteral("Image generation failed: provider did not respond (%1). %2")
+                                   .arg(int(error)).arg(detail));
+        }
+    }
+    else if (imageFetch)
+    {
+        /* A6: the provider returned an image URL; this reply carries the
+         * downloaded bytes. */
+        QImage result = QImage::fromData(data);
+        if (result.isNull())
+        {
+            pbLogRequest(m_obj, kind, requestId, elapsed, false,
+                         QStringLiteral("unreadable image bytes"));
+            emit errorOccurred(requestId,
+                               QStringLiteral("Image generation failed: the provider "
+                                              "image URL returned unreadable data."));
+        }
+        else
+        {
+            pbLogRequest(m_obj, kind, requestId, elapsed, true);
+            emit resultReady(requestId, result);
+        }
     }
     else
     {
-        QImage result = resultFromJson(data);
-        if (result.isNull())
+        const QJsonObject first = firstDataObject(data);
+        if (first.isEmpty())
         {
-            pbLogRequest(m_obj, "generation", requestId, elapsed, false,
+            pbLogRequest(m_obj, kind, requestId, elapsed, false,
                          QStringLiteral("unreadable result"));
             emit errorOccurred(requestId,
                                QStringLiteral("Image generation failed: provider returned "
@@ -434,8 +498,41 @@ void GenerationService::onReplyFinished()
         }
         else
         {
-            pbLogRequest(m_obj, "generation", requestId, elapsed, true);
-            emit resultReady(requestId, result);
+            const QString b64 = first.value(QStringLiteral("b64_json")).toString();
+            if (!b64.isEmpty())
+            {
+                QImage result = QImage::fromData(QByteArray::fromBase64(b64.toLatin1()));
+                if (result.isNull())
+                {
+                    pbLogRequest(m_obj, kind, requestId, elapsed, false,
+                                 QStringLiteral("undecodable image"));
+                    emit errorOccurred(requestId,
+                                       QStringLiteral("Image generation failed: provider "
+                                                      "returned an unreadable image."));
+                }
+                else
+                {
+                    pbLogRequest(m_obj, kind, requestId, elapsed, true);
+                    emit resultReady(requestId, result);
+                }
+            }
+            else
+            {
+                const QString url = first.value(QStringLiteral("url")).toString();
+                if (url.isEmpty())
+                {
+                    pbLogRequest(m_obj, kind, requestId, elapsed, false,
+                                 QStringLiteral("result without image data"));
+                    emit errorOccurred(requestId,
+                                       QStringLiteral("Image generation failed: provider "
+                                                      "returned a result without image data."));
+                }
+                else
+                {
+                    /* never QImage::load(url): download asynchronously */
+                    fetchImage(QUrl(url), requestId, startedAt);
+                }
+            }
         }
     }
 
@@ -447,8 +544,51 @@ void GenerationService::onReplyFinished()
     }
 }
 
+void GenerationService::fetchImage(const QUrl &url, const QString &requestId,
+                                   qint64 startedAt)
+{
+    QNetworkRequest request(url);
+    request.setTransferTimeout(m_timeoutMs);
+    if (!m_apiKey.isEmpty())
+        request.setRawHeader("Authorization", "Bearer " + m_apiKey.toUtf8());
+
+    QNetworkReply *reply = m_network.get(request);
+    reply->setProperty("pbRequestId", requestId);
+    reply->setProperty("pbStartedAt", startedAt);
+    reply->setProperty("pbIsImageFetch", true);
+    m_replies.append(reply);
+
+    handleSslErrors(reply);
+    connect(reply, &QNetworkReply::finished, this, &GenerationService::onReplyFinished);
+}
+
+void GenerationService::handleSslErrors(QNetworkReply *reply) const
+{
+    const bool insecure = m_insecureTls;
+    /* Always record the failure detail so errors stay truthful. */
+    connect(reply, &QNetworkReply::sslErrors, reply,
+            [reply, insecure](const QList<QSslError> &errors) {
+        reply->setProperty("pbSslDetail", sslErrorDetail(errors));
+        /* A7: bypass certificate validation ONLY with the explicit
+         * paintbrush-image-insecure / paintbrush-dev-insecure opt-in.
+         * Default: Qt aborts the request and onReplyFinished surfaces a
+         * truthful TLS error. */
+        if (insecure)
+            reply->ignoreSslErrors();
+    });
+}
+
+void GenerationService::setBusy(bool busy)
+{
+    if (m_busy == busy)
+        return;
+    m_busy = busy;
+    emit busyChanged(busy);
+}
+
 void GenerationService::cancelAll()
 {
+    ++m_cancelEpoch; /* invalidate in-flight local workers */
     for (QNetworkReply *reply : m_replies)
         reply->abort();
     m_replies.clear();

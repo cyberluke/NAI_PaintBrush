@@ -390,6 +390,7 @@ libqt_plugin_la_SOURCES = \
 	paintbrush/pb_canvas_item.cpp paintbrush/pb_canvas_item.hpp \
 	paintbrush/pb_controller.cpp paintbrush/pb_controller.hpp \
 	paintbrush/pb_frame_capture.cpp paintbrush/pb_frame_capture.hpp \
+	paintbrush/pb_media_logic.hpp \
 	paintbrush/pb_segmentation_service.cpp paintbrush/pb_segmentation_service.hpp \
 	paintbrush/pb_tracking_service.cpp paintbrush/pb_tracking_service.hpp \
 	paintbrush/pb_vision_service.cpp paintbrush/pb_vision_service.hpp \
@@ -398,6 +399,9 @@ libqt_plugin_la_SOURCES = \
 	paintbrush/pb_companion_service.cpp paintbrush/pb_companion_service.hpp \
 	paintbrush/pb_thumbnail_service.cpp paintbrush/pb_thumbnail_service.hpp \
 	paintbrush/pb_lookup_service.cpp paintbrush/pb_lookup_service.hpp \
+	paintbrush/pb_capability.cpp paintbrush/pb_capability.hpp \
+	paintbrush/pb_sticker.cpp paintbrush/pb_sticker.hpp \
+	paintbrush/pb_layer_model.cpp paintbrush/pb_layer_model.hpp \
 	paintbrush/pb_project_store.cpp paintbrush/pb_project_store.hpp \
 	paintbrush/pb_export.cpp paintbrush/pb_export.hpp
 
@@ -560,6 +564,7 @@ nodist_libqt_plugin_la_SOURCES = \
 	paintbrush/pb_history.moc.cpp \
 	paintbrush/pb_canvas_item.moc.cpp \
 	paintbrush/pb_controller.moc.cpp \
+	paintbrush/pb_frame_capture.moc.cpp \
 	paintbrush/pb_segmentation_service.moc.cpp \
 	paintbrush/pb_tracking_service.moc.cpp \
 	paintbrush/pb_vision_service.moc.cpp \
@@ -567,7 +572,8 @@ nodist_libqt_plugin_la_SOURCES = \
 	paintbrush/pb_assistant_service.moc.cpp \
 	paintbrush/pb_companion_service.moc.cpp \
 	paintbrush/pb_thumbnail_service.moc.cpp \
-	paintbrush/pb_lookup_service.moc.cpp
+	paintbrush/pb_lookup_service.moc.cpp \
+	paintbrush/pb_layer_model.moc.cpp
 
 nodist_libqt_plugin_la_SOURCES += \
 	dialogs/extended/ui_equalizer.h \

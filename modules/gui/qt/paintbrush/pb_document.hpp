@@ -13,6 +13,7 @@
 #define PB_DOCUMENT_HPP
 
 #include "pb_layer.hpp"
+#include "pb_media_logic.hpp"
 
 #include <QObject>
 #include <QSize>
@@ -21,6 +22,8 @@
 #include <QList>
 #include <QVector>
 #include <QStringList>
+#include <QTransform>
+#include <memory>
 
 #include <vlc_common.h>
 
@@ -83,6 +86,46 @@ struct AssistantMessage
     qint64 timeMs = 0;
 };
 
+class PaintbrushDocument;
+class UndoCommand;
+
+/* The single canonical compositor. Screen tiles, export, eyedropper, AI
+ * preview and thumbnails all render through here, so every consumer sees
+ * the same picture with the same layer transforms. */
+class DocumentRenderer
+{
+public:
+    /* Composite one layer into `target` for the canvas region whose
+     * top-left corner is `region.topLeft()` (target is region-sized).
+     * Honors the full layer transform (position + center-pivot scale +
+     * rotation), the local-space mask, opacity and blend mode. */
+    static void compositeLayer(QImage &target, const QRect &region,
+                               const CanvasLayer &layer);
+
+    /* Composite all visible layers of `doc` bottom-to-top into `target`. */
+    static void composite(QImage &target, const QRect &region,
+                          const PaintbrushDocument &doc);
+
+    /* Full-canvas render (the canonical flatten). */
+    static QImage render(const PaintbrushDocument &doc);
+
+    /* Render `region` (canvas coordinates) into a region-sized image. */
+    static QImage renderRegion(const PaintbrushDocument &doc,
+                               const QRect &region);
+};
+
+/* Canvas-space transform helpers shared by the document-level rotate/crop
+ * operations and their typed undo commands. */
+
+/* Rotation that maps the old canvas rect exactly onto a canvas of swapped
+ * dimensions (pivot = old canvas center, target center = new canvas
+ * center). clockwise = true rotates 90° visually. */
+QTransform pbCanvasRotateTransform(const QSize &oldCanvasSize, bool clockwise);
+
+/* Translation that maps old-canvas point `cropRect.topLeft()` onto the new
+ * canvas origin (crop). */
+QTransform pbCanvasCropShift(const QRect &cropRect);
+
 class PaintbrushDocument : public QObject
 {
     Q_OBJECT
@@ -98,6 +141,8 @@ public:
 
     /* -- document state ------------------------------------------------ */
     QSize canvasSize() const { return m_canvasSize; }
+    /* The render target. Layer rasters are LOCAL-sized and are never
+     * resized here — only the canvas (render target) changes. */
     void setCanvasSize(const QSize &size);
     int canvasWidth() const { return m_canvasSize.width(); }
     int canvasHeight() const { return m_canvasSize.height(); }
@@ -114,6 +159,19 @@ public:
     const CanvasLayer *currentLayer() const;
     CanvasLayer *layerAt(int index);
     const CanvasLayer *layerAt(int index) const;
+    /* stable-id lookups (typed undo commands) */
+    int indexOfLayerId(int id) const;
+    CanvasLayer *layerById(int id);
+    const CanvasLayer *layerById(int id) const;
+
+    /* -- canvas-space operations (pure transforms, never raster resizing) - */
+    /* Rotate the whole canvas 90° (clockwise = true). Canvas size swaps and
+     * every layer transform is recomposed; rasters are never resampled.
+     * The mutation is applied immediately and the returned typed command
+     * replays (redo) or reverts (undo) it exactly. */
+    std::unique_ptr<UndoCommand> makeRotate90Command(bool clockwise);
+    /* Crop the canvas to `rect` (canvas coordinates). Same contract. */
+    std::unique_ptr<UndoCommand> makeCropCommand(const QRect &rect);
 
     /* -- selection ------------------------------------------------------ */
     const QPainterPath &selectionPath() const { return m_selection; }
@@ -127,9 +185,23 @@ public:
     void setSourceMedia(const QString &mrl, const QString &title, qint64 timeMs);
     void clearSourceMedia();
 
+    /* The canonical FrameRef of the captured/edit frame (A19): the AI and
+     * crop paths decode exactly THIS frame through FrameProvider instead
+     * of hunting for the first LAYER_REFERENCE layer. Kept in sync with
+     * setSourceMedia() (mrl/title/timeMs) and set wholesale when a frame
+     * is captured with verified dimensions/PTS. */
+    FrameRef sourceFrame() const { return m_sourceFrame; }
+    void setSourceFrame(const FrameRef &ref);
+
     /* -- tracked objects ------------------------------------------------- */
     const QVector<ObjectTrack> &tracks() const { return m_tracks; }
     void setTracks(const QVector<ObjectTrack> &tracks);
+    /* Mutable access to the REAL track store the document owns, so
+     * cache-style mutations (mask eviction under a memory budget) reach the
+     * document instead of a controller copy (A32). Callers must re-emit
+     * trackingStateChanged/notify as needed; this does NOT mark the project
+     * dirty — eviction is a cache operation, not a content edit. */
+    QVector<ObjectTrack> &tracksRef() { return m_tracks; }
 
     /* -- project ---------------------------------------------------------- */
     QString projectPath() const { return m_projectPath; }
@@ -137,17 +209,8 @@ public:
     bool dirty() const { return m_dirty; }
     void setDirty(bool dirty);
 
-    /* -- undo support ------------------------------------------------------ */
-    /* Snapshot helpers used by UndoStack. Layer snapshots are compact JSON
-     * blobs (see ProjectStore serialization) so structural changes can be
-     * undone as one unit. */
-    QByteArray layersSnapshot() const;
-    void restoreLayersSnapshot(const QByteArray &data);
-    QByteArray canvasSnapshot() const;
-    void restoreCanvasSnapshot(const QByteArray &data);
-
-    /* Flatten all visible layers into one image (used for export, AI input
-     * and companion previews). */
+    /* Flatten all visible layers through the canonical DocumentRenderer
+     * (thin wrapper; identical transform semantics as the screen path). */
     QImage flattenedImage() const;
 
     /* Composited source for AI operations: the captured media frame when
@@ -168,8 +231,11 @@ public slots:
     void resetDocument(const QSize &size);
 
 private:
+    void assignLayerIds();
+
     QSize m_canvasSize;
     QList<CanvasLayer> m_layers;
+    int m_nextLayerId = 1;
     int m_currentLayerIndex = -1;
     QPainterPath m_selection;
     bool m_hasSelection = false;
@@ -177,6 +243,7 @@ private:
     QString m_sourceMRL;
     QString m_sourceTitle;
     qint64 m_sourceTimeMs = 0;
+    FrameRef m_sourceFrame; /* exact frame identity for the AI/crop paths */
 
     QVector<ObjectTrack> m_tracks;
 

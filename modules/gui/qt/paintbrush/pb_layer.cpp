@@ -10,6 +10,54 @@
 
 namespace paintbrush {
 
+QTransform CanvasLayer::transform() const
+{
+    QTransform t;
+    if (qFuzzyIsNull(rotation) && qFuzzyCompare(scale, 1.0f))
+    {
+        /* the common case (raster layers, untouched image layers): pure
+         * translation — identity when position is the origin */
+        t.translate(position.x(), position.y());
+        return t;
+    }
+    const QPointF c = raster.isNull() ? QPointF() : QPointF(raster.rect().center());
+    t.translate(position.x() + c.x(), position.y() + c.y());
+    t.rotate(rotation);
+    t.scale(scale, scale);
+    t.translate(-c.x(), -c.y());
+    return t;
+}
+
+void CanvasLayer::setTransform(const QTransform &t)
+{
+    /* decompose a uniform affine A(x) = L*x + t into
+     *   A(x) = position + c + L*(x - c)
+     * with c the center of the current local raster (the pivot). Exact for
+     * any uniform L (translation + uniform scale + rotation); the forward
+     * transform() rebuilds A bit-for-bit. */
+    const qreal m11 = t.m11(), m12 = t.m12();
+    const qreal m21 = t.m21(), m22 = t.m22();
+
+    const qreal s = std::hypot(m11, m12);
+    rotation = float(qRadiansToDegrees(std::atan2(m12, m11)));
+    scale = s < 0.001 ? 1.0f : float(s);
+
+    const QPointF c = raster.isNull() ? QPointF() : QPointF(raster.rect().center());
+    const QPointF Lc(m11 * c.x() + m21 * c.y(),
+                     m12 * c.x() + m22 * c.y());
+    position = QPointF(t.m31(), t.m32()) - c + Lc;
+}
+
+QPointF CanvasLayer::mapLocalToCanvas(const QPointF &local) const
+{
+    return transform().map(local);
+}
+
+QPointF CanvasLayer::mapCanvasToLocal(const QPointF &canvas) const
+{
+    return transform().inverted().map(canvas);
+}
+
 CanvasLayer CanvasLayer::createRaster(const QSize &size, const QString &name)
 {
     CanvasLayer layer;

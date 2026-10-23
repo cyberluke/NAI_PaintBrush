@@ -15,9 +15,18 @@ import VLC.Widgets as Widgets
 import VLC.Style
 import VLC.Paintbrush
 
-/* The NAI Paintbrush workspace. Tool rail on the left, canvas in the
- * middle, inspector/assistant on the right, palette below, and a media
- * drawer at the bottom. Everything collapses back to a simple canvas. */
+/* The NAI Paintbrush workspace — canvas-first (A35).
+ *
+ * Layout budget (startup state: contextual inspector drawer and companion
+ * pill both collapsed):
+ *   canvas width = W - toolRail = W - 92dp
+ *   => canvas >= 0.75 * W for any W >= 368dp (and the tool rail is the only
+ *      fixed-width chrome in the row).
+ * The inspector is a contextual drawer anchored to the right edge that is
+ * closed by default and opens only when the active selection needs it;
+ * the companion is a small avatar pill, collapsed by default, that never
+ * occupies layout width. Top bar (Media/AI/Save actions), iconic tool rail,
+ * central canvas and bottom palette strip complete the surface. */
 Item {
     id: root
 
@@ -197,11 +206,11 @@ Item {
 
             Widgets.IconToolButton {
                 text: VLCIcons.info
-                description: PaintbrushCtx.companionMode === 0 ? qsTr("Show companion")
-                                                               : qsTr("Companion on")
+                description: assistantDock.expanded ? qsTr("Hide companion")
+                                                    : qsTr("Show companion")
                 checkable: true
-                checked: PaintbrushCtx.companionMode !== 0
-                onClicked: PaintbrushCtx.setCompanionMode(checked ? 2 : 0)
+                checked: assistantDock.expanded
+                onClicked: assistantDock.expanded = !assistantDock.expanded
             }
             Widgets.IconToolButton {
                 text: VLCIcons.add
@@ -239,6 +248,13 @@ Item {
                 enabled: PaintbrushCtx.hasOpenDocument
                 onClicked: exportDialog.open()
             }
+            /* AI diagnostics: a diagnostics action instead of permanent
+             * status dots in the creative space (A37/S5) */
+            Widgets.IconToolButton {
+                text: VLCIcons.settings
+                description: qsTr("AI diagnostics")
+                onClicked: inspectorDock.openDiagnostics()
+            }
             Widgets.IconToolButton {
                 text: VLCIcons.history
                 description: qsTr("Back to VLC")
@@ -250,7 +266,8 @@ Item {
         }
     }
 
-    /* center: canvas with tool rail + right docks */
+    /* center: canvas with tool rail; the inspector drawer and the companion
+     * pill float above the canvas and never steal layout width when closed */
     RowLayout {
         id: mainRow
 
@@ -262,7 +279,8 @@ Item {
 
         PaintbrushToolRail {
             id: toolRail
-            Layout.preferredWidth: VLCStyle.dp(56, VLCStyle.scale)
+            /* the only fixed-width chrome in the row; canvas gets the rest */
+            Layout.preferredWidth: VLCStyle.dp(92, VLCStyle.scale)
             Layout.fillHeight: true
             canvas: paintbrushCanvas
         }
@@ -277,20 +295,31 @@ Item {
                 canvas: paintbrushCanvas
             }
         }
+    }
 
-        PaintbrushInspectorDock {
-            id: inspectorDock
-            Layout.preferredWidth: Math.min(root.width * 0.28, VLCStyle.dp(360, VLCStyle.scale))
-            Layout.fillHeight: true
-            canvas: paintbrushCanvas
-        }
+    /* contextual inspector drawer: closed by default, opens when the active
+     * selection needs it; floats over the right edge of the canvas row */
+    PaintbrushInspectorDock {
+        id: inspectorDock
 
-        PaintbrushAssistantDock {
-            id: assistantDock
-            Layout.preferredWidth: Math.min(root.width * 0.22, VLCStyle.dp(280, VLCStyle.scale))
-            Layout.fillHeight: true
-            visible: PaintbrushCtx.companionMode !== 0
-        }
+        anchors.top: mainRow.top
+        anchors.bottom: mainRow.bottom
+        anchors.right: parent.right
+        width: inspectorDock.expanded ? inspectorDock.drawerWidth : 0
+        clip: true
+        canvas: paintbrushCanvas
+    }
+
+    /* companion pill: a small avatar, collapsed by default (A41); the chat
+     * expands in place and never occupies layout width */
+    PaintbrushAssistantDock {
+        id: assistantDock
+
+        anchors.right: parent.right
+        anchors.bottom: paletteBar.top
+        anchors.rightMargin: VLCStyle.margin_normal
+        anchors.bottomMargin: VLCStyle.margin_normal
+        z: 5
     }
 
     /* palette bar */
@@ -394,7 +423,7 @@ Item {
     Shortcut { sequence: "Ctrl+Right"; onActivated: PaintbrushCtx.playerFrameNext() }
     Shortcut { sequence: "Ctrl+Space"; onActivated: PaintbrushCtx.playerPlayPause() }
     Shortcut { sequence: "Ctrl+U"; onActivated: PaintbrushCtx.captureVideoFrame() }
-    Shortcut { sequence: "Ctrl+I"; onActivated: PaintbrushCtx.setCompanionMode(PaintbrushCtx.companionMode === 0 ? 2 : 0) }
+    Shortcut { sequence: "Ctrl+I"; onActivated: assistantDock.expanded = !assistantDock.expanded }
     Shortcut { sequence: "Escape"; onActivated: { PaintbrushCtx.cancelTracking(); PaintbrushCtx.cancelGeneration(); PaintbrushCtx.cancelThumbnails() } }
 
     /* Fit to the desktop so the bottom chrome (palette + media drawer)

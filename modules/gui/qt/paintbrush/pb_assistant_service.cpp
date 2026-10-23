@@ -84,6 +84,10 @@ void AssistantService::configure(vlc_object_t *obj)
     m_apiKey = pbApiKey(obj, "PAINTBRUSH_ASSISTANT_API_KEY",
                         "paintbrush-assistant-api-key");
     m_reasoning = pbConfigBool(obj, "paintbrush-assistant-reasoning");
+    /* A7: TLS validation stays ON unless the operator explicitly opts into
+     * self-signed local endpoints (per-service or shared dev flag). */
+    m_insecureTls = pbConfigBool(obj, "paintbrush-assistant-insecure")
+                 || pbConfigBool(obj, "paintbrush-dev-insecure");
 
     m_contextLimit = pbConfigInt(obj, "paintbrush-assistant-context-limit");
     m_inputLimit = pbConfigInt(obj, "paintbrush-assistant-input-limit");
@@ -295,11 +299,11 @@ void AssistantService::chat(const QString &text, const QImage &image,
     reply->setProperty("pbStartedAt", QDateTime::currentMSecsSinceEpoch());
     m_replies.append(reply);
 
-    /* local endpoints often use self-signed certificates; log instead of
-     * failing hard so local providers work out of the box */
-    connect(reply, &QNetworkReply::sslErrors, reply, [reply](const QList<QSslError> &) {
-        reply->ignoreSslErrors();
-    });
+    /* A7: no more unconditional ignoreSslErrors(). Certificate validation
+     * is on by default; only the explicit paintbrush-assistant-insecure /
+     * paintbrush-dev-insecure opt-in bypasses it for self-signed local
+     * endpoints. */
+    handleSslErrors(reply);
 
     if (!m_busy)
     {
@@ -328,11 +332,33 @@ void AssistantService::onReplyFinished()
         QString detail = QString::fromUtf8(data).left(300);
         if (detail.isEmpty())
             detail = reply->errorString();
-        pbLogRequest(m_obj, "assistant", conversationId, elapsed, false, detail);
-        emit errorOccurred(conversationId,
-                           QStringLiteral("The AI assistant failed: the chat endpoint did "
-                                          "not respond (%1). %2")
-                               .arg(int(error)).arg(detail));
+
+        /* A7: TLS validation failures are surfaced truthfully instead of
+         * being silently ignored. (Qt5/Qt6-safe: the failure detail is
+         * recorded by the sslErrors handler, never read back from a
+         * getter that only Qt5 had.) */
+        const QString sslDetail = reply->property("pbSslDetail").toString();
+        const bool tlsFailure = !sslDetail.isEmpty() ||
+                                error == QNetworkReply::SslHandshakeFailedError;
+
+        if (tlsFailure)
+        {
+            pbLogRequest(m_obj, "assistant", conversationId, elapsed, false,
+                         QStringLiteral("TLS: %1").arg(sslDetail));
+            emit errorOccurred(conversationId,
+                QStringLiteral("The AI assistant failed: TLS certificate validation "
+                               "failed. %1 Enable the paintbrush-dev-insecure option "
+                               "only for trusted self-signed local endpoints.")
+                    .arg(sslDetail.isEmpty() ? detail : sslDetail));
+        }
+        else
+        {
+            pbLogRequest(m_obj, "assistant", conversationId, elapsed, false, detail);
+            emit errorOccurred(conversationId,
+                               QStringLiteral("The AI assistant failed: the chat endpoint did "
+                                              "not respond (%1). %2")
+                                   .arg(int(error)).arg(detail));
+        }
     }
     else
     {
@@ -388,6 +414,22 @@ void AssistantService::cancelAll()
         m_busy = false;
         emit busyChanged(false);
     }
+}
+
+void AssistantService::handleSslErrors(QNetworkReply *reply) const
+{
+    const bool insecure = m_insecureTls;
+    /* Always record the failure detail so errors stay truthful. */
+    connect(reply, &QNetworkReply::sslErrors, reply,
+            [reply, insecure](const QList<QSslError> &errors) {
+        reply->setProperty("pbSslDetail", sslErrorDetail(errors));
+        /* A7: bypass certificate validation ONLY with the explicit
+         * paintbrush-assistant-insecure / paintbrush-dev-insecure opt-in.
+         * Default: Qt aborts the request and onReplyFinished surfaces a
+         * truthful TLS error. */
+        if (insecure)
+            reply->ignoreSslErrors();
+    });
 }
 
 } // namespace paintbrush

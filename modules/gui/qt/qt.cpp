@@ -229,6 +229,17 @@ static void ShowDialog   ( intf_thread_t *, int, int, intf_dialog_args_t * );
 #define PB_ENABLED_TEXT N_( "Enable the Paintbrush creative workspace" )
 #define PB_ENABLED_LONGTEXT N_( "Show the NAI Paintbrush workspace entry and allow "\
                                 "switching to the Paintbrush creative mode." )
+#define PB_EDIT_PTS_TOLERANCE_TEXT N_( "Edit frame PTS tolerance (ms)" )
+#define PB_EDIT_PTS_TOLERANCE_LONGTEXT N_( "Maximum accepted difference between a "\
+                                           "requested timestamp and the decoded "\
+                                           "frame's actual PTS, in milliseconds. "\
+                                           "Frames decoded by the Paintbrush edit "\
+                                           "source are only published when their "\
+                                           "actual PTS is within this tolerance." )
+#define PB_TRACKING_STEP_TEXT N_( "Tracking frame step (ms)" )
+#define PB_TRACKING_STEP_LONGTEXT N_( "Nominal time between tracked frames, in "\
+                                      "milliseconds. Every tracked mask is keyed "\
+                                      "by the actual decoded PTS of its frame." )
 #define PB_START_TEXT N_( "Start in Paintbrush mode" )
 #define PB_START_LONGTEXT N_( "Start VLC directly in the Paintbrush creative "\
                               "workspace. Equivalent to: vlc --paintbrush [media]" )
@@ -477,6 +488,18 @@ vlc_module_begin ()
                 N_( "Recent Paintbrush projects" ), N_( "Semicolon-separated list of recently opened Paintbrush projects." ) )
     add_bool( "paintbrush-demo-mode", false,
               N_( "Paintbrush demo mode" ), N_( "Show the strongest Paintbrush features for recording and demos." ) )
+
+    /* Edit decode source (EditDecodeSource) tuning: the exact-frame
+     * decoder used by thumbnails, tracking, sticker export and AI crops.
+     * HW decode policy is NOT configured here — the edit source honors the
+     * generic avcodec-hwdec tri-state (0 Auto, 1 Disabled, 2 Required) so
+     * the capability stays generic while applying to the edit decoder only
+     * (main playback keeps Auto). */
+    add_integer_with_range( "paintbrush-edit-pts-tolerance-ms", 250, 20, 2000,
+                            PB_EDIT_PTS_TOLERANCE_TEXT,
+                            PB_EDIT_PTS_TOLERANCE_LONGTEXT )
+    add_integer_with_range( "paintbrush-tracking-step-ms", 40, 5, 1000,
+                            PB_TRACKING_STEP_TEXT, PB_TRACKING_STEP_LONGTEXT )
 
     add_bool( "qt-system-tray", true, SYSTRAY_TEXT, SYSTRAY_LONGTEXT)
 

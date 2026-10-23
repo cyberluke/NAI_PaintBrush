@@ -13,6 +13,7 @@
 #define PB_ASSISTANT_SERVICE_HPP
 
 #include "pb_common.hpp"
+#include "pb_capability.hpp"
 
 #include <QObject>
 #include <QImage>
@@ -58,6 +59,14 @@ public:
     int timeoutMs() const { return m_timeoutMs; }
     bool reasoning() const { return m_reasoning; }
 
+    /* TLS posture (A7): certificate validation is on unless the operator
+     * explicitly opts into self-signed endpoints. */
+    bool insecureTlsOptIn() const { return m_insecureTls; }
+    TlsPosture tlsPosture() const
+    {
+        return m_insecureTls ? TlsPosture::DevSelfSigned : TlsPosture::Normal;
+    }
+
     /* model limits (tokens) */
     int contextLimit() const { return m_contextLimit; }
     int inputLimit() const { return m_inputLimit; }
@@ -95,6 +104,8 @@ private:
     void compactConversation();
     int estimateTokens(const QJsonObject &message) const;
     static QString extractContent(const QByteArray &json);
+    /* A7: TLS validation gating shared by all replies. */
+    void handleSslErrors(QNetworkReply *reply) const;
 
     vlc_object_t *m_obj = nullptr;
     QString m_baseUrl;
@@ -103,6 +114,7 @@ private:
     QString m_unavailableReason;
     int m_timeoutMs = 120000;
     bool m_reasoning = true;
+    bool m_insecureTls = false;
 
     /* model limits (tokens), defaults match the persisted profile */
     int m_contextLimit = 524288;

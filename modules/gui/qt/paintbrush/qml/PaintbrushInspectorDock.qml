@@ -1,5 +1,5 @@
 /*****************************************************************************
- * PaintbrushInspectorDock.qml : NAI Paintbrush — layers & AI actions
+ * PaintbrushInspectorDock.qml : NAI Paintbrush — contextual inspector drawer
  *****************************************************************************
  * Copyright (C) 2026 NAI Paintbrush authors
  *****************************************************************************/
@@ -13,8 +13,17 @@ import VLC.Widgets as Widgets
 import VLC.Style
 import VLC.Paintbrush
 
-/* Right-hand dock: layers list, object actions, AI availability and
- * diagnostics. Collapsible via the header. */
+/* Contextual inspector drawer (A37). Closed by default; opens only when the
+ * active tool/selection needs it:
+ *   - a selection exists  -> layer controls + selection actions
+ *   - an object is selected -> AI actions (find/remove/extract/replace/...)
+ *   - pinned by the user  -> stays open
+ * Layers bind to the real PaintbrushLayerModel (A38): the visibility
+ * checkbox reads the layer's `visible` role, the label its `name`, the
+ * opacity slider and transform spinboxes initialize from the layer's
+ * opacity/transform. AI diagnostics live behind the Diagnostics action and
+ * are fed by CapabilityReport-derived status strings (no status dots in the
+ * creative space, S5). */
 Item {
     id: root
 
@@ -25,10 +34,21 @@ Item {
         colorSet: ColorContext.View
     }
 
-    property bool expanded: true
+    /* contextual open state: default closed, auto-opens for selections */
+    property bool pinned: false
+    readonly property bool expanded: pinned
+        || canvas.hasSelection
+        || PaintbrushCtx.objectSelected
+    readonly property real drawerWidth: Math.min((parent ? parent.width : 320) * 0.26,
+                                                 VLCStyle.dp(320, VLCStyle.scale))
+
+    function openDiagnostics() {
+        diagnosticsDialog.open()
+    }
 
     Rectangle {
         anchors.fill: parent
+        visible: root.expanded
         color: theme.bg.primary
         border.width: 1
         border.color: theme.border
@@ -38,6 +58,7 @@ Item {
         anchors.fill: parent
         anchors.margins: VLCStyle.margin_small
         spacing: VLCStyle.margin_xsmall
+        visible: root.expanded
 
         /* header */
         RowLayout {
@@ -50,19 +71,22 @@ Item {
                 font.pixelSize: VLCStyle.fontSize_large
             }
             Widgets.LabelExt {
-                text: qsTr("Inspector")
+                text: root.pinned ? qsTr("Inspector") : qsTr("Inspector (selection)")
                 color: theme.fg.primary
                 font.pixelSize: VLCStyle.fontSize_large
             }
             Item { Layout.fillWidth: true }
             Widgets.IconToolButton {
-                text: root.expanded ? VLCIcons.ic_fluent_chevron_down_24 : VLCIcons.ic_fluent_chevron_up_24
-                description: qsTr("Collapse inspector")
-                onClicked: root.expanded = !root.expanded
+                text: root.pinned ? VLCIcons.close : VLCIcons.ic_fluent_chevron_right_24
+                description: root.pinned ? qsTr("Close inspector")
+                                         : qsTr("Keep inspector open")
+                checkable: true
+                checked: root.pinned
+                onClicked: root.pinned = !root.pinned
             }
         }
 
-        /* layers */
+        /* ------------------------------------------------------- layers */
         Widgets.LabelExt {
             text: qsTr("Layers")
             color: theme.fg.secondary
@@ -77,15 +101,14 @@ Item {
             clip: true
             spacing: VLCStyle.margin_xxxsmall
 
-            property int currentIndex: PaintbrushCtx.document.currentLayerIndex
-
-            model: PaintbrushCtx.document.layerCount
+            model: PaintbrushCtx.layerModel
+            currentIndex: PaintbrushCtx.document.currentLayerIndex
 
             delegate: Rectangle {
                 required property int index
 
                 width: layerList.width
-                height: VLCStyle.dp(30, VLCStyle.scale)
+                height: VLCStyle.dp(34, VLCStyle.scale)
                 radius: VLCStyle.margin_xsmall
                 color: PaintbrushCtx.document.currentLayerIndex === index
                        ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.15)
@@ -97,16 +120,27 @@ Item {
                     anchors.rightMargin: VLCStyle.margin_xsmall
                     spacing: VLCStyle.margin_xsmall
 
+                    /* layer thumbnail (real raster, "" when no content) */
+                    Image {
+                        Layout.preferredWidth: VLCStyle.dp(28, VLCStyle.scale)
+                        Layout.preferredHeight: VLCStyle.dp(22, VLCStyle.scale)
+                        source: model.thumb
+                        fillMode: Image.PreserveAspectFit
+                        asynchronous: true
+                    }
+
+                    /* visibility checkbox bound to the real layer state */
                     Widgets.CheckButton {
                         Layout.preferredWidth: VLCStyle.dp(22, VLCStyle.scale)
                         Layout.preferredHeight: VLCStyle.dp(22, VLCStyle.scale)
-                        checked: true
+                        checked: model.visible
                         onClicked: PaintbrushCtx.setLayerVisible(index, checked)
                     }
 
+                    /* real layer name */
                     Widgets.LabelExt {
                         Layout.fillWidth: true
-                        text: qsTr("Layer %1").arg(index + 1)
+                        text: model.name
                         color: theme.fg.primary
                         font.pixelSize: VLCStyle.fontSize_small
                         elide: Text.ElideRight
@@ -152,7 +186,36 @@ Item {
             }
         }
 
-        /* image-layer transform (scale / rotation; pivot at content center) */
+        /* layer controls bound to the current layer's model state: opacity
+         * (new, A38) plus image/text-layer transform (scale/rotation) */
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: VLCStyle.margin_xsmall
+
+            Widgets.LabelExt {
+                text: qsTr("Opacity")
+                color: theme.fg.secondary
+                font.pixelSize: VLCStyle.fontSize_xsmall
+            }
+            Slider {
+                id: opacitySlider
+                Layout.fillWidth: true
+                from: 0
+                to: 100
+                stepSize: 1
+                value: PaintbrushCtx.layerModel.opacityOf(
+                           PaintbrushCtx.document.currentLayerIndex) * 100
+                onMoved: PaintbrushCtx.setLayerOpacity(
+                             PaintbrushCtx.document.currentLayerIndex,
+                             value / 100.0)
+            }
+            Widgets.LabelExt {
+                text: Math.round(opacitySlider.value) + "%"
+                color: theme.fg.secondary
+                font.pixelSize: VLCStyle.fontSize_xsmall
+            }
+        }
+
         RowLayout {
             Layout.fillWidth: true
             spacing: VLCStyle.margin_xsmall
@@ -167,9 +230,11 @@ Item {
                 Layout.fillWidth: true
                 from: 1
                 to: 400
-                value: 100
+                value: Math.round(PaintbrushCtx.layerModel.scaleOf(
+                                      PaintbrushCtx.document.currentLayerIndex) * 100)
                 onValueModified: PaintbrushCtx.transformLayer(
-                                     layerList.currentIndex, value / 100.0,
+                                     PaintbrushCtx.document.currentLayerIndex,
+                                     value / 100.0,
                                      layerRotSpin.value)
             }
             Widgets.LabelExt {
@@ -182,22 +247,27 @@ Item {
                 Layout.preferredWidth: VLCStyle.dp(64, VLCStyle.scale)
                 from: -180
                 to: 180
-                value: 0
+                value: Math.round(PaintbrushCtx.layerModel.rotationOf(
+                                      PaintbrushCtx.document.currentLayerIndex))
                 onValueModified: PaintbrushCtx.transformLayer(
-                                     layerList.currentIndex, layerScaleSpin.value / 100.0,
+                                     PaintbrushCtx.document.currentLayerIndex,
+                                     layerScaleSpin.value / 100.0,
                                      value)
             }
         }
 
+        /* ------------------------------------------ selection (contextual) */
         Widgets.LabelExt {
             text: qsTr("Selection")
             color: theme.fg.secondary
             font.pixelSize: VLCStyle.fontSize_small
+            visible: canvas.hasSelection
         }
 
         RowLayout {
             Layout.fillWidth: true
             spacing: VLCStyle.margin_xsmall
+            visible: canvas.hasSelection
 
             Widgets.IconToolButton {
                 text: VLCIcons.ic_fluent_arrow_sync_24_regular
@@ -230,7 +300,7 @@ Item {
                 onClicked: canvas.selectionFillHoles()
             }
             Widgets.IconToolButton {
-                text: VLCIcons.ic_fluent_full_screen_maximize
+                text: VLCIcons.fullscreen
                 description: qsTr("Smooth selection")
                 enabled: canvas.hasSelection
                 onClicked: canvas.selectionSmooth()
@@ -242,23 +312,25 @@ Item {
                 onClicked: canvas.selectionClear()
             }
             Widgets.IconToolButton {
-                text: VLCIcons.ic_fluent_full_screen_maximize
+                text: VLCIcons.ic_fluent_arrow_move
                 description: qsTr("Crop to selection")
                 enabled: canvas.hasSelection
                 onClicked: canvas.cropToSelection()
             }
         }
 
-        /* AI actions */
+        /* ------------------------------ AI actions (object / selection) */
         Widgets.LabelExt {
             text: qsTr("AI actions")
             color: theme.fg.secondary
             font.pixelSize: VLCStyle.fontSize_small
+            visible: PaintbrushCtx.objectSelected || canvas.hasSelection
         }
 
         ColumnLayout {
             Layout.fillWidth: true
             spacing: VLCStyle.margin_xxxsmall
+            visible: PaintbrushCtx.objectSelected || canvas.hasSelection
 
             Widgets.ActionButtonPrimary {
                 Layout.fillWidth: true
@@ -325,7 +397,9 @@ Item {
                     Layout.fillWidth: true
                 }
                 Widgets.IconToolButton {
-                    text: PaintbrushCtx.objectMaskSoftEdge ? VLCIcons.ic_fluent_arrow_sync_24_regular : VLCIcons.ic_fluent_full_screen_maximize
+                    text: PaintbrushCtx.objectMaskSoftEdge
+                          ? VLCIcons.ic_fluent_arrow_sync_24_regular
+                          : VLCIcons.fullscreen
                     description: qsTr("Soft edge (feathered alpha)")
                     checkable: true
                     checked: PaintbrushCtx.objectMaskSoftEdge
@@ -474,71 +548,13 @@ Item {
             }
         }
 
-        /* AI availability + diagnostics */
-        Widgets.LabelExt {
-            text: qsTr("AI")
-            color: theme.fg.secondary
-            font.pixelSize: VLCStyle.fontSize_small
-        }
-
-        ColumnLayout {
-            Layout.fillWidth: true
-            spacing: VLCStyle.margin_xxxsmall
-
-            RowLayout {
-                Layout.fillWidth: true
-                Rectangle {
-                    width: 8; height: 8; radius: 4
-                    color: PaintbrushCtx.segmentationAvailable ? "limegreen" : "#c33"
-                }
-                Widgets.LabelExt {
-                    Layout.fillWidth: true
-                    text: PaintbrushCtx.segmentationAvailable
-                          ? qsTr("Object Select ready")
-                          : qsTr("Object Select unavailable")
-                    color: theme.fg.secondary
-                    font.pixelSize: VLCStyle.fontSize_xsmall
-                    wrapMode: Text.WordWrap
-                }
-            }
-            RowLayout {
-                Layout.fillWidth: true
-                Rectangle {
-                    width: 8; height: 8; radius: 4
-                    color: PaintbrushCtx.visionConfigured ? "limegreen" : "#c33"
-                }
-                Widgets.LabelExt {
-                    Layout.fillWidth: true
-                    text: PaintbrushCtx.visionConfigured
-                          ? qsTr("Ask about this ready")
-                          : PaintbrushCtx.visionUnavailableReason
-                    color: theme.fg.secondary
-                    font.pixelSize: VLCStyle.fontSize_xsmall
-                    wrapMode: Text.WordWrap
-                }
-            }
-            RowLayout {
-                Layout.fillWidth: true
-                Rectangle {
-                    width: 8; height: 8; radius: 4
-                    color: PaintbrushCtx.generationConfigured ? "limegreen" : "#c33"
-                }
-                Widgets.LabelExt {
-                    Layout.fillWidth: true
-                    text: PaintbrushCtx.generationConfigured
-                          ? qsTr("Image generation ready")
-                          : PaintbrushCtx.generationUnavailableReason
-                    color: theme.fg.secondary
-                    font.pixelSize: VLCStyle.fontSize_xsmall
-                    wrapMode: Text.WordWrap
-                }
-            }
-        }
-
+        /* diagnostics action (A37): status dots are not part of the
+         * creative space — they live in the diagnostics dialog, fed by
+         * CapabilityReport-derived strings (S5) */
         Widgets.IconToolButton {
             Layout.alignment: Qt.AlignRight
-            text: VLCIcons.info
-            description: qsTr("Diagnostics")
+            text: VLCIcons.settings
+            description: qsTr("AI diagnostics")
             onClicked: diagnosticsDialog.open()
         }
     }
@@ -553,6 +569,60 @@ Item {
 
         contentItem: ColumnLayout {
             width: parent.width
+
+            /* capability truth (S5): one row per AI feature, status text
+             * derived from CapabilityReport — the dot color is green only
+             * when the capability is genuinely configured */
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: VLCStyle.margin_xxxsmall
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: VLCStyle.margin_xsmall
+                    Rectangle {
+                        width: 8; height: 8; radius: 4
+                        color: PaintbrushCtx.segmentationAvailable ? "limegreen" : "#c33"
+                    }
+                    Widgets.LabelExt {
+                        Layout.fillWidth: true
+                        text: qsTr("Object Select — %1").arg(PaintbrushCtx.segmentationStatusText)
+                        color: theme.fg.secondary
+                        font.pixelSize: VLCStyle.fontSize_xsmall
+                        wrapMode: Text.WordWrap
+                    }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: VLCStyle.margin_xsmall
+                    Rectangle {
+                        width: 8; height: 8; radius: 4
+                        color: PaintbrushCtx.visionConfigured ? "limegreen" : "#c33"
+                    }
+                    Widgets.LabelExt {
+                        Layout.fillWidth: true
+                        text: qsTr("Ask about this — %1").arg(PaintbrushCtx.visionStatusText)
+                        color: theme.fg.secondary
+                        font.pixelSize: VLCStyle.fontSize_xsmall
+                        wrapMode: Text.WordWrap
+                    }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: VLCStyle.margin_xsmall
+                    Rectangle {
+                        width: 8; height: 8; radius: 4
+                        color: PaintbrushCtx.generationConfigured ? "limegreen" : "#c33"
+                    }
+                    Widgets.LabelExt {
+                        Layout.fillWidth: true
+                        text: qsTr("Image generation — %1").arg(PaintbrushCtx.generationStatusText)
+                        color: theme.fg.secondary
+                        font.pixelSize: VLCStyle.fontSize_xsmall
+                        wrapMode: Text.WordWrap
+                    }
+                }
+            }
 
             ScrollView {
                 Layout.fillWidth: true

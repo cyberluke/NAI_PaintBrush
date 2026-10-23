@@ -5,12 +5,10 @@
  *****************************************************************************/
 
 #include "pb_document.hpp"
+#include "pb_history.hpp"
 
 #include <QPainter>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QBuffer>
+#include <QtMath>
 
 namespace paintbrush {
 
@@ -23,6 +21,7 @@ void PaintbrushDocument::resetDocument(const QSize &size)
 {
     m_canvasSize = size.isValid() && !size.isEmpty() ? size : QSize(1280, 720);
     m_layers.clear();
+    m_nextLayerId = 1;
     m_currentLayerIndex = -1;
     m_selection = QPainterPath();
     m_hasSelection = false;
@@ -35,6 +34,7 @@ void PaintbrushDocument::resetDocument(const QSize &size)
 
     /* Start with one empty raster layer, like Paintbrush does. */
     m_layers.append(CanvasLayer::createRaster(m_canvasSize, QStringLiteral("Layer 1")));
+    m_layers[0].id = m_nextLayerId++;
     m_currentLayerIndex = 0;
 
     emit canvasSizeChanged();
@@ -52,36 +52,26 @@ void PaintbrushDocument::setCanvasSize(const QSize &size)
     if (size == m_canvasSize || !size.isValid() || size.isEmpty())
         return;
 
-    const QSize oldSize = m_canvasSize;
+    /* renderTarget only: layer rasters stay LOCAL-sized. A layer's placement
+     * transform maps local content onto the (possibly resized) canvas. */
     m_canvasSize = size;
-    for (CanvasLayer &layer : m_layers) {
-        if (layer.raster.isNull())
-            continue;
-        QImage resized = QImage(size, QImage::Format_ARGB32);
-        resized.fill(Qt::transparent);
-        QPainter p(&resized);
-        p.drawImage(QPoint(0, 0), layer.raster);
-        p.end();
-        layer.raster = std::move(resized);
-        if (!layer.mask.isNull()) {
-            QImage mask(size, QImage::Format_Grayscale8);
-            mask.fill(0);
-            QPainter mp(&mask);
-            mp.drawImage(0, 0, layer.mask);
-            mp.end();
-            layer.mask = std::move(mask);
-        }
-    }
     m_dirty = true;
     emit canvasSizeChanged();
     emit layersChanged();
     emit dirtyChanged(true);
-    Q_UNUSED(oldSize);
+}
+
+void PaintbrushDocument::assignLayerIds()
+{
+    for (CanvasLayer &layer : m_layers)
+        if (layer.id == 0)
+            layer.id = m_nextLayerId++;
 }
 
 void PaintbrushDocument::setLayers(const QList<CanvasLayer> &layers)
 {
     m_layers = layers;
+    assignLayerIds();
     if (m_currentLayerIndex >= m_layers.size())
         m_currentLayerIndex = m_layers.isEmpty() ? -1 : m_layers.size() - 1;
     m_dirty = true;
@@ -122,6 +112,26 @@ const CanvasLayer *PaintbrushDocument::layerAt(int index) const
     return &m_layers[index];
 }
 
+int PaintbrushDocument::indexOfLayerId(int id) const
+{
+    for (int i = 0; i < m_layers.size(); ++i)
+        if (m_layers[i].id == id)
+            return i;
+    return -1;
+}
+
+CanvasLayer *PaintbrushDocument::layerById(int id)
+{
+    const int index = indexOfLayerId(id);
+    return index < 0 ? nullptr : &m_layers[index];
+}
+
+const CanvasLayer *PaintbrushDocument::layerById(int id) const
+{
+    const int index = indexOfLayerId(id);
+    return index < 0 ? nullptr : &m_layers[index];
+}
+
 void PaintbrushDocument::setSelectionPath(const QPainterPath &path)
 {
     m_selection = path;
@@ -146,6 +156,21 @@ void PaintbrushDocument::setSourceMedia(const QString &mrl, const QString &title
     m_sourceMRL = mrl;
     m_sourceTitle = title;
     m_sourceTimeMs = timeMs;
+    /* keep the exact-frame identity in sync (A19) */
+    m_sourceFrame.mrl = mrl;
+    m_sourceFrame.title = title;
+    m_sourceFrame.ptsMs = qMax<qint64>(0, timeMs);
+    m_dirty = true;
+    emit mediaChanged();
+    emit dirtyChanged(true);
+}
+
+void PaintbrushDocument::setSourceFrame(const FrameRef &ref)
+{
+    m_sourceFrame = ref;
+    m_sourceMRL = ref.mrl;
+    m_sourceTitle = ref.title;
+    m_sourceTimeMs = qMax<qint64>(0, ref.ptsMs);
     m_dirty = true;
     emit mediaChanged();
     emit dirtyChanged(true);
@@ -179,146 +204,246 @@ void PaintbrushDocument::setDirty(bool dirty)
     emit dirtyChanged(dirty);
 }
 
-QByteArray PaintbrushDocument::layersSnapshot() const
+/* ------------------------------------------------------ canvas transforms */
+
+QTransform pbCanvasRotateTransform(const QSize &oldCanvasSize, bool clockwise)
 {
-    /* Compact JSON: names, types, flags and PNG-encoded raster per layer.
-     * See ProjectStore for the canonical format; this is intentionally the
-     * same layer serialization so undo snapshots and project files agree. */
-    QJsonArray array;
-    for (const CanvasLayer &layer : m_layers) {
-        QJsonObject obj;
-        obj[QStringLiteral("name")] = layer.name;
-        obj[QStringLiteral("type")] = layer.type;
-        obj[QStringLiteral("visible")] = layer.visible;
-        obj[QStringLiteral("locked")] = layer.locked;
-        obj[QStringLiteral("alphaLocked")] = layer.alphaLocked;
-        obj[QStringLiteral("opacity")] = layer.opacity;
-        obj[QStringLiteral("blend")] = layer.blendMode;
-        obj[QStringLiteral("text")] = layer.text;
-        obj[QStringLiteral("posX")] = layer.position.x();
-        obj[QStringLiteral("posY")] = layer.position.y();
-        obj[QStringLiteral("scale")] = layer.scale;
-        obj[QStringLiteral("rotation")] = layer.rotation;
-
-        QByteArray png;
-        QBuffer buffer(&png);
-        buffer.open(QIODevice::WriteOnly);
-        layer.raster.save(&buffer, "PNG");
-        obj[QStringLiteral("image")] = QString::fromLatin1(png.toBase64());
-
-        if (!layer.mask.isNull()) {
-            QByteArray maskPng;
-            QBuffer maskBuffer(&maskPng);
-            maskBuffer.open(QIODevice::WriteOnly);
-            layer.mask.save(&maskBuffer, "PNG");
-            obj[QStringLiteral("mask")] = QString::fromLatin1(maskPng.toBase64());
-        }
-        array.append(obj);
-    }
-
-    QJsonDocument doc(array);
-    return doc.toJson(QJsonDocument::Compact);
+    const QPointF cOld(oldCanvasSize.width() / 2.0, oldCanvasSize.height() / 2.0);
+    const QPointF cNew(oldCanvasSize.height() / 2.0, oldCanvasSize.width() / 2.0);
+    QTransform t;
+    t.translate(cNew.x(), cNew.y());
+    t.rotate(clockwise ? 90 : -90);
+    t.translate(-cOld.x(), -cOld.y());
+    return t;
 }
 
-void PaintbrushDocument::restoreLayersSnapshot(const QByteArray &data)
+QTransform pbCanvasCropShift(const QRect &cropRect)
 {
-    const QJsonDocument doc = QJsonDocument::fromJson(data);
-    if (!doc.isArray())
-        return;
-
-    QList<CanvasLayer> layers;
-    const QJsonArray array = doc.array();
-    for (const QJsonValue &value : array) {
-        const QJsonObject obj = value.toObject();
-        CanvasLayer layer;
-        layer.name = obj[QStringLiteral("name")].toString();
-        layer.type = obj[QStringLiteral("type")].toInt(LAYER_RASTER);
-        layer.visible = obj[QStringLiteral("visible")].toBool(true);
-        layer.locked = obj[QStringLiteral("locked")].toBool(false);
-        layer.alphaLocked = obj[QStringLiteral("alphaLocked")].toBool(false);
-        layer.opacity = obj[QStringLiteral("opacity")].toDouble(1.0);
-        layer.blendMode = obj[QStringLiteral("blend")].toInt(BLEND_NORMAL);
-        layer.text = obj[QStringLiteral("text")].toString();
-        layer.position = QPointF(obj[QStringLiteral("posX")].toDouble(0),
-                                 obj[QStringLiteral("posY")].toDouble(0));
-        layer.scale = float(obj[QStringLiteral("scale")].toDouble(1.0));
-        layer.rotation = float(obj[QStringLiteral("rotation")].toDouble(0.0));
-
-        const QByteArray png = QByteArray::fromBase64(
-            obj[QStringLiteral("image")].toString().toLatin1());
-        if (!png.isEmpty())
-            layer.raster.loadFromData(png, "PNG");
-
-        const QByteArray maskPng = QByteArray::fromBase64(
-            obj[QStringLiteral("mask")].toString().toLatin1());
-        if (!maskPng.isEmpty())
-            layer.mask.loadFromData(maskPng, "PNG");
-
-        layers.append(std::move(layer));
-    }
-    setLayers(layers);
+    QTransform t;
+    t.translate(-cropRect.left(), -cropRect.top());
+    return t;
 }
 
-QByteArray PaintbrushDocument::canvasSnapshot() const
+std::unique_ptr<UndoCommand> PaintbrushDocument::makeRotate90Command(bool clockwise)
 {
-    QJsonObject obj;
-    obj[QStringLiteral("width")] = m_canvasSize.width();
-    obj[QStringLiteral("height")] = m_canvasSize.height();
-    return QJsonDocument(obj).toJson(QJsonDocument::Compact);
-}
+    auto composite = std::make_unique<CompositeCommand>();
+    composite->desc = QStringLiteral("Rotate");
 
-void PaintbrushDocument::restoreCanvasSnapshot(const QByteArray &data)
-{
-    const QJsonDocument doc = QJsonDocument::fromJson(data);
-    if (!doc.isObject())
-        return;
-    const QJsonObject obj = doc.object();
-    const int w = obj[QStringLiteral("width")].toInt(m_canvasSize.width());
-    const int h = obj[QStringLiteral("height")].toInt(m_canvasSize.height());
-    setCanvasSize(QSize(w, h));
-}
+    const QSize oldSize = m_canvasSize;
+    const QSize newSize(oldSize.height(), oldSize.width());
+    composite->children.push_back(std::make_unique<CanvasResizeCommand>(
+        CanvasResizeCommand{oldSize, newSize, composite->desc}));
 
-QImage PaintbrushDocument::flattenedImage() const
-{
-    if (m_layers.isEmpty())
-        return {};
-
-    QImage result(m_canvasSize, QImage::Format_ARGB32);
-    result.fill(Qt::transparent);
-    QPainter painter(&result);
-
-    for (const CanvasLayer &layer : m_layers)
+    const QTransform rot = pbCanvasRotateTransform(oldSize, clockwise);
+    for (int i = 0; i < m_layers.size(); ++i)
     {
-        if (!layer.visible || layer.raster.isNull())
+        CanvasLayer &layer = m_layers[i];
+        if (layer.raster.isNull())
             continue;
+        const QTransform before = layer.transform();
+        layer.setTransform(rot * before);
+        const QTransform after = layer.transform();
+        composite->children.push_back(std::make_unique<SetTransformCommand>(
+            SetTransformCommand{layer.id, i, before, after, composite->desc}));
+    }
 
-        /* draw the layer into its own buffer so the layer mask can be
-         * applied before blending with the composition mode */
-        QImage layerImage(m_canvasSize, QImage::Format_ARGB32);
-        layerImage.fill(Qt::transparent);
+    m_canvasSize = newSize;
+    m_dirty = true;
+    emit canvasSizeChanged();
+    emit layersChanged();
+    emit dirtyChanged(true);
+    return composite;
+}
+
+std::unique_ptr<UndoCommand> PaintbrushDocument::makeCropCommand(const QRect &rect)
+{
+    auto composite = std::make_unique<CompositeCommand>();
+    composite->desc = QStringLiteral("Crop");
+
+    const QSize oldSize = m_canvasSize;
+    const QSize newSize = rect.size();
+    composite->children.push_back(std::make_unique<CanvasResizeCommand>(
+        CanvasResizeCommand{oldSize, newSize, composite->desc}));
+
+    const QTransform shift = pbCanvasCropShift(rect);
+    for (int i = 0; i < m_layers.size(); ++i)
+    {
+        CanvasLayer &layer = m_layers[i];
+        if (layer.raster.isNull())
+            continue;
+        const QTransform before = layer.transform();
+        layer.setTransform(shift * before);
+        const QTransform after = layer.transform();
+        composite->children.push_back(std::make_unique<SetTransformCommand>(
+            SetTransformCommand{layer.id, i, before, after, composite->desc}));
+    }
+
+    m_canvasSize = newSize;
+    m_dirty = true;
+    emit canvasSizeChanged();
+    emit layersChanged();
+    emit dirtyChanged(true);
+    return composite;
+}
+
+/* ------------------------------------------------------- canonical render */
+
+/* One layer through the canonical transform. `region` is the canvas region
+ * whose top-left corner sits at target pixel (0,0). */
+void DocumentRenderer::compositeLayer(QImage &target, const QRect &region,
+                                      const CanvasLayer &layer)
+{
+    if (layer.raster.isNull() || !layer.visible)
+        return;
+
+    const QTransform tf = layer.transform();
+
+    /* exact path: pure integer translation (the default for raster layers
+     * and untransformed image/text layers) — blit the source sub-rect, no
+     * resampling, pixel-identical to the old fast path */
+    const bool exact = tf.type() <= QTransform::TxTranslate &&
+                       tf.dx() == qreal(int(tf.dx())) &&
+                       tf.dy() == qreal(int(tf.dy()));
+
+    if (exact)
+    {
+        const QPoint off(int(tf.dx()), int(tf.dy()));
+        const QRect srcRect = region.translated(-off);
+        const QRect layerRect = layer.raster.rect();
+        const QRect validSrc = srcRect.intersected(layerRect);
+        if (validSrc.isEmpty())
+            return;
+
+        const QRect dstRect = validSrc.translated(-region.topLeft());
+        const QRect srcLocal = validSrc.translated(-off);
+
+        QImage layerPart(dstRect.size(), QImage::Format_ARGB32);
+        layerPart.fill(Qt::transparent);
         {
-            QPainter lp(&layerImage);
-            if (layer.type == LAYER_IMAGE || layer.type == LAYER_TEXT)
-                lp.drawImage(layer.position, layer.raster);
-            else
-                lp.drawImage(0, 0, layer.raster);
-            lp.end();
+            QPainter p(&layerPart);
+            p.setCompositionMode(QPainter::CompositionMode_Source);
+            p.drawImage(QPoint(0, 0), layer.raster, srcLocal);
+            p.end();
         }
 
         if (!layer.mask.isNull())
         {
-            QPainter mp(&layerImage);
-            mp.setCompositionMode(QPainter::CompositionMode_DestinationIn);
-            mp.drawImage(0, 0, maskToImage(layer.mask));
-            mp.end();
+            QImage mask = layer.mask.scaled(layer.raster.size(),
+                                            Qt::IgnoreAspectRatio,
+                                            Qt::FastTransformation);
+            QPainter p(&layerPart);
+            p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+            p.drawImage(QPoint(0, 0), maskToImage(mask), srcLocal);
+            p.end();
         }
 
-        painter.setOpacity(layer.opacity);
-        painter.setCompositionMode(toCompositionMode(layer.blendMode));
-        painter.drawImage(0, 0, layerImage);
+        QPainter p(&target);
+        p.setOpacity(layer.opacity);
+        p.setCompositionMode(toCompositionMode(layer.blendMode));
+        p.drawImage(dstRect.topLeft(), layerPart);
+        p.end();
+        return;
     }
-    painter.end();
+
+    /* transformed path: render the whole local content once with the
+     * canonical center-pivot transform, then composite the part that lands
+     * in this region */
+    const QRect layerRect = layer.raster.rect();
+    const QPointF contentCenter(layerRect.center());
+    QImage layerPart(layerRect.size(), QImage::Format_ARGB32);
+    layerPart.fill(Qt::transparent);
+    {
+        QPainter p(&layerPart);
+        p.setCompositionMode(QPainter::CompositionMode_Source);
+        p.drawImage(QPoint(0, 0), layer.raster);
+        if (!layer.mask.isNull())
+        {
+            QImage mask = layer.mask.scaled(layerRect.size(),
+                                            Qt::IgnoreAspectRatio,
+                                            Qt::FastTransformation);
+            p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+            p.drawImage(QPoint(0, 0), maskToImage(mask));
+        }
+        p.end();
+    }
+
+    /* transform around the content center — identical semantics to the
+     * tile compositor, so screen and export cannot diverge */
+    QTransform tf2;
+    tf2.translate(contentCenter.x(), contentCenter.y());
+    tf2.rotate(layer.rotation);
+    tf2.scale(layer.scale, layer.scale);
+    tf2.translate(-contentCenter.x(), -contentCenter.y());
+
+    QImage drawn = layerPart.transformed(tf2, Qt::SmoothTransformation);
+
+    /* The transformed image's (0,0) is the BOUNDING-BOX top-left of the
+     * transformed content, not the transformed origin. Compute that offset
+     * so the content lands exactly where layer.transform() maps it —
+     * otherwise the placement disagrees with transform() by the bbox
+     * shift (screen, export and the transform math would diverge). */
+    QPointF bboxTL = tf2.map(QPointF(0, 0));
+    const QPointF c1 = tf2.map(QPointF(layerRect.width(), 0));
+    const QPointF c2 = tf2.map(QPointF(0, layerRect.height()));
+    const QPointF c3 = tf2.map(QPointF(layerRect.width(), layerRect.height()));
+    bboxTL.setX(qMin(qMin(bboxTL.x(), c1.x()), qMin(c2.x(), c3.x())));
+    bboxTL.setY(qMin(qMin(bboxTL.y(), c1.y()), qMin(c2.y(), c3.y())));
+
+    const QPointF drawAt = layer.position + bboxTL;
+
+    const QRect drawRect(drawAt.toPoint(), drawn.size());
+    const QRect visible = drawRect.intersected(region);
+    if (visible.isEmpty())
+        return;
+
+    QImage tilePart(visible.size(), QImage::Format_ARGB32);
+    tilePart.fill(Qt::transparent);
+    {
+        QPainter p(&tilePart);
+        p.setCompositionMode(QPainter::CompositionMode_Source);
+        p.drawImage(QPoint(0, 0), drawn, visible.translated(-drawRect.topLeft()));
+        p.end();
+    }
+
+    QPainter p(&target);
+    p.setOpacity(layer.opacity);
+    p.setCompositionMode(toCompositionMode(layer.blendMode));
+    p.drawImage(visible.topLeft() - region.topLeft(), tilePart);
+    p.end();
+}
+
+void DocumentRenderer::composite(QImage &target, const QRect &region,
+                                 const PaintbrushDocument &doc)
+{
+    const auto &layers = doc.layers();
+    for (const CanvasLayer &layer : layers)
+        compositeLayer(target, region, layer);
+}
+
+QImage DocumentRenderer::render(const PaintbrushDocument &doc)
+{
+    const QSize size = doc.canvasSize();
+    if (size.isEmpty())
+        return {};
+    return renderRegion(doc, QRect(QPoint(0, 0), size));
+}
+
+QImage DocumentRenderer::renderRegion(const PaintbrushDocument &doc,
+                                      const QRect &region)
+{
+    if (region.isEmpty())
+        return {};
+    QImage result(region.size(), QImage::Format_ARGB32);
+    result.fill(Qt::transparent);
+    composite(result, region, doc);
     return result;
+}
+
+QImage PaintbrushDocument::flattenedImage() const
+{
+    /* thin wrapper over the canonical renderer — identical transform
+     * semantics as the screen/export/eyedropper paths */
+    return DocumentRenderer::render(*this);
 }
 
 QImage PaintbrushDocument::aiSourceImage() const

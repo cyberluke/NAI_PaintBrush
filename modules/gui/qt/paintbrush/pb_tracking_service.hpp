@@ -13,13 +13,13 @@
 #define PB_TRACKING_SERVICE_HPP
 
 #include "pb_common.hpp"
+#include "pb_media_logic.hpp"
 
 #include <QObject>
 #include <QImage>
 #include <QVector>
 #include <QPointF>
 #include <QString>
-#include <QTimer>
 #include <QMutex>
 #include <QWaitCondition>
 
@@ -33,9 +33,6 @@
 
 #include <vlc_common.h>
 
-struct vlc_player_t;
-struct vlc_player_listener_id;
-
 #ifdef HAVE_SAM3
 /* The sam3.h header defines the complete deleters required by the
  * unique_ptr-based state/tracker handles. */
@@ -44,14 +41,25 @@ struct vlc_player_listener_id;
 
 namespace paintbrush {
 
+class FrameProvider;
+
 /* Real temporal object tracking. Uses the SAM3 visual tracker
  * (sam3_tracker_add_instance + sam3_propagate_frame) — a genuine
  * propagation backend, never per-frame independent segmentation.
  *
- * The player is stepped one frame at a time on the GUI thread (via
- * vlc_player_NextVideoFrame/PreviousVideoFrame with the
- * on_next_frame_status callback), the frame is captured from the vout,
- * and propagation runs on a worker thread so the UI stays responsive. */
+ * Exact-frame pipeline (A14): every tracked frame is decoded by the
+ * EditDecodeSource (FrameProvider) at a concrete PTS — no
+ * vlc_player frame stepping, no singleShot(40) vout snapshot guess, no
+ * "whatever the vout was showing". Masks are keyed by the ACTUAL decoded
+ * PTS of the frame they were propagated on.
+ *
+ * Two-pass tracking (A13): the run keeps a SeedState {seedFrame,
+ * seedPoints, seedMask, pts}. When a TRACK_BOTH run finishes its first
+ * pass, it performs a GENUINE second pass: re-AddInstance with the same
+ * seed mask/points (the worker's encode hash skips re-encoding the seed
+ * frame), the pass restarts at seedPts as frame 0 (walking backward),
+ * m_lastMask is reset to the SEED mask, and propagation continues from
+ * there — never from "wherever playback stopped". */
 class TrackingService : public QObject
 {
     Q_OBJECT
@@ -73,16 +81,19 @@ public:
     QString unavailableReason() const { return m_unavailableReason; }
     bool isTracking() const { return m_tracking; }
     QString device() const { return m_device; }
-    int progressDone() const { return m_done; }
-    int progressTotal() const { return m_total; }
+    int progressDone() const { return m_pass.done(); }
+    int progressTotal() const { return m_pass.total(); }
     QString statusText() const { return m_status; }
 
-    /* Start tracking an object. startFrame is the frame where the object
-     * was selected, startMask its mask, posPoints the click prompts used
-     * to seed the tracker instance. */
-    void startTrack(vlc_player_t *player, const QImage &startFrame,
-                    const QImage &startMask, const QVector<QPointF> &posPoints,
-                    int direction, int maxFrames);
+    /* Start tracking an object. `provider` is the edit frame source used
+     * for every step; `seedPtsMs` is the PTS of `startFrame` (pass-2 frame
+     * 0 is re-seeded at this same PTS). startFrame/startMask/posPoints are
+     * the seed state the SAM instance is added from — and re-added from on
+     * the reverse pass. */
+    void startTrack(FrameProvider *provider, const QString &mrl,
+                    const QImage &startFrame, const QImage &startMask,
+                    const QVector<QPointF> &posPoints,
+                    int direction, int maxFrames, qint64 seedPtsMs);
     void cancel();
     void shutdown();
     void pause();
@@ -105,26 +116,38 @@ signals:
     void availabilityChanged(bool available, const QString &reason);
 
     /* emitted from the worker thread; connected to the GUI-thread slots */
-    void workerJobDone(const QImage &mask, float confidence, int stepIndex);
+    void workerJobDone(const QImage &mask, float confidence, int stepIndex,
+                       qint64 ptsMs);
     void workerInstanceReady(int instanceId);
     void workerError(const QString &error);
 
 private slots:
     void stepNext();
-    void onWorkerJobDone(const QImage &mask, float confidence, int stepIndex);
+    void onWorkerJobDone(const QImage &mask, float confidence, int stepIndex,
+                         qint64 ptsMs);
     void onWorkerInstanceReady(int instanceId);
     void onWorkerError(const QString &error);
-    void onFrameStepStatus(int status);
-    void onStepTimeout();
 
 private:
-    enum class StepKind { Forward, Backward };
+    /* The immutable seed of a tracking run: the frame, the click prompts,
+     * the object mask, and the PTS of the seed frame. The reverse pass
+     * re-adds the SAM instance from exactly this state and restarts its
+     * walk at seedPtsMs. */
+    struct SeedState
+    {
+        QImage frame;
+        QVector<QPointF> points;
+        QImage mask;
+        qint64 ptsMs = 0;
+        QString mrl;
+    };
 
     void beginTracking();
-    void requestFrameStep(StepKind kind);
-    void captureAndPropagate();
+    /* Switch to the genuine second pass: re-AddInstance with the seed
+     * mask/points, reset m_lastMask to the SEED mask, restart the walk at
+     * seedPts as pass-2 frame 0. */
+    void beginReversePass();
     void finishTrack(bool complete, bool cancelled, const QString &error);
-    void resetPlayerInteraction();
     void setAvailable(bool available, const QString &reason);
     void setStatus(const QString &status);
 
@@ -138,6 +161,7 @@ private:
         QVector<QPointF> posPoints;
         QVector<QPointF> negPoints;
         int stepIndex = 0;
+        qint64 ptsMs = 0; /* actual PTS of the frame (masks keyed by PTS) */
     };
     void runWorkerJob(const WorkerJob &job);
 
@@ -147,21 +171,16 @@ private:
     QString m_unavailableReason;
     bool m_available = false;
 
-    vlc_player_t *m_player = nullptr;
-    vlc_player_listener_id *m_listener = nullptr;
+    FrameProvider *m_provider = nullptr;
     bool m_tracking = false;
     bool m_paused = false;
-    int m_done = 0;
-    int m_total = 0;
-    int m_direction = TRACK_FORWARD;
-    int m_stepSign = 1;          /* +1 forward, -1 backward */
-    int m_bothPhase = 0;         /* 0 = first direction, 1 = reverse */
+    TrackingPassState m_pass;      /* pure two-pass walk state machine */
+    qint64 m_lastPtsMs = 0;        /* actual PTS of the last emitted keyframe */
+    int m_nextFrameIndex = 0;      /* global keyframe index (unique across passes) */
     QString m_status;
-    QTimer m_stepTimer;
+    qint64 m_stepMs = 40;          /* nominal frame interval (config) */
 
-    QImage m_startFrame;
-    QImage m_startMask;
-    QVector<QPointF> m_startPoints;
+    SeedState m_seed;
     QImage m_lastMask;
     int m_instanceId = -1;
 

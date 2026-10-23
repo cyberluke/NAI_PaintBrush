@@ -43,6 +43,7 @@
 
 #include "paintbrush/pb_controller.hpp"
 #include "paintbrush/pb_canvas_item.hpp"
+#include "paintbrush/pb_layer_model.hpp"
 #include "paintbrush/pb_segmentation_service.hpp"
 #include "paintbrush/pb_tracking_service.hpp"
 #include "paintbrush/pb_vision_service.hpp"
@@ -582,6 +583,8 @@ void MainUI::registerQMLTypes()
                                                       "GenerationService", "");
         qmlRegisterUncreatableType<paintbrush::CompanionService>(uri, versionMajor, versionMinor,
                                                      "CompanionService", "");
+        qmlRegisterUncreatableType<paintbrush::PaintbrushLayerModel>(uri, versionMajor, versionMinor,
+                                                       "PaintbrushLayerModel", "");
 
         qmlRegisterModule(uri, versionMajor, versionMinor);
         qmlProtectModule(uri, versionMajor);

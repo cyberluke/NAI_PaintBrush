@@ -16,6 +16,9 @@
 #include <QDir>
 #include <QStandardPaths>
 #include <QProcessEnvironment>
+#include <QRadialGradient>
+#include <QHash>
+#include <QLineF>
 
 namespace paintbrush {
 
@@ -77,6 +80,184 @@ QImage toRgb888(const QImage &image)
     if (image.isNull())
         return {};
     return image.convertToFormat(QImage::Format_RGB888);
+}
+
+/* ---------------------------------------------------------------- dabs */
+
+void stampDab(QImage &target, const QPointF &center, const DabSpec &spec)
+{
+    if (target.isNull() || spec.radius <= 0.0 || spec.opacity <= 0.0)
+        return;
+
+    const qreal r = qMax<qreal>(0.5, spec.radius);
+    QPainter p(&target);
+    p.setRenderHint(QPainter::Antialiasing, r > 2.0);
+    p.setCompositionMode(spec.mode);
+    p.setPen(Qt::NoPen);
+
+    if (spec.mode == QPainter::CompositionMode_Clear)
+    {
+        /* eraser: color is irrelevant */
+        p.setBrush(Qt::black);
+        p.drawEllipse(center, r, r);
+        p.end();
+        return;
+    }
+
+    QColor c = spec.color;
+    c.setAlphaF(qBound<qreal>(0.0, c.alphaF() * spec.opacity, 1.0));
+
+    if (spec.hardness >= 0.99)
+    {
+        p.setBrush(c);
+        p.drawEllipse(center, r, r);
+    }
+    else
+    {
+        /* soft tip: solid core up to `hardness`, then a radial falloff to
+         * transparent at the rim */
+        QRadialGradient g(center, r);
+        g.setColorAt(0.0, c);
+        g.setColorAt(qBound<qreal>(0.0, spec.hardness, 0.99), c);
+        QColor edge = c;
+        edge.setAlpha(0);
+        g.setColorAt(1.0, edge);
+        p.setBrush(g);
+        p.drawEllipse(center, r, r);
+    }
+    p.end();
+}
+
+void stampDab(QImage &target, const QPointF &center, qreal radius,
+              qreal hardness, qreal opacity, const QColor &color,
+              QPainter::CompositionMode mode)
+{
+    DabSpec spec;
+    spec.radius = radius;
+    spec.hardness = hardness;
+    spec.opacity = opacity;
+    spec.color = color;
+    spec.mode = mode;
+    stampDab(target, center, spec);
+}
+
+/* ---------------------------------------------------------------- fill */
+
+QRegion scanlineFill(const QImage &image, const QPoint &seed, QRgb target,
+                     QRgb fill, int tolerance, const QPainterPath *selection,
+                     qint64 maxPixels)
+{
+    QRegion region;
+    if (image.isNull() || !image.rect().contains(seed) || target == fill)
+        return region;
+
+    const int w = image.width();
+    const int h = image.height();
+    const qint64 cap = maxPixels > 0 ? maxPixels : qint64(w) * qint64(h);
+    if (cap <= 0)
+        return region;
+
+    auto similar = [&](QRgb a, QRgb b) {
+        if (tolerance <= 0)
+            return a == b;
+        return qAbs(qRed(a) - qRed(b)) <= tolerance &&
+               qAbs(qGreen(a) - qGreen(b)) <= tolerance &&
+               qAbs(qBlue(a) - qBlue(b)) <= tolerance;
+    };
+    /* a pixel may be filled when it matches the target and, when a
+     * selection is active, lies inside it (selection is a barrier) */
+    auto allowed = [&](int x, int y) {
+        if (x < 0 || y < 0 || x >= w || y >= h)
+            return false;
+        if (!similar(image.pixel(x, y), target))
+            return false;
+        if (selection && !selection->contains(QPointF(x, y)))
+            return false;
+        return true;
+    };
+
+    /* per-row visited spans, kept sorted and merged. Memory is O(spans):
+     * no full-canvas copy, no w*h visited buffer. */
+    QHash<int, QVector<QPair<int, int>>> visited;
+    auto rowContains = [&](int y, int x) {
+        const auto it = visited.constFind(y);
+        if (it == visited.constEnd())
+            return false;
+        for (const auto &iv : *it)
+            if (x >= iv.first && x <= iv.second)
+                return true;
+        return false;
+    };
+    auto rowAdd = [&](int y, int l, int r) {
+        QVector<QPair<int, int>> &ivs = visited[y];
+        int i = 0;
+        while (i < ivs.size() && ivs[i].first <= r + 1)
+        {
+            if (ivs[i].second + 1 < l)
+            {
+                ++i;
+                continue;
+            }
+            l = qMin(l, ivs[i].first);
+            r = qMax(r, ivs[i].second);
+            ivs.removeAt(i);
+        }
+        ivs.insert(i, {l, r});
+    };
+
+    /* span stack: each entry is one maximal [l..r] run on row y */
+    QVector<std::tuple<int, int, int>> stack; /* l, r, y */
+    qint64 count = 0;
+
+    auto pushSpan = [&](int x, int y) {
+        if (count >= cap || !allowed(x, y) || rowContains(y, x))
+            return;
+        int l = x, r = x;
+        while (allowed(l - 1, y) && !rowContains(y, l - 1))
+            --l;
+        while (allowed(r + 1, y) && !rowContains(y, r + 1))
+            ++r;
+        rowAdd(y, l, r);
+        stack.append({l, r, y});
+        count += r - l + 1;
+        /* spans enter the region at push time so a cap that stops the loop
+         * before the first pop still yields the seed span */
+        region += QRect(l, y, r - l + 1, 1);
+    };
+
+    pushSpan(seed.x(), seed.y());
+    while (!stack.isEmpty() && count < cap)
+    {
+        const auto [l, r, y] = stack.takeLast();
+
+        /* check the rows above and below across the whole span (+1 so
+         * diagonally connected spans are found too) */
+        for (int yy = y - 1; yy <= y + 1; yy += 2)
+        {
+            if (yy < 0 || yy >= h)
+                continue;
+            for (int x = l - 1; x <= r + 1;)
+            {
+                if (count >= cap || rowContains(yy, x) || !allowed(x, yy))
+                {
+                    ++x;
+                    continue;
+                }
+                int nl = x;
+                int nr = x;
+                while (allowed(nl - 1, yy) && !rowContains(yy, nl - 1))
+                    --nl;
+                while (allowed(nr + 1, yy) && !rowContains(yy, nr + 1))
+                    ++nr;
+                rowAdd(yy, nl, nr);
+                stack.append({nl, nr, yy});
+                count += nr - nl + 1;
+                region += QRect(nl, yy, nr - nl + 1, 1);
+                x = nr + 1;
+            }
+        }
+    }
+    return region;
 }
 
 /* Moore-neighbor contour tracing. Follows the boundary of the foreground

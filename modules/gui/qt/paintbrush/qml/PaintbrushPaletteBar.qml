@@ -1,5 +1,5 @@
 /*****************************************************************************
- * PaintbrushPaletteBar.qml : NAI Paintbrush — classic color palette
+ * PaintbrushPaletteBar.qml : NAI Paintbrush — tool-option context palette
  *****************************************************************************
  * Copyright (C) 2026 NAI Paintbrush authors
  *****************************************************************************/
@@ -13,9 +13,12 @@ import VLC.Widgets as Widgets
 import VLC.Style
 import VLC.Paintbrush
 
-/* Compact Paintbrush-style palette: foreground/background colors, a row of
- * swatches, recent colors and a brush-size slider. Eyedropper integration
- * happens on the canvas (Pick tool). */
+/* Compact Paintbrush-style palette (A39): foreground/background colors, the
+ * classic swatches, a tool-option context section that shows ONLY the
+ * active tool's options (one Size group for drawing/shape tools, one Flow
+ * group for Spray — never two Size labels), and the precision toggles
+ * (grid/rulers/snap/pressure). Eyedropper integration happens on the canvas
+ * (Pick tool). The color dialog uses a real SV plane + hue rail (A40). */
 Item {
     id: root
 
@@ -108,7 +111,64 @@ Item {
             }
         }
 
-Item { Layout.fillWidth: true }
+        Item { Layout.fillWidth: true }
+
+        /* --------------------------- tool-option context section (A39) */
+        /* Only the active tool's options render here. One group at a time:
+         * Spray shows its Flow slider; the drawing/shape tools show a
+         * single Size slider. There is never more than one Size label. */
+
+        /* Spray flow (tool 9) */
+        RowLayout {
+            spacing: VLCStyle.margin_xsmall
+            visible: canvas.tool === 9
+
+            Widgets.LabelExt {
+                text: qsTr("Flow")
+                color: theme.fg.secondary
+                font.pixelSize: VLCStyle.fontSize_small
+            }
+            Slider {
+                Layout.preferredWidth: VLCStyle.dp(90, VLCStyle.scale)
+                Layout.alignment: Qt.AlignVCenter
+                from: 0.1
+                to: 4.0
+                stepSize: 0.1
+                value: canvas.sprayFlow
+                onMoved: canvas.sprayFlow = value
+            }
+            Widgets.LabelExt {
+                text: canvas.sprayFlow.toFixed(1)
+                color: theme.fg.secondary
+                font.pixelSize: VLCStyle.fontSize_small
+            }
+        }
+
+        /* Brush size (pencil/brush/eraser/shapes) — the ONLY Size group */
+        RowLayout {
+            spacing: VLCStyle.margin_xsmall
+            visible: canvas.tool >= 4 && canvas.tool <= 6
+                     || canvas.tool >= 10 && canvas.tool <= 13
+
+            Widgets.LabelExt {
+                text: qsTr("Size")
+                color: theme.fg.secondary
+                font.pixelSize: VLCStyle.fontSize_small
+            }
+            Slider {
+                Layout.preferredWidth: VLCStyle.dp(140, VLCStyle.scale)
+                Layout.alignment: Qt.AlignVCenter
+                from: 1
+                to: 64
+                value: canvas.brushSize
+                onMoved: canvas.brushSize = value
+            }
+            Widgets.LabelExt {
+                text: Math.round(canvas.brushSize)
+                color: theme.fg.secondary
+                font.pixelSize: VLCStyle.fontSize_small
+            }
+        }
 
         /* precision drawing: grid + snap + pen pressure */
         Button {
@@ -151,49 +211,6 @@ Item { Layout.fillWidth: true }
             checked: canvas.pressureEnabled
             onClicked: canvas.pressureEnabled = !canvas.pressureEnabled
         }
-
-        /* brush size */
-        Widgets.LabelExt {
-            text: qsTr("Size")
-            color: theme.fg.secondary
-            font.pixelSize: VLCStyle.fontSize_small
-        }
-        Slider {
-            Layout.preferredWidth: VLCStyle.dp(90, VLCStyle.scale)
-            Layout.alignment: Qt.AlignVCenter
-            from: 0.1
-            to: 4.0
-            stepSize: 0.1
-            visible: canvas.tool === 9
-            value: canvas.sprayFlow
-            onMoved: canvas.sprayFlow = value
-        }
-        Widgets.LabelExt {
-            text: canvas.sprayFlow.toFixed(1)
-            color: theme.fg.secondary
-            font.pixelSize: VLCStyle.fontSize_small
-            visible: canvas.tool === 9
-        }
-
-        /* brush size */
-        Widgets.LabelExt {
-            text: qsTr("Size")
-            color: theme.fg.secondary
-            font.pixelSize: VLCStyle.fontSize_small
-        }
-        Slider {
-            Layout.preferredWidth: VLCStyle.dp(140, VLCStyle.scale)
-            Layout.alignment: Qt.AlignVCenter
-            from: 1
-            to: 64
-            value: canvas.brushSize
-            onMoved: canvas.brushSize = value
-        }
-        Widgets.LabelExt {
-            text: Math.round(canvas.brushSize)
-            color: theme.fg.secondary
-            font.pixelSize: VLCStyle.fontSize_small
-        }
     }
 
     /* custom color dialog */
@@ -219,61 +236,162 @@ Item { Layout.fillWidth: true }
         onAccepted: canvas.fgColor = picker.color
     }
 
-    /* simple hue/sat/value picker built from primitives */
+    /* Real SV plane + hue rail (A40): hue picked on the rail (x0.85),
+     * saturation = x position, value = 1 - y*0.8. The old saturation
+     * expression (1.0 - (y/h)*0.0 + 0.0) pinned saturation to 1.0; the
+     * plane now maps both axes truthfully. */
     component ColorPicker: Rectangle {
         id: picker
 
         property color color: "black"
+        property real hue: 0.0
+        property real saturation: 1.0
+        property real value: 1.0
 
-        Gradient {
-            id: hsvGradient
-            GradientStop { position: 0.0; color: "#ff0000" }
-            GradientStop { position: 0.17; color: "#ffff00" }
-            GradientStop { position: 0.33; color: "#00ff00" }
-            GradientStop { position: 0.5; color: "#00ffff" }
-            GradientStop { position: 0.67; color: "#0000ff" }
-            GradientStop { position: 0.83; color: "#ff00ff" }
-            GradientStop { position: 1.0; color: "#ff0000" }
+        function clamp01(x) {
+            return Math.max(0.0, Math.min(1.0, x))
         }
 
-        Rectangle {
-            anchors.fill: parent
-            gradient: hsvGradient
+        /* initialize the markers from the current color when shown */
+        Component.onCompleted: {
+            const r = picker.color.r, g = picker.color.g, b = picker.color.b
+            const max = Math.max(r, g, b), min = Math.min(r, g, b)
+            const d = max - min
+            picker.value = max
+            picker.saturation = max === 0 ? 0 : d / max
+            if (d > 0) {
+                let h
+                if (max === r) h = (g - b) / d + (g < b ? 6 : 0)
+                else if (max === g) h = (b - r) / d + 2
+                else h = (r - g) / d + 4
+                picker.hue = h / 6
+            }
         }
 
-        Rectangle {
-            id: valueOverlay
-            anchors.fill: parent
-            color: "transparent"
-            /* darken towards bottom */
-            Rectangle {
+        /* ---------------- SV plane (x = saturation, y = value) */
+        Item {
+            id: svArea
+            anchors.left: parent.left
+            anchors.right: hueRail.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.leftMargin: 2
+            anchors.topMargin: 2
+            anchors.bottomMargin: 2
+
+            Canvas {
+                id: svCanvas
                 anchors.fill: parent
-                gradient: Gradient {
-                    GradientStop { position: 0.0; color: "transparent" }
-                    GradientStop { position: 1.0; color: "#000000" }
+                antialiasing: true
+
+                onPaint: {
+                    const ctx = getContext("2d")
+                    ctx.clearRect(0, 0, width, height)
+
+                    /* base hue */
+                    ctx.fillStyle = Qt.hsla(picker.hue, 1.0, 0.5, 1.0)
+                    ctx.fillRect(0, 0, width, height)
+
+                    /* saturation overlay: white -> transparent, left to right */
+                    let g = ctx.createLinearGradient(0, 0, width, 0)
+                    g.addColorStop(0, "white")
+                    g.addColorStop(1, "rgba(255, 255, 255, 0)")
+                    ctx.fillStyle = g
+                    ctx.fillRect(0, 0, width, height)
+
+                    /* value overlay: transparent -> black, top to bottom */
+                    g = ctx.createLinearGradient(0, 0, 0, height)
+                    g.addColorStop(0, "rgba(0, 0, 0, 0)")
+                    g.addColorStop(1, "black")
+                    ctx.fillStyle = g
+                    ctx.fillRect(0, 0, width, height)
                 }
             }
+            Connections {
+                target: picker
+                function onHueChanged() { svCanvas.requestPaint() }
+            }
+            onWidthChanged: svCanvas.requestPaint()
+            onHeightChanged: svCanvas.requestPaint()
+
+            /* saturation = 1.0 - (y/h) is gone; the plane maps
+             *   saturation = x / width
+             *   value      = 1.0 - (y / height) * 0.8   (value *0.8 stays) */
+            function pick(mouse) {
+                picker.saturation = picker.clamp01(mouse.x / svArea.width)
+                picker.value = 1.0 - picker.clamp01(mouse.y / svArea.height) * 0.8
+                picker.color = Qt.hsla(picker.hue, picker.saturation,
+                                       picker.value, 1.0)
+            }
+
+            MouseArea {
+                anchors.fill: parent
+                onPositionChanged: (mouse) => { if (pressed) parent.pick(mouse) }
+                onClicked: (mouse) => parent.pick(mouse)
+            }
+
+            /* marker */
+            Rectangle {
+                width: 10
+                height: 10
+                radius: 5
+                border.width: 2
+                border.color: "white"
+                color: "transparent"
+                x: picker.saturation * (svArea.width - 10)
+                y: (1.0 - picker.value) / 0.8 * (svArea.height - 10)
+            }
         }
 
-        MouseArea {
-            anchors.fill: parent
-            onPositionChanged: (mouse) => {
-                if (pressed)
-                    picker.color = Qt.hsla(
-                        (mouse.x / width) * 0.85,
-                        1.0 - (mouse.y / height) * 0.0 + 0.0,
-                        1.0 - (mouse.y / height) * 0.8,
-                        1.0)
+        /* ---------------- hue rail (vertical spectrum, hue *0.85) */
+        Item {
+            id: hueRail
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.rightMargin: 2
+            anchors.topMargin: 2
+            anchors.bottomMargin: 2
+            width: VLCStyle.dp(16, VLCStyle.scale)
+
+            Canvas {
+                id: hueCanvas
+                anchors.fill: parent
+                antialiasing: true
+
+                onPaint: {
+                    const ctx = getContext("2d")
+                    const stops = [0.0, 0.17, 0.33, 0.5, 0.67, 0.83, 1.0]
+                    const colors = ["#ff0000", "#ffff00", "#00ff00",
+                                    "#00ffff", "#0000ff", "#ff00ff", "#ff0000"]
+                    for (let i = 0; i < stops.length - 1; ++i) {
+                        const g = ctx.createLinearGradient(0, stops[i] * height,
+                                                           0, stops[i + 1] * height)
+                        g.addColorStop(0, colors[i])
+                        g.addColorStop(1, colors[i + 1])
+                        ctx.fillStyle = g
+                        ctx.fillRect(0, stops[i] * height, width,
+                                     (stops[i + 1] - stops[i]) * height)
+                    }
+                }
             }
-            onClicked: (mouse) => {
-                picker.color = Qt.hsla(
-                    (mouse.x / width) * 0.85,
-                    1.0,
-                    1.0 - (mouse.y / height) * 0.8,
-                    1.0)
+            onWidthChanged: hueCanvas.requestPaint()
+            onHeightChanged: hueCanvas.requestPaint()
+
+            function pick(mouse) {
+                picker.hue = picker.clamp01(mouse.y / hueRail.height) * 0.85
+                picker.color = Qt.hsla(picker.hue, picker.saturation,
+                                       picker.value, 1.0)
+            }
+
+            MouseArea {
+                anchors.fill: parent
+                onPositionChanged: (mouse) => { if (pressed) parent.pick(mouse) }
+                onClicked: (mouse) => parent.pick(mouse)
             }
         }
 
+        /* current color */
         Rectangle {
             width: VLCStyle.dp(36, VLCStyle.scale)
             height: VLCStyle.dp(36, VLCStyle.scale)
@@ -281,7 +399,7 @@ Item { Layout.fillWidth: true }
             border.width: 2
             border.color: "white"
             color: picker.color
-            anchors.right: parent.right
+            anchors.left: parent.left
             anchors.bottom: parent.bottom
             anchors.margins: VLCStyle.margin_small
         }

@@ -12,40 +12,40 @@
 #ifndef PB_THUMBNAIL_SERVICE_HPP
 #define PB_THUMBNAIL_SERVICE_HPP
 
-#include "pb_frame_capture.hpp"
+#include "pb_media_logic.hpp"
 
 #include <QObject>
 #include <QImage>
 #include <QString>
 #include <QTimer>
-#include <QHash>
 #include <QList>
-
-struct vlc_player_t;
 
 namespace paintbrush {
 
+class FrameProvider;
+
 /* Bounded, cancellable media thumbnail generator for the media drawer.
  *
- * Thumbnails are produced from the real vout snapshot pipeline (the same
- * FrameCaptureService path), one frame at a time on a timer so the UI never
- * blocks. Generation only runs while the player is paused — while it plays,
- * the generator idles and the strip shows placeholders for pending slots.
+ * Exact-frame pipeline (A10/A11/A12): thumbnails are decoded by the
+ * EditDecodeSource (FrameProvider) at their exact timestamps — never by
+ * seeking/snapshotting the main playback player. The two-phase
+ * seek->tick->snapshot race is gone: each slot is decoded once with a
+ * concrete PTS, and the result is published only when the returned PTS is
+ * within the configured tolerance of the requested timestamp.
  *
- * Behaviour:
- *  - adaptive sampling: at most `maxThumbnails` frames across the duration,
- *    denser near the requested anchor time (the current viewport);
- *  - two-phase per thumbnail: seek to the target time, then snapshot the
- *    freshly displayed frame on the next tick (so the vout has decoded it);
- *  - the player is restored to its original time when the batch finishes or
- *    is cancelled;
- *  - results are cached by media identity + timestamp, so reseeking the same
- *    file does not re-decode frames;
- *  - cancellation clears the pending queue and restores the player.
+ * Real priority (A10): candidate timestamps are sorted by distance from
+ * the anchor (the current viewport) into a priority queue and popped
+ * highest-priority first, so the frame the user is looking at fills in
+ * before the rest. The previously computed-but-discarded `ordered` list is
+ * now actually fed into the queue.
  *
- * "No UI-thread frame decoding" is honoured: the vout itself decodes on its
- * own pipeline; this service only requests an encoded snapshot (the same
- * operation the single-frame capture uses) one at a time. */
+ * Bounded cache (A12): decoded thumbs live in an LRU byte-budget store;
+ * entries are evicted least-recently-used by cumulative bytes beyond the
+ * cap, so the cache cannot grow without bound.
+ *
+ * "No UI-thread frame decoding" is honoured: decoding happens on the edit
+ * source's own decode thread; the GUI thread only waits for the result,
+ * one slot per timer tick so the UI stays responsive between slots. */
 class ThumbnailService : public QObject
 {
     Q_OBJECT
@@ -60,7 +60,10 @@ public:
 
     explicit ThumbnailService(QObject *parent = nullptr);
 
-    void startBatch(vlc_player_t *player, const QString &mediaKey,
+    /* Start a batch over [0, durationMs) on `provider`, denser near
+     * `anchorMs`. `mediaKey` is the media MRL used for cache identity and
+     * frame requests. No player interaction of any kind. */
+    void startBatch(FrameProvider *provider, const QString &mediaKey,
                     qint64 durationMs, qint64 anchorMs, int maxThumbnails);
     void cancel();
     bool isGenerating() const { return m_timer.isActive(); }
@@ -68,18 +71,19 @@ public:
     QList<Thumbnail> thumbnails() const { return m_thumbnails; }
     QImage cachedImage(const QString &mediaKey, qint64 timeMs) const;
 
-    /* The user is scrubbing the seek bar: pause generation (the batch keeps
-     * its state so it can be resumed) without touching the playhead. While
-     * suspended the service performs no seeks, so it cannot race a precise
-     * user seek and leave a partially-decoded frame on screen. */
+    /* PTS verification tolerance (ms). Must be set by the controller from
+     * the paintbrush-edit-pts-tolerance-ms config before batches run. */
+    void setPtsToleranceMs(qint64 toleranceMs) { m_ptsToleranceMs = toleranceMs; }
+    qint64 ptsToleranceMs() const { return m_ptsToleranceMs; }
+
+    /* Legacy scrub-interlock API kept for QML/controller compatibility.
+     * The service no longer touches the player at all, so these are
+     * no-ops apart from pausing generation while the user drags the
+     * scrubber (so decodes do not queue behind a busy UI). */
     void suspend();
     void resume();
     bool isSuspended() const { return m_suspended; }
-
-    /* Called by the controller whenever the user moves the playhead on their
-     * own. The batch will not restore the original position on finish or
-     * cancel afterwards: the user owns the playhead now. */
-    void noteUserSeek() { m_userSought = true; }
+    void noteUserSeek() { /* the playhead is the user's; nothing to do */ }
 
 signals:
     void thumbnailReady(int index, const QImage &image);
@@ -90,23 +94,14 @@ private slots:
     void onTick();
 
 private:
-    void seekTo(qint64 timeMs);
-    QImage snapshotNow();
-
-    vlc_player_t *m_player = nullptr;
+    FrameProvider *m_provider = nullptr;
     QString m_mediaKey;
-    qint64 m_originalTimeMs = 0;
-    qint64 m_durationMs = 0;
+    qint64 m_ptsToleranceMs = 250;
     QTimer m_timer;
-    QList<qint64> m_pendingTimes;      /* queue of timestamps to generate */
+    ThumbnailPriorityQueue m_pending;  /* highest priority (anchor-nearest) first */
     QList<Thumbnail> m_thumbnails;     /* slots, in display order */
-    int m_cursor = -1;                 /* current slot being generated */
-    bool m_seekPhase = false;          /* false = seek, true = snapshot */
     bool m_suspended = false;          /* user scrubbing: timer stopped */
-    bool m_userSought = false;         /* user moved the playhead themselves */
-    qint64 m_lastSeekedTime = -1;      /* the timestamp we just seeked to */
-    int m_retryCount = 0;              /* snapshot retries for the current slot */
-    QHash<QString, QImage> m_cache;    /* mediaKey|timeMs -> thumbnail */
+    mutable LruCache<QImage> m_cache;  /* mediaKey|timeMs -> thumbnail, LRU bytes */
 };
 
 } // namespace paintbrush

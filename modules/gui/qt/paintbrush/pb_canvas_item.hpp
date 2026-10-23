@@ -26,6 +26,7 @@
 #include <QPair>
 #include <QFont>
 #include <QTimer>
+#include <QSGTexture>
 
 class QSGNode;
 class QSGTransformNode;
@@ -253,13 +254,21 @@ private:
     void continueStroke(const QPointF &canvasPos);
     void endStroke(const QPointF &canvasPos, bool primary);
     void strokeSegment(const QPointF &from, const QPointF &to);
-    void paintDot(const QPointF &center, qreal radius, bool erase);
-    void paintLineSegment(const QPointF &a, const QPointF &b);
+    /* dab pipeline (A22): pointer sample -> normalizer -> stabilizer ->
+     * velocity -> spacing -> dab -> per-stroke scratch tile -> commit
+     * region delta on stroke end */
+    void strokeSegmentDabs(const QPointF &fromLocal, const QPointF &toLocal);
+    void stampDabAt(const QPointF &localCenter, qreal radius, qreal hardness,
+                    qreal opacity, bool erase);
+    void ensureScratch(const QRect &localRect);
+    void commitScratch(const QString &desc);
+    QPointF localFromCanvas(const QPointF &canvasPos) const;
+    QRect mappedRect(const QRect &localRect) const;
     void floodFillAt(const QPointF &canvasPos);
     void sampleColorAt(const QPointF &canvasPos);
     QPainterPath buildShapePath(const QPointF &a, const QPointF &b) const;
     void commitShape(const QPainterPath &path, bool filled);
-    void captureBeforeRegion(const QRect &canvasRect);
+    void captureBeforeRegion(const QRect &localRect);
     void pushStrokeEntry(const QString &desc);
     void maskStrokeToSelectionAndAlphaLock();
     void notifyModified();
@@ -283,6 +292,9 @@ private:
     QSGNode *buildGridNode();
     bool shouldSnap() const;
     qreal pressureFactor() const;   /* 0..1 applied when pressure enabled */
+    /* adaptive texture filtering: nearest on integer (pixel-art) zoom,
+     * linear on continuous zoom (A25) */
+    QSGTexture::Filtering adaptiveFiltering() const;
 
     PaintbrushDocument *m_doc = nullptr;
     UndoStack *m_undoStack = nullptr;
@@ -342,10 +354,22 @@ private:
     bool m_strokeActive = false;
     bool m_strokePrimary = true;
     QPointF m_lastCanvasPos;
-    QRect m_strokeUnion;
+    QRect m_strokeUnion;              /* layer-local coords */
     QList<QPair<QRect, QImage>> m_strokeBefore;
     bool m_strokeHadPaint = false;
     qreal m_currentPressure = 1.0;   /* 1.0 for mouse; tablet reports 0..1 */
+
+    /* dab-brush pipeline state (A22): per-stroke scratch tile in LAYER-LOCAL
+     * coordinates, seeded with the real layer content, committed as one
+     * region delta on stroke end */
+    QImage m_scratchTile;
+    QPoint m_scratchOrigin;
+    QRect m_scratchSeeded;
+    QPointF m_strokeSmooth;          /* stabilized sample (local coords) */
+    QPointF m_strokeLastDab;         /* last dab position (local coords) */
+    QVector<QPointF> m_stabilizer;   /* recent samples for smoothing */
+    qreal m_strokeRemainder = 0.0;   /* spacing carry-over along a segment */
+    qreal m_strokeSpeed = 0.0;       /* smoothed sample speed (px/event) */
 
     /* selection state */
     QPointF m_dragStartCanvas;

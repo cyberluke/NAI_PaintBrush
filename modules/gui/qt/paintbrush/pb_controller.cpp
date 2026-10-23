@@ -13,8 +13,6 @@
 #include <QQuickItem>
 #include <QImage>
 #include <QBuffer>
-#include <QElapsedTimer>
-#include <QThread>
 #include <QFileInfo>
 #include <QClipboard>
 #include <QGuiApplication>
@@ -39,6 +37,11 @@ PaintbrushController::PaintbrushController(qt_intf_t *intf, QObject *parent)
     : QObject(parent)
     , m_intf(intf)
 {
+    /* layer list model for the inspector: mirrors the document and reloads
+     * on structural changes (document signals) and in-place mutations
+     * (controller documentChanged) */
+    m_layerModel = new PaintbrushLayerModel(&m_document, this, this);
+
     configureServices();
 
     connect(&m_segmentation, &SegmentationService::maskReady,
@@ -102,6 +105,11 @@ PaintbrushController::PaintbrushController(qt_intf_t *intf, QObject *parent)
     connect(&m_thumbnails, &ThumbnailService::generationFailed,
             this, [this](const QString &reason) { setStatus(reason); emit thumbnailsChanged(); });
 
+    /* keep the sticker-editor track selection valid when tracks change
+     * (track finished, deleted, document reset/loaded) */
+    connect(&m_document, &PaintbrushDocument::tracksChanged,
+            this, &PaintbrushController::sanitizeSelectedTrack);
+
     m_companion.setAssistantService(&m_assistant);
 
     connect(&m_undoStack, &UndoStack::canUndoChanged,
@@ -136,12 +144,13 @@ PaintbrushController::~PaintbrushController()
 {
     m_mediaTimer.stop();
     m_autosaveTimer.stop();
+    m_thumbnails.cancel();
     m_segmentation.shutdown();
     m_tracking.shutdown();
+    m_editSource.shutdown();
     m_vision.cancelAll();
     m_generation.cancelAll();
     m_assistant.cancelAll();
-    m_thumbnails.cancel();
 }
 
 void PaintbrushController::configureServices()
@@ -153,6 +162,12 @@ void PaintbrushController::configureServices()
     m_assistant.configure(VLC_OBJECT(m_intf));
     m_companion.configure(VLC_OBJECT(m_intf));
     m_lookup.configure(VLC_OBJECT(m_intf));
+
+    /* the edit decode source: dedicated exact-frame decoder for the
+     * edit/AI pipeline (thumbnails, tracking, sticker export, crops) */
+    m_editSource.configure(VLC_OBJECT(m_intf));
+    m_thumbnails.setPtsToleranceMs(qMax<qint64>(
+        20, pbConfigInt(VLC_OBJECT(m_intf), "paintbrush-edit-pts-tolerance-ms")));
 
     /* demo mode: preload a sample project if present; otherwise a blank
      * canvas is ready anyway */
@@ -334,20 +349,21 @@ void PaintbrushController::openVideoFile(const QUrl &url)
         return;
     }
 
-    /* A Paintbrush video session is the main VLC player: append the file to
-     * the playlist and start playing it, then the media drawer appears and
-     * frames can be captured/tracked. Software decoding is forced for this
-     * media: Paintbrush needs exact random-access frames, and hardware
-     * decoders can emit compressed/artifacted frames on seeks (see the
-     * avcodec-hwdec policy). */
+    /* A Paintbrush video session is the main VLC player (PlaybackSession):
+     * append the file to the playlist and start playing it, then the media
+     * drawer appears and frames can be captured/tracked. Playback keeps the
+     * DEFAULT decode policy (Auto) — it is never forced to software decode
+     * anymore (A18). Exact-frame work (thumbnails, tracking, sticker
+     * export, AI crops) never seeks/snapshots this session: it decodes
+     * through EditFrameSource, which applies the generic avcodec-hwdec
+     * tri-state to its own dedicated decoder only. */
     vlc::playlist::Media media(QUrl::fromLocalFile(path).toString(),
-                               QFileInfo(path).fileName(),
-                               QStringList{QStringLiteral(":avcodec-hwdec=1")});
+                               QFileInfo(path).fileName());
     m_intf->p_mainPlaylistController->append(
         QVector<vlc::playlist::Media>{media}, true);
     emit mediaStateChanged();
     setStatus(QStringLiteral("Playing %1").arg(QFileInfo(path).fileName()));
-    pbLogInfo(VLC_OBJECT(m_intf), "media", "opened %s (software decode)",
+    pbLogInfo(VLC_OBJECT(m_intf), "media", "opened %s (playback decode policy: auto)",
               qUtf8Printable(path));
 
     if (m_welcomeVisible)
@@ -398,14 +414,41 @@ void PaintbrushController::openImageData(const QImage &image, const QString &nam
 
 void PaintbrushController::captureVideoFrame()
 {
-    vlc_player_t *player = m_intf->p_mainPlayerController->getPlayer();
-    if (!player || !playerHasVideo())
+    if (!playerHasVideo())
     {
         setStatus(QStringLiteral("No video frame is available to capture."));
         return;
     }
 
-    const QImage frame = FrameCaptureService::captureCurrentFrame(player);
+    const QString mrl = currentMediaMRL();
+    const qint64 pts = playerTimeMs();
+
+    /* Exact-frame decode first: the edit source returns the DECODED frame
+     * with a verified PTS (no PNG round-trip). The viewer snapshot path is
+     * only a fallback when the edit source cannot decode (e.g. a stream
+     * the thumbnailing input cannot open). */
+    QImage frame;
+    qint64 actualPts = pts;
+    bool ptsVerified = false;
+    if (!mrl.isEmpty())
+    {
+        const DecodedFrame f = requestFrame(mrl, pts);
+        if (f.ok())
+        {
+            frame = f.image;
+            actualPts = f.ptsMs;
+            ptsVerified = true;
+        }
+    }
+    if (frame.isNull())
+    {
+        /* generic viewer screenshot utility (kept out of the edit path) */
+        vlc_player_t *player = m_intf->p_mainPlayerController->getPlayer();
+        frame = FrameCaptureService::captureCurrentFrame(player);
+        const FrameRef ref = FrameCaptureService::currentMediaRef(player);
+        if (!mrl.isEmpty())
+            actualPts = ref.ptsMs;
+    }
     if (frame.isNull())
     {
         setStatus(QStringLiteral("Could not capture the current video frame."));
@@ -418,7 +461,11 @@ void PaintbrushController::captureVideoFrame()
         emit welcomeChanged();
     }
 
-    const MediaFrameRef ref = FrameCaptureService::currentMediaRef(player);
+    /* store the exact frame identity (A19): AI/crop paths re-decode THIS
+     * frame through the FrameProvider instead of scanning layers */
+    const QString title = currentMediaTitle();
+    m_document.setSourceFrame(FrameRef{mrl, title, actualPts,
+                                       frame.width(), frame.height()});
 
     /* adopt the frame size on a blank canvas */
     const bool blank = (m_document.layerCount() <= 1 &&
@@ -428,9 +475,8 @@ void PaintbrushController::captureVideoFrame()
         m_document.resetDocument(frame.size());
 
     addImageLayer(frame, QPointF(0, 0),
-                  ref.title.isEmpty() ? QStringLiteral("Video frame") : ref.title,
+                  title.isEmpty() ? QStringLiteral("Video frame") : title,
                   LAYER_REFERENCE);
-    m_document.setSourceMedia(ref.mrl, ref.title, ref.timeMs);
 
     if (m_canvas)
     {
@@ -438,7 +484,9 @@ void PaintbrushController::captureVideoFrame()
         m_canvas->fitToView();
     }
     emit mediaStateChanged();
-    setStatus(QStringLiteral("Captured video frame at %1 ms").arg(ref.timeMs));
+    setStatus(QStringLiteral("Captured video frame at %1 ms%2")
+                  .arg(actualPts)
+                  .arg(ptsVerified ? QString() : QStringLiteral(" (unverified)")));
     triggerCompanionEvent(QStringLiteral("media-frame-captured"));
 }
 
@@ -876,13 +924,17 @@ void PaintbrushController::newLayer()
     CanvasLayer layer = CanvasLayer::createRaster(m_document.canvasSize(),
                                                   QStringLiteral("Layer %1")
                                                       .arg(m_document.layerCount() + 1));
-    const QByteArray before = m_document.layersSnapshot();
+    InsertLayerCommand cmd;
+    cmd.desc = QStringLiteral("Add layer");
     QList<CanvasLayer> layers = m_document.layers();
     layers.append(std::move(layer));
+    cmd.index = layers.size() - 1;
+    cmd.prevCurrentIndex = m_document.currentLayerIndex();
     m_document.setLayers(layers);
-    m_document.setCurrentLayerIndex(layers.size() - 1);
-    const QByteArray after = m_document.layersSnapshot();
-    m_undoStack.pushStructure({before, after, QStringLiteral("Add layer")});
+    m_document.setCurrentLayerIndex(cmd.index);
+    cmd.layer = m_document.layerAt(cmd.index) ? *m_document.layerAt(cmd.index)
+                                              : CanvasLayer();
+    m_undoStack.pushInsertLayer(cmd);
     if (m_canvas)
         m_canvas->markCanvasDirty();
     emit documentChanged();
@@ -894,13 +946,16 @@ void PaintbrushController::deleteLayer(int index)
     if (index < 0 || index >= layers.size() || layers.size() <= 1)
         return;
 
-    const QByteArray before = m_document.layersSnapshot();
+    DeleteLayerCommand cmd;
+    cmd.desc = QStringLiteral("Delete layer");
+    cmd.index = index;
+    cmd.layer = layers[index]; /* immutable copy: the undo payload */
+    cmd.prevCurrentIndex = m_document.currentLayerIndex();
     layers.removeAt(index);
     m_document.setLayers(layers);
     if (m_document.currentLayerIndex() >= layers.size())
         m_document.setCurrentLayerIndex(layers.size() - 1);
-    const QByteArray after = m_document.layersSnapshot();
-    m_undoStack.pushStructure({before, after, QStringLiteral("Delete layer")});
+    m_undoStack.pushDeleteLayer(cmd);
     if (m_canvas)
         m_canvas->markCanvasDirty();
     emit documentChanged();
@@ -912,14 +967,19 @@ void PaintbrushController::duplicateLayer(int index)
     if (index < 0 || index >= layers.size())
         return;
 
-    const QByteArray before = m_document.layersSnapshot();
     CanvasLayer copy = layers[index];
     copy.name = copy.name + QStringLiteral(" copy");
+    copy.id = 0; /* fresh stable id for the copy */
+    InsertLayerCommand cmd;
+    cmd.desc = QStringLiteral("Duplicate layer");
     layers.insert(index + 1, std::move(copy));
+    cmd.index = index + 1;
+    cmd.prevCurrentIndex = m_document.currentLayerIndex();
     m_document.setLayers(layers);
-    m_document.setCurrentLayerIndex(index + 1);
-    const QByteArray after = m_document.layersSnapshot();
-    m_undoStack.pushStructure({before, after, QStringLiteral("Duplicate layer")});
+    m_document.setCurrentLayerIndex(cmd.index);
+    cmd.layer = m_document.layerAt(cmd.index) ? *m_document.layerAt(cmd.index)
+                                              : CanvasLayer();
+    m_undoStack.pushInsertLayer(cmd);
     if (m_canvas)
         m_canvas->markCanvasDirty();
     emit documentChanged();
@@ -933,15 +993,38 @@ void PaintbrushController::setCurrentLayer(int index)
 
 void PaintbrushController::setLayerVisible(int index, bool visible)
 {
-    QList<CanvasLayer> layers = m_document.layers();
-    if (index < 0 || index >= layers.size() || layers[index].visible == visible)
+    CanvasLayer *layer = m_document.layerAt(index);
+    if (!layer || layer->visible == visible)
         return;
 
-    const QByteArray before = m_document.layersSnapshot();
-    layers[index].visible = visible;
-    m_document.setLayers(layers);
-    const QByteArray after = m_document.layersSnapshot();
-    m_undoStack.pushStructure({before, after, QStringLiteral("Toggle layer visibility")});
+    SetVisibilityCommand cmd;
+    cmd.desc = QStringLiteral("Toggle layer visibility");
+    cmd.layerIndex = index;
+    cmd.before = layer->visible;
+    cmd.after = visible;
+    layer->visible = visible;
+    m_undoStack.pushSetVisibility(cmd);
+    if (m_canvas)
+        m_canvas->markCanvasDirty();
+    emit documentChanged();
+}
+
+void PaintbrushController::setLayerOpacity(int index, double opacity)
+{
+    CanvasLayer *layer = m_document.layerAt(index);
+    if (!layer)
+        return;
+    opacity = qBound(0.0, opacity, 1.0);
+    if (qFuzzyCompare(float(opacity), layer->opacity))
+        return;
+
+    SetOpacityCommand cmd;
+    cmd.desc = QStringLiteral("Set layer opacity");
+    cmd.layerIndex = index;
+    cmd.before = layer->opacity;
+    layer->opacity = float(opacity);
+    cmd.after = layer->opacity;
+    m_undoStack.pushSetOpacity(cmd);
     if (m_canvas)
         m_canvas->markCanvasDirty();
     emit documentChanged();
@@ -954,12 +1037,15 @@ void PaintbrushController::moveLayer(int index, int delta)
     if (index < 0 || index >= layers.size() || target < 0 || target >= layers.size())
         return;
 
-    const QByteArray before = m_document.layersSnapshot();
+    ReorderCommand cmd;
+    cmd.desc = QStringLiteral("Reorder layer");
+    cmd.index = index;
+    cmd.target = target;
+    cmd.prevCurrentIndex = m_document.currentLayerIndex();
     layers.move(index, target);
     m_document.setLayers(layers);
     m_document.setCurrentLayerIndex(target);
-    const QByteArray after = m_document.layersSnapshot();
-    m_undoStack.pushStructure({before, after, QStringLiteral("Reorder layer")});
+    m_undoStack.pushReorder(cmd);
     if (m_canvas)
         m_canvas->markCanvasDirty();
     emit documentChanged();
@@ -967,24 +1053,27 @@ void PaintbrushController::moveLayer(int index, int delta)
 
 void PaintbrushController::transformLayer(int index, double scale, double rotation)
 {
-    QList<CanvasLayer> layers = m_document.layers();
-    if (index < 0 || index >= layers.size())
+    CanvasLayer *layer = m_document.layerAt(index);
+    if (!layer)
         return;
-    CanvasLayer &layer = layers[index];
-    if (layer.type != LAYER_IMAGE && layer.type != LAYER_TEXT)
+    if (layer->type != LAYER_IMAGE && layer->type != LAYER_TEXT &&
+        layer->type != LAYER_STICKER)
         return;
     scale = qBound(0.01, scale, 64.0);
     rotation = qBound(-360.0, rotation, 360.0);
-    if (qFuzzyCompare(float(scale), layer.scale) &&
-        qFuzzyCompare(float(rotation), layer.rotation))
+    if (qFuzzyCompare(float(scale), layer->scale) &&
+        qFuzzyCompare(float(rotation), layer->rotation))
         return;
 
-    const QByteArray before = m_document.layersSnapshot();
-    layer.scale = float(scale);
-    layer.rotation = float(rotation);
-    m_document.setLayers(layers);
-    const QByteArray after = m_document.layersSnapshot();
-    m_undoStack.pushStructure({before, after, QStringLiteral("Transform layer")});
+    SetTransformCommand cmd;
+    cmd.desc = QStringLiteral("Transform layer");
+    cmd.layerId = layer->id;
+    cmd.layerIndex = index;
+    cmd.before = layer->transform();
+    layer->scale = float(scale);
+    layer->rotation = float(rotation);
+    cmd.after = layer->transform();
+    m_undoStack.pushSetTransform(cmd);
     if (m_canvas)
         m_canvas->markCanvasDirty();
     emit documentChanged();
@@ -992,23 +1081,75 @@ void PaintbrushController::transformLayer(int index, double scale, double rotati
 
 void PaintbrushController::moveImageLayer(int index, const QPointF &position)
 {
-    QList<CanvasLayer> layers = m_document.layers();
-    if (index < 0 || index >= layers.size())
+    CanvasLayer *layer = m_document.layerAt(index);
+    if (!layer)
         return;
-    CanvasLayer &layer = layers[index];
-    if (layer.type != LAYER_IMAGE && layer.type != LAYER_TEXT)
+    if (layer->type != LAYER_IMAGE && layer->type != LAYER_TEXT &&
+        layer->type != LAYER_STICKER)
         return;
-    if (layer.position == position)
+    if (layer->position == position)
         return;
 
-    const QByteArray before = m_document.layersSnapshot();
-    layer.position = position;
-    m_document.setLayers(layers);
-    const QByteArray after = m_document.layersSnapshot();
-    m_undoStack.pushStructure({before, after, QStringLiteral("Move image layer")});
+    SetTransformCommand cmd;
+    cmd.desc = QStringLiteral("Move image layer");
+    cmd.layerId = layer->id;
+    cmd.layerIndex = index;
+    cmd.before = layer->transform();
+    layer->position = position;
+    cmd.after = layer->transform();
+    m_undoStack.pushSetTransform(cmd);
     if (m_canvas)
         m_canvas->markCanvasDirty();
     emit documentChanged();
+}
+
+/* ------------------------------------------- capability-honest status (S5) */
+
+QString PaintbrushController::generationStatusText() const
+{
+    /* Truth comes from the generation service's CapabilityReport: the local
+     * heal/blur fallbacks are named as what they are (pixel operations, not
+     * generative), remote-generation names the configured model, and the
+     * unavailable branch carries the service's own reason. */
+    const CapabilityReport report =
+        m_generation.capability(GenerationService::ACTION_GENERATIVE_FILL);
+    switch (report.mode)
+    {
+    case CapabilityReport::RemoteGeneration:
+        return QStringLiteral("Remote generation (%1)")
+            .arg(report.modelName.isEmpty() ? QStringLiteral("default model")
+                                            : report.modelName);
+    case CapabilityReport::LocalHeal:
+        return QStringLiteral("Local heal — pixel propagation, not generative");
+    case CapabilityReport::LocalBlur:
+        return QStringLiteral("Local blur — pixel filter, not generative");
+    case CapabilityReport::Unavailable:
+        break;
+    }
+    return m_generation.unavailableReason().isEmpty()
+               ? QStringLiteral("Unavailable")
+               : m_generation.unavailableReason();
+}
+
+QString PaintbrushController::visionStatusText() const
+{
+    if (m_vision.isConfigured())
+        return QStringLiteral("Ready (%1)")
+            .arg(m_vision.model().isEmpty() ? QStringLiteral("default model")
+                                            : m_vision.model());
+    return m_vision.unavailableReason().isEmpty()
+               ? QStringLiteral("Unconfigured")
+               : QStringLiteral("Unconfigured — %1")
+                     .arg(m_vision.unavailableReason());
+}
+
+QString PaintbrushController::segmentationStatusText() const
+{
+    if (m_segmentation.isConfigured())
+        return QStringLiteral("Ready");
+    return m_segmentation.unavailableReason().isEmpty()
+               ? QStringLiteral("Unavailable")
+               : m_segmentation.unavailableReason();
 }
 
 /* ------------------------------------------------------ object selection */
@@ -1052,7 +1193,13 @@ void PaintbrushController::onObjectMaskEdited(const QImage &mask)
     emit objectSelectionChanged();
     /* one mask-refine stroke == one undoable operation */
     if (!before.isNull() && before != mask)
-        m_undoStack.pushMask({before, mask, QStringLiteral("Refine selection mask")});
+    {
+        MaskCommand cmd;
+        cmd.data.before = before;
+        cmd.data.after = mask;
+        cmd.data.description = QStringLiteral("Refine selection mask");
+        m_undoStack.pushMask(cmd);
+    }
     setStatus(QStringLiteral("Selection mask refined with brush."));
 }
 
@@ -1219,7 +1366,19 @@ QImage PaintbrushController::pristineSourceFrame() const
     /* The reference layer holds the true captured video frame. The canvas
      * composite mixes user strokes and generated layers over it, so AI
      * operations must read the reference raster directly — otherwise the
-     * VLM/segmenter is shown a synthetic reconstruction, not the frame. */
+     * VLM/segmenter is shown a synthetic reconstruction, not the frame.
+     *
+     * A19: the frame identity is the document's stored FrameRef, decoded
+     * through the edit frame source (FrameProvider) — never "the first
+     * LAYER_REFERENCE in the layer list", which could be a stale frame. */
+    const FrameRef ref = m_document.sourceFrame();
+    if (ref.isValid())
+    {
+        const DecodedFrame f = m_editSource.request(ref);
+        if (!f.image.isNull())
+            return f.image;
+    }
+    /* legacy fallback: a still captured before the edit source existed */
     const auto &layers = m_document.layers();
     for (const CanvasLayer &layer : layers)
     {
@@ -1307,36 +1466,63 @@ void PaintbrushController::addObjectToCanvas()
         setStatus(QStringLiteral("Nothing selected to add."));
         return;
     }
-    const QRectF bounds = m_canvas->objectMaskBounds();
-    addImageLayer(cutout, bounds.topLeft(), QStringLiteral("Cutout"),
-                  LAYER_IMAGE);
+    const QRectF bounds = m_canvas ? m_canvas->objectMaskBounds() : QRectF();
+    QPoint trimOffset;
+    const QImage trimmed = trimToContent(cutout, &trimOffset);
+    if (trimmed.isNull())
+    {
+        setStatus(QStringLiteral("The selected object is empty."));
+        return;
+    }
+    /* A20: the cutout becomes a Sticker asset — cutout pixels + FrameRef +
+     * seed mask — inserted into the EXISTING document via InsertLayerCommand
+     * (undoable, transformable, persisted). No doc reset, no canvas
+     * re-creation. The sticker lands where the object was in the frame so it
+     * can be dragged anywhere. */
+    const QImage seedMask = trimmed.convertToFormat(QImage::Format_Alpha8);
+    insertStickerLayer(trimmed, bounds.topLeft() + QPointF(trimOffset),
+                       QStringLiteral("Cutout"), m_document.sourceMediaMRL(),
+                       m_document.sourceMediaTitle(), m_document.sourceTimeMs(),
+                       seedMask);
     if (m_canvas)
         m_canvas->markCanvasDirty();
-    setStatus(QStringLiteral("Cutout added to the canvas"));
+    setStatus(QStringLiteral("Cutout added to the canvas as a sticker layer"));
     triggerCompanionEvent(QStringLiteral("cutout-added"));
 }
 
 void PaintbrushController::extractObject()
 {
-    /* the collage main feature: pull the selected object out of the video
-     * frame onto its own transparent canvas, ready to be placed anywhere */
+    /* A20 (collage main feature): pull the selected object out of the video
+     * frame onto the CURRENT canvas. The selection becomes a Sticker asset
+     * (cutout pixels + FrameRef + seed mask) and InsertLayerCommand inserts
+     * it as a normal draggable/transformable layer into the EXISTING
+     * document — the document is NEVER reset and the canvas is NEVER
+     * re-created, so every other layer and the undo history survive. */
     const QImage cutout = objectCrop();
     if (cutout.isNull())
     {
         setStatus(QStringLiteral("Select an object first (Object Select tool)."));
         return;
     }
-    const int w = qBound(16, cutout.width() + 128, 8192);
-    const int h = qBound(16, cutout.height() + 128, 8192);
-    m_document.resetDocument(QSize(w, h));
-    addImageLayer(cutout, QPointF(64, 64), QStringLiteral("Extracted object"),
-                  LAYER_IMAGE);
+    const QRectF bounds = m_canvas ? m_canvas->objectMaskBounds() : QRectF();
+    QPoint trimOffset;
+    const QImage trimmed = trimToContent(cutout, &trimOffset);
+    if (trimmed.isNull())
+    {
+        setStatus(QStringLiteral("The selected object is empty."));
+        return;
+    }
+    const QImage seedMask = trimmed.convertToFormat(QImage::Format_Alpha8);
+    insertStickerLayer(trimmed, bounds.topLeft() + QPointF(trimOffset),
+                       QStringLiteral("Extracted object"),
+                       m_document.sourceMediaMRL(), m_document.sourceMediaTitle(),
+                       m_document.sourceTimeMs(), seedMask);
     if (m_canvas)
     {
         m_canvas->markCanvasDirty();
         m_canvas->fitToView();
     }
-    setStatus(QStringLiteral("Object extracted to a new canvas"));
+    setStatus(QStringLiteral("Object extracted as a sticker — drag it anywhere on the canvas"));
     triggerCompanionEvent(QStringLiteral("object-extracted"));
 }
 
@@ -1568,12 +1754,18 @@ void PaintbrushController::trackObject(int direction, int frames)
     track.complete = false;
     m_pendingTrack.append(track);
 
-    vlc_player_t *player = m_intf->p_mainPlayerController->getPlayer();
-    m_tracking.startTrack(player, currentAiSource(), m_objectMask,
-                          positivePointsForTracking(), direction, frames);
+    /* the seed frame is decoded through the edit frame source (exact
+     * PTS); tracking never steps or snapshots the playback player */
+    const qint64 seedPts = m_document.sourceFrame().isValid()
+                               ? m_document.sourceFrame().ptsMs
+                               : playerTimeMs();
+    m_tracking.startTrack(&m_editSource, m_document.sourceMediaMRL(),
+                          currentAiSource(), m_objectMask,
+                          positivePointsForTracking(), direction, frames,
+                          seedPts);
     emit trackingStateChanged();
-    pbLogInfo(VLC_OBJECT(m_intf), "tracking", "track started id=%d dir=%d",
-              track.id, direction);
+    pbLogInfo(VLC_OBJECT(m_intf), "tracking", "track started id=%d dir=%d seedPts=%lld",
+              track.id, direction, (long long)seedPts);
 }
 
 QVector<QPointF> PaintbrushController::positivePointsForTracking() const
@@ -1585,6 +1777,37 @@ QVector<QPointF> PaintbrushController::positivePointsForTracking() const
     if (bounds.isEmpty())
         return {};
     return { bounds.center() };
+}
+
+DecodedFrame PaintbrushController::requestFrame(const QString &mrl,
+                                                qint64 ptsMs) const
+{
+    if (mrl.isEmpty())
+        return {};
+    return m_editSource.request(FrameRef{mrl, {}, ptsMs});
+}
+
+QImage PaintbrushController::decodeKeyframeFrame(const ObjectTrack &track,
+                                                 const TrackKeyframe &kf) const
+{
+    /* the track remembers its own source MRL (survives relinks); fall back
+     * to the document's media when it is missing */
+    const QString mrl = track.sourceMRL.isEmpty()
+                            ? m_document.sourceMediaMRL()
+                            : track.sourceMRL;
+    if (mrl.isEmpty() || kf.timeMs < 0)
+        return {};
+
+    const DecodedFrame f = m_editSource.request(FrameRef{mrl, {}, kf.timeMs});
+    if (!f.ok())
+    {
+        pbLogWarn(VLC_OBJECT(m_intf), "export",
+                  "keyframe %d at %lld ms not exported: decode failed or "
+                  "PTS not verified (actual %lld ms)",
+                  kf.frameIndex, (long long)kf.timeMs, (long long)f.ptsMs);
+        return {};
+    }
+    return f.image;
 }
 
 void PaintbrushController::cancelTracking()
@@ -1683,71 +1906,30 @@ QString PaintbrushController::exportTrackedSticker(int trackId, const QUrl &dirU
     if (track.keyframes.isEmpty())
         return QStringLiteral("This track has no keyframes yet.");
 
-    vlc_player_t *player = m_intf->p_mainPlayerController->getPlayer();
-    if (!player)
-        return QStringLiteral("The source media is no longer loaded.");
-
-    const qint64 originalTime = FrameCaptureService::currentTimeMs(player);
+    /* offline export (A17): every frame is decoded by the edit frame
+     * source at the keyframe's exact PTS — no main-player seeks, no
+     * sleep-polling, no unverified "first non-zero snapshot" */
     QDir().mkpath(dir);
     int written = 0;
+    int skipped = 0;
     QSize lastSize;
 
     for (const TrackKeyframe &kf : track.keyframes)
     {
-        /* seek the player to the keyframe time and grab the real frame */
-        {
-            PlayerLock lock(player);
-            vlc_player_SetTime(player, kf.timeMs * 1000);
-        }
-        /* allow the vout to display the frame */
-        QElapsedTimer wait;
-        wait.start();
-        QImage frame;
-        while (wait.elapsed() < 3000)
-        {
-            frame = FrameCaptureService::captureCurrentFrame(player);
-            if (!frame.isNull())
-                break;
-            QThread::msleep(60);
-        }
+        const QImage frame = decodeKeyframeFrame(track, kf);
         if (frame.isNull())
-            continue;
-
-        /* apply the keyframe mask -> transparent cutout */
-        QImage mask = kf.mask;
-        if (mask.size() != frame.size())
-            mask = mask.scaled(frame.size(), Qt::IgnoreAspectRatio,
-                               Qt::FastTransformation);
-        mask = mask.convertToFormat(QImage::Format_Grayscale8);
-
-        QImage cutout(frame.size(), QImage::Format_ARGB32);
-        cutout.fill(Qt::transparent);
         {
-            QPainter p(&cutout);
-            p.drawImage(0, 0, frame);
-            p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
-            p.drawImage(0, 0, mask);
-            p.end();
-        }
-
-        /* trim to the mask bounds */
-        int minX = cutout.width(), minY = cutout.height();
-        int maxX = -1, maxY = -1;
-        for (int y = 0; y < cutout.height(); ++y)
-        {
-            const QRgb *line = reinterpret_cast<const QRgb *>(cutout.constScanLine(y));
-            for (int x = 0; x < cutout.width(); ++x)
-                if (qAlpha(line[x]) != 0)
-                {
-                    if (x < minX) minX = x;
-                    if (x > maxX) maxX = x;
-                    if (y < minY) minY = y;
-                    if (y > maxY) maxY = y;
-                }
-        }
-        if (maxX < 0)
+            ++skipped;
             continue;
-        QImage sticker = cutout.copy(QRect(minX, minY, maxX - minX + 1, maxY - minY + 1));
+        }
+        const QImage sticker = renderStickerFrame(frame, kf.mask, 0,
+                                                  QColor(), false, 1.0,
+                                                  &track.effect);
+        if (sticker.isNull())
+        {
+            ++skipped;
+            continue;
+        }
         lastSize = sticker.size();
 
         const QString path = dir + QStringLiteral("/sticker_%1.png")
@@ -1757,21 +1939,23 @@ QString PaintbrushController::exportTrackedSticker(int trackId, const QUrl &dirU
         ++written;
     }
 
-    /* restore the original position */
-    if (written > 0 && originalTime > 0)
-    {
-        PlayerLock lock(player);
-        vlc_player_SetTime(player, originalTime * 1000);
-    }
-
     if (written == 0)
-        return QStringLiteral("No frames could be exported.");
+        return QStringLiteral("No frames could be exported (%1 keyframe frames unavailable).")
+                   .arg(skipped);
     setStatus(QStringLiteral("Sticker sequence: %1 frames (%2x%3) in %4")
                   .arg(written).arg(lastSize.width()).arg(lastSize.height()).arg(dir));
     return dir;
 }
 
 /* --------------------------------------------------- animated sticker editor */
+
+/* A frame whose PTS differs from the requested keyframe time by more than
+ * this is NOT the frame the keyframe mask was computed for, so it is never
+ * accepted as the sticker source (A17: "verify the first non-zero frame
+ * against the requested keyframe time before accepting it"). 120 ms covers
+ * one to a few frames of GOP-aligned seeks while still rejecting frames
+ * that are visually a different moment. */
+static constexpr qint64 kStickerFrameToleranceMs = 120;
 
 static const ObjectTrack *findTrack(const QVector<ObjectTrack> &tracks, int trackId)
 {
@@ -1782,201 +1966,9 @@ static const ObjectTrack *findTrack(const QVector<ObjectTrack> &tracks, int trac
 }
 
 /* Render a keyframe cutout with optional outline/shadow/scale and an
- * optional track effect. Shared by the preview data URLs and the optioned
- * export so what you see is what exports. */
-static QImage renderStickerFrame(const QImage &frame, const QImage &mask,
-                                 int outline, const QColor &outlineColor,
-                                 bool shadow, double scale,
-                                 const TrackEffect *effect = nullptr)
-{
-    QImage maskScaled = mask.isNull() ? QImage() : mask;
-    if (!maskScaled.isNull() && maskScaled.size() != frame.size())
-        maskScaled = maskScaled.scaled(frame.size(), Qt::IgnoreAspectRatio,
-                                       Qt::FastTransformation);
-    if (!maskScaled.isNull())
-        maskScaled = maskScaled.convertToFormat(QImage::Format_Grayscale8);
-
-    QImage cutout(frame.size(), QImage::Format_ARGB32);
-    cutout.fill(Qt::transparent);
-    {
-        QPainter p(&cutout);
-        p.drawImage(0, 0, frame);
-        if (!maskScaled.isNull())
-        {
-            p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
-            p.drawImage(0, 0, maskScaled);
-        }
-        p.end();
-    }
-
-    /* -- track effect pass (applied to the masked cutout) ------------------ */
-    if (effect != nullptr && effect->type != TrackEffect::None)
-    {
-        const float t = qBound(0.f, float(effect->intensity) / 100.f, 1.f);
-        switch (effect->type)
-        {
-        case TrackEffect::Blur:
-        {
-            /* soften the cutout: blur the mask-shaped cutout */
-            QImage blurred = cutout;
-            const int radius = qMax(1, int(t * 10.f));
-            for (int pass = 0; pass < radius; ++pass)
-            {
-                QImage tmp = blurred;
-                QPainter bp(&tmp);
-                bp.setRenderHint(QPainter::SmoothPixmapTransform);
-                bp.drawImage(0, 0, blurred.scaled(qMax(1, blurred.width() / 2),
-                                                  qMax(1, blurred.height() / 2),
-                                                  Qt::IgnoreAspectRatio,
-                                                  Qt::SmoothTransformation)
-                                                      .scaled(blurred.size()));
-                bp.end();
-                blurred = tmp;
-            }
-            cutout = blurred;
-            break;
-        }
-        case TrackEffect::Dim:
-        {
-            QPainter p(&cutout);
-            p.setCompositionMode(QPainter::CompositionMode_SourceIn);
-            p.fillRect(cutout.rect(),
-                       QColor(0, 0, 0, int(255 * t * 0.65f)));
-            p.end();
-            break;
-        }
-        case TrackEffect::Spotlight:
-        {
-            /* brighten the cutout (saturate toward white) */
-            QImage bright = cutout;
-            for (int y = 0; y < bright.height(); ++y)
-            {
-                QRgb *line = reinterpret_cast<QRgb *>(bright.scanLine(y));
-                for (int x = 0; x < bright.width(); ++x)
-                {
-                    const QRgb px = line[x];
-                    if (qAlpha(px) == 0)
-                        continue;
-                    const int a = qAlpha(px);
-                    const int r = qMin(255, qRed(px) + int(96 * t));
-                    const int g = qMin(255, qGreen(px) + int(96 * t));
-                    const int b = qMin(255, qBlue(px) + int(96 * t));
-                    line[x] = qRgba(r, g, b, a);
-                }
-            }
-            cutout = bright;
-            break;
-        }
-        case TrackEffect::Outline:
-        {
-            QColor oc = effect->color.isEmpty()
-                            ? QColor(255, 255, 255)
-                            : QColor(effect->color);
-            if (!oc.isValid())
-                oc = QColor(255, 255, 255);
-            const int width = qMax(1, int(t * 12.f) + 1);
-            QImage alpha = cutout.convertToFormat(QImage::Format_Alpha8);
-            QImage gray = alpha.convertToFormat(QImage::Format_Grayscale8);
-            QPainterPath path = maskToPath(gray);
-            QImage result(cutout.size(), QImage::Format_ARGB32);
-            result.fill(Qt::transparent);
-            QPainter p(&result);
-            p.setPen(QPen(oc, width, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-            p.setBrush(oc);
-            p.drawPath(path);
-            p.end();
-            QPainter c(&result);
-            c.drawImage(0, 0, cutout);
-            c.end();
-            cutout = result;
-            break;
-        }
-        case TrackEffect::Attach:
-        {
-            /* composite the cutout back over the source frame at the mask
-             * position: the result is the full frame with the object
-             * re-attached (and the rest of the frame preserved). */
-            QImage composited = frame;
-            QPainter p(&composited);
-            p.drawImage(0, 0, cutout);
-            p.end();
-            cutout = composited;
-            break;
-        }
-        default:
-            break;
-        }
-    }
-
-    /* trim to non-empty bounds */
-    int minX = cutout.width(), minY = cutout.height();
-    int maxX = -1, maxY = -1;
-    for (int y = 0; y < cutout.height(); ++y)
-    {
-        const QRgb *line = reinterpret_cast<const QRgb *>(cutout.constScanLine(y));
-        for (int x = 0; x < cutout.width(); ++x)
-            if (qAlpha(line[x]) != 0)
-            {
-                if (x < minX) minX = x;
-                if (x > maxX) maxX = x;
-                if (y < minY) minY = y;
-                if (y > maxY) maxY = y;
-            }
-    }
-    if (maxX < 0)
-        return {};
-    QImage trimmed = cutout.copy(QRect(minX, minY, maxX - minX + 1, maxY - minY + 1));
-
-    if (scale != 1.0)
-    {
-        const QSize scaledSize(qMax(1, int(trimmed.width() * scale)),
-                               qMax(1, int(trimmed.height() * scale)));
-        trimmed = trimmed.scaled(scaledSize, Qt::KeepAspectRatio,
-                                 Qt::SmoothTransformation);
-    }
-
-    if (outline <= 0 && !shadow)
-        return trimmed;
-
-    /* shadow: dark silhouette offset below-right */
-    QImage result(trimmed.size(), QImage::Format_ARGB32);
-    result.fill(Qt::transparent);
-    {
-        QPainter p(&result);
-        if (shadow)
-        {
-            QImage shadowMask(trimmed.size(), QImage::Format_ARGB32);
-            shadowMask.fill(Qt::transparent);
-            QImage alpha = trimmed.convertToFormat(QImage::Format_Alpha8);
-            QPainterPath path;
-            QImage gray = alpha.convertToFormat(QImage::Format_Grayscale8);
-            path = maskToPath(gray);
-            QPainter sp(&shadowMask);
-            sp.setPen(QPen(QColor(0, 0, 0, 160), 6, Qt::SolidLine,
-                           Qt::RoundCap, Qt::RoundJoin));
-            sp.setBrush(QColor(0, 0, 0, 160));
-            sp.drawPath(path);
-            sp.end();
-            p.drawImage(QPoint(4, 4), shadowMask);
-        }
-        if (outline > 0)
-        {
-            QPainterPath path;
-            QImage alpha = trimmed.convertToFormat(QImage::Format_Alpha8);
-            QImage gray = alpha.convertToFormat(QImage::Format_Grayscale8);
-            path = maskToPath(gray);
-            QPainter op(&result);
-            op.setPen(QPen(outlineColor, outline * 2 + 1, Qt::SolidLine,
-                           Qt::RoundCap, Qt::RoundJoin));
-            op.setBrush(outlineColor);
-            op.drawPath(path);
-            op.end();
-        }
-        p.drawImage(0, 0, trimmed);
-        p.end();
-    }
-    return result;
-}
+ * optional track effect: shared implementation lives in pb_sticker.cpp so
+ * the controller, the harness and any future offline export pipeline use
+ * exactly the same renderer. */
 
 int PaintbrushController::stickerEditorKeyframeCount(int trackId) const
 {
@@ -2013,11 +2005,12 @@ QString PaintbrushController::stickerEditorPreviewDataUrl(int trackId, int frame
     const TrackKeyframe &kf = track->keyframes[frameIndex];
     if (kf.mask.isNull())
         return {};
-    /* the true frame pixels are re-captured from the player on export; for
-     * the preview we render the mask shape with a neutral fill so the trim/
-     * outline/shadow settings are visible without re-seeking the player. */
-    QImage frame(kf.mask.size(), QImage::Format_ARGB32);
-    frame.fill(QColor(200, 200, 210));
+    /* real pixel preview (A16): the source frame is decoded by the edit
+     * frame source at the keyframe's exact PTS, so the preview shows the
+     * actual video pixels, not a neutral silhouette */
+    const QImage frame = decodeKeyframeFrame(*track, kf);
+    if (frame.isNull())
+        return {};
     QImage rendered = renderStickerFrame(frame, kf.mask, outline,
                                          QColor(outlineColor), shadow, scale,
                                          &track->effect);
@@ -2053,42 +2046,37 @@ QString PaintbrushController::exportTrackedStickerOptions(int trackId, const QUr
     endFrame = qBound(startFrame, endFrame, track->keyframes.size() - 1);
     speed = qBound(1, speed, 8);
 
-    vlc_player_t *player = m_intf->p_mainPlayerController->getPlayer();
-    if (!player)
-        return QStringLiteral("The source media is no longer loaded.");
-
-    const qint64 originalTime = FrameCaptureService::currentTimeMs(player);
+    /* offline export (A17): walk the track keyframes, decode each via the
+     * edit frame source (exact PTS, verified), apply effect+outline+
+     * shadow+scale, write sequentially. No main-player seeks, no
+     * sleep-poll, no unverified snapshots. */
     QDir().mkpath(dir);
     int written = 0;
     int exported = 0;
+    int skipped = 0;
     QSize lastSize;
     const QColor oc(outlineColor);
 
+    /* A17 offline export: every frame is decoded by the edit frame source
+     * at the keyframe's exact PTS — no main-player seeks, no sleep-polling,
+     * no unverified "first non-zero snapshot" (Stream 3 final path). */
     for (int i = startFrame; i <= endFrame; ++i)
     {
         const TrackKeyframe &kf = track->keyframes[i];
-        /* seek the player to the keyframe time and grab the real frame */
-        {
-            PlayerLock lock(player);
-            vlc_player_SetTime(player, kf.timeMs * 1000);
-        }
-        QElapsedTimer wait;
-        wait.start();
-        QImage frame;
-        while (wait.elapsed() < 3000)
-        {
-            frame = FrameCaptureService::captureCurrentFrame(player);
-            if (!frame.isNull())
-                break;
-            QThread::msleep(60);
-        }
+        const QImage frame = decodeKeyframeFrame(*track, kf);
         if (frame.isNull())
+        {
+            ++skipped;
             continue;
+        }
 
         QImage sticker = renderStickerFrame(frame, kf.mask, outline, oc,
                                             shadow, scale, &track->effect);
         if (sticker.isNull())
+        {
+            ++skipped;
             continue;
+        }
         lastSize = sticker.size();
 
         /* speed > 1 keeps every speed-th frame (playback speed control) */
@@ -2106,14 +2094,9 @@ QString PaintbrushController::exportTrackedStickerOptions(int trackId, const QUr
         ++written;
     }
 
-    if (written > 0 && originalTime > 0)
-    {
-        PlayerLock lock(player);
-        vlc_player_SetTime(player, originalTime * 1000);
-    }
-
     if (written == 0)
-        return QStringLiteral("No frames could be exported.");
+        return QStringLiteral("No frames could be exported (%1 keyframe frames unavailable).")
+                   .arg(skipped);
     setStatus(QStringLiteral("Sticker sequence: %1 frames (%2x%3) in %4")
                   .arg(written).arg(lastSize.width()).arg(lastSize.height()).arg(dir));
     pbLogInfo(VLC_OBJECT(m_intf), "export",
@@ -2139,33 +2122,12 @@ void PaintbrushController::placeStickerFrame(int trackId, int frameIndex, int ou
         setStatus(QStringLiteral("This frame has no mask (evicted to save memory). Re-track or use a corrected frame."));
         return;
     }
-    vlc_player_t *player = m_intf->p_mainPlayerController->getPlayer();
-    QImage frame;
-    if (player)
-    {
-        const qint64 originalTime = FrameCaptureService::currentTimeMs(player);
-        {
-            PlayerLock lock(player);
-            vlc_player_SetTime(player, kf.timeMs * 1000);
-        }
-        QElapsedTimer wait;
-        wait.start();
-        while (wait.elapsed() < 3000)
-        {
-            frame = FrameCaptureService::captureCurrentFrame(player);
-            if (!frame.isNull())
-                break;
-            QThread::msleep(60);
-        }
-        if (originalTime > 0)
-        {
-            PlayerLock lock(player);
-            vlc_player_SetTime(player, originalTime * 1000);
-        }
-    }
+    /* offline decode through the edit frame source: no player seeks, no
+     * sleep-polling (A17) */
+    const QImage frame = decodeKeyframeFrame(*track, kf);
     if (frame.isNull())
     {
-        setStatus(QStringLiteral("Could not capture the frame; place it from a still instead."));
+        setStatus(QStringLiteral("Could not capture the frame for this keyframe; place it from a still instead."));
         return;
     }
     QImage sticker = renderStickerFrame(frame, kf.mask, outline,
@@ -2176,17 +2138,151 @@ void PaintbrushController::placeStickerFrame(int trackId, int frameIndex, int ou
         setStatus(QStringLiteral("The selected frame produced an empty cutout."));
         return;
     }
-    const QPointF pos = kf.mask.isNull()
-        ? QPointF(0, 0)
-        : QPointF((m_document.canvasSize().width() - sticker.width()) / 2.0,
-                  (m_document.canvasSize().height() - sticker.height()) / 2.0);
-    addImageLayer(sticker, pos, QStringLiteral("Animated sticker frame"),
-                  LAYER_IMAGE);
+    const QPointF pos = QPointF((m_document.canvasSize().width() - sticker.width()) / 2.0,
+                                (m_document.canvasSize().height() - sticker.height()) / 2.0);
+    /* A20: a sticker layer — cutout pixels + FrameRef + seed mask — inserted
+     * into the EXISTING document via InsertLayerCommand (undoable,
+     * transformable, persisted). */
+    insertStickerLayer(sticker, pos, QStringLiteral("Animated sticker frame"),
+                       track->sourceMRL, {}, kf.timeMs, kf.mask);
     if (m_canvas)
         m_canvas->markCanvasDirty();
     setStatus(QStringLiteral("Sticker frame placed on the canvas."));
     triggerCompanionEvent(QStringLiteral("sticker-made"));
 }
+void PaintbrushController::insertStickerLayer(const QImage &raster,
+                                              const QPointF &position,
+                                              const QString &name,
+                                              const QString &sourceMRL,
+                                              const QString &sourceTitle,
+                                              qint64 sourceTimeMs,
+                                              const QImage &seedMask)
+{
+    if (raster.isNull())
+        return;
+    CanvasLayer layer = CanvasLayer::createImage(raster, position, name);
+    layer.type = LAYER_STICKER;
+    if (!sourceMRL.isEmpty())
+    {
+        layer.metadata[QStringLiteral("sourceMRL")] = sourceMRL;
+        layer.metadata[QStringLiteral("sourceTitle")] = sourceTitle;
+        layer.metadata[QStringLiteral("sourceTimeMs")] = qint64(sourceTimeMs);
+    }
+    if (!seedMask.isNull())
+    {
+        QByteArray png;
+        QBuffer buffer(&png);
+        buffer.open(QIODevice::WriteOnly);
+        seedMask.convertToFormat(QImage::Format_Grayscale8).save(&buffer, "PNG");
+        layer.metadata[QStringLiteral("seedMask")] =
+            QStringLiteral("data:image/png;base64,") +
+            QString::fromLatin1(png.toBase64());
+    }
+
+    /* A20: one typed InsertLayerCommand carries the immutable sticker asset
+     * into the EXISTING document — undoable (undo removes the sticker),
+     * transformable (SetTransformCommand), persisted (project store) and
+     * rendered by the canonical DocumentRenderer like any other layer. */
+    InsertLayerCommand cmd;
+    cmd.desc = QStringLiteral("Add %1").arg(name);
+    QList<CanvasLayer> layers = m_document.layers();
+    layers.append(std::move(layer));
+    cmd.index = layers.size() - 1;
+    cmd.prevCurrentIndex = m_document.currentLayerIndex();
+    m_document.setLayers(layers);
+    m_document.setCurrentLayerIndex(cmd.index);
+    cmd.layer = m_document.layerAt(cmd.index) ? *m_document.layerAt(cmd.index)
+                                              : CanvasLayer();
+    m_undoStack.pushInsertLayer(cmd);
+}
+
+QImage PaintbrushController::stickerFrameForKeyframe(int trackId, int frameIndex,
+                                                     bool *playerTouched) const
+{
+    const ObjectTrack *track = findTrack(m_document.tracks(), trackId);
+    if (!track || frameIndex < 0 || frameIndex >= track->keyframes.size())
+        return {};
+    const TrackKeyframe &kf = track->keyframes[frameIndex];
+
+    /* A16/A17 final path: the offline edit frame source decodes the exact
+     * keyframe PTS — no player seeks at all. */
+    if (!track->sourceMRL.isEmpty() || !m_document.sourceMediaMRL().isEmpty())
+    {
+        const QImage offline = decodeKeyframeFrame(*track, kf);
+        if (!offline.isNull())
+        {
+            cacheStickerFrame(trackId, frameIndex, kf.timeMs, offline);
+            return offline;
+        }
+    }
+
+    StickerFrameCache::Entry cached;
+    if (m_stickerFrames.get(trackId, frameIndex, &cached))
+        return cached.frame;
+
+    /* Last-resort fallback (legacy bridge): ONE seek + ONE capture through
+     * FrameCaptureService, accepted only when the captured frame's PTS
+     * matches the requested keyframe time. No UI-thread sleep-polling. */
+    vlc_player_t *player = m_intf->p_mainPlayerController->getPlayer();
+    if (!player || !playerHasVideo())
+        return {};
+    if (playerTouched)
+        *playerTouched = true; /* the seek below moves the playhead */
+    {
+        PlayerLock lock(player);
+        vlc_player_SetTime(player, kf.timeMs * 1000);
+    }
+    const QImage frame = FrameCaptureService::captureCurrentFrame(player);
+    const qint64 actualMs = FrameCaptureService::currentTimeMs(player);
+    if (frame.isNull() || qAbs(actualMs - kf.timeMs) > kStickerFrameToleranceMs)
+        return {};
+    cacheStickerFrame(trackId, frameIndex, kf.timeMs, frame);
+    return frame;
+}
+
+void PaintbrushController::cacheStickerFrame(int trackId, int frameIndex,
+                                             qint64 timeMs,
+                                             const QImage &frame) const
+{
+    if (frame.isNull())
+        return;
+    m_stickerFrames.put(trackId, frameIndex, timeMs, frame);
+}
+
+void PaintbrushController::setSelectedTrackId(int trackId)
+{
+    int id = -1;
+    const QVector<ObjectTrack> tracks = m_document.tracks();
+    for (const ObjectTrack &track : tracks)
+        if (track.id == trackId)
+        {
+            id = trackId;
+            break;
+        }
+    if (id == m_selectedTrackId)
+        return;
+    m_selectedTrackId = id;
+    emit selectedTrackChanged();
+}
+
+void PaintbrushController::sanitizeSelectedTrack()
+{
+    int fallback = -1;
+    const QVector<ObjectTrack> tracks = m_document.tracks();
+    for (const ObjectTrack &track : tracks)
+    {
+        if (track.id == m_selectedTrackId)
+            return; /* current selection is still valid */
+        if (fallback < 0)
+            fallback = track.id;
+    }
+    if (m_selectedTrackId != fallback)
+    {
+        m_selectedTrackId = fallback;
+        emit selectedTrackChanged();
+    }
+}
+
 
 /* ------------------------------------------------------- track effects ---- */
 
@@ -2239,10 +2335,10 @@ QString PaintbrushController::trackEffectPreviewDataUrl(int trackId, int frameIn
     const TrackKeyframe &kf = track->keyframes[frameIndex];
     if (kf.mask.isNull())
         return {};
-    /* neutral fill so the effect + trim/outline/shadow are visible without
-     * re-seeking the player (matches stickerEditorPreviewDataUrl) */
-    QImage frame(kf.mask.size(), QImage::Format_ARGB32);
-    frame.fill(QColor(200, 200, 210));
+    /* real pixel preview (A16): decode the exact source frame offline */
+    const QImage frame = decodeKeyframeFrame(*track, kf);
+    if (frame.isNull())
+        return {};
     QImage rendered = renderStickerFrame(frame, kf.mask, outline,
                                          QColor(outlineColor), shadow, scale,
                                          &track->effect);
@@ -2269,6 +2365,19 @@ void PaintbrushController::onTrackKeyframe(int frameIndex, qint64 timeMs,
     kf.confidence = confidence;
     m_pendingTrack[0].keyframes.append(kf);
     m_pendingTrack[0].endMs = timeMs;
+
+    /* A16/A17: warm the sticker frame LRU with the REAL source pixels via
+     * the offline edit frame source — never the playback player. */
+    if (!m_pendingTrack[0].sourceMRL.isEmpty() ||
+        !m_document.sourceMediaMRL().isEmpty())
+    {
+        const ObjectTrack &t = m_pendingTrack[0];
+        const TrackKeyframe kf2 = kf;
+        const QImage frame = decodeKeyframeFrame(t, kf2);
+        if (!frame.isNull())
+            cacheStickerFrame(m_pendingTrack[0].id, frameIndex, timeMs, frame);
+    }
+
     /* keep tracked-mask memory bounded as the track grows */
     enforceTrackMaskMemoryBudget();
     emit trackingStateChanged();
@@ -2295,40 +2404,47 @@ qint64 PaintbrushController::enforceTrackMaskMemoryBudget()
      * non-user-corrected mask content (keep frame metadata + corrected
      * keyframes) so a long 4K track cannot grow memory without limit. The
      * default budget is generous (512 MiB) and covers many dozens of frames;
-     * exports read from the remaining masks. */
+     * exports read from the remaining masks. Eviction operates on the REAL
+     * track store the document owns (tracksRef) — never on a controller
+     * copy (A32) — and drops the matching sticker-frame cache entries so
+     * the frame cache cannot outlive the mask it renders. */
     const qint64 budget = qint64(512) * 1024 * 1024;
     const qint64 before = trackedMaskBytes();
     if (before <= budget)
         return before;
 
     /* gather candidate frames oldest-first across all tracks + pending */
-    QList<TrackKeyframe *> candidates;
-    auto collect = [&candidates](QVector<ObjectTrack> &tracks) {
-        for (ObjectTrack &track : tracks)
-            for (TrackKeyframe &kf : track.keyframes)
-                if (!kf.corrected && !kf.mask.isNull())
-                    candidates.append(&kf);
+    struct Candidate
+    {
+        int trackId;
+        int frameIndex;
+        TrackKeyframe *kf;
     };
-    QVector<ObjectTrack> all = m_document.tracks();
-    // pending track lives separately; operate through references below
+    QList<Candidate> candidates;
+    QVector<ObjectTrack> &docTracks = m_document.tracksRef();
+    for (ObjectTrack &track : docTracks)
+        for (TrackKeyframe &kf : track.keyframes)
+            if (!kf.corrected && !kf.mask.isNull())
+                candidates.append({track.id, kf.frameIndex, &kf});
     for (ObjectTrack &track : m_pendingTrack)
         for (TrackKeyframe &kf : track.keyframes)
             if (!kf.corrected && !kf.mask.isNull())
-                candidates.append(&kf);
+                candidates.append({track.id, kf.frameIndex, &kf});
     std::sort(candidates.begin(), candidates.end(),
-              [](const TrackKeyframe *a, const TrackKeyframe *b) {
-                  return a->frameIndex < b->frameIndex;
+              [](const Candidate &a, const Candidate &b) {
+                  return a.kf->frameIndex < b.kf->frameIndex;
               });
 
     qint64 cur = before;
-    for (TrackKeyframe *kf : candidates)
+    for (const Candidate &c : candidates)
     {
         if (cur <= budget)
             break;
-        if (!kf->mask.isNull())
+        if (!c.kf->mask.isNull())
         {
-            cur -= qint64(kf->mask.sizeInBytes());
-            kf->mask = QImage();   /* evict content, keep metadata */
+            cur -= qint64(c.kf->mask.sizeInBytes());
+            c.kf->mask = QImage();   /* evict content, keep metadata */
+            m_stickerFrames.remove(c.trackId, c.frameIndex);
         }
     }
     return cur;
@@ -2344,10 +2460,16 @@ void PaintbrushController::onTrackFinished(bool complete, bool cancelled,
         if (!error.isEmpty())
             m_pendingTrack[0].error = error;
 
+        const int finishedTrackId = m_pendingTrack[0].id;
         QVector<ObjectTrack> tracks = m_document.tracks();
         tracks.append(m_pendingTrack[0]);
         m_document.setTracks(tracks);
         m_pendingTrack.clear();
+        /* A15: a fresh track becomes the sticker-editor selection when
+         * nothing else is selected yet; sanitizeSelectedTrack (connected to
+         * tracksChanged) keeps the selection valid from here on. */
+        if (m_selectedTrackId < 0)
+            setSelectedTrackId(finishedTrackId);
         triggerCompanionEvent(QStringLiteral("object-tracked"));
     }
     emit trackingStateChanged();
@@ -2422,8 +2544,13 @@ void PaintbrushController::makeSticker()
     sp.drawImage(0, 0, trimmed);
     sp.end();
 
-    const QRectF pos = m_canvas->objectMaskBounds();
-    addImageLayer(sticker, pos.topLeft(), QStringLiteral("Sticker"), LAYER_IMAGE);
+    /* A20: the sticker is a LAYER_STICKER asset (cutout + FrameRef + seed
+     * mask) inserted into the EXISTING document via InsertLayerCommand. */
+    const QRectF pos = m_canvas ? m_canvas->objectMaskBounds() : QRectF();
+    const QImage seedMask = trimmed.convertToFormat(QImage::Format_Alpha8);
+    insertStickerLayer(sticker, pos.topLeft(), QStringLiteral("Sticker"),
+                       m_document.sourceMediaMRL(), m_document.sourceMediaTitle(),
+                       m_document.sourceTimeMs(), seedMask);
     if (m_canvas)
         m_canvas->markCanvasDirty();
     setStatus(QStringLiteral("Sticker created"));
@@ -2516,7 +2643,7 @@ void PaintbrushController::autoCollage(int preset)
     {
         const CanvasLayer &l = all[i];
         if (l.type == LAYER_RASTER || l.type == LAYER_IMAGE ||
-            l.type == LAYER_GENERATED)
+            l.type == LAYER_STICKER || l.type == LAYER_GENERATED)
         {
             if (!l.raster.isNull() && !l.isEmpty())
                 indices.append(i);
@@ -2684,12 +2811,15 @@ void PaintbrushController::autoCollage(int preset)
     }
     }
 
-    /* apply as one undoable structure change. Every piece is baked to its
-     * final size/orientation so it lands exactly in its slot (pixel-perfect
-     * scaling for image/generated layers, which otherwise only stored a
-     * render-time scale with an ambiguous pivot). Raster layers are cut to
-     * content and converted to positioned image layers. */
-    const QByteArray before = m_document.layersSnapshot();
+    /* apply as ONE typed undoable step: every piece becomes a
+     * SetTransformCommand (position/scale/rotation stored as the layer's
+     * canonical transform — content stays pristine, no baking/resampling).
+     * The presets sized `scale` against the piece's CURRENT canvas-space
+     * footprint (bounds), so the new transform REPLACES the previous one:
+     * A(q) = newPos + s*R(rot)*(q - qTL) with qTL the piece content top-left
+     * in local raster space — the footprint lands exactly in its slot. */
+    auto composite = std::make_unique<CompositeCommand>();
+    composite->desc = QStringLiteral("Auto collage");
     QList<CanvasLayer> layers = m_document.layers();
     for (int i = 0; i < pieces.size(); ++i)
     {
@@ -2700,59 +2830,27 @@ void PaintbrushController::autoCollage(int preset)
         const qreal scale = newScales[i];
         const qreal rot = newRotations[i];
 
-        if (l.type == LAYER_RASTER)
-        {
-            /* cut the raster layer's content into a positioned image layer */
-            QImage content = l.raster.copy(b.toAlignedRect());
-            if (content.isNull())
-                continue;
-            l.raster = content;
-            l.type = LAYER_IMAGE;
-        }
+        if (l.raster.isNull())
+            continue;
 
-        /* Bake scale + rotation into the raster (and mask) so the piece's
-         * top-left matches `newPos` exactly. A layer that already carried a
-         * render-time scale/rotation is compounded with the collage transform
-         * (uniform scale and rotation around the same center commute, so the
-         * result is a single scale = product, rotation = sum). The footprint
-         * is the exact slot computed by the preset, so scaling is pixel-perfect
-         * (no render-time pivot ambiguity). */
-        const qreal totalScale = qFuzzyIsNull(rot) && qFuzzyCompare(scale, 1.0)
-                                     ? scale
-                                     : scale * l.scale;
-        const qreal totalRot = (qFuzzyIsNull(rot) && qFuzzyCompare(l.rotation, 0.0))
-                                   ? 0.0
-                                   : rot + l.rotation;
+        const QTransform before = l.transform();
+        const QPointF qTL = before.inverted().map(b.topLeft());
+        const QPointF rTL = QTransform().rotate(rot).map(qTL);
 
-        if (!qFuzzyCompare(totalScale, 1.0) || !qFuzzyIsNull(totalRot))
-        {
-            QTransform tf;
-            const QPointF center(l.raster.width() / 2.0, l.raster.height() / 2.0);
-            tf.translate(center.x(), center.y());
-            tf.rotate(totalRot);
-            tf.scale(totalScale, totalScale);
-            tf.translate(-center.x(), -center.y());
+        QTransform t;
+        t.translate(newPos.x() - scale * rTL.x(),
+                    newPos.y() - scale * rTL.y());
+        t.rotate(rot);
+        t.scale(scale, scale);
 
-            QImage baked = l.raster.transformed(tf, Qt::SmoothTransformation);
-            if (!l.mask.isNull())
-                l.mask = l.mask.scaled(l.raster.size(), Qt::IgnoreAspectRatio,
-                                       Qt::FastTransformation)
-                             .transformed(tf, Qt::SmoothTransformation);
-            l.raster = baked;
-            l.scale = 1.0f;
-            l.rotation = 0.0f;
-        }
-        else
-        {
-            l.scale = 1.0f;
-            l.rotation = 0.0f;
-        }
-
-        l.position = newPos;
+        l.setTransform(t);
+        const QTransform after = l.transform();
+        composite->children.push_back(std::make_unique<SetTransformCommand>(
+            SetTransformCommand{l.id, idx, before, after, composite->desc}));
     }
     m_document.setLayers(layers);
-    const QByteArray after = m_document.layersSnapshot();
-    m_undoStack.pushStructure({before, after, QStringLiteral("Auto collage")});
+    if (!composite->children.empty())
+        m_undoStack.pushCommand(std::move(composite));
     if (m_canvas)
         m_canvas->markCanvasDirty();
     setStatus(QStringLiteral("Auto collage applied"));
@@ -2862,13 +2960,17 @@ void PaintbrushController::addImageLayer(const QImage &image, const QPointF &pos
     CanvasLayer layer = CanvasLayer::createImage(image, position, name);
     layer.type = type;
 
-    const QByteArray before = m_document.layersSnapshot();
+    InsertLayerCommand cmd;
+    cmd.desc = QStringLiteral("Add %1").arg(name);
     QList<CanvasLayer> layers = m_document.layers();
     layers.append(std::move(layer));
+    cmd.index = layers.size() - 1;
+    cmd.prevCurrentIndex = m_document.currentLayerIndex();
     m_document.setLayers(layers);
-    m_document.setCurrentLayerIndex(layers.size() - 1);
-    const QByteArray after = m_document.layersSnapshot();
-    m_undoStack.pushStructure({before, after, QStringLiteral("Add %1").arg(name)});
+    m_document.setCurrentLayerIndex(cmd.index);
+    cmd.layer = m_document.layerAt(cmd.index) ? *m_document.layerAt(cmd.index)
+                                              : CanvasLayer();
+    m_undoStack.pushInsertLayer(cmd);
 }
 
 void PaintbrushController::addResultLayer(const QImage &image, const QString &name)
@@ -2878,7 +2980,9 @@ void PaintbrushController::addResultLayer(const QImage &image, const QString &na
 
 QImage PaintbrushController::flattenedPreview() const
 {
-    QImage flat = m_document.flattenedImage();
+    /* the AI preview uses the same canonical renderer as the screen and
+     * export, so the model sees exactly what the user sees */
+    QImage flat = DocumentRenderer::render(m_document);
     if (flat.isNull())
         return {};
     /* The AI sees an opaque image: composite the (possibly transparent)
@@ -2965,16 +3069,16 @@ void PaintbrushController::playerSeek(qint64 timeMs)
 
 void PaintbrushController::playerSeekBegin()
 {
-    /* user pressed the seek slider: stop the thumbnail batch from seeking
-     * the player underneath the drag */
+    /* user pressed the seek slider: suspend the thumbnail batch so it does
+     * not queue decodes behind a busy scrub (it never touches the player) */
     m_thumbnails.suspend();
 }
 
 void PaintbrushController::playerSeekEnd()
 {
     /* user released the seek slider. The suspended thumbnail batch is NOT
-     * resumed here: resuming would seek the player immediately and race the
-     * final precise seek issued on release. onMediaTimer() resumes the batch
+     * resumed here: resuming would decode immediately and race the final
+     * precise seek issued on release. onMediaTimer() resumes the batch
      * a moment later, only while the video is actually playing — when paused,
      * generation stays suspended so it cannot disturb the exact frame the
      * user is inspecting. */
@@ -3023,19 +3127,20 @@ qint64 PaintbrushController::thumbnailTimeMs(int index) const
 
 void PaintbrushController::generateThumbnails()
 {
-    vlc_player_t *player = m_intf->p_mainPlayerController->getPlayer();
-    if (!player)
+    /* thumbnails decode through the edit frame source (FrameProvider):
+     * the main playback player is never seeked or snapshotted for batch
+     * work (A8/A11) */
+    const QString mediaKey = currentMediaMRL();
+    if (mediaKey.isEmpty())
     {
         setStatus(QStringLiteral("No media is loaded for thumbnails."));
         return;
     }
-    const QString mediaKey = FrameCaptureService::currentMRL(player);
-    if (mediaKey.isEmpty())
+    const qint64 duration = playerLengthMs();
+    if (duration <= 0)
         return;
-    const qint64 duration = m_intf->p_mainPlayerController->getLength().toMilliseconds();
-    const qint64 anchor = m_intf->p_mainPlayerController->getTime().toMilliseconds();
-    m_thumbnails.startBatch(player, mediaKey, qMax<qint64>(1, duration),
-                            anchor, 24);
+    const qint64 anchor = playerTimeMs();
+    m_thumbnails.startBatch(&m_editSource, mediaKey, duration, anchor, 24);
     emit thumbnailsChanged();
 }
 
@@ -3058,6 +3163,7 @@ void PaintbrushController::clearAiCache()
 {
     m_segmentation.clearCache();
     m_thumbnails.cancel();
+    m_editSource.clearCache();
     setStatus(QStringLiteral("AI caches cleared"));
     emit serviceAvailabilityChanged();
 }
@@ -3066,6 +3172,8 @@ void PaintbrushController::unloadAiModels()
 {
     m_segmentation.shutdown();
     m_tracking.shutdown();
+    m_thumbnails.cancel();
+    m_editSource.shutdown();
     m_vision.cancelAll();
     m_generation.cancelAll();
     m_assistant.cancelAll();
@@ -3084,6 +3192,8 @@ QString PaintbrushController::autosavePath() const
 
 void PaintbrushController::playerStop()
 {
+    /* stop batch work that decodes against the outgoing media */
+    m_thumbnails.cancel();
     m_intf->p_mainPlaylistController->stop();
     emit mediaStateChanged();
 }
@@ -3101,10 +3211,10 @@ void PaintbrushController::onMediaTimer()
         m_thumbnails.resume();
 
     /* Auto-fill the thumbnail timeline: as soon as a video with a known
-     * length is loaded, start generating thumbnails once (the service seeks
-     * the player to each slot, snapshots it, then restores the original
-     * position). This makes the timeline populated instead of empty even if
-     * the user never touches the "Generate thumbnails" button. */
+     * length is loaded, start generating thumbnails once. Generation
+     * decodes through the edit frame source at exact PTS and never
+     * touches the playback player, so it cannot disturb what the user is
+     * watching. */
     if (playerHasVideo())
     {
         const QString mrl = currentMediaMRL();
@@ -3249,3 +3359,4 @@ QString PaintbrushController::diagnosticsText() const
 }
 
 } // namespace paintbrush
+

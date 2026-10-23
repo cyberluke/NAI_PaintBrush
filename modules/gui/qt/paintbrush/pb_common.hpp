@@ -27,6 +27,7 @@
 #include <QVector>
 #include <QPainter>
 #include <QPainterPath>
+#include <QRegion>
 
 #ifdef HAVE_CONFIG_H
 # include "config.h"
@@ -81,7 +82,8 @@ enum LayerType {
     LAYER_IMAGE,        /* imported / cutout image layer       */
     LAYER_TEXT,         /* editable text layer                 */
     LAYER_REFERENCE,    /* media frame reference layer         */
-    LAYER_GENERATED     /* AI generated result layer           */
+    LAYER_GENERATED,    /* AI generated result layer           */
+    LAYER_STICKER       /* extracted/collage sticker asset      */
 };
 
 enum BlendMode {
@@ -119,6 +121,41 @@ QImage applyMaskAsAlpha(const QImage &source, const QImage &mask);
 
 /* Convert a QImage to an RGB888 QImage (3 channels, tightly packed). */
 QImage toRgb888(const QImage &image);
+
+/* ------------------------------------------------------------------ dabs */
+
+/* Parameters of one brush dab (the atomic stamp of the dab pipeline).
+ * Shared by the brush, eraser and spray generators so every tool that
+ * deposits paint goes through the same stamping + commit path. */
+struct DabSpec
+{
+    qreal radius = 1.0;     /* dab radius in the target's coordinate space  */
+    qreal hardness = 1.0;   /* 1.0 = hard edge; < 1.0 = soft radial falloff */
+    qreal opacity = 1.0;    /* scales the color alpha (pressure mapping)    */
+    QColor color = Qt::black;
+    QPainter::CompositionMode mode = QPainter::CompositionMode_SourceOver;
+};
+
+/* Stamp one dab into `target` (drawn at `center`, clipped to the image).
+ * With CompositionMode_Clear the color is ignored (eraser). */
+void stampDab(QImage &target, const QPointF &center, const DabSpec &spec);
+
+/* Convenience overload: opacity/color/mode without building a DabSpec. */
+void stampDab(QImage &target, const QPointF &center, qreal radius,
+              qreal hardness, qreal opacity, const QColor &color,
+              QPainter::CompositionMode mode = QPainter::CompositionMode_SourceOver);
+
+/* ------------------------------------------------------------------ fill */
+
+/* Bounded scanline (span) flood fill. Returns the filled region as a
+ * QRegion. No full-image copy and no w*h visited buffer: visited pixels are
+ * tracked per row as merged [start,end] intervals, so memory is O(spans),
+ * never O(canvas). Pixels outside `selection` (when non-null) act as
+ * barriers. At most `maxPixels` are filled (negative = unbounded). */
+QRegion scanlineFill(const QImage &image, const QPoint &seed, QRgb target,
+                     QRgb fill, int tolerance,
+                     const QPainterPath *selection = nullptr,
+                     qint64 maxPixels = -1);
 
 /* Trace the outer contour of a binary mask into a QPainterPath (Moore
  * neighbor tracing). Used to convert AI masks into editable selections. */

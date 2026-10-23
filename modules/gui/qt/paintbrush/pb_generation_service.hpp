@@ -13,10 +13,13 @@
 #define PB_GENERATION_SERVICE_HPP
 
 #include "pb_common.hpp"
+#include "pb_capability.hpp"
 
 #include <QObject>
 #include <QImage>
 #include <QString>
+#include <QJsonObject>
+#include <QUrl>
 #include <QNetworkAccessManager>
 #include <QList>
 
@@ -30,8 +33,10 @@ namespace paintbrush {
  * Generative fill, Background replace and the optional cartoon treatment
  * of Make sticker.
  *
- * When no provider is configured every action reports an explicit
- * "unavailable" state — the rest of Paintbrush keeps working. */
+ * When no provider is configured the local CPU fallbacks keep the actions
+ * usable, but they are pixel operations, NOT generative: capability()
+ * reports local-heal / local-blur (never remote-generation) and the UI must
+ * present them as such (A3/A4). */
 class GenerationService : public QObject
 {
     Q_OBJECT
@@ -49,15 +54,32 @@ public:
     ~GenerationService() override;
 
     void configure(vlc_object_t *obj);
-    /* Always true: the local inpainting fallback makes the generative
-     * actions usable even without an external image provider. When a
-     * provider IS configured the network path is preferred. */
-    bool isConfigured() const { return true; }
+    /* Truthful usability: true only when a real capability exists (local
+     * heal/blur fallback or a configured provider). This never claims
+     * remote generation — use capability() to know which mode is active. */
+    bool isConfigured() const { return capability().isUsable(); }
     bool hasProvider() const { return !m_baseUrl.isEmpty(); }
     bool isBusy() const { return m_busy; }
     QString baseUrl() const { return m_baseUrl; }
     QString model() const { return m_model; }
     QString unavailableReason() const { return m_unavailableReason; }
+
+    /* Action-aware capability report (A3/A4): local-heal for remove/fill,
+     * local-blur for background replace, remote-generation only when a
+     * provider is configured. Never green "ready" without a provider. */
+    CapabilityReport capability(Action action = ACTION_GENERATIVE_FILL) const;
+    CapabilityReport::Mode capabilityMode(Action action = ACTION_GENERATIVE_FILL) const
+    {
+        return capability(action).mode;
+    }
+
+    /* TLS posture (A7): certificate validation is on unless the operator
+     * explicitly opts into self-signed endpoints. */
+    bool insecureTlsOptIn() const { return m_insecureTls; }
+    TlsPosture tlsPosture() const
+    {
+        return m_insecureTls ? TlsPosture::DevSelfSigned : TlsPosture::Normal;
+    }
 
     void generate(Action action, const QImage &image, const QImage &mask,
                   const QString &prompt, const QString &requestId);
@@ -74,7 +96,14 @@ private slots:
 
 private:
     static QString defaultPrompt(Action action, const QString &userPrompt);
-    static QImage resultFromJson(const QByteArray &json);
+    /* Extract the first data object of an OpenAI-style images response. */
+    static QJsonObject firstDataObject(const QByteArray &json);
+    /* A6: download a provider image URL asynchronously (GET -> bytes ->
+     * QImage::fromData). Never a synchronous QImage::load(url). */
+    void fetchImage(const QUrl &url, const QString &requestId, qint64 startedAt);
+    /* A7: TLS validation gating shared by POST and image GET replies. */
+    void handleSslErrors(QNetworkReply *reply) const;
+    void setBusy(bool busy);
 
     vlc_object_t *m_obj = nullptr;
     QString m_baseUrl;
@@ -83,6 +112,10 @@ private:
     QString m_unavailableReason;
     int m_timeoutMs = 120000;
     bool m_busy = false;
+    bool m_insecureTls = false;
+    /* bumped by cancelAll(); in-flight local workers drop their result when
+     * their captured epoch no longer matches */
+    quint64 m_cancelEpoch = 0;
 
     QNetworkAccessManager m_network;
     QList<QNetworkReply *> m_replies;

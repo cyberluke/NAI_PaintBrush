@@ -41,7 +41,8 @@ QString ExportService::exportImageOptions(PaintbrushDocument *doc,
 {
     if (!doc)
         return QStringLiteral("No document to export.");
-    QImage flat = doc->flattenedImage();
+    /* the canonical renderer: export shows exactly what the screen shows */
+    QImage flat = DocumentRenderer::render(*doc);
     if (flat.isNull())
         return QStringLiteral("The canvas is empty.");
 

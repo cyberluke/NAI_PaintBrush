@@ -5,14 +5,9 @@
  *****************************************************************************/
 
 #include "pb_tracking_service.hpp"
-#include "pb_frame_capture.hpp"
 
 #include <QFileInfo>
-#include <QDebug>
-#include <cerrno>
-
-#include <vlc_player.h>
-#include <vlc_vout.h>
+#include <QTimer>
 
 #ifdef HAVE_SAM3
 # include <sam3.h>
@@ -23,7 +18,6 @@ namespace paintbrush {
 TrackingService::TrackingService(QObject *parent)
     : QObject(parent)
 {
-    connect(&m_stepTimer, &QTimer::timeout, this, &TrackingService::onStepTimeout);
     /* worker-thread signals are delivered queued to this GUI-thread object */
     connect(this, &TrackingService::workerJobDone,
             this, &TrackingService::onWorkerJobDone);
@@ -45,8 +39,12 @@ void TrackingService::configure(vlc_object_t *obj)
     m_device = pbConfigString(obj, "paintbrush-sam-device").trimmed();
     if (m_device.isEmpty())
         m_device = QStringLiteral("auto");
-    pbLogInfo(obj, "tracking", "configured model=%s device=%s",
-              qUtf8Printable(m_modelPath), qUtf8Printable(m_device));
+    m_stepMs = qBound<qint64>(
+        qint64(5), qint64(pbConfigInt(obj, "paintbrush-tracking-step-ms")),
+        qint64(1000));
+    pbLogInfo(obj, "tracking", "configured model=%s device=%s step=%lld ms",
+              qUtf8Printable(m_modelPath), qUtf8Printable(m_device),
+              (long long)m_stepMs);
 
     if (m_modelPath.isEmpty())
     {
@@ -89,7 +87,6 @@ void TrackingService::setStatus(const QString &status)
 void TrackingService::shutdown()
 {
     cancel();
-    resetPlayerInteraction();
     if (!m_running)
         return;
     {
@@ -106,12 +103,15 @@ void TrackingService::shutdown()
     m_model.reset();
     m_loadedModelPath.clear();
 #endif
+    m_provider = nullptr;
 }
 
-void TrackingService::startTrack(vlc_player_t *player, const QImage &startFrame,
+void TrackingService::startTrack(FrameProvider *provider, const QString &mrl,
+                                 const QImage &startFrame,
                                  const QImage &startMask,
                                  const QVector<QPointF> &posPoints,
-                                 int direction, int maxFrames)
+                                 int direction, int maxFrames,
+                                 qint64 seedPtsMs)
 {
     if (m_tracking)
         return;
@@ -120,23 +120,26 @@ void TrackingService::startTrack(vlc_player_t *player, const QImage &startFrame,
         emit errorOccurred(m_unavailableReason);
         return;
     }
-    if (!player || startFrame.isNull() || startMask.isNull())
+    if (!provider || startFrame.isNull() || startMask.isNull())
     {
         emit errorOccurred(QStringLiteral("Tracking requires a selected object on a video frame."));
         return;
     }
 
-    m_player = player;
-    m_startFrame = startFrame;
-    m_startMask = startMask;
-    m_startPoints = posPoints;
-    m_direction = direction;
-    m_total = qBound(1, maxFrames, 200);
-    m_done = 0;
-    m_bothPhase = 0;
-    m_stepSign = 1;
+    /* seed state: everything the run (and its reverse pass) starts from */
+    m_provider = provider;
+    m_seed.frame = startFrame;
+    m_seed.mask = startMask;
+    m_seed.points = posPoints;
+    m_seed.ptsMs = qMax<qint64>(0, seedPtsMs);
+    m_seed.mrl = mrl;
+
+    m_pass.reset(direction, qBound(1, maxFrames, 200), m_seed.ptsMs,
+                 m_stepMs);
+    m_lastPtsMs = m_seed.ptsMs;
+    m_nextFrameIndex = 0;
     m_instanceId = -1;
-    m_lastMask = startMask;
+    m_lastMask = startMask; /* pass-1 frame 0 mask = the seed mask */
     m_cancelPending = false;
 
     /* ensure the worker is running */
@@ -146,15 +149,9 @@ void TrackingService::startTrack(vlc_player_t *player, const QImage &startFrame,
         m_worker = std::thread([this]() { workerLoop(); });
     }
 
-    /* the player must be paused for frame stepping */
-    {
-        PlayerLock lock(m_player);
-        if (vlc_player_CanPause(m_player))
-            vlc_player_Pause(m_player);
-    }
-
-    pbLogInfo(m_obj, "tracking", "start dir=%d max=%d",
-              direction, m_total);
+    pbLogInfo(m_obj, "tracking", "start dir=%d max=%d seedPts=%lld step=%lld ms",
+              direction, m_pass.total(), (long long)m_seed.ptsMs,
+              (long long)m_stepMs);
     beginTracking();
 }
 
@@ -164,25 +161,31 @@ void TrackingService::beginTracking()
     emit trackingStarted();
     setStatus(QStringLiteral("Seeding tracker…"));
 
-    /* register for frame-step status callbacks */
-    if (!m_listener && m_player)
-    {
-        vlc_player_cbs cbs;
-        memset(&cbs, 0, sizeof(cbs));
-        cbs.on_next_frame_status = [](vlc_player_t *, int status, void *data) {
-            QMetaObject::invokeMethod(static_cast<TrackingService *>(data),
-                                      "onFrameStepStatus", Qt::QueuedConnection,
-                                      Q_ARG(int, status));
-        };
-        PlayerLock lock(m_player);
-        m_listener = vlc_player_AddListener(m_player, &cbs, this);
-    }
-
-    /* step 0: add the tracked instance from the click prompts */
+    /* step 0: add the tracked instance from the click prompts on the seed
+     * frame. The reverse pass re-adds the SAME instance from the same
+     * seed (beginReversePass). */
     {
         QMutexLocker lock(&m_mutex);
-        m_queue.push_back({WorkerJob::Type::AddInstance, m_startFrame,
-                           m_startPoints, {}, 0});
+        m_queue.push_back({WorkerJob::Type::AddInstance, m_seed.frame,
+                           m_seed.points, {}, 0, m_seed.ptsMs});
+        m_cond.wakeAll();
+    }
+}
+
+void TrackingService::beginReversePass()
+{
+    /* genuine second pass (A13): re-add the SAM instance with the same
+     * seed mask/points, reset the last mask to the SEED mask and restart
+     * the walk at seedPts as pass-2 frame 0. */
+    m_pass.beginReversePass();
+    m_lastPtsMs = m_seed.ptsMs;
+    m_lastMask = m_seed.mask;
+
+    setStatus(QStringLiteral("Tracking backward…"));
+    {
+        QMutexLocker lock(&m_mutex);
+        m_queue.push_back({WorkerJob::Type::AddInstance, m_seed.frame,
+                           m_seed.points, {}, 0, m_seed.ptsMs});
         m_cond.wakeAll();
     }
 }
@@ -192,99 +195,62 @@ void TrackingService::stepNext()
     if (!m_tracking || m_paused)
         return;
 
-    if (m_done >= m_total)
+    if (m_pass.done() >= m_pass.total())
     {
-        /* both directions: reverse and continue */
-        if (m_direction == TRACK_BOTH && m_bothPhase == 0)
+        if (m_pass.needsReversePass())
         {
-            m_bothPhase = 1;
-            m_done = 0;
-            m_stepSign = -1;
-        }
-        else
-        {
-            finishTrack(true, false, {});
+            beginReversePass();
             return;
         }
-    }
-
-    emit progressChanged(m_done, m_total);
-    setStatus(m_stepSign > 0 ? QStringLiteral("Tracking forward…")
-                             : QStringLiteral("Tracking backward…"));
-
-    requestFrameStep(m_stepSign > 0 ? StepKind::Forward : StepKind::Backward);
-}
-
-void TrackingService::requestFrameStep(StepKind kind)
-{
-    if (!m_player)
-    {
-        finishTrack(false, false, QStringLiteral("Player is gone."));
-        return;
-    }
-    m_stepTimer.start(3000); /* safety timeout per frame step */
-    {
-        PlayerLock lock(m_player);
-        if (kind == StepKind::Forward)
-            vlc_player_NextVideoFrame(m_player);
-        else
-            vlc_player_PreviousVideoFrame(m_player);
-    }
-}
-
-void TrackingService::onFrameStepStatus(int status)
-{
-    if (!m_tracking)
-        return;
-    if (status != 0)
-    {
-        if (status == -EAGAIN)
-        {
-            /* no more frames in this direction */
-            if (m_direction == TRACK_BOTH && m_bothPhase == 0)
-            {
-                m_bothPhase = 1;
-                m_done = 0;
-                m_stepSign = -1;
-                stepNext();
-                return;
-            }
-            finishTrack(true, false, {});
-            return;
-        }
-        finishTrack(false, m_cancelPending,
-                    QStringLiteral("Frame step failed (status %1).").arg(status));
+        finishTrack(true, false, {});
         return;
     }
 
-    m_stepTimer.stop();
-    captureAndPropagate();
-}
+    emit progressChanged(m_pass.done(), m_pass.total());
+    setStatus(m_pass.stepSign() > 0 ? QStringLiteral("Tracking forward…")
+                                    : QStringLiteral("Tracking backward…"));
 
-void TrackingService::captureAndPropagate()
-{
-    if (!m_tracking || !m_player)
-        return;
-
-    /* small delay so the vout has the new frame before snapshotting */
-    QTimer::singleShot(40, this, [this]() {
-        if (!m_tracking)
-            return;
-        const QImage frame = FrameCaptureService::captureCurrentFrame(m_player);
-        if (frame.isNull())
+    /* decode the next exact frame via the edit frame source (A14):
+     * concrete PTS, no player stepping, no vout snapshot races */
+    const qint64 nextPts = m_pass.nextPtsMs(m_lastPtsMs);
+    if (nextPts < 0)
+    {
+        /* walked off the start of the media: reverse if owed, else done */
+        if (m_pass.direction() == TrackingPassState::TRACK_BOTH
+            && m_pass.bothPhase() == 0)
         {
-            finishTrack(false, false,
-                        QStringLiteral("Could not capture the next video frame."));
+            beginReversePass();
             return;
         }
+        finishTrack(true, false, {});
+        return;
+    }
 
+    const DecodedFrame frame =
+        m_provider->request(FrameRef{m_seed.mrl, {}, nextPts});
+    if (!frame.ok())
+    {
+        /* decode failure or PTS outside tolerance: the media ended in
+         * this direction, or the frame could not be verified. Never
+         * propagate "whatever the vout was showing". */
+        if (m_pass.direction() == TrackingPassState::TRACK_BOTH
+            && m_pass.bothPhase() == 0)
+        {
+            beginReversePass();
+            return;
+        }
+        finishTrack(true, false, {});
+        return;
+    }
+
+    {
         QMutexLocker lock(&m_mutex);
         if (m_cancelPending)
             return;
-        m_queue.push_back({WorkerJob::Type::Propagate, frame, {}, {},
-                           m_done + 1});
+        m_queue.push_back({WorkerJob::Type::Propagate, frame.image, {}, {},
+                           m_pass.done() + 1, frame.ptsMs});
         m_cond.wakeAll();
-    });
+    }
 }
 
 void TrackingService::onWorkerInstanceReady(int instanceId)
@@ -298,20 +264,22 @@ void TrackingService::onWorkerInstanceReady(int instanceId)
                     QStringLiteral("Failed to seed the tracker with the selected object."));
         return;
     }
-    /* emit the initial keyframe */
-    emit keyframeReady(0, FrameCaptureService::currentTimeMs(m_player), m_lastMask, 1.0f);
+    /* emit the seed keyframe once (first pass only — the reverse pass
+     * re-uses the seed keyframe already recorded at the same PTS) */
+    if (m_pass.bothPhase() == 0)
+        emit keyframeReady(m_nextFrameIndex++, m_seed.ptsMs, m_lastMask, 1.0f);
     stepNext();
 }
 
 void TrackingService::onWorkerJobDone(const QImage &mask, float confidence,
-                                      int stepIndex)
+                                      int stepIndex, qint64 ptsMs)
 {
     if (!m_tracking)
         return;
     m_lastMask = mask;
-    m_done = stepIndex;
-    emit keyframeReady(m_done, FrameCaptureService::currentTimeMs(m_player),
-                       mask, confidence);
+    m_lastPtsMs = ptsMs; /* mask is keyed by the ACTUAL decoded PTS */
+    m_pass.markDone(stepIndex);
+    emit keyframeReady(m_nextFrameIndex++, ptsMs, mask, confidence);
     stepNext();
 }
 
@@ -323,25 +291,20 @@ void TrackingService::onWorkerError(const QString &error)
     finishTrack(false, false, error);
 }
 
-void TrackingService::onStepTimeout()
-{
-    finishTrack(false, false, QStringLiteral("Timed out waiting for the next video frame."));
-}
-
 void TrackingService::refineCurrentFrame(const QVector<QPointF> &posPoints,
                                          const QVector<QPointF> &negPoints)
 {
     if (!m_tracking || m_instanceId < 0)
         return;
     QMutexLocker lock(&m_mutex);
-    m_queue.push_back({WorkerJob::Type::Refine, {}, posPoints, negPoints, m_done});
+    m_queue.push_back({WorkerJob::Type::Refine, {}, posPoints, negPoints,
+                       m_pass.done(), m_lastPtsMs});
     m_cond.wakeAll();
 }
 
 void TrackingService::cancel()
 {
     m_cancelPending = true;
-    resetPlayerInteraction();
     if (m_tracking)
     {
         m_tracking = false;
@@ -357,7 +320,6 @@ void TrackingService::pause()
     if (!m_tracking || m_paused)
         return;
     m_paused = true;
-    m_stepTimer.stop();
     setStatus(QStringLiteral("Tracking paused"));
 }
 
@@ -374,22 +336,10 @@ void TrackingService::finishTrack(bool complete, bool cancelled,
                                   const QString &error)
 {
     m_tracking = false;
-    m_stepTimer.stop();
-    resetPlayerInteraction();
     if (!m_cancelPending)
         m_cancelPending = cancelled;
+    m_provider = nullptr;
     emit trackFinished(complete, m_cancelPending, error);
-}
-
-void TrackingService::resetPlayerInteraction()
-{
-    if (m_listener && m_player)
-    {
-        PlayerLock lock(m_player);
-        vlc_player_RemoveListener(m_player, m_listener);
-        m_listener = nullptr;
-    }
-    m_player = nullptr;
 }
 
 /* --------------------------------------------------------------- worker */
@@ -535,7 +485,9 @@ void TrackingService::runWorkerJob(const WorkerJob &job)
         {
         case WorkerJob::Type::AddInstance:
         {
-            /* encode the start frame and add the clicked instance */
+            /* encode the seed frame and add the clicked instance. Called
+             * for pass 1 AND for the reverse pass with the identical seed
+             * frame: the hash cache skips the re-encode. */
             const quint64 hash = fnvImageHash(job.frame);
             if (hash != m_encodedHash)
             {
@@ -622,7 +574,7 @@ void TrackingService::runWorkerJob(const WorkerJob &job)
                 bestMask = bestMask.scaled(job.frame.size(), Qt::IgnoreAspectRatio,
                                            Qt::FastTransformation);
 
-            emit workerJobDone(bestMask, bestScore, job.stepIndex);
+            emit workerJobDone(bestMask, bestScore, job.stepIndex, job.ptsMs);
             break;
         }
 

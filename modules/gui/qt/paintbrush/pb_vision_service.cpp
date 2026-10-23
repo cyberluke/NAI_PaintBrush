@@ -18,6 +18,8 @@
 #include <QUrl>
 #include <QSslError>
 #include <QDateTime>
+#include <QCryptographicHash>
+#include <limits>
 
 namespace paintbrush {
 
@@ -40,6 +42,9 @@ void VisionService::configure(vlc_object_t *obj)
     if (m_timeoutMs <= 0)
         m_timeoutMs = 60000;
     m_apiKey = pbApiKey(obj, "PAINTBRUSH_VLM_API_KEY", "paintbrush-vlm-api-key");
+    /* TLS opt-in for trusted local dev endpoints with self-signed
+     * certificates. Default false: certificate validation is enforced. */
+    m_insecure = pbConfigBool(obj, "paintbrush-vlm-insecure");
 
     if (m_baseUrl.isEmpty())
     {
@@ -102,32 +107,45 @@ static QByteArray pngDataUrl(const QImage &image)
     return "data:image/png;base64," + bytes.toBase64();
 }
 
-QByteArray VisionService::buildPayload(const QImage &crop, const QImage &context,
-                                       const QString &question) const
+/* Static system prompt: what the VLM is, what it receives and how it must
+ * answer. It stays the second text part, after the user's question. */
+static const char *systemPromptText()
+{
+    return
+        "You are a helpful creative assistant inside a paint program. "
+        "The user selected an object in a picture or video frame and asks a question about it.\n"
+        "You receive: (1) a crop of the selected object, (2) the full contextual frame.\n"
+        "Answer concisely and honestly. Clearly separate:\n"
+        "- what you can see (visible evidence),\n"
+        "- what you are inferring (likely),\n"
+        "- when you are not sure (uncertainty).\n"
+        "Look for specific identifying details and report them when visible: logos and printed "
+        "text (read letter-by-letter, e.g. an 'M' emblem, brand names), character or clothing "
+        "attributes (hat, color, pattern, accessories), colors, shapes, and materials.\n"
+        "For brand/product questions, only name a specific model/SKU when the visible "
+        "evidence supports it; otherwise describe the category. Do not invent details.\n"
+        "Reply in JSON with exactly three fields: {\"answer\": \"...\", \"evidence\": \"...\", "
+        "\"uncertainty\": \"...\"} where uncertainty is a short phrase like \"low\", "
+        "\"medium\", \"high\" followed by a brief reason. If the user asked a question that "
+        "does not fit this shape, put your full reply in answer and leave evidence empty.";
+}
+
+/* One user turn: the question VERBATIM first, then the static system
+ * prompt, then the crop and context images. */
+QJsonArray VisionService::buildUserContent(const QImage &crop, const QImage &context,
+                                           const QString &question)
 {
     QJsonArray content;
 
-    QJsonObject textPart;
-    textPart[QStringLiteral("type")] = QStringLiteral("text");
-    textPart[QStringLiteral("text")] =
-        QStringLiteral(
-            "You are a helpful creative assistant inside a paint program. "
-            "The user selected an object in a picture or video frame and asks a question about it.\n"
-            "You receive: (1) a crop of the selected object, (2) the full contextual frame.\n"
-            "Answer concisely and honestly. Clearly separate:\n"
-            "- what you can see (visible evidence),\n"
-            "- what you are inferring (likely),\n"
-            "- when you are not sure (uncertainty).\n"
-            "Look for specific identifying details and report them when visible: logos and printed "
-            "text (read letter-by-letter, e.g. an 'M' emblem, brand names), character or clothing "
-            "attributes (hat, color, pattern, accessories), colors, shapes, and materials.\n"
-            "For brand/product questions, only name a specific model/SKU when the visible "
-            "evidence supports it; otherwise describe the category. Do not invent details.\n"
-            "Reply in JSON with exactly three fields: {\"answer\": \"...\", \"evidence\": \"...\", "
-            "\"uncertainty\": \"...\"} where uncertainty is a short phrase like \"low\", "
-            "\"medium\", \"high\" followed by a brief reason. If the user asked a question that "
-            "does not fit this shape, put your full reply in answer and leave evidence empty.");
-    content.append(textPart);
+    QJsonObject questionPart;
+    questionPart[QStringLiteral("type")] = QStringLiteral("text");
+    questionPart[QStringLiteral("text")] = question; /* verbatim, first part */
+    content.append(questionPart);
+
+    QJsonObject promptPart;
+    promptPart[QStringLiteral("type")] = QStringLiteral("text");
+    promptPart[QStringLiteral("text")] = QString::fromUtf8(systemPromptText());
+    content.append(promptPart);
 
     if (!crop.isNull())
     {
@@ -150,12 +168,88 @@ QByteArray VisionService::buildPayload(const QImage &crop, const QImage &context
         content.append(imgPart);
     }
 
-    QJsonObject userMsg;
-    userMsg[QStringLiteral("role")] = QStringLiteral("user");
-    userMsg[QStringLiteral("content")] = content;
+    return content;
+}
 
+/* Append one message to a session, dropping the oldest turn pair when the
+ * bounded history is full (a lone survivor is dropped on its own). */
+void VisionService::appendMessage(VisionSession &session, const QString &role,
+                                  const QJsonArray &content)
+{
+    VisionMessage message;
+    message.role = role;
+    message.content = content;
+    session.messages.append(message);
+
+    while (session.messages.size() > VisionSession::maxMessages)
+    {
+        session.messages.removeFirst();
+        if (session.messages.size() > VisionSession::maxMessages)
+            session.messages.removeFirst();
+    }
+}
+
+/* Stable session key for callers that pass no conversation id: content hash
+ * of crop + context + question. */
+QString VisionService::makeSessionId(const QImage &crop, const QImage &context,
+                                     const QString &question)
+{
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    hash.addData(QByteArrayLiteral("pb-vision-session"));
+    hash.addData(question.toUtf8());
+    if (!crop.isNull())
+    {
+        hash.addData(QByteArrayLiteral("crop"));
+        hash.addData(QByteArray::number(crop.width()));
+        hash.addData(QByteArray::number(crop.height()));
+        hash.addData(QByteArray(
+            reinterpret_cast<const char *>(crop.constBits()),
+            qMin<qint64>(crop.sizeInBytes(), 1 << 16)));
+    }
+    if (!context.isNull())
+    {
+        hash.addData(QByteArrayLiteral("context"));
+        hash.addData(QByteArray::number(context.width()));
+        hash.addData(QByteArray::number(context.height()));
+        hash.addData(QByteArray(
+            reinterpret_cast<const char *>(context.constBits()),
+            qMin<qint64>(context.sizeInBytes(), 1 << 16)));
+    }
+    return QString::fromLatin1(hash.result().toHex());
+}
+
+/* Assemble the payload for one request. When sessionId names an existing
+ * session, the messages array carries the bounded history (including the
+ * turn already appended by ask()); otherwise a single-shot user message is
+ * built. */
+QByteArray VisionService::buildPayload(const QImage &crop, const QImage &context,
+                                       const QString &question,
+                                       const QString &sessionId) const
+{
     QJsonArray messages;
-    messages.append(userMsg);
+
+    if (!sessionId.isEmpty())
+    {
+        const auto it = m_sessions.constFind(sessionId);
+        if (it != m_sessions.constEnd())
+        {
+            for (const VisionMessage &message : it->messages)
+            {
+                QJsonObject msg;
+                msg[QStringLiteral("role")] = message.role;
+                msg[QStringLiteral("content")] = message.content;
+                messages.append(msg);
+            }
+        }
+    }
+
+    if (messages.isEmpty())
+    {
+        QJsonObject userMsg;
+        userMsg[QStringLiteral("role")] = QStringLiteral("user");
+        userMsg[QStringLiteral("content")] = buildUserContent(crop, context, question);
+        messages.append(userMsg);
+    }
 
     QJsonObject payload;
     payload[QStringLiteral("model")] = m_model.isEmpty()
@@ -222,6 +316,38 @@ void VisionService::ask(const QImage &objectCrop, const QImage &contextFrame,
         return;
     }
 
+    /* conversationId is the session key: a follow-up reusing it appends a
+     * new turn to the same conversation instead of a fresh single shot. */
+    QString sessionId = conversationId;
+    if (sessionId.isEmpty())
+        sessionId = makeSessionId(objectCrop, contextFrame, question);
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    VisionSession &session = m_sessions[sessionId];
+    if (session.id.isEmpty())
+        session.id = sessionId;
+    session.lastUsedMs = now;
+    appendMessage(session, QStringLiteral("user"),
+                  buildUserContent(objectCrop, contextFrame, question));
+
+    /* Bound the session store: evict the least recently used session. */
+    while (m_sessions.size() > maxSessions)
+    {
+        QString victim;
+        qint64 oldest = std::numeric_limits<qint64>::max();
+        for (auto it = m_sessions.constBegin(); it != m_sessions.constEnd(); ++it)
+        {
+            if (it.value().lastUsedMs < oldest)
+            {
+                oldest = it.value().lastUsedMs;
+                victim = it.key();
+            }
+        }
+        if (victim.isEmpty())
+            break;
+        m_sessions.remove(victim);
+    }
+
     QUrl url(m_baseUrl);
     QString path = url.path();
     if (!path.endsWith(QStringLiteral("/chat/completions")))
@@ -240,17 +366,19 @@ void VisionService::ask(const QImage &objectCrop, const QImage &contextFrame,
 
     QNetworkReply *reply = m_network.post(request, buildPayload(objectCrop,
                                                                 contextFrame,
-                                                                question));
-    reply->setProperty("pbConversationId", conversationId);
+                                                                question,
+                                                                sessionId));
+    reply->setProperty("pbConversationId", sessionId);
     reply->setProperty("pbStartedAt",
                        QDateTime::currentMSecsSinceEpoch());
     m_replies.append(reply);
 
-    /* local endpoints often use self-signed certificates; log instead of
-     * failing hard so local providers work out of the box */
-    connect(reply, &QNetworkReply::sslErrors, reply, [reply](const QList<QSslError> &) {
-        reply->ignoreSslErrors();
-    });
+    /* TLS is validated by default. paintbrush-vlm-insecure explicitly opts
+     * into ignoring certificate errors for trusted local dev endpoints. */
+    connect(reply, &QNetworkReply::sslErrors, this,
+            [this, reply](const QList<QSslError> &errors) {
+                onSslErrors(reply, errors);
+            });
 
     if (!m_busy)
     {
@@ -258,6 +386,26 @@ void VisionService::ask(const QImage &objectCrop, const QImage &contextFrame,
         emit busyChanged(true);
     }
     connect(reply, &QNetworkReply::finished, this, &VisionService::onReplyFinished);
+}
+
+void VisionService::onSslErrors(QNetworkReply *reply, const QList<QSslError> &errors)
+{
+    if (m_insecure)
+    {
+        /* Explicit opt-in (paintbrush-vlm-insecure): allow trusted local
+         * development endpoints with self-signed certificates. */
+        reply->ignoreSslErrors();
+        return;
+    }
+
+    /* Default: a certificate validation failure is a real error. Record why
+     * and abort; onReplyFinished() reports it truthfully. */
+    QStringList details;
+    details.reserve(errors.size());
+    for (const QSslError &error : errors)
+        details << error.errorString();
+    reply->setProperty("pbSslFailure", details.join(QStringLiteral("; ")));
+    reply->abort();
 }
 
 void VisionService::onReplyFinished()
@@ -271,18 +419,37 @@ void VisionService::onReplyFinished()
     const qint64 elapsed = startedAt > 0
         ? QDateTime::currentMSecsSinceEpoch() - startedAt : 0;
 
-    const QByteArray data = reply->readAll();
     const QNetworkReply::NetworkError error = reply->error();
+    const QString sslDetail = reply->property("pbSslFailure").toString();
+
+    /* After an SSL abort or a refused connection the reply device is
+     * closed; only read the body when it can still deliver data. */
+    QByteArray data;
+    if ((error == QNetworkReply::NoError || sslDetail.isEmpty())
+        && reply->isOpen())
+        data = reply->readAll();
 
     if (error != QNetworkReply::NoError)
     {
-        QString detail = QString::fromUtf8(data).left(300);
-        if (detail.isEmpty())
-            detail = reply->errorString();
-        pbLogRequest(m_obj, "vision", conversationId, elapsed, false, detail);
-        emit errorOccurred(conversationId,
-                           QStringLiteral("Ask about this failed: vision endpoint did not respond (%1). %2")
-                               .arg(int(error)).arg(detail));
+        QString message;
+        if (!sslDetail.isEmpty())
+        {
+            message = QStringLiteral(
+                          "Ask about this failed: TLS certificate validation failed (%1). "
+                          "Enable paintbrush-vlm-insecure only for trusted local development "
+                          "endpoints.")
+                          .arg(sslDetail);
+        }
+        else
+        {
+            QString detail = QString::fromUtf8(data).left(300);
+            if (detail.isEmpty())
+                detail = reply->errorString();
+            message = QStringLiteral("Ask about this failed: vision endpoint did not respond (%1). %2")
+                          .arg(int(error)).arg(detail);
+        }
+        pbLogRequest(m_obj, "vision", conversationId, elapsed, false, message);
+        emit errorOccurred(conversationId, message);
     }
     else
     {
@@ -300,6 +467,23 @@ void VisionService::onReplyFinished()
             pbLogRequest(m_obj, "vision", conversationId, elapsed, true);
             QString answer, evidence, uncertainty;
             parseStructured(content, &answer, &evidence, &uncertainty);
+
+            /* Store the assistant turn so a follow-up on the same session
+             * carries the real conversation (user + assistant). */
+            if (!conversationId.isEmpty())
+            {
+                auto it = m_sessions.find(conversationId);
+                if (it != m_sessions.end())
+                {
+                    QJsonArray parts;
+                    QJsonObject textPart;
+                    textPart[QStringLiteral("type")] = QStringLiteral("text");
+                    textPart[QStringLiteral("text")] = content;
+                    parts.append(textPart);
+                    appendMessage(it.value(), QStringLiteral("assistant"), parts);
+                    it.value().lastUsedMs = QDateTime::currentMSecsSinceEpoch();
+                }
+            }
             emit responseReady(conversationId, answer, evidence, uncertainty,
                                content);
         }
@@ -311,6 +495,12 @@ void VisionService::onReplyFinished()
         m_busy = false;
         emit busyChanged(false);
     }
+}
+
+void VisionService::clearSession(const QString &sessionId)
+{
+    if (!sessionId.isEmpty())
+        m_sessions.remove(sessionId);
 }
 
 void VisionService::cancelAll()

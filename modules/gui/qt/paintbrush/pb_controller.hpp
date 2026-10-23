@@ -14,7 +14,9 @@
 
 #include "pb_common.hpp"
 #include "pb_document.hpp"
+#include "pb_layer_model.hpp"
 #include "pb_history.hpp"
+#include "pb_sticker.hpp"
 #include "pb_segmentation_service.hpp"
 #include "pb_tracking_service.hpp"
 #include "pb_vision_service.hpp"
@@ -24,6 +26,7 @@
 #include "pb_project_store.hpp"
 #include "pb_thumbnail_service.hpp"
 #include "pb_lookup_service.hpp"
+#include "pb_frame_capture.hpp"
 
 #include <QObject>
 #include <QImage>
@@ -53,6 +56,13 @@ class PaintbrushController : public QObject
     Q_OBJECT
 
     Q_PROPERTY(PaintbrushDocument *document READ document CONSTANT FINAL)
+    Q_PROPERTY(PaintbrushLayerModel *layerModel READ layerModel CONSTANT FINAL)
+    /* Capability-honest status strings (S5/A3/A4): derived from the
+     * services' CapabilityReport / configured state — never a hardcoded
+     * "ready". Used by the diagnostics surface in the UI. */
+    Q_PROPERTY(QString generationStatusText READ generationStatusText NOTIFY serviceAvailabilityChanged FINAL)
+    Q_PROPERTY(QString visionStatusText READ visionStatusText NOTIFY serviceAvailabilityChanged FINAL)
+    Q_PROPERTY(QString segmentationStatusText READ segmentationStatusText NOTIFY serviceAvailabilityChanged FINAL)
     Q_PROPERTY(bool paintbrushEnabled READ paintbrushEnabled CONSTANT FINAL)
     Q_PROPERTY(bool welcomeVisible READ welcomeVisible NOTIFY welcomeChanged FINAL)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY canUndoChanged FINAL)
@@ -85,6 +95,10 @@ class PaintbrushController : public QObject
     Q_PROPERTY(QString trackingStatus READ trackingStatus NOTIFY trackingStateChanged FINAL)
     Q_PROPERTY(QVariantList trackList READ trackList NOTIFY trackingStateChanged FINAL)
     Q_PROPERTY(bool trackingPaused READ trackingPaused NOTIFY trackingStateChanged FINAL)
+    /* The tracked object currently selected for sticker editing (A15). The
+     * media drawer's sticker editor binds to this instead of a hardcoded 0.
+     * -1 = no track selected (no tracks exist). */
+    Q_PROPERTY(int selectedTrackId READ selectedTrackId WRITE setSelectedTrackId NOTIFY selectedTrackChanged FINAL)
 
     Q_PROPERTY(bool visionBusy READ visionBusy NOTIFY visionStateChanged FINAL)
     Q_PROPERTY(QString visionAnswer READ visionAnswer NOTIFY visionStateChanged FINAL)
@@ -120,6 +134,7 @@ public:
 
     qt_intf_t *intf() const { return m_intf; }
     PaintbrushDocument *document() { return &m_document; }
+    PaintbrushLayerModel *layerModel() const { return m_layerModel; }
     bool paintbrushEnabled() const;
     bool welcomeVisible() const { return m_welcomeVisible; }
     QString projectName() const { return m_projectName; }
@@ -166,6 +181,8 @@ public:
     Q_INVOKABLE void moveLayer(int index, int delta);
     Q_INVOKABLE void setLayerVisible(int index, bool visible);
     Q_INVOKABLE void setCurrentLayer(int index);
+    /* Layer opacity (0..1), one undoable typed command per change. */
+    Q_INVOKABLE void setLayerOpacity(int index, double opacity);
     /* Image-layer transforms (scale/rotation/pivot at content center),
      * one undoable operation each, persisted with the project. */
     Q_INVOKABLE void transformLayer(int index, double scale, double rotation);
@@ -198,6 +215,11 @@ public:
     Q_INVOKABLE void seekToTrackKeyframe(int trackId, int keyframeIndex);
     bool trackingPaused() const;
     QVariantList trackList() const;
+    /* Real track selection for the sticker editor. setSelectedTrackId
+     * clamps to an existing track id (-1 when no tracks exist); the drawer
+     * binds stickerEditor.trackId to this property. */
+    int selectedTrackId() const { return m_selectedTrackId; }
+    Q_INVOKABLE void setSelectedTrackId(int trackId);
     /* Export a tracked object as a transparent animated sticker: seeks the
      * player to each keyframe, applies the keyframe mask, trims to content
      * and writes a transparent PNG sequence into `dir`. Returns a status
@@ -274,6 +296,14 @@ public:
     QString visionUnavailableReason() const { return m_vision.unavailableReason(); }
     bool generationConfigured() const { return m_generation.isConfigured(); }
     QString generationUnavailableReason() const { return m_generation.unavailableReason(); }
+    /* Capability-honest status text: generation reports local-heal /
+     * local-blur / remote-generation(model) / unavailable(reason) from its
+     * CapabilityReport; vision reports Ready(model) / Unconfigured; SAM
+     * reports Ready / the service's own reason (MissingModel, BuildNoSam3,
+     * LoadError, ...). */
+    QString generationStatusText() const;
+    QString visionStatusText() const;
+    QString segmentationStatusText() const;
     bool trackingAvailable() const { return m_tracking.isConfigured(); }
     QString trackingUnavailableReason() const { return m_tracking.unavailableReason(); }
     bool companionAvailable() const { return m_companion.mode() != CompanionService::MODE_OFF; }
@@ -355,6 +385,7 @@ signals:
     void lookupChanged();
     void assistantMessageAppended(const QString &role, const QString &text);
     void welcomeChanged();
+    void selectedTrackChanged();
 
 private slots:
     void onCanvasObjectClick(QPointF canvasPos, bool positive, QPointF itemPos);
@@ -385,6 +416,26 @@ private:
     void addImageLayer(const QImage &image, const QPointF &position,
                        const QString &name, int type);
     void addResultLayer(const QImage &image, const QString &name);
+    /* Insert a LAYER_STICKER asset (cutout pixels + FrameRef provenance +
+     * seed mask in metadata) as a new layer into the EXISTING document via
+     * InsertLayerCommand — undoable, transformable, persisted. `raster` is
+     * the already-trimmed sticker pixels; `position` is its canvas
+     * top-left. */
+    void insertStickerLayer(const QImage &raster, const QPointF &position,
+                            const QString &name, const QString &sourceMRL,
+                            const QString &sourceTitle, qint64 sourceTimeMs,
+                            const QImage &seedMask);
+    /* Real source pixels for a track keyframe (A16): bounded LRU cache
+     * first, then ONE verified seek+capture through the existing
+     * FrameCaptureService bridge. No UI-thread sleep-polling (A17); the
+     * frame is accepted only when its PTS matches the keyframe time. A full
+     * offline decode pipeline (EditDecodeSource / FrameProvider) lands with
+     * Stream 3. */
+    QImage stickerFrameForKeyframe(int trackId, int frameIndex,
+                                   bool *playerTouched = nullptr) const;
+    void cacheStickerFrame(int trackId, int frameIndex, qint64 timeMs,
+                           const QImage &frame) const;
+    void sanitizeSelectedTrack();
     void updateObjectSelection();
     void appendAssistantMessage(const QString &role, const QString &text);
     void pushRecentProject(const QString &path);
@@ -395,6 +446,13 @@ private:
     QImage currentAiSource() const;
     QImage pristineSourceFrame() const;
     QVector<QPointF> positivePointsForTracking() const;
+    /* Exact-frame decode helpers (EditDecodeSource): all edit-pipeline
+     * frame acquisition goes through these, never the playback player. */
+    DecodedFrame requestFrame(const QString &mrl, qint64 ptsMs) const;
+    /* Decode the frame a track keyframe was propagated on (source MRL
+     * from the track, PTS from the keyframe) with PTS verification. */
+    QImage decodeKeyframeFrame(const ObjectTrack &track,
+                               const TrackKeyframe &kf) const;
     void startAutosave();
     /* Total bytes held by tracked-object masks and a bounded-eviction pass
      * used while a track grows (memory hardening). Returns bytes after
@@ -404,6 +462,7 @@ private:
 
     qt_intf_t *m_intf = nullptr;
     PaintbrushDocument m_document;
+    PaintbrushLayerModel *m_layerModel = nullptr;
     UndoStack m_undoStack;
     PaintbrushCanvasItem *m_canvas = nullptr;
 
@@ -416,6 +475,10 @@ private:
     ProjectStore m_projectStore;
     ThumbnailService m_thumbnails;
     LookupService m_lookup;
+    /* Dedicated exact-frame decode source (EditDecodeSource). The main
+     * playback player is the PlaybackSession (viewing only); every exact-
+     * frame consumer decodes through this FrameProvider. */
+    EditFrameSource m_editSource;
 
     QString m_statusMessage;
     QString m_projectName;
@@ -435,6 +498,10 @@ private:
 
     QVector<ObjectTrack> m_pendingTrack;
     int m_trackIdCounter = 1;
+    /* real track selection for the sticker editor (A15); -1 = none */
+    int m_selectedTrackId = -1;
+    /* real source pixels for sticker previews/exports (A16), LRU-bounded */
+    mutable StickerFrameCache m_stickerFrames;
 
     /* object selection click session */
     QVector<QPointF> m_posPoints;

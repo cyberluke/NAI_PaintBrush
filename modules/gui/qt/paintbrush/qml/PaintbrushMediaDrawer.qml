@@ -231,7 +231,10 @@ Item {
                         }
                         MouseArea {
                             anchors.fill: parent
-                            onClicked: PaintbrushCtx.seekToTrackKeyframe(modelData.id, 0)
+                            onClicked: {
+                                PaintbrushCtx.setSelectedTrackId(modelData.id)
+                                PaintbrushCtx.seekToTrackKeyframe(modelData.id, 0)
+                            }
                         }
                     }
                 }
@@ -241,9 +244,11 @@ Item {
                     description: qsTr("Make animated sticker from a track")
                     visible: PaintbrushCtx.document.trackCount > 0
                     onClicked: {
-                        stickerEditor.trackId = 0
-                        stickerEditor.startFrame = 0
-                        stickerEditor.endFrame = Math.max(0, PaintbrushCtx.stickerEditorKeyframeCount(0) - 1)
+                        /* A15: the sticker editor opens on the REAL selected
+                         * track (chosen in the drawer lane or the editor's
+                         * track picker), never a hardcoded track 0. */
+                        const trackId = PaintbrushCtx.selectedTrackId
+                        stickerEditor.selectTrack(trackId)
                         stickerEditor.open()
                     }
                 }
@@ -373,11 +378,33 @@ Item {
                 previewFrame = (previewFrame + 1 <= endFrame) ? previewFrame + 1 : startFrame
         }
 
+        /* A15: switch the editor to `trackIdx` — a real selected track,
+         * synced into the controller's SelectedTrack state and back into
+         * this dialog (trim range, preview frame, effect controls). */
+        function selectTrack(trackIdx) {
+            if (trackIdx < 0 || frameCountOf(trackIdx) <= 0)
+                return
+            PaintbrushCtx.setSelectedTrackId(trackIdx)
+            trackId = trackIdx
+            startFrame = 0
+            endFrame = Math.max(0, frameCountOf(trackIdx) - 1)
+            previewFrame = 0
+            effectCombo.currentIndex = PaintbrushCtx.trackEffectType(trackIdx)
+            effectIntensitySpin.value = PaintbrushCtx.trackEffectIntensity(trackIdx)
+            effectColorField.text = PaintbrushCtx.trackEffectColor(trackIdx)
+        }
+
+        function frameCountOf(id) { return PaintbrushCtx.stickerEditorKeyframeCount(id) }
+
         onOpened: {
-            previewFrame = startFrame
-            effectCombo.currentIndex = PaintbrushCtx.trackEffectType(trackId)
-            effectIntensitySpin.value = PaintbrushCtx.trackEffectIntensity(trackId)
-            effectColorField.text = PaintbrushCtx.trackEffectColor(trackId)
+            /* bind to the controller's SelectedTrack (never hardcoded 0) */
+            selectTrack(PaintbrushCtx.selectedTrackId)
+            for (let i = 0; i < trackCombo.count; ++i) {
+                if (trackCombo.model[i].id === PaintbrushCtx.selectedTrackId) {
+                    trackCombo.currentIndex = i
+                    break
+                }
+            }
             previewTimer.start()
         }
         onClosed: previewTimer.stop()
@@ -386,6 +413,26 @@ Item {
             anchors.fill: parent
             anchors.margins: VLCStyle.margin_normal
             spacing: VLCStyle.margin_small
+
+            /* real track selection (A15): the user picks WHICH tracked
+             * object becomes a sticker — bound to the controller's
+             * SelectedTrack state, never a hardcoded track 0. */
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: VLCStyle.margin_xsmall
+                Widgets.LabelExt { text: qsTr("Track"); color: theme.fg.secondary }
+                Widgets.ComboBoxExt {
+                    id: trackCombo
+                    Layout.fillWidth: true
+                    model: PaintbrushCtx.trackList
+                    textRole: "label"
+                    valueRole: "id"
+                    onActivated: {
+                        if (stickerEditor.opened)
+                            stickerEditor.selectTrack(trackCombo.currentValue)
+                    }
+                }
+            }
 
             /* preview loop */
             Rectangle {

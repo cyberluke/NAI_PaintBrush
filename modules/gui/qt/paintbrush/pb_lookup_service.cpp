@@ -32,7 +32,10 @@ void LookupService::configure(vlc_object_t *obj)
     /* Reuse the assistant gateway: it is the configured chat endpoint and
      * (through the SSEProxy vision sidecar) accepts image parts, which is
      * exactly what product identification needs. A dedicated lookup vendor
-     * can still be wired here later without touching the editor. */
+     * can still be wired here later without touching the editor.
+     *
+     * A42: this remains a CANDIDATE-generation prompt — no catalog
+     * retrieval, no source URLs. Results carry evidenceBacked=false. */
     m_baseUrl = pbConfigString(obj, "paintbrush-assistant-base-url").trimmed();
     m_model = pbConfigString(obj, "paintbrush-assistant-model").trimmed();
     m_apiKey = pbApiKey(obj, "PAINTBRUSH_ASSISTANT_API_KEY",
@@ -40,6 +43,10 @@ void LookupService::configure(vlc_object_t *obj)
     m_timeoutMs = pbConfigInt(obj, "paintbrush-assistant-timeout") * 1000;
     if (m_timeoutMs <= 0)
         m_timeoutMs = 120000;
+    /* A7: TLS validation stays ON unless the operator explicitly opts into
+     * self-signed local endpoints (per-service or shared dev flag). */
+    m_insecureTls = pbConfigBool(obj, "paintbrush-lookup-insecure")
+                 || pbConfigBool(obj, "paintbrush-dev-insecure");
 
     if (m_baseUrl.isEmpty())
     {
@@ -52,7 +59,7 @@ void LookupService::configure(vlc_object_t *obj)
     }
 
     m_configured = true;
-    m_providerName = QStringLiteral("assistant-gateway");
+    m_providerName = QStringLiteral("assistant-gateway (candidate prompt, not evidence-backed)");
     emit availabilityChanged(true, {});
 }
 
@@ -181,13 +188,68 @@ bool LookupService::lookup(const QImage &objectCrop, const QString &vlmDescripti
     reply->setProperty("pbLookupRequestId", requestId);
     m_replies.append(reply);
 
-    connect(reply, &QNetworkReply::sslErrors, reply, [reply](const QList<QSslError> &) {
-        reply->ignoreSslErrors();
-    });
+    /* A7: no more unconditional ignoreSslErrors(). Certificate validation
+     * is on by default; only the explicit paintbrush-lookup-insecure /
+     * paintbrush-dev-insecure opt-in bypasses it for self-signed local
+     * endpoints. */
+    handleSslErrors(reply);
     connect(reply, &QNetworkReply::finished, this, [this, requestId]() {
         onReplyFinished(requestId);
     });
     return true;
+}
+
+QVariantList LookupService::matchesFromContent(const QString &content)
+{
+    QVariantList matches;
+    if (content.isEmpty())
+        return matches;
+
+    /* try to extract the JSON object the prompt asked for */
+    const int start = content.indexOf('{');
+    const int end = content.lastIndexOf('}');
+    if (start >= 0 && end > start)
+    {
+        const QJsonDocument objDoc = QJsonDocument::fromJson(
+            content.mid(start, end - start + 1).toUtf8());
+        if (objDoc.isObject())
+        {
+            const QJsonObject obj = objDoc.object();
+            QVariantMap match;
+            match[QStringLiteral("title")] = obj[QStringLiteral("title")].toString();
+            match[QStringLiteral("description")] =
+                obj[QStringLiteral("description")].toString();
+            match[QStringLiteral("confidence")] =
+                obj[QStringLiteral("confidence")].toDouble(0.0);
+            match[QStringLiteral("evidence")] =
+                obj[QStringLiteral("evidence")].toString();
+            match[QStringLiteral("metadata")] =
+                obj[QStringLiteral("metadata")].toObject().toVariantMap();
+            /* A42 honesty: no retrieval layer, so never present fabricated
+             * or empty sources as real ones. */
+            match[QStringLiteral("sourceUrl")] = QString();
+            match[QStringLiteral("imageUrl")] = QString();
+            match[QStringLiteral("evidenceBacked")] = false;
+            match[QStringLiteral("confidenceIsEstimate")] = true;
+            if (!match[QStringLiteral("title")].toString().isEmpty())
+                matches.append(match);
+        }
+    }
+    if (matches.isEmpty())
+    {
+        /* model did not follow the JSON shape: surface the answer as
+         * a single plain match so the user still gets the result */
+        QVariantMap match;
+        match[QStringLiteral("title")] = content.trimmed().left(120);
+        match[QStringLiteral("description")] = content.trimmed();
+        match[QStringLiteral("confidence")] = 0.0;
+        match[QStringLiteral("sourceUrl")] = QString();
+        match[QStringLiteral("imageUrl")] = QString();
+        match[QStringLiteral("evidenceBacked")] = false;
+        match[QStringLiteral("confidenceIsEstimate")] = true;
+        matches.append(match);
+    }
+    return matches;
 }
 
 void LookupService::onReplyFinished(int requestId)
@@ -205,8 +267,27 @@ void LookupService::onReplyFinished(int requestId)
         QString detail = QString::fromUtf8(data).left(300);
         if (detail.isEmpty())
             detail = reply->errorString();
-        emit errorOccurred(QStringLiteral("Object lookup failed: the chat endpoint did not respond (%1). %2")
-                               .arg(int(error)).arg(detail));
+
+        /* A7: TLS validation failures are surfaced truthfully instead of
+         * being silently ignored. (Qt5/Qt6-safe: the failure detail is
+         * recorded by the sslErrors handler, never read back from a
+         * getter that only Qt5 had.) */
+        const QString sslDetail = reply->property("pbSslDetail").toString();
+        const bool tlsFailure = !sslDetail.isEmpty() ||
+                                error == QNetworkReply::SslHandshakeFailedError;
+
+        if (tlsFailure)
+        {
+            emit errorOccurred(QStringLiteral(
+                "Object lookup failed: TLS certificate validation failed. %1 Enable "
+                "the paintbrush-dev-insecure option only for trusted self-signed "
+                "local endpoints.").arg(sslDetail.isEmpty() ? detail : sslDetail));
+        }
+        else
+        {
+            emit errorOccurred(QStringLiteral("Object lookup failed: the chat endpoint did not respond (%1). %2")
+                                   .arg(int(error)).arg(detail));
+        }
     }
     else
     {
@@ -224,44 +305,9 @@ void LookupService::onReplyFinished(int requestId)
                 content = choice[QStringLiteral("text")].toString();
         }
 
-        QVariantList matches;
-        if (!content.isEmpty())
-        {
-            /* try to extract the JSON object the prompt asked for */
-            const int start = content.indexOf('{');
-            const int end = content.lastIndexOf('}');
-            if (start >= 0 && end > start)
-            {
-                const QJsonDocument objDoc = QJsonDocument::fromJson(
-                    content.mid(start, end - start + 1).toUtf8());
-                if (objDoc.isObject())
-                {
-                    const QJsonObject obj = objDoc.object();
-                    QVariantMap match;
-                    match[QStringLiteral("title")] = obj[QStringLiteral("title")].toString();
-                    match[QStringLiteral("description")] =
-                        obj[QStringLiteral("description")].toString();
-                    match[QStringLiteral("confidence")] =
-                        obj[QStringLiteral("confidence")].toDouble(0.0);
-                    match[QStringLiteral("evidence")] =
-                        obj[QStringLiteral("evidence")].toString();
-                    match[QStringLiteral("metadata")] =
-                        obj[QStringLiteral("metadata")].toObject().toVariantMap();
-                    if (!match[QStringLiteral("title")].toString().isEmpty())
-                        matches.append(match);
-                }
-            }
-            if (matches.isEmpty())
-            {
-                /* model did not follow the JSON shape: surface the answer as
-                 * a single plain match so the user still gets the result */
-                QVariantMap match;
-                match[QStringLiteral("title")] = content.trimmed().left(120);
-                match[QStringLiteral("description")] = content.trimmed();
-                match[QStringLiteral("confidence")] = 0.0;
-                matches.append(match);
-            }
-        }
+        /* A42: candidate matches only — every map is marked
+         * evidenceBacked=false with empty sourceUrl/imageUrl. */
+        const QVariantList matches = matchesFromContent(content);
         if (matches.isEmpty())
         {
             emit errorOccurred(QStringLiteral("Object lookup returned no identification."));
@@ -279,6 +325,22 @@ void LookupService::onReplyFinished(int requestId)
 QVariantList LookupService::matches() const
 {
     return m_matches;
+}
+
+void LookupService::handleSslErrors(QNetworkReply *reply) const
+{
+    const bool insecure = m_insecureTls;
+    /* Always record the failure detail so errors stay truthful. */
+    connect(reply, &QNetworkReply::sslErrors, reply,
+            [reply, insecure](const QList<QSslError> &errors) {
+        reply->setProperty("pbSslDetail", sslErrorDetail(errors));
+        /* A7: bypass certificate validation ONLY with the explicit
+         * paintbrush-lookup-insecure / paintbrush-dev-insecure opt-in.
+         * Default: Qt aborts the request and onReplyFinished surfaces a
+         * truthful TLS error. */
+        if (insecure)
+            reply->ignoreSslErrors();
+    });
 }
 
 } // namespace paintbrush
