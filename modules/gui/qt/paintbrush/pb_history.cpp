@@ -306,12 +306,13 @@ void SetRoleCommand::revert(PaintbrushDocument &doc)
  * matching treatment (spec §57). */
 static void applyTextState(PaintbrushDocument &doc, int layerId,
                            const QString &text, const art::TextTreatment &t,
-                           const QImage &raster)
+                           const QImage &raster, const QPointF &position)
 {
     if (CanvasLayer *l = doc.layerById(layerId))
     {
         l->text = text;
         l->raster = raster;
+        l->position = position;
         l->metadata[QStringLiteral("textTreatment")] = t.toVariant();
         l->name = text.left(24);
         notifyLayerStateChanged(doc);
@@ -320,12 +321,12 @@ static void applyTextState(PaintbrushDocument &doc, int layerId,
 
 void SetTextCommand::apply(PaintbrushDocument &doc)
 {
-    applyTextState(doc, layerId, afterText, afterTreatment, afterRaster);
+    applyTextState(doc, layerId, afterText, afterTreatment, afterRaster, afterPosition);
 }
 
 void SetTextCommand::revert(PaintbrushDocument &doc)
 {
-    applyTextState(doc, layerId, beforeText, beforeTreatment, beforeRaster);
+    applyTextState(doc, layerId, beforeText, beforeTreatment, beforeRaster, beforePosition);
 }
 
 qint64 SetTextCommand::bytes() const

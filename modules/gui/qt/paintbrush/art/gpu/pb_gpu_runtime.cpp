@@ -264,8 +264,23 @@ bool GpuRuntime::ensurePipelines()
 {
     if (!m_pipelines || !m_rtRp)
         return false;
-    if (m_pipelines->paper && m_pipelines->glitter && m_pipelines->finish)
+    /* the pipelines embed the render pass descriptor they were created with;
+     * when the target grows, m_rtRp is a NEW object and the old pipelines
+     * reference a DELETED descriptor — rebuild them against the new one */
+    if (m_pipelines->paper && m_pipelines->glitter && m_pipelines->finish &&
+        m_pipelinesRp == m_rtRp)
         return true;
+
+    /* drop pipelines bound to a stale render pass descriptor */
+    if (m_pipelines->paper || m_pipelines->glitter || m_pipelines->finish)
+    {
+        delete m_pipelines->paper;
+        delete m_pipelines->glitter;
+        delete m_pipelines->finish;
+        m_pipelines->paper = nullptr;
+        m_pipelines->glitter = nullptr;
+        m_pipelines->finish = nullptr;
+    }
 
     /* paper: kQuadClip is 4 floats/vertex (pos + texcoord); only position is
      * consumed but the stride must match the buffer layout */
@@ -311,6 +326,7 @@ bool GpuRuntime::ensurePipelines()
         m_lastError = QStringLiteral("Finish pipeline creation failed.");
         return false;
     }
+    m_pipelinesRp = m_rtRp;
     return true;
 }
 
@@ -352,6 +368,8 @@ bool GpuRuntime::ensureTarget(const QSize &size)
         std::fprintf(stderr, "pb_gpu: render target create failed\n");
         return false;
     }
+    /* the render pass descriptor changed with the new target: the pipelines
+     * reference it, so they must be rebuilt against the new descriptor */
     if (!ensurePipelines())
     {
         std::fprintf(stderr, "pb_gpu: ensurePipelines failed: %s\n", qPrintable(m_lastError));
@@ -402,13 +420,17 @@ QImage GpuRuntime::readback(QRhiTexture *tex, const QSize &size)
     m_rhi->endOffscreenFrame();
     m_rhi->finish(); /* synchronous readback */
     QImage out = image.convertToFormat(QImage::Format_ARGB32);
-    /* crop to the requested size (the target is grow-only). The QRhi D3D11
-     * backend flips the viewport Y for offscreen renders: the drawn content
-     * sits at the BOTTOM of the target when the target is taller than the
-     * viewport, so the crop is bottom-anchored vertically (X stays
-     * top-left-anchored; there is no horizontal flip). */
+    /* crop to the requested size (the target is grow-only). The backend with
+     * a Y-down framebuffer (D3D11/Metal) flips the viewport Y for offscreen
+     * renders: the drawn content sits at the BOTTOM of the target when the
+     * target is taller than the viewport, so the crop is bottom-anchored
+     * vertically there; Y-up backends (GL) keep it top-anchored. X stays
+     * top-left-anchored on every backend (no horizontal flip). */
     if (!out.isNull() && out.size() != size)
-        out = out.copy(0, out.height() - size.height(), size.width(), size.height());
+    {
+        const int y = m_rhi->isYUpInFramebuffer() ? 0 : out.height() - size.height();
+        out = out.copy(0, y, size.width(), size.height());
+    }
     return out;
 }
 

@@ -117,6 +117,9 @@ private:
     QRhiTexture *m_target = nullptr;
     QRhiTextureRenderTarget *m_rt = nullptr;
     QRhiRenderPassDescriptor *m_rtRp = nullptr;
+    /* the render pass descriptor the current pipelines were built against;
+     * pipelines are rebuilt when the target grows (new descriptor) */
+    QRhiRenderPassDescriptor *m_pipelinesRp = nullptr;
     /* the finish SRB needs a valid texture at create time; the 1x1 dummy
      * stays alive for the runtime's lifetime */
     QRhiTexture *m_finishDummy = nullptr;

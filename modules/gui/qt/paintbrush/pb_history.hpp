@@ -149,6 +149,10 @@ public:
     art::TextTreatment afterTreatment;
     QImage beforeRaster;
     QImage afterRaster;
+    /* the layer position is part of the edit: the visual center is re-anchored
+     * when the glyph raster resizes, so undo/redo must restore it too */
+    QPointF beforePosition;
+    QPointF afterPosition;
     QString desc;
     Kind kind() const override { return Kind::SetText; }
     QString description() const override { return desc; }

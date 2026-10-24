@@ -614,6 +614,8 @@ void PaintbrushController::editTextLayer(int index, const QString &text,
     cmd.afterTreatment = t;
     cmd.beforeRaster = l->raster;
     cmd.afterRaster = after;
+    cmd.beforePosition = l->position;
+    cmd.afterPosition = newPos;
     cmd.desc = QStringLiteral("Edit text");
     if (cmd.beforeText == cmd.afterText &&
         cmd.beforeRaster == cmd.afterRaster &&
@@ -623,12 +625,6 @@ void PaintbrushController::editTextLayer(int index, const QString &text,
         cmd.beforeTreatment.trackingOverride == cmd.afterTreatment.trackingOverride)
         return; /* nothing changed */
     cmd.apply(m_document);
-    if (!after.isNull())
-    {
-        CanvasLayer *nl = m_document.layerById(cmd.layerId);
-        if (nl)
-            nl->position = newPos;
-    }
     m_undoStack.pushCommand(std::make_unique<SetTextCommand>(cmd));
     if (m_canvas)
         m_canvas->markCanvasDirty();
