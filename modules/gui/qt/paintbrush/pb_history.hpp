@@ -14,6 +14,7 @@
 
 #include "pb_common.hpp"
 #include "pb_layer.hpp"
+#include "art/style/typography_style.hpp"
 
 #include <QObject>
 #include <QImage>
@@ -78,9 +79,103 @@ public:
         DeleteLayer,
         Mask,
         CanvasResize,
-        Composite
+        Composite,
+        SetEffects,
+        SetRole,
+        SetArtState,
+        SetText,
+        AddHarvest
     };
     virtual Kind kind() const = 0;
+};
+
+struct HarvestItem;
+
+/* Add a (derived) harvest item to the document tray; revert removes it. Used
+ * by Boost so "Undo Boost" restores the raw document including the tray. */
+class AddHarvestCommand : public UndoCommand
+{
+public:
+    AddHarvestCommand();
+    ~AddHarvestCommand() override;
+    std::shared_ptr<HarvestItem> item;   /* carries its stable id */
+    QString desc;
+    Kind kind() const override { return Kind::AddHarvest; }
+    QString description() const override { return desc; }
+    qint64 bytes() const override;
+    void apply(PaintbrushDocument &doc) override;
+    void revert(PaintbrushDocument &doc) override;
+};
+
+/* Paintbrush 2.0: replace a layer's non-destructive finish chain. O(nodes),
+ * never pixels — the raster is untouched by effects (spec §39, §46). */
+class SetEffectsCommand : public UndoCommand
+{
+public:
+    int layerId = 0;
+    QVector<art::EffectNode> before;
+    QVector<art::EffectNode> after;
+    QString desc;
+    Kind kind() const override { return Kind::SetEffects; }
+    QString description() const override { return desc; }
+    void apply(PaintbrushDocument &doc) override;
+    void revert(PaintbrushDocument &doc) override;
+};
+
+/* Set a layer's semantic composition role (spec §20). */
+class SetRoleCommand : public UndoCommand
+{
+public:
+    int layerId = 0;
+    int before = 0;
+    int after = 0;
+    QString desc;
+    Kind kind() const override { return Kind::SetRole; }
+    QString description() const override { return desc; }
+    void apply(PaintbrushDocument &doc) override;
+    void revert(PaintbrushDocument &doc) override;
+};
+
+/* Editable typography (spec §57): one typed command per text edit. The
+ * layer's text, treatment and the re-rendered raster are replaced together
+ * so undo/redo restores the exact glyph pixels of the previous state. */
+class SetTextCommand : public UndoCommand
+{
+public:
+    int layerId = 0;
+    QString beforeText;
+    QString afterText;
+    art::TextTreatment beforeTreatment;
+    art::TextTreatment afterTreatment;
+    QImage beforeRaster;
+    QImage afterRaster;
+    QString desc;
+    Kind kind() const override { return Kind::SetText; }
+    QString description() const override { return desc; }
+    qint64 bytes() const override;
+    void apply(PaintbrushDocument &doc) override;
+    void revert(PaintbrushDocument &doc) override;
+};
+
+/* Document art direction: paper stock, mood and light rig as one typed
+ * command (a Mood switch is one undo step, spec §23). */
+class SetArtStateCommand : public UndoCommand
+{
+public:
+    struct State
+    {
+        QString paperId;
+        QString moodId;
+        art::ArtLightRig light;
+    };
+    State before;
+    State after;
+    QString desc;
+    Kind kind() const override { return Kind::SetArtState; }
+    QString description() const override { return desc; }
+    void apply(PaintbrushDocument &doc) override;
+    void revert(PaintbrushDocument &doc) override;
+    static State capture(const PaintbrushDocument &doc);
 };
 
 class StrokeCommand : public UndoCommand

@@ -6,15 +6,84 @@
 
 #include "pb_document.hpp"
 #include "pb_history.hpp"
+#include "art/style/mood.hpp"
+#include "art/style/typography_style.hpp"
+#include "art/surface/paper_renderer.hpp"
+#include "art/materials/glitter/glitter_material.hpp"
 
 #include <QPainter>
 #include <QtMath>
+#include <QMutex>
+#include <QMutexLocker>
+#include <QRandomGenerator>
 
 namespace paintbrush {
 
 PaintbrushDocument::PaintbrushDocument(QObject *parent)
     : QObject(parent)
 {
+    /* A fresh document is crafted paper, not a white rectangle (spec §8): the
+     * default mood supplies paper, light and seed before any layer exists. */
+    const art::Mood &m = art::mood::defaultMood();
+    m_paperStockId = m.paperId;
+    m_lightRig = m.light;
+    m_moodId = m.id;
+    m_artSeed = QRandomGenerator::global()->generate() | 1u;
+}
+
+/* -------------------------------------------------------- art direction */
+
+void PaintbrushDocument::setPaperStockId(const QString &id)
+{
+    if (m_paperStockId == id)
+        return;
+    m_paperStockId = id;
+    m_dirty = true;
+    emit artStateChanged();
+    emit layersChanged();
+    emit dirtyChanged(true);
+}
+
+const art::PaperStock *PaintbrushDocument::paperStock() const
+{
+    if (m_paperStockId.isEmpty())
+        return nullptr;
+    return art::paper::findById(m_paperStockId);
+}
+
+void PaintbrushDocument::setLightRig(const art::ArtLightRig &rig)
+{
+    m_lightRig = rig;
+    m_dirty = true;
+    emit artStateChanged();
+    emit layersChanged();
+    emit dirtyChanged(true);
+}
+
+void PaintbrushDocument::setMoodId(const QString &id)
+{
+    if (m_moodId == id)
+        return;
+    m_moodId = id;
+    m_dirty = true;
+    emit artStateChanged();
+    emit dirtyChanged(true);
+}
+
+void PaintbrushDocument::setArtSeed(quint32 seed)
+{
+    m_artSeed = seed == 0 ? 1u : seed;
+    emit artStateChanged();
+}
+
+art::ArtScale PaintbrushDocument::artScale(float exportScale) const
+{
+    art::ArtScale s;
+    s.referenceDpi = 96.0f;
+    s.worldUnitsPerInch = 96.0f;   /* canvas pixel == world unit at 1x */
+    s.devicePixelRatio = 1.0f;
+    s.exportScale = exportScale > 0.0f ? exportScale : 1.0f;
+    return s;
 }
 
 void PaintbrushDocument::resetDocument(const QSize &size)
@@ -31,12 +100,21 @@ void PaintbrushDocument::resetDocument(const QSize &size)
     m_tracks.clear();
     m_projectPath.clear();
     m_dirty = false;
+    m_harvest.clear();
+    {
+        const art::Mood &m = art::mood::defaultMood();
+        m_paperStockId = m.paperId;
+        m_lightRig = m.light;
+        m_moodId = m.id;
+        m_artSeed = QRandomGenerator::global()->generate() | 1u;
+    }
 
     /* Start with one empty raster layer, like Paintbrush does. */
     m_layers.append(CanvasLayer::createRaster(m_canvasSize, QStringLiteral("Layer 1")));
     m_layers[0].id = m_nextLayerId++;
     m_currentLayerIndex = 0;
 
+    emit artStateChanged();
     emit canvasSizeChanged();
     emit layersChanged();
     emit currentLayerChanged(m_currentLayerIndex);
@@ -63,6 +141,12 @@ void PaintbrushDocument::setCanvasSize(const QSize &size)
 
 void PaintbrushDocument::assignLayerIds()
 {
+    /* ids loaded from a project are kept (stable across reopen); the
+     * allocator always moves past the largest id in use so fresh ids never
+     * collide with restored ones */
+    for (const CanvasLayer &layer : m_layers)
+        if (layer.id >= m_nextLayerId)
+            m_nextLayerId = layer.id + 1;
     for (CanvasLayer &layer : m_layers)
         if (layer.id == 0)
             layer.id = m_nextLayerId++;
@@ -289,9 +373,11 @@ std::unique_ptr<UndoCommand> PaintbrushDocument::makeCropCommand(const QRect &re
 /* ------------------------------------------------------- canonical render */
 
 /* One layer through the canonical transform. `region` is the canvas region
- * whose top-left corner sits at target pixel (0,0). */
-void DocumentRenderer::compositeLayer(QImage &target, const QRect &region,
-                                      const CanvasLayer &layer)
+ * whose top-left corner sits at target pixel (0,0). This is the raw pixel
+ * path: `layer.raster` is drawn as-is (effects already resolved by the
+ * context-aware compositeLayer below). */
+static void compositeLayerRaw(QImage &target, const QRect &region,
+                              const CanvasLayer &layer)
 {
     if (layer.raster.isNull() || !layer.visible)
         return;
@@ -308,14 +394,17 @@ void DocumentRenderer::compositeLayer(QImage &target, const QRect &region,
     if (exact)
     {
         const QPoint off(int(tf.dx()), int(tf.dy()));
+        /* the region expressed in LAYER-LOCAL coordinates */
         const QRect srcRect = region.translated(-off);
         const QRect layerRect = layer.raster.rect();
+        /* the visible part of the layer, still in local coordinates */
         const QRect validSrc = srcRect.intersected(layerRect);
         if (validSrc.isEmpty())
             return;
 
-        const QRect dstRect = validSrc.translated(-region.topLeft());
-        const QRect srcLocal = validSrc.translated(-off);
+        /* back to canvas space (+off), then into target space (-region) */
+        const QRect dstRect = validSrc.translated(off - region.topLeft());
+        const QRect srcLocal = validSrc;
 
         QImage layerPart(dstRect.size(), QImage::Format_ARGB32);
         layerPart.fill(Qt::transparent);
@@ -412,12 +501,190 @@ void DocumentRenderer::compositeLayer(QImage &target, const QRect &region,
     p.end();
 }
 
+/* ------------------------------------------------- art-aware compositing */
+
+DocumentRenderer::Context DocumentRenderer::contextFor(const PaintbrushDocument &doc,
+                                                       float exportScale)
+{
+    Context ctx;
+    ctx.scale = doc.artScale(exportScale);
+    ctx.rig = doc.lightRig();
+    ctx.paper = doc.paperStock();
+    ctx.paintPaper = ctx.paper != nullptr;
+    return ctx;
+}
+
+QImage DocumentRenderer::effectiveSource(const CanvasLayer &layer, const Context &ctx,
+                                         QPoint *originOffset)
+{
+    if (originOffset)
+        *originOffset = QPoint(0, 0);
+    if (layer.raster.isNull())
+        return QImage();
+
+    const float s = ctx.scale.exportScale;
+    const bool scaled = !qFuzzyCompare(s, 1.0f);
+    QImage src;
+
+    /* 1) source pixels at the context scale */
+    if (scaled && !layer.materialState.isEmpty() &&
+        layer.materialPreset.startsWith(QLatin1String("material.glitter")))
+    {
+        /* re-render the material from its state in world units so flakes keep
+         * their apparent size at export (spec §11, §55) */
+        art::glitter::GlitterState st;
+        if (st.deserialize(layer.materialState))
+        {
+            const QSize out(qMax(1, int(std::lround(layer.raster.width() * s))),
+                            qMax(1, int(std::lround(layer.raster.height() * s))));
+            src = st.render(out, 0.0f, 0.0f, 1.0f / s, ctx.rig, ctx.paper, ctx.scale);
+        }
+    }
+    if (src.isNull() && scaled && layer.type == LAYER_TEXT)
+    {
+        /* editable typography (spec §57): text layers re-render their glyphs
+         * from the stored treatment at export scale — a crisp vector-style
+         * render, never a bitmap upscale of the 1x raster. Fall back to the
+         * raster path when no treatment is stored (legacy documents). */
+        const QVariant v = layer.metadata.value(QStringLiteral("textTreatment"));
+        if (v.isValid())
+        {
+            const art::TextTreatment t = art::TextTreatment::fromVariant(v.toMap());
+            src = art::typography::render(t, s);
+        }
+    }
+    if (src.isNull())
+    {
+        src = layer.raster.convertToFormat(QImage::Format_ARGB32);
+        if (scaled)
+            src = src.scaled(qMax(1, int(std::lround(src.width() * s))),
+                             qMax(1, int(std::lround(src.height() * s))),
+                             Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    }
+
+    /* 2) local-space mask */
+    if (!layer.mask.isNull())
+    {
+        QImage mask = layer.mask.scaled(src.size(), Qt::IgnoreAspectRatio,
+                                        Qt::FastTransformation);
+        QPainter p(&src);
+        p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+        p.drawImage(QPoint(0, 0), maskToImage(mask));
+        p.end();
+    }
+
+    /* 3) non-destructive finish chain */
+    if (layer.hasEnabledEffects())
+    {
+        const art::FinishResult fr = art::FinishRuntime::apply(src, layer.effects,
+                                                               ctx.rig, ctx.scale);
+        src = fr.image.convertToFormat(QImage::Format_ARGB32);
+        if (originOffset)
+            *originOffset = fr.originOffset;
+    }
+    return src;
+}
+
+void DocumentRenderer::compositeLayer(QImage &target, const QRect &region,
+                                      const CanvasLayer &layer, const Context &ctx)
+{
+    if (layer.raster.isNull() || !layer.visible)
+        return;
+    if (!layer.hasEnabledEffects())
+    {
+        compositeLayerRaw(target, region, layer);
+        return;
+    }
+    /* Resolve the finish chain into an expanded raster and composite it with
+     * the SAME placement transform. The expanded image's local origin sits
+     * at `off` (<= 0) relative to the raster origin and its pivot is shifted
+     * by the same padding, so shifting `position` by `off` reproduces the
+     * exact canvas placement for any rotation/scale (see transform()). */
+    QPoint off;
+    QImage src = effectiveSource(layer, ctx, &off);
+    CanvasLayer tmp = layer;
+    tmp.raster = src;
+    tmp.mask = QImage();
+    tmp.effects.clear();
+    tmp.position = layer.position + QPointF(off);
+    compositeLayerRaw(target, region, tmp);
+}
+
+void DocumentRenderer::compositeLayer(QImage &target, const QRect &region,
+                                      const CanvasLayer &layer)
+{
+    Context ctx;
+    ctx.paintPaper = false;
+    compositeLayer(target, region, layer, ctx);
+}
+
+namespace {
+
+/* Single-entry paper cache: the full-canvas paper at one (stock, seed, size,
+ * scale) is computed once and region draws copy from it. Procedural paper is
+ * deterministic, so the cache can never go stale for the same key. */
+struct PaperCache
+{
+    QMutex mutex;
+    QString stockId;
+    quint32 seed = 0;
+    QSize size;
+    float totalScale = 0.0f;
+    float ambient = -1.0f;
+    QImage image;
+};
+
+PaperCache &paperCache()
+{
+    static PaperCache c;
+    return c;
+}
+
+} // namespace
+
+void DocumentRenderer::paintPaper(QImage &target, const QRect &region, const Context &ctx)
+{
+    if (!ctx.paintPaper || !ctx.paper || region.isEmpty())
+        return;
+    const QSize full(region.right() + 1, region.bottom() + 1);
+    PaperCache &cache = paperCache();
+    QMutexLocker lock(&cache.mutex);
+    const float total = ctx.scale.totalScale();
+    if (cache.stockId != ctx.paper->id || cache.seed != ctx.paper->seed ||
+        cache.totalScale != total || cache.image.isNull() ||
+        cache.size.width() < full.width() || cache.size.height() < full.height() ||
+        !qFuzzyCompare(cache.ambient, ctx.rig.ambient))
+    {
+        const QSize want(qMax(full.width(), cache.size.width()),
+                         qMax(full.height(), cache.size.height()));
+        art::PaperRenderer renderer;
+        art::PaperRenderer::State st;
+        st.stock = ctx.paper;
+        st.rig = &ctx.rig;
+        st.scale = ctx.scale;
+        st.worldViewX = 0.0f;
+        st.worldViewY = 0.0f;
+        cache.image = renderer.render(want, st, QRect(QPoint(0, 0), want));
+        cache.stockId = ctx.paper->id;
+        cache.seed = ctx.paper->seed;
+        cache.size = want;
+        cache.totalScale = total;
+        cache.ambient = ctx.rig.ambient;
+    }
+    QPainter p(&target);
+    p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+    p.drawImage(QPoint(0, 0), cache.image, region);
+    p.end();
+}
+
 void DocumentRenderer::composite(QImage &target, const QRect &region,
                                  const PaintbrushDocument &doc)
 {
+    const Context ctx = contextFor(doc, 1.0f);
+    paintPaper(target, region, ctx);
     const auto &layers = doc.layers();
     for (const CanvasLayer &layer : layers)
-        compositeLayer(target, region, layer);
+        compositeLayer(target, region, layer, ctx);
 }
 
 QImage DocumentRenderer::render(const PaintbrushDocument &doc)
@@ -436,6 +703,48 @@ QImage DocumentRenderer::renderRegion(const PaintbrushDocument &doc,
     QImage result(region.size(), QImage::Format_ARGB32);
     result.fill(Qt::transparent);
     composite(result, region, doc);
+    return result;
+}
+
+QImage DocumentRenderer::renderScaled(const PaintbrushDocument &doc, float scale)
+{
+    if (scale <= 0.0f || qFuzzyCompare(scale, 1.0f))
+        return render(doc);
+    const QSize canvas = doc.canvasSize();
+    if (canvas.isEmpty())
+        return {};
+    const QSize out(qMax(1, int(std::lround(canvas.width() * scale))),
+                    qMax(1, int(std::lround(canvas.height() * scale))));
+    QImage result(out, QImage::Format_ARGB32);
+    result.fill(Qt::transparent);
+
+    const Context ctx = contextFor(doc, scale);
+    paintPaper(result, QRect(QPoint(0, 0), out), ctx);
+
+    for (const CanvasLayer &layer : doc.layers())
+    {
+        if (!layer.visible || layer.raster.isNull())
+            continue;
+        QPoint off;
+        const QImage src = effectiveSource(layer, ctx, &off);
+        if (src.isNull())
+            continue;
+        /* src pixel -> (translate off) -> local/scale -> layer transform ->
+         * canvas * scale. Qt composes left-to-right. */
+        const QTransform full =
+            QTransform::fromTranslate(off.x(), off.y()) *
+            QTransform::fromScale(1.0 / scale, 1.0 / scale) *
+            layer.transform() *
+            QTransform::fromScale(scale, scale);
+        QPainter p(&result);
+        p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        p.setOpacity(layer.opacity);
+        p.setCompositionMode(toCompositionMode(layer.blendMode));
+        p.setTransform(full);
+        p.drawImage(QPoint(0, 0), src);
+        p.end();
+    }
     return result;
 }
 

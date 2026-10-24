@@ -13,6 +13,7 @@
 #define PB_LAYER_HPP
 
 #include "pb_common.hpp"
+#include "art/finish/effects.hpp"
 
 #include <QString>
 #include <QImage>
@@ -20,6 +21,8 @@
 #include <QRectF>
 #include <QTransform>
 #include <QVariantMap>
+#include <QVector>
+#include <QByteArray>
 
 namespace paintbrush {
 
@@ -87,6 +90,31 @@ public:
      * Persisted by the project store; additive, never required for
      * rendering (the cutout alpha already encodes the mask). */
     QVariantMap metadata;
+
+    /* -- Paintbrush 2.0 product layer ----------------------------------- */
+    /* Non-destructive finish chain (spec §39): applied by the canonical
+     * renderer at composite time; `raster` is never modified by an effect. */
+    QVector<art::EffectNode> effects;
+    /* Semantic composition role (spec §20): art::LayerRole as int so it maps
+     * trivially to QML / the manifest. */
+    int role = int(art::LayerRole::None);
+    /* Material identity when this raster is a RENDER of an art material
+     * (e.g. "material.glitter.fine"); empty for ordinary pixels. */
+    QString materialPreset;
+    /* Compact binary material state (glitter grain grid); re-rendered at
+     * export scale so the material keeps its world size (spec §55). */
+    QByteArray materialState;
+    /* Harvest provenance (spec §54): the HarvestItem id this layer derives
+     * from, or 0 when it is not a harvested asset. */
+    int harvestId = 0;
+
+    bool hasEnabledEffects() const
+    {
+        for (const art::EffectNode &e : effects)
+            if (e.enabled && e.type != art::EffectNode::None)
+                return true;
+        return false;
+    }
 };
 
 } // namespace paintbrush

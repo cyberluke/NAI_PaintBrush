@@ -8,9 +8,12 @@ $ErrorActionPreference = 'Stop'
 $qt = 'C:\msys64\mingw64'
 $moc = "$qt\share\qt6\bin\moc.exe"
 $gpp = "$qt\bin\g++.exe"
-$src = '..\..\modules\gui\qt\paintbrush'
+$here = Split-Path -Parent $MyInvocation.MyCommand.Path
+Set-Location $here
+$src = (Resolve-Path (Join-Path $here '..\..\..\modules\gui\qt\paintbrush')).Path
 $includeArgs = @(
-    '-I', 'stub',
+    # the shared stub (pb_art_harness/stub) tracks pb_common.hpp's VLC usage
+    '-I', (Resolve-Path (Join-Path $here '..\pb_art_harness\stub')).Path,
     '-I', $src,
     '-I', "$qt\include\qt6",
     '-I', "$qt\include\qt6\QtCore",

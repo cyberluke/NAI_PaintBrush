@@ -29,6 +29,7 @@ static QString layerToJson(const CanvasLayer &layer)
 {
     QJsonObject obj;
     obj[QStringLiteral("name")] = layer.name;
+    obj[QStringLiteral("id")] = layer.id;  /* stable across reopen (provenance) */
     obj[QStringLiteral("type")] = layer.type;
     obj[QStringLiteral("visible")] = layer.visible;
     obj[QStringLiteral("locked")] = layer.locked;
@@ -75,6 +76,25 @@ static QString layerToJson(const CanvasLayer &layer)
             obj[QStringLiteral("metadata")] = meta;
     }
 
+    /* Paintbrush 2.0: non-destructive finish chain, composition role, material
+     * identity/state and harvest provenance (spec §39, §20, §52, §54). */
+    if (!layer.effects.isEmpty())
+    {
+        QJsonArray effects;
+        for (const art::EffectNode &e : layer.effects)
+            effects.append(QJsonObject::fromVariantMap(e.toVariant()));
+        obj[QStringLiteral("effects")] = effects;
+    }
+    if (layer.role != 0)
+        obj[QStringLiteral("role")] = art::layerRoleName(art::LayerRole(layer.role));
+    if (!layer.materialPreset.isEmpty())
+        obj[QStringLiteral("materialPreset")] = layer.materialPreset;
+    if (!layer.materialState.isEmpty())
+        obj[QStringLiteral("materialState")] =
+            QString::fromLatin1(layer.materialState.toBase64());
+    if (layer.harvestId > 0)
+        obj[QStringLiteral("harvestId")] = layer.harvestId;
+
     if (!layer.raster.isNull())
     {
         QByteArray png;
@@ -110,6 +130,7 @@ static QList<CanvasLayer> layersFromJson(const QJsonArray &array)
         const QJsonObject obj = value.toObject();
         CanvasLayer layer;
         layer.name = obj[QStringLiteral("name")].toString();
+        layer.id = qMax(0, obj[QStringLiteral("id")].toInt(0));
         layer.type = obj[QStringLiteral("type")].toInt(LAYER_RASTER);
         layer.visible = obj[QStringLiteral("visible")].toBool(true);
         layer.locked = obj[QStringLiteral("locked")].toBool(false);
@@ -136,9 +157,116 @@ static QList<CanvasLayer> layersFromJson(const QJsonArray &array)
         for (auto it = meta.constBegin(); it != meta.constEnd(); ++it)
             layer.metadata[it.key()] = it.value().toVariant();
 
+        for (const QJsonValue &ev : obj[QStringLiteral("effects")].toArray())
+            layer.effects.append(art::EffectNode::fromVariant(ev.toObject().toVariantMap()));
+        layer.role = int(art::layerRoleFromName(obj[QStringLiteral("role")].toString()));
+        layer.materialPreset = obj[QStringLiteral("materialPreset")].toString();
+        layer.materialState = QByteArray::fromBase64(
+            obj[QStringLiteral("materialState")].toString().toLatin1());
+        layer.harvestId = obj[QStringLiteral("harvestId")].toInt(0);
+
         layers.append(std::move(layer));
     }
     return layers;
+}
+
+static QString imageToBase64Png(const QImage &img)
+{
+    if (img.isNull())
+        return QString();
+    QByteArray png;
+    QBuffer buffer(&png);
+    buffer.open(QIODevice::WriteOnly);
+    img.save(&buffer, "PNG");
+    return QString::fromLatin1(png.toBase64());
+}
+
+static QImage imageFromBase64Png(const QString &b64)
+{
+    const QByteArray png = QByteArray::fromBase64(b64.toLatin1());
+    QImage img;
+    if (!png.isEmpty())
+        img.loadFromData(png, "PNG");
+    return img;
+}
+
+/* Document art state: paper, mood, seed, light rig (spec §52). */
+static QJsonObject artToJson(const PaintbrushDocument *doc)
+{
+    QJsonObject art;
+    art[QStringLiteral("paper")] = doc->paperStockId();
+    art[QStringLiteral("mood")] = doc->moodId();
+    art[QStringLiteral("seed")] = double(doc->artSeed());
+    const art::ArtLightRig &rig = doc->lightRig();
+    QJsonObject light;
+    light[QStringLiteral("dirX")] = double(rig.direction.x());
+    light[QStringLiteral("dirY")] = double(rig.direction.y());
+    light[QStringLiteral("dirZ")] = double(rig.direction.z());
+    light[QStringLiteral("elevation")] = double(rig.elevationDeg);
+    light[QStringLiteral("softness")] = double(rig.softness);
+    light[QStringLiteral("ambient")] = double(rig.ambient);
+    light[QStringLiteral("intensity")] = double(rig.intensity);
+    light[QStringLiteral("temperature")] = double(rig.temperature);
+    art[QStringLiteral("light")] = light;
+    return art;
+}
+
+static void artFromJson(PaintbrushDocument *doc, const QJsonObject &art)
+{
+    if (art.isEmpty())
+        return;
+    if (art.contains(QStringLiteral("paper")))
+        doc->setPaperStockId(art[QStringLiteral("paper")].toString());
+    if (art.contains(QStringLiteral("mood")))
+        doc->setMoodId(art[QStringLiteral("mood")].toString());
+    if (art.contains(QStringLiteral("seed")))
+        doc->setArtSeed(quint32(art[QStringLiteral("seed")].toDouble(1)));
+    const QJsonObject light = art[QStringLiteral("light")].toObject();
+    if (!light.isEmpty())
+    {
+        art::ArtLightRig rig = doc->lightRig();
+        rig.direction = QVector3D(float(light[QStringLiteral("dirX")].toDouble(0.5)),
+                                  float(light[QStringLiteral("dirY")].toDouble(-0.35)),
+                                  float(light[QStringLiteral("dirZ")].toDouble(0.6)));
+        rig.elevationDeg = float(light[QStringLiteral("elevation")].toDouble(-1.0));
+        rig.softness = float(light[QStringLiteral("softness")].toDouble(0.35));
+        rig.ambient = float(light[QStringLiteral("ambient")].toDouble(0.3));
+        rig.intensity = float(light[QStringLiteral("intensity")].toDouble(1.0));
+        rig.temperature = float(light[QStringLiteral("temperature")].toDouble(0.55));
+        doc->setLightRig(rig);
+    }
+}
+
+/* Harvest tray: manifest + cutout/mask assets per item (spec §52, §53). */
+static QJsonArray harvestToJson(const HarvestTrayModel *tray)
+{
+    QJsonArray arr;
+    for (const HarvestItem &h : tray->items())
+    {
+        QJsonObject o = QJsonObject::fromVariantMap(h.toManifest());
+        o[QStringLiteral("cutout")] = imageToBase64Png(h.cutout);
+        o[QStringLiteral("mask")] = imageToBase64Png(h.mask);
+        arr.append(o);
+    }
+    return arr;
+}
+
+static QVector<HarvestItem> harvestFromJson(const QJsonArray &arr)
+{
+    QVector<HarvestItem> items;
+    for (const QJsonValue &v : arr)
+    {
+        const QJsonObject o = v.toObject();
+        HarvestItem h = HarvestItem::fromManifest(o.toVariantMap());
+        h.cutout = imageFromBase64Png(o[QStringLiteral("cutout")].toString())
+                       .convertToFormat(QImage::Format_ARGB32);
+        h.mask = imageFromBase64Png(o[QStringLiteral("mask")].toString());
+        if (!h.mask.isNull() && h.mask.format() != QImage::Format_Grayscale8)
+            h.mask = h.mask.convertToFormat(QImage::Format_Grayscale8);
+        if (h.id > 0 && !h.cutout.isNull())
+            items.append(h);
+    }
+    return items;
 }
 
 QString ProjectStore::saveToBytes(PaintbrushDocument *doc, QByteArray *out) const
@@ -205,6 +333,8 @@ QString ProjectStore::saveToBytes(PaintbrushDocument *doc, QByteArray *out) cons
     root[QStringLiteral("trackedObjects")] = tracks;
 
     root[QStringLiteral("documentSettings")] = QJsonObject();
+    root[QStringLiteral("art")] = artToJson(doc);
+    root[QStringLiteral("harvest")] = harvestToJson(doc->harvest());
 
     *out = QJsonDocument(root).toJson(QJsonDocument::Indented);
     return {};
@@ -305,6 +435,11 @@ QString ProjectStore::loadFromBytes(PaintbrushDocument *doc,
         tracks.append(std::move(track));
     }
     doc->setTracks(tracks);
+
+    /* Paintbrush 2.0 art state + harvest tray (absent in older projects:
+     * the defaults from resetDocument stay) */
+    artFromJson(doc, root[QStringLiteral("art")].toObject());
+    doc->harvest()->setItems(harvestFromJson(root[QStringLiteral("harvest")].toArray()));
 
     doc->setDirty(false);
     return {};

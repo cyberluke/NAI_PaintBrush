@@ -15,6 +15,8 @@
 #include "pb_common.hpp"
 #include "pb_history.hpp"
 #include "pb_document.hpp"
+#include "art/stroke/bristle_brush.hpp"
+#include "art/materials/glitter/glitter_material.hpp"
 
 #include <QQuickItem>
 #include <QColor>
@@ -66,6 +68,36 @@ class PaintbrushCanvasItem : public QQuickItem
     Q_PROPERTY(bool objectMaskVisible READ objectMaskVisible WRITE setObjectMaskVisible NOTIFY objectMaskVisibleChanged FINAL)
     Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged FINAL)
     Q_PROPERTY(qreal fillTolerance READ fillTolerance WRITE setFillTolerance NOTIFY fillToleranceChanged FINAL)
+    /* Paintbrush 2.0 art tool controls (spec §14.3 primary controls) */
+    Q_PROPERTY(qreal glitterAmount READ glitterAmount WRITE setGlitterAmount NOTIFY artParamsChanged FINAL)
+    Q_PROPERTY(qreal glitterFlakeSize READ glitterFlakeSize WRITE setGlitterFlakeSize NOTIFY artParamsChanged FINAL)
+    Q_PROPERTY(qreal glitterShimmer READ glitterShimmer WRITE setGlitterShimmer NOTIFY artParamsChanged FINAL)
+    Q_PROPERTY(qreal glitterAdhesion READ glitterAdhesion WRITE setGlitterAdhesion NOTIFY artParamsChanged FINAL)
+    Q_PROPERTY(qreal brushFlow READ brushFlow WRITE setBrushFlow NOTIFY artParamsChanged FINAL)
+    Q_PROPERTY(qreal brushColorVariation READ brushColorVariation WRITE setBrushColorVariation NOTIFY artParamsChanged FINAL)
+
+public:
+    qreal glitterAmount() const { return m_glitterParams.amount; }
+    void setGlitterAmount(qreal v);
+    qreal glitterFlakeSize() const { return m_glitterParams.flakeSize; }
+    void setGlitterFlakeSize(qreal v);
+    qreal glitterShimmer() const { return m_glitterParams.shimmer; }
+    void setGlitterShimmer(qreal v);
+    qreal glitterAdhesion() const { return m_glitterParams.adhesion; }
+    void setGlitterAdhesion(qreal v);
+    qreal brushFlow() const { return m_brushFlow; }
+    void setBrushFlow(qreal v);
+    qreal brushColorVariation() const { return m_brushColorVariation; }
+    void setBrushColorVariation(qreal v);
+    /* Glitter grain palette from the mood (bounded set, spec §14.4). */
+    void setGlitterPalette(const QVector<QColor> &palette, const QString &id);
+
+signals:
+    void artParamsChanged();
+
+private:
+    qreal m_brushFlow = 0.75;
+    qreal m_brushColorVariation = 0.15;
 
 public:
     explicit PaintbrushCanvasItem(QQuickItem *parent = nullptr);
@@ -215,6 +247,9 @@ signals:
     void colorPicked(const QColor &color);
     void imageDropped(QUrl url, QPointF canvasPos);
     void fillToleranceChanged();
+    /* Double-click landed on a text layer: QML opens the inline text editor
+     * for that layer (spec §57 — text stays truly editable). */
+    void textLayerDoubleClicked(int layerIndex);
 
 protected:
     QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *data) override;
@@ -370,6 +405,21 @@ private:
     QVector<QPointF> m_stabilizer;   /* recent samples for smoothing */
     qreal m_strokeRemainder = 0.0;   /* spacing carry-over along a segment */
     qreal m_strokeSpeed = 0.0;       /* smoothed sample speed (px/event) */
+
+    /* Paintbrush 2.0 art tools. Both ride the same scratch-tile + typed
+     * StrokeCommand commit path as the brush (spec §13.1, §46). */
+    art::BristleBrushEngine m_bristle;   /* stable bristle set per stroke */
+    /* glitter: a per-stroke bounded grain grid in layer-local world units;
+     * the render is stamped into the scratch tile at stroke end, the state
+     * is kept on the layer for export re-rendering (spec §55) */
+    art::glitter::GlitterState m_glitterState;
+    art::GlitterParams m_glitterParams;
+    QPointF m_glitterLast;
+    QRect m_glitterUnion;            /* layer-local affected rect */
+    QString m_glitterPaletteId;
+    void beginArtStroke(const QPointF &local);
+    void artStrokeSegment(const QPointF &fromLocal, const QPointF &toLocal);
+    void endArtStroke(const QPointF &local);
 
     /* selection state */
     QPointF m_dragStartCanvas;

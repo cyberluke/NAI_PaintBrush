@@ -74,6 +74,8 @@ enum ToolId {
     TOOL_ELLIPSE,
     TOOL_TEXT,
     TOOL_PAN_ZOOM,
+    TOOL_BRISTLE,          /* Paintbrush 2.0: premium bristle paint  */
+    TOOL_GLITTER,          /* Paintbrush 2.0: glitter material pour  */
     TOOL_COUNT
 };
 

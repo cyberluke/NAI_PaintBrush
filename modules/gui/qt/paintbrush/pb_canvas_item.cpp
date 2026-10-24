@@ -247,6 +247,8 @@ bool PaintbrushCanvasItem::shouldSnap() const
     case TOOL_BRUSH:
     case TOOL_ERASER:
     case TOOL_SPRAY:
+    case TOOL_BRISTLE:
+    case TOOL_GLITTER:
     case TOOL_LINE:
     case TOOL_RECTANGLE:
     case TOOL_ROUNDED_RECT:
@@ -328,6 +330,244 @@ void PaintbrushCanvasItem::setFillTolerance(qreal tolerance)
         return;
     m_fillTolerance = tolerance;
     emit fillToleranceChanged();
+}
+
+/* ------------------------------------------------- Paintbrush 2.0 art tools */
+
+void PaintbrushCanvasItem::setGlitterAmount(qreal v)
+{
+    v = qBound<qreal>(0.05, v, 2.0);
+    if (qFuzzyCompare(qreal(m_glitterParams.amount), v))
+        return;
+    m_glitterParams.amount = float(v);
+    emit artParamsChanged();
+}
+
+void PaintbrushCanvasItem::setGlitterFlakeSize(qreal v)
+{
+    v = qBound<qreal>(0.2, v, 2.5);
+    if (qFuzzyCompare(qreal(m_glitterParams.flakeSize), v))
+        return;
+    m_glitterParams.flakeSize = float(v);
+    emit artParamsChanged();
+}
+
+void PaintbrushCanvasItem::setGlitterShimmer(qreal v)
+{
+    v = qBound<qreal>(0.0, v, 1.0);
+    if (qFuzzyCompare(qreal(m_glitterParams.shimmer), v))
+        return;
+    m_glitterParams.shimmer = float(v);
+    emit artParamsChanged();
+}
+
+void PaintbrushCanvasItem::setGlitterAdhesion(qreal v)
+{
+    v = qBound<qreal>(0.0, v, 1.0);
+    if (qFuzzyCompare(qreal(m_glitterParams.adhesion), v))
+        return;
+    m_glitterParams.adhesion = float(v);
+    emit artParamsChanged();
+}
+
+void PaintbrushCanvasItem::setBrushFlow(qreal v)
+{
+    v = qBound<qreal>(0.05, v, 1.0);
+    if (qFuzzyCompare(m_brushFlow, v))
+        return;
+    m_brushFlow = v;
+    emit artParamsChanged();
+}
+
+void PaintbrushCanvasItem::setBrushColorVariation(qreal v)
+{
+    v = qBound<qreal>(0.0, v, 1.0);
+    if (qFuzzyCompare(m_brushColorVariation, v))
+        return;
+    m_brushColorVariation = v;
+    emit artParamsChanged();
+}
+
+void PaintbrushCanvasItem::setGlitterPalette(const QVector<QColor> &palette, const QString &id)
+{
+    m_glitterParams.palette = palette;
+    m_glitterPaletteId = id;
+    emit artParamsChanged();
+}
+
+/* Glitter flake diameter in layer-local px at flakeSize == 1: a fine craft
+ * glitter. The grain grid lives in layer-local units, which ARE world units at
+ * 1x, so export re-renders the same state at any scale (spec §11, §55). */
+static constexpr float kGlitterFlakeWorld = 1.6f;
+
+void PaintbrushCanvasItem::beginArtStroke(const QPointF &local)
+{
+    CanvasLayer *layer = m_doc ? m_doc->currentLayer() : nullptr;
+    if (!layer || layer->raster.isNull() || layer->locked)
+        return;
+    m_strokeActive = true;
+    m_scratchTile = QImage();
+    m_scratchSeeded = QRect();
+    m_strokeLastDab = local;
+    m_strokeSmooth = local;
+    m_stabilizer.clear();
+    m_stabilizer.append(local);
+
+    if (m_tool == TOOL_BRISTLE)
+    {
+        art::BristleBrushParams p;
+        p.size = float(qMax<qreal>(2.0, m_brushSize));
+        p.flow = float(m_brushFlow);
+        p.hardness = 0.8f;
+        p.smoothing = 0.4f;
+        p.colorVariation = float(m_brushColorVariation);
+        p.color = m_fgColor;
+        /* document seed + stroke count: reproducible, never global randomness */
+        p.seed = m_doc->artSeed() ^ (std::uint32_t(m_undoStack ? m_undoStack->count() : 0) * 2654435761u);
+        m_bristle.beginStroke(p);
+        artStrokeSegment(local, local);
+    }
+    else if (m_tool == TOOL_GLITTER)
+    {
+        m_glitterParams.seed = m_doc->artSeed() ^
+            (std::uint32_t(m_undoStack ? m_undoStack->count() : 0) * 40503u + 7u);
+        m_glitterParams.color = m_fgColor;
+        /* the grain grid covers the whole layer in layer-local world units */
+        const float cell = art::glitter::glitterWorldCellSize(m_glitterParams, kGlitterFlakeWorld);
+        const QSize cells(int(layer->raster.width() / cell) + 2,
+                          int(layer->raster.height() / cell) + 2);
+        if (cells.width() * cells.height() > 4 * 1024 * 1024)
+        {
+            /* bounded sim: refuse absurd grids rather than allocate GBs */
+            setTool(TOOL_BRUSH);
+            return;
+        }
+        m_glitterState.reset(cells, cell);
+        m_glitterLast = local;
+        m_glitterUnion = QRect();
+        artStrokeSegment(local, local);
+    }
+}
+
+void PaintbrushCanvasItem::artStrokeSegment(const QPointF &fromLocal, const QPointF &toLocal)
+{
+    CanvasLayer *layer = m_doc ? m_doc->currentLayer() : nullptr;
+    if (!layer || layer->raster.isNull() || layer->locked || !m_strokeActive)
+        return;
+    const qreal pf = pressureFactor();
+    const float pressure = float(m_pressureEnabled ? pf : 0.75);
+
+    if (m_tool == TOOL_BRISTLE)
+    {
+        /* the engine needs the affected rect BEFORE painting so the undo
+         * before-region and the scratch tile cover it: predict it from the
+         * segment + brush radius (same bound the engine returns) */
+        const qreal r = qMax<qreal>(2.0, m_brushSize) * 0.5 * 1.4 + 2.0;
+        const QRectF seg = QRectF(fromLocal, toLocal).normalized().adjusted(-r, -r, r, r);
+        const QRect affected = seg.toAlignedRect().intersected(layer->raster.rect());
+        if (affected.isEmpty())
+            return;
+        captureBeforeRegion(affected);
+        ensureScratch(affected);
+        const QRect painted = m_bristle.strokeSegment(
+            m_scratchTile, fromLocal - QPointF(m_scratchOrigin),
+            toLocal - QPointF(m_scratchOrigin), pressure);
+        if (!painted.isEmpty())
+        {
+            m_strokeHadPaint = true;
+            markTilesDirty(mappedRect(painted.translated(m_scratchOrigin)));
+        }
+        m_strokeLastDab = toLocal;
+        return;
+    }
+
+    if (m_tool == TOOL_GLITTER)
+    {
+        const float radius = float(qMax<qreal>(3.0, m_brushSize) * 0.5);
+        const QLineF seg(fromLocal, toLocal);
+        const qreal len = seg.length();
+        const qreal step = qMax<qreal>(1.0, radius * 0.35);
+        /* pour along the segment; the hand's motion is the "push" vector for
+         * loose grains (spec §14.2 displacement) */
+        const QPointF transport = (toLocal - fromLocal) * 0.15;
+        int steps = qMax(1, int(len / step));
+        for (int i = 0; i <= steps; ++i)
+        {
+            const QPointF p = len > 0.0 ? seg.pointAt(qreal(i) / steps) : fromLocal;
+            m_glitterState.paintGlue(float(p.x()), float(p.y()), radius,
+                                     m_glitterParams.adhesion * 0.5f);
+            m_glitterState.applyGlitter(float(p.x()), float(p.y()), radius,
+                                        m_glitterParams, transport,
+                                        0.6f + 0.4f * pressure);
+        }
+        const QRectF r = QRectF(fromLocal, toLocal).normalized()
+                             .adjusted(-radius - 3, -radius - 3, radius + 3, radius + 3);
+        const QRect affected = r.toAlignedRect().intersected(layer->raster.rect());
+        if (affected.isEmpty())
+            return;
+        m_glitterUnion = m_glitterUnion.isNull() ? affected : m_glitterUnion.united(affected);
+        captureBeforeRegion(affected);
+        ensureScratch(affected);
+        /* live preview: render the touched region of the grain grid into the
+         * scratch tile (deterministic, so the preview IS the final result) */
+        const art::ArtLightRig &rig = m_doc->lightRig();
+        const art::ArtScale scale = m_doc->artScale(1.0f);
+        QImage flakes = m_glitterState.render(affected.size(), float(affected.x()),
+                                              float(affected.y()), 1.0f, rig,
+                                              m_doc->paperStock(), scale);
+        {
+            QPainter p(&m_scratchTile);
+            /* reseed the region from the layer first so re-rendering the
+             * (grown) pile never stacks previews on top of previews */
+            p.setCompositionMode(QPainter::CompositionMode_Source);
+            p.drawImage(affected.topLeft() - m_scratchOrigin, layer->raster, affected);
+            p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+            p.drawImage(affected.topLeft() - m_scratchOrigin, flakes);
+            p.end();
+        }
+        m_strokeHadPaint = true;
+        markTilesDirty(mappedRect(affected));
+        m_glitterLast = toLocal;
+        m_strokeLastDab = toLocal;
+    }
+}
+
+void PaintbrushCanvasItem::endArtStroke(const QPointF &local)
+{
+    if (!m_strokeActive)
+        return;
+    artStrokeSegment(m_strokeLastDab, local);
+    m_strokeActive = false;
+    CanvasLayer *layer = m_doc ? m_doc->currentLayer() : nullptr;
+
+    if (m_tool == TOOL_GLITTER && layer && m_strokeHadPaint && !m_glitterUnion.isEmpty())
+    {
+        /* final pass: render the whole pile once over the full affected
+         * union (segments only previewed their own rect) */
+        const QRect u = m_glitterUnion.intersected(layer->raster.rect());
+        captureBeforeRegion(u);
+        ensureScratch(u);
+        QImage flakes = m_glitterState.render(u.size(), float(u.x()), float(u.y()), 1.0f,
+                                              m_doc->lightRig(), m_doc->paperStock(),
+                                              m_doc->artScale(1.0f));
+        QPainter p(&m_scratchTile);
+        p.setCompositionMode(QPainter::CompositionMode_Source);
+        p.drawImage(u.topLeft() - m_scratchOrigin, layer->raster, u);
+        p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+        p.drawImage(u.topLeft() - m_scratchOrigin, flakes);
+        p.end();
+        markTilesDirty(mappedRect(u));
+    }
+    if (m_strokeHadPaint)
+        commitScratch(m_tool == TOOL_GLITTER ? QStringLiteral("Glitter")
+                                             : QStringLiteral("Bristle paint"));
+    if (m_tool == TOOL_BRISTLE)
+        m_bristle.endStroke();
+    m_strokeBefore.clear();
+    m_strokeUnion = QRect();
+    m_scratchTile = QImage();
+    m_scratchSeeded = QRect();
+    m_glitterUnion = QRect();
 }
 
 void PaintbrushCanvasItem::setZoom(qreal zoom)
@@ -892,6 +1132,10 @@ void PaintbrushCanvasItem::strokeSegment(const QPointF &from, const QPointF &to)
         if (from == to)
             emitSprayPuff();
         break;
+    case TOOL_BRISTLE:
+    case TOOL_GLITTER:
+        artStrokeSegment(localFromCanvas(from), localFromCanvas(to));
+        break;
     default:
         break;
     }
@@ -926,6 +1170,14 @@ void PaintbrushCanvasItem::beginStroke(const QPointF &canvasPos, bool primary)
         m_strokeLastDab = m_strokeSmooth;
         /* the initial dab captures its own before-region */
         strokeSegmentDabs(m_strokeSmooth, m_strokeSmooth);
+        break;
+
+    case TOOL_BRISTLE:
+    case TOOL_GLITTER:
+        m_lastCanvasPos = canvasPos;
+        m_strokeRemainder = 0.0;
+        m_strokeSpeed = 0.0;
+        beginArtStroke(localFromCanvas(canvasPos));
         break;
 
     case TOOL_SPRAY:
@@ -1059,6 +1311,26 @@ void PaintbrushCanvasItem::continueStroke(const QPointF &canvasPos)
         }
         break;
 
+    case TOOL_BRISTLE:
+    case TOOL_GLITTER:
+        if (m_strokeActive)
+        {
+            /* same normalize + short-window stabilize as the brush so the
+             * art tools inherit the proven stroke feel */
+            const QPointF local = localFromCanvas(canvasPos);
+            m_stabilizer.append(local);
+            if (m_stabilizer.size() > 3)
+                m_stabilizer.removeFirst();
+            QPointF avg;
+            for (const QPointF &s : m_stabilizer)
+                avg += s;
+            avg /= m_stabilizer.size();
+            m_strokeSmooth = avg;
+            artStrokeSegment(m_strokeLastDab, m_strokeSmooth);
+            m_lastCanvasPos = canvasPos;
+        }
+        break;
+
     case TOOL_LINE:
     case TOOL_RECTANGLE:
     case TOOL_ROUNDED_RECT:
@@ -1155,6 +1427,12 @@ void PaintbrushCanvasItem::endStroke(const QPointF &canvasPos, bool primary)
             m_scratchTile = QImage();
             m_scratchSeeded = QRect();
         }
+        break;
+
+    case TOOL_BRISTLE:
+    case TOOL_GLITTER:
+        if (m_strokeActive)
+            endArtStroke(localFromCanvas(canvasPos));
         break;
 
     case TOOL_SPRAY:
@@ -2428,7 +2706,33 @@ void PaintbrushCanvasItem::mouseReleaseEvent(QMouseEvent *event)
 
 void PaintbrushCanvasItem::mouseDoubleClickEvent(QMouseEvent *event)
 {
-    /* double-click = single click (avoid accidental double strokes) */
+    /* double-click on a text layer opens its inline editor (spec §57): the
+     * click is hit-tested top-most-first against the text layers' glyph
+     * alpha, and the layer is selected before the editor opens */
+    const QPointF canvasPos = canvasFromItem(event->position());
+    if (m_doc && event->button() == Qt::LeftButton)
+    {
+        for (int i = m_doc->layerCount() - 1; i >= 0; --i)
+        {
+            const CanvasLayer &l = *m_doc->layerAt(i);
+            if (!l.visible || l.raster.isNull() || l.type != LAYER_TEXT)
+                continue;
+            const QPointF local = l.mapCanvasToLocal(canvasPos);
+            if (local.x() < 0.0 || local.y() < 0.0 ||
+                local.x() >= double(l.raster.width()) ||
+                local.y() >= double(l.raster.height()))
+                continue;
+            /* only opaque glyph pixels count as a hit */
+            if (qAlpha(l.raster.pixel(int(local.x()), int(local.y()))) > 16)
+            {
+                m_doc->setCurrentLayerIndex(i);
+                emit textLayerDoubleClicked(i);
+                event->accept();
+                return;
+            }
+        }
+    }
+    /* fall back: double-click = single click (avoid accidental double strokes) */
     mousePressEvent(event);
 }
 

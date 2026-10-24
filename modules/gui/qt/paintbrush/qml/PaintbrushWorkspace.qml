@@ -272,7 +272,7 @@ Item {
         id: mainRow
 
         anchors.top: topBar.bottom
-        anchors.bottom: paletteBar.top
+        anchors.bottom: harvestTray.visible ? harvestTray.top : paletteBar.top
         anchors.left: parent.left
         anchors.right: parent.right
         spacing: 0
@@ -293,6 +293,72 @@ Item {
                 id: canvasView
                 anchors.fill: parent
                 canvas: paintbrushCanvas
+            }
+
+            /* Keep + Boost: the two product verbs float bottom-left over the
+             * canvas (spec §5, §24); the mood popover opens from here too */
+            PaintbrushBoostBar {
+                id: boostBar
+                anchors.left: parent.left
+                anchors.bottom: parent.bottom
+                anchors.leftMargin: VLCStyle.margin_normal
+                anchors.bottomMargin: VLCStyle.margin_normal
+                canvas: paintbrushCanvas
+                z: 4
+            }
+            Button {
+                id: moodBtn
+                anchors.left: boostBar.right
+                anchors.leftMargin: VLCStyle.margin_small
+                anchors.verticalCenter: boostBar.verticalCenter
+                text: qsTr("Mood")
+                z: 4
+                onClicked: moodPicker.opened ? moodPicker.close() : moodPicker.open()
+                ToolTip.visible: hovered
+                ToolTip.delay: 600
+                ToolTip.text: qsTr("Paper, light, palette, type and badges — one coherent look")
+            }
+            PaintbrushMoodPicker {
+                id: moodPicker
+                canvas: paintbrushCanvas
+                x: moodBtn.x
+                y: moodBtn.y - height - VLCStyle.margin_small
+            }
+        }
+    }
+
+    /* the Harvest Tray sits between the canvas row and the palette bar; it
+     * collapses to nothing while empty (spec §5.4) */
+    PaintbrushHarvestTray {
+        id: harvestTray
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: textEditorBar.visible ? textEditorBar.top : paletteBar.top
+        height: implicitHeight
+        canvas: paintbrushCanvas
+        dropTarget: canvasView
+        z: 3
+    }
+
+    /* editable typography (spec §57): inline bar for the current text layer
+     * (word, role, size, tracking, color) — no dialogs. Appears above the
+     * palette only when the current layer is text; double-clicking a text
+     * layer on the canvas selects it and focuses the word field. */
+    PaintbrushTextEditorBar {
+        id: textEditorBar
+
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: paletteBar.top
+        canvas: paintbrushCanvas
+        z: 4
+
+        Connections {
+            target: paintbrushCanvas
+            function onTextLayerDoubleClicked(layerIndex) {
+                /* the canvas already selected the layer; open + focus */
+                textEditorBar.refreshTreatment()
+                textEditorBar.openEditor()
             }
         }
     }
@@ -411,6 +477,11 @@ Item {
     Shortcut { sequence: "E"; onActivated: paintbrushCanvas.tool = 6 }
     Shortcut { sequence: "O"; onActivated: paintbrushCanvas.tool = 3 }
     Shortcut { sequence: "T"; onActivated: paintbrushCanvas.tool = 14 }
+    Shortcut { sequence: "P"; onActivated: paintbrushCanvas.tool = 16 }
+    Shortcut { sequence: "L"; onActivated: paintbrushCanvas.tool = 17 }
+    Shortcut { sequence: "K"; onActivated: PaintbrushCtx.keepSelection() }
+    Shortcut { sequence: "Ctrl+B"; onActivated: PaintbrushCtx.boost() }
+    Shortcut { sequence: "M"; onActivated: moodPicker.opened ? moodPicker.close() : moodPicker.open() }
     Shortcut { sequence: "G"; onActivated: paintbrushCanvas.gridVisible = !paintbrushCanvas.gridVisible }
     Shortcut { sequence: "R"; onActivated: paintbrushCanvas.rulersVisible = !paintbrushCanvas.rulersVisible }
     Shortcut { sequence: "Shift+G"; onActivated: paintbrushCanvas.snapToGrid = !paintbrushCanvas.snapToGrid }

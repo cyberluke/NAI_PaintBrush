@@ -14,6 +14,10 @@
 
 #include "pb_layer.hpp"
 #include "pb_media_logic.hpp"
+#include "pb_harvest.hpp"
+#include "art/runtime/art_scale.hpp"
+#include "art/runtime/light_rig.hpp"
+#include "art/surface/paper_stock.hpp"
 
 #include <QObject>
 #include <QSize>
@@ -95,14 +99,40 @@ class UndoCommand;
 class DocumentRenderer
 {
 public:
+    /* Art-runtime context shared by every layer of one render: the world
+     * scale (1x screen, Nx export), the document light rig and paper. One
+     * context per render keeps shadows, glitter and paper lit identically
+     * (spec §12, §38). */
+    struct Context
+    {
+        art::ArtScale scale;
+        art::ArtLightRig rig;
+        const art::PaperStock *paper = nullptr;
+        bool paintPaper = true;
+    };
+    static Context contextFor(const PaintbrushDocument &doc, float exportScale = 1.0f);
+
     /* Composite one layer into `target` for the canvas region whose
      * top-left corner is `region.topLeft()` (target is region-sized).
      * Honors the full layer transform (position + center-pivot scale +
-     * rotation), the local-space mask, opacity and blend mode. */
+     * rotation), the local-space mask, opacity and blend mode, and the
+     * layer's non-destructive effect chain. */
     static void compositeLayer(QImage &target, const QRect &region,
                                const CanvasLayer &layer);
+    static void compositeLayer(QImage &target, const QRect &region,
+                               const CanvasLayer &layer, const Context &ctx);
 
-    /* Composite all visible layers of `doc` bottom-to-top into `target`. */
+    /* The layer's effective source pixels: the raster (masked) with the
+     * finish chain applied, plus the local-space offset of that image's
+     * origin relative to the raster origin (<= 0 when effects pad). A
+     * material layer with state is re-rendered at ctx.scale. */
+    static QImage effectiveSource(const CanvasLayer &layer, const Context &ctx,
+                                  QPoint *originOffset);
+
+    /* Paint the document paper (PaperStock) into `target` for `region`. */
+    static void paintPaper(QImage &target, const QRect &region, const Context &ctx);
+
+    /* Composite paper + all visible layers of `doc` bottom-to-top. */
     static void composite(QImage &target, const QRect &region,
                           const PaintbrushDocument &doc);
 
@@ -112,6 +142,11 @@ public:
     /* Render `region` (canvas coordinates) into a region-sized image. */
     static QImage renderRegion(const PaintbrushDocument &doc,
                                const QRect &region);
+
+    /* Export-resolution render (spec §55): the canvas at `scale` with paper,
+     * material state and finish chains re-evaluated in world units (never a
+     * bitmap upscale of the 1x flatten). scale == 1 is identical to render(). */
+    static QImage renderScaled(const PaintbrushDocument &doc, float scale);
 };
 
 /* Canvas-space transform helpers shared by the document-level rotate/crop
@@ -135,6 +170,10 @@ class PaintbrushDocument : public QObject
     Q_PROPERTY(int layerCount READ layerCount NOTIFY layersChanged FINAL)
     Q_PROPERTY(int currentLayerIndex READ currentLayerIndex WRITE setCurrentLayerIndex NOTIFY currentLayerChanged FINAL)
     Q_PROPERTY(int trackCount READ trackCount NOTIFY tracksChanged FINAL)
+    /* Paintbrush 2.0 art direction state (spec §8, §12, §23, §52). */
+    Q_PROPERTY(QString paperStockId READ paperStockId WRITE setPaperStockId NOTIFY artStateChanged FINAL)
+    Q_PROPERTY(QString moodId READ moodId WRITE setMoodId NOTIFY artStateChanged FINAL)
+    Q_PROPERTY(paintbrush::HarvestTrayModel *harvest READ harvest CONSTANT FINAL)
 
 public:
     explicit PaintbrushDocument(QObject *parent = nullptr);
@@ -203,6 +242,28 @@ public:
      * dirty — eviction is a cache operation, not a content edit. */
     QVector<ObjectTrack> &tracksRef() { return m_tracks; }
 
+    /* -- art direction (Paintbrush 2.0) ----------------------------------- */
+    /* The paper the canvas is made of (empty = legacy transparent canvas). */
+    QString paperStockId() const { return m_paperStockId; }
+    void setPaperStockId(const QString &id);
+    const art::PaperStock *paperStock() const;
+    /* The one document light rig every material/finisher samples. */
+    const art::ArtLightRig &lightRig() const { return m_lightRig; }
+    void setLightRig(const art::ArtLightRig &rig);
+    /* Current mood id (art direction preset); empty = none applied. */
+    QString moodId() const { return m_moodId; }
+    void setMoodId(const QString &id);
+    /* Document seed: every material/stroke derives its seed from this so
+     * reopen/export reproduce identical results (spec §37). */
+    quint32 artSeed() const { return m_artSeed; }
+    void setArtSeed(quint32 seed);
+    /* Harvest tray — document-scoped (spec §5.4, §52). */
+    HarvestTrayModel *harvest() { return &m_harvest; }
+    const HarvestTrayModel *harvest() const { return &m_harvest; }
+    /* World scale for this document at `exportScale`. Canvas pixels are the
+     * world unit at 1x (96 units/inch). */
+    art::ArtScale artScale(float exportScale = 1.0f) const;
+
     /* -- project ---------------------------------------------------------- */
     QString projectPath() const { return m_projectPath; }
     void setProjectPath(const QString &path);
@@ -226,12 +287,19 @@ signals:
     void tracksChanged();
     void dirtyChanged(bool dirty);
     void documentReset();
+    void artStateChanged();
 
 public slots:
     void resetDocument(const QSize &size);
 
 private:
     void assignLayerIds();
+
+    QString m_paperStockId;
+    art::ArtLightRig m_lightRig;
+    QString m_moodId;
+    quint32 m_artSeed = 1;
+    HarvestTrayModel m_harvest;
 
     QSize m_canvasSize;
     QList<CanvasLayer> m_layers;

@@ -27,6 +27,8 @@
 #include "pb_thumbnail_service.hpp"
 #include "pb_lookup_service.hpp"
 #include "pb_frame_capture.hpp"
+#include "pb_harvest.hpp"
+#include "pb_boost.hpp"
 
 #include <QObject>
 #include <QImage>
@@ -127,6 +129,108 @@ class PaintbrushController : public QObject
     Q_PROPERTY(QVariantList activeJobs READ activeJobs NOTIFY activeJobsChanged FINAL)
     Q_PROPERTY(bool recoveryAvailable READ recoveryAvailable NOTIFY recoveryStateChanged FINAL)
     Q_PROPERTY(QString recoveryDescription READ recoveryDescription NOTIFY recoveryStateChanged FINAL)
+
+    /* -- Paintbrush 2.0: Harvest -> Compose -> Boost ------------------------ */
+    Q_PROPERTY(paintbrush::HarvestTrayModel *harvestTray READ harvestTray CONSTANT FINAL)
+    Q_PROPERTY(int harvestCount READ harvestCount NOTIFY harvestChanged FINAL)
+    Q_PROPERTY(bool canKeep READ canKeep NOTIFY objectSelectionChanged FINAL)
+    Q_PROPERTY(bool boostBusy READ boostBusy NOTIFY boostStateChanged FINAL)
+    Q_PROPERTY(QString boostSummary READ boostSummary NOTIFY boostStateChanged FINAL)
+    Q_PROPERTY(bool canBoost READ canBoost NOTIFY documentChanged FINAL)
+    Q_PROPERTY(QVariantList moodList READ moodList CONSTANT FINAL)
+    Q_PROPERTY(QVariantList paperList READ paperList CONSTANT FINAL)
+    Q_PROPERTY(QVariantList typographyList READ typographyList CONSTANT FINAL)
+    Q_PROPERTY(QStringList badgeList READ badgeList CONSTANT FINAL)
+    Q_PROPERTY(QString currentMoodId READ currentMoodId NOTIFY artStateChanged FINAL)
+    Q_PROPERTY(QString currentPaperId READ currentPaperId NOTIFY artStateChanged FINAL)
+    Q_PROPERTY(QVariantList moodPalette READ moodPalette NOTIFY artStateChanged FINAL)
+    Q_PROPERTY(QString undoText READ undoText NOTIFY canUndoChanged FINAL)
+
+public:
+    QString undoText() const { return m_undoStack.undoText(); }
+    /* -- harvest (spec §5) ---------------------------------------------- */
+    HarvestTrayModel *harvestTray() { return m_document.harvest(); }
+    int harvestCount() const { return m_document.harvest()->count(); }
+    bool canKeep() const { return m_objectSelected && !m_objectMask.isNull(); }
+    /* Keep: the current object selection becomes an immutable HarvestItem in
+     * the tray (exact frame + mask). Never clutters the canvas. */
+    Q_INVOKABLE void keepSelection();
+    /* Place a tray item on the canvas as a draggable sticker layer. `canvasPos`
+     * is the drop point (content center); a null point centers it. */
+    Q_INVOKABLE void placeHarvest(int harvestId, const QPointF &canvasPos);
+    Q_INVOKABLE void removeHarvest(int harvestId);
+    Q_INVOKABLE void toggleHarvestFavorite(int harvestId);
+    /* Seek the player to the moment this harvest came from. */
+    Q_INVOKABLE void seekToHarvest(int harvestId);
+
+    /* -- boost (spec §24-§30) -------------------------------------------- */
+    bool boostBusy() const { return m_boostBusy; }
+    QString boostSummary() const { return m_boostSummary; }
+    bool canBoost() const;
+    /* Teen Boost: one grouped, reversible art-direction pass. Deterministic
+     * structure first; a real bridge pose is decoded + segmented when the
+     * analysis finds a sparse gap and SAM is available. */
+    Q_INVOKABLE void boost();
+    Q_INVOKABLE void cancelBoost();
+
+    /* -- art direction (spec §8, §21-§23) --------------------------------- */
+    QVariantList moodList() const;
+    QVariantList paperList() const;
+    QVariantList typographyList() const;
+    QStringList badgeList() const;
+    QString currentMoodId() const { return m_document.moodId(); }
+    QString currentPaperId() const { return m_document.paperStockId(); }
+    QVariantList moodPalette() const;
+    Q_INVOKABLE void applyMood(const QString &moodId);
+    Q_INVOKABLE void setPaper(const QString &paperId);
+    /* Layer finish + role (non-destructive, one typed command each). */
+    Q_INVOKABLE void setLayerRole(int index, const QString &role);
+    Q_INVOKABLE QString layerRole(int index) const;
+    Q_INVOKABLE void addLayerShadow(int index, double blur, double opacity);
+    Q_INVOKABLE void addLayerGlow(int index, const QString &color, double radius);
+    Q_INVOKABLE void addLayerOutline(int index, const QString &color, double width);
+    Q_INVOKABLE void clearLayerEffects(int index);
+    Q_INVOKABLE int layerEffectCount(int index) const;
+    /* Typography + badges as new layers (text stays editable in metadata). */
+    Q_INVOKABLE void addStyledText(const QString &text, const QString &styleId,
+                                   double sizePx, const QString &color);
+    /* Editable typography (spec §57): replace the text, role, size, tracking
+     * and color of an existing text layer. The raster is re-rendered from the
+     * treatment (never a bitmap stretch) and the change is one typed undo
+     * step. An empty text deletes nothing — it renders empty glyphs; callers
+     * use deleteLayer to remove a text layer. `tracking` is the em-fraction
+     * override; pass -99 to use the style role's tracking. */
+    Q_INVOKABLE void editTextLayer(int index, const QString &text,
+                                   const QString &styleId, double sizePx,
+                                   const QString &color, double tracking);
+    /* Current treatment of a text layer for the inline editor: the QVariantMap
+     * of TextTreatment, or empty for a non-text layer. */
+    Q_INVOKABLE QVariantMap textTreatmentFor(int index) const;
+    Q_INVOKABLE void addBadge(const QString &kind, const QString &color, double size);
+    Q_INVOKABLE QString badgePreviewDataUrl(const QString &kind, const QString &color) const;
+    Q_INVOKABLE QString paperPreviewDataUrl(const QString &paperId) const;
+
+signals:
+    void harvestChanged();
+    void boostStateChanged();
+    void artStateChanged();
+
+private:
+    void finishBoost(const QString &summary);
+    void boostInsertBridge(const QImage &mask, double score);
+    void applyMoodToCanvasTools();
+
+    bool m_boostBusy = false;
+    QString m_boostSummary;
+    /* in-flight boost transaction (bridge pose waits for segmentation) */
+    std::unique_ptr<BoostTransaction> m_boostTx;
+    BoostAnalysis m_boostAnalysis;
+    BoostOptions m_boostOptions;
+    QVector<BridgeCandidate> m_boostCandidates;
+    int m_boostBestCandidate = -1;
+    bool m_boostAwaitingMask = false;
+    QImage m_boostSavedMask;        /* user's object mask, restored after boost */
+    QTimer m_boostTimeout;
 
 public:
     explicit PaintbrushController(qt_intf_t *intf, QObject *parent = nullptr);
@@ -486,6 +590,7 @@ private:
     QString m_objectMaskBoundsText;
     bool m_objectSelectBusy = false;
     QImage m_objectMask;
+    double m_objectMaskScore = 0.0; /* confidence of the current object mask */
     QImage m_maskUndoBefore;   /* mask captured when a refine stroke arms */
     bool m_objectMaskSoftEdge = false;
 

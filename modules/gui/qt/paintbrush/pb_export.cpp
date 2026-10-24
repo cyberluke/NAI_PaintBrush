@@ -41,8 +41,13 @@ QString ExportService::exportImageOptions(PaintbrushDocument *doc,
 {
     if (!doc)
         return QStringLiteral("No document to export.");
-    /* the canonical renderer: export shows exactly what the screen shows */
-    QImage flat = DocumentRenderer::render(*doc);
+    /* the canonical renderer: export shows exactly what the screen shows.
+     * At scale != 1 the paper, material state and finish chains are
+     * re-evaluated in world units at export resolution (spec §55) instead of
+     * bitmap-upscaling the 1x flatten. */
+    QImage flat = (scale > 0.0 && !qFuzzyCompare(scale, 1.0))
+        ? DocumentRenderer::renderScaled(*doc, float(scale))
+        : DocumentRenderer::render(*doc);
     if (flat.isNull())
         return QStringLiteral("The canvas is empty.");
 
@@ -68,11 +73,6 @@ QString ExportService::exportImageOptions(PaintbrushDocument *doc,
         if (maxX >= 0)
             flat = flat.copy(QRect(minX, minY, maxX - minX + 1, maxY - minY + 1));
     }
-
-    if (scale > 0.0 && !qFuzzyCompare(scale, 1.0))
-        flat = flat.scaled(qMax(1, int(flat.width() * scale)),
-                           qMax(1, int(flat.height() * scale)),
-                           Qt::KeepAspectRatio, Qt::SmoothTransformation);
 
     const QFileInfo info(path);
     QString fmt = format;

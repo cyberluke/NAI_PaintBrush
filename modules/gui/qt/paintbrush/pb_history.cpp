@@ -5,6 +5,7 @@
  *****************************************************************************/
 
 #include "pb_history.hpp"
+#include "pb_harvest.hpp"
 #include "pb_document.hpp"
 
 #include <QPainter>
@@ -254,6 +255,130 @@ void CompositeCommand::revert(PaintbrushDocument &doc)
 {
     for (int i = children.size() - 1; i >= 0; --i)
         children[i]->revert(doc);
+}
+
+/* ------------------------------------------------ Paintbrush 2.0 commands */
+
+static void notifyLayerStateChanged(PaintbrushDocument &doc)
+{
+    doc.setDirty(true);
+    emit doc.layersChanged();
+}
+
+void SetEffectsCommand::apply(PaintbrushDocument &doc)
+{
+    if (CanvasLayer *l = doc.layerById(layerId))
+    {
+        l->effects = after;
+        notifyLayerStateChanged(doc);
+    }
+}
+
+void SetEffectsCommand::revert(PaintbrushDocument &doc)
+{
+    if (CanvasLayer *l = doc.layerById(layerId))
+    {
+        l->effects = before;
+        notifyLayerStateChanged(doc);
+    }
+}
+
+void SetRoleCommand::apply(PaintbrushDocument &doc)
+{
+    if (CanvasLayer *l = doc.layerById(layerId))
+    {
+        l->role = after;
+        notifyLayerStateChanged(doc);
+    }
+}
+
+void SetRoleCommand::revert(PaintbrushDocument &doc)
+{
+    if (CanvasLayer *l = doc.layerById(layerId))
+    {
+        l->role = before;
+        notifyLayerStateChanged(doc);
+    }
+}
+
+/* Editable typography: apply/revert restore text + treatment + raster as one
+ * consistent state so the canvas always shows the glyph pixels of the
+ * matching treatment (spec §57). */
+static void applyTextState(PaintbrushDocument &doc, int layerId,
+                           const QString &text, const art::TextTreatment &t,
+                           const QImage &raster)
+{
+    if (CanvasLayer *l = doc.layerById(layerId))
+    {
+        l->text = text;
+        l->raster = raster;
+        l->metadata[QStringLiteral("textTreatment")] = t.toVariant();
+        l->name = text.left(24);
+        notifyLayerStateChanged(doc);
+    }
+}
+
+void SetTextCommand::apply(PaintbrushDocument &doc)
+{
+    applyTextState(doc, layerId, afterText, afterTreatment, afterRaster);
+}
+
+void SetTextCommand::revert(PaintbrushDocument &doc)
+{
+    applyTextState(doc, layerId, beforeText, beforeTreatment, beforeRaster);
+}
+
+qint64 SetTextCommand::bytes() const
+{
+    return qint64(beforeRaster.sizeInBytes()) + qint64(afterRaster.sizeInBytes());
+}
+
+SetArtStateCommand::State SetArtStateCommand::capture(const PaintbrushDocument &doc)
+{
+    State s;
+    s.paperId = doc.paperStockId();
+    s.moodId = doc.moodId();
+    s.light = doc.lightRig();
+    return s;
+}
+
+static void applyArtState(PaintbrushDocument &doc, const SetArtStateCommand::State &s)
+{
+    doc.setPaperStockId(s.paperId);
+    doc.setMoodId(s.moodId);
+    doc.setLightRig(s.light);
+}
+
+void SetArtStateCommand::apply(PaintbrushDocument &doc) { applyArtState(doc, after); }
+void SetArtStateCommand::revert(PaintbrushDocument &doc) { applyArtState(doc, before); }
+
+AddHarvestCommand::AddHarvestCommand() = default;
+AddHarvestCommand::~AddHarvestCommand() = default;
+
+qint64 AddHarvestCommand::bytes() const
+{
+    if (!item)
+        return 0;
+    return qint64(item->cutout.sizeInBytes()) + qint64(item->mask.sizeInBytes());
+}
+
+void AddHarvestCommand::apply(PaintbrushDocument &doc)
+{
+    if (!item)
+        return;
+    if (doc.harvest()->itemById(item->id))
+        return;
+    const int id = doc.harvest()->add(*item);
+    item->id = id;
+    doc.setDirty(true);
+}
+
+void AddHarvestCommand::revert(PaintbrushDocument &doc)
+{
+    if (!item)
+        return;
+    doc.harvest()->remove(item->id);
+    doc.setDirty(true);
 }
 
 /* -------------------------------------------------------------- undo log */

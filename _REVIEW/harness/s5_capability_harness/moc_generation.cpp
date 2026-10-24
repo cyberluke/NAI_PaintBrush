@@ -6,7 +6,7 @@
 ** WARNING! All changes made in this file will be lost!
 *****************************************************************************/
 
-#include "../../modules/gui/qt/paintbrush/pb_generation_service.hpp"
+#include "../../../modules/gui/qt/paintbrush/pb_generation_service.hpp"
 #include <QtNetwork/QSslError>
 #include <QtCore/qmetatype.h>
 

@@ -10,6 +10,67 @@
 
 ---
 
+## 0. Paintbrush 2.0 — Product / Art Materials / Harvest / Boost (2026-10-23)
+
+Latest stage. Full report: `_REVIEW/PAINTBRUSH_2_STAGE_REPORT.md`. Summary:
+
+- **Art Materials Runtime** (`modules/gui/qt/paintbrush/art/`): shared `ArtScale`
+  + one document `ArtLightRig`; six `PaperStock`s rendered procedurally in world
+  space (zoom/export stable, deterministic); bristle brush (stable per-stroke
+  bristles, per-strand pigment); **glitter flagship** (glue/bonded/loose grains,
+  bounded palette identity, facet twinkle from the shared light, byte-exact
+  state serialization); non-destructive **Finish** chain per layer (shadow /
+  glow / directed motion blur / outline / ghost, premultiplied, world units);
+  six Moods, seven typography roles, eleven procedural badges.
+- **Harvest → Compose → Boost**: `HarvestItem` (exact FrameRef/PTS + mask) in a
+  document-scoped `HarvestTrayModel` (persisted); Keep / drag-to-place;
+  `BoostEngine` + `BoostTransaction` (deterministic hierarchy/depth/motion/
+  spacing, real-frame bridge pose scored + segmented, **one undo step**).
+- **Core changes**: layer `effects/role/materialState/harvestId`; renderer paints
+  paper, resolves effect chains, `renderScaled()` for export; typed commands
+  `SetEffects/SetRole/SetArtState/AddHarvest`; project store additive; **fixed
+  pre-existing exact-path composite bug** (translated stickers drew nothing).
+- **Verification**: `_REVIEW/harness/pb_art_harness/build_run.ps1` 135/135;
+  `build_run_s1.ps1` (S1 core) 81/81; S5 67/67 (script path/stub repaired);
+  plugin builds (`scripts/pb-build-plugin.ps1`), cache regenerated, app launches,
+  `qmllint` clean.
+- **Build graph**: meson regen still broken → `scripts/pb-ninja-add-sources.py`
+  patches `build.ninja` from the authoritative `meson.build` list (it also added
+  `pb_capability/pb_sticker/pb_layer_model`, which were missing from the stale
+  graph). The `REGENERATE_BUILD` edge is commented out per the §7 workaround.
+- **Shortcuts**: P bristle, L glitter, K keep, Ctrl+B boost, M mood picker.
+
+### 0a. Paintbrush 2.0 — Showroom (GPU Art Runtime, editable typography, 4K, live acceptance)
+
+Second stage of 2.0, same report file. Summary:
+
+- **GPU Art Runtime** (`art/gpu/`, QRhi/D3D11 first port): paper + glitter +
+  finish rendered on the GPU with the CPU path as the golden reference.
+  `scripts/pb-bake-shaders.py` bakes GLSL→qsb packs (`shaders_qsb.h`).
+  Harness `_REVIEW/harness/pb_gpu_harness/build_run.ps1` **19/19** (paper
+  near-bit-exact, glitter on a dense 4836-grain pile, finish blur/shadow/glow
+  to rounding noise). Bugs fixed: grow-only-target readback (`result.pixelSize`
+  + bottom-anchored crop under the D3D11 Y flip), shadow/glow are a 3× box blur
+  (B-spline kernel) with the subject composited back, `textureLod` in dynamic
+  loops (HLSL force-unroll), glitter +0.5px half-pixel.
+- **Editable typography UI**: double-click a text layer → inline
+  `PaintbrushTextEditorBar.qml` (word, role, size, tracking, color); every edit
+  is one typed `SetTextCommand` (undo/redo); text re-renders from its treatment
+  at export scale (vector-style crisp, never bitmap upscale).
+- **4K export** verified: `renderScaled(4)` → 3840×2160, crisp glyphs, world-
+  sized glitter, scaled finish padding, deterministic, ~1.2 s.
+- **LIVE acceptance run**: `_REVIEW/harness/pb_live_harness/build_run.ps1`
+  **31/31** — libvlc decodes the real 553 MB NewJeans "Hype Boy Dance Practice"
+  clip, real SAM3 (`sam3-q4_0.ggml`, CPU) segments dancers, Keep A/B/C → canvas
+  → Boost with a REAL mid-gap bridge pose → 4K export → one undo restores
+  byte-identical. Artifacts in `build/live/`.
+- **Totals**: art 141/141, S1 81/81, S5 67/67, GPU 19/19, live 31/31 (339
+  checks, all green); plugin builds `NINJA_EXIT=0`.
+- Notes: this libvlc API reports time in **microseconds**; non-ASCII video
+  paths are staged to an ASCII copy (native argv is ANSI-lossy).
+
+---
+
 ## 1. Current implementation state
 
 The NAI Paintbrush creative workspace is a native VLC 4 Qt/QML module

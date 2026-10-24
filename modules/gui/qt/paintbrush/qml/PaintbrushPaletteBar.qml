@@ -144,11 +144,13 @@ Item {
             }
         }
 
-        /* Brush size (pencil/brush/eraser/shapes) — the ONLY Size group */
+        /* Brush size (pencil/brush/eraser/shapes/bristle/glitter) — the ONLY
+         * Size group */
         RowLayout {
             spacing: VLCStyle.margin_xsmall
             visible: canvas.tool >= 4 && canvas.tool <= 6
                      || canvas.tool >= 10 && canvas.tool <= 13
+                     || canvas.tool === 16 || canvas.tool === 17
 
             Widgets.LabelExt {
                 text: qsTr("Size")
@@ -159,7 +161,7 @@ Item {
                 Layout.preferredWidth: VLCStyle.dp(140, VLCStyle.scale)
                 Layout.alignment: Qt.AlignVCenter
                 from: 1
-                to: 64
+                to: (canvas.tool === 16 || canvas.tool === 17) ? 160 : 64
                 value: canvas.brushSize
                 onMoved: canvas.brushSize = value
             }
@@ -167,6 +169,80 @@ Item {
                 text: Math.round(canvas.brushSize)
                 color: theme.fg.secondary
                 font.pixelSize: VLCStyle.fontSize_small
+            }
+        }
+
+        /* Bristle paint (tool 16): flow + pigment variation (spec §13) */
+        RowLayout {
+            spacing: VLCStyle.margin_xsmall
+            visible: canvas.tool === 16
+
+            Widgets.LabelExt {
+                text: qsTr("Flow")
+                color: theme.fg.secondary
+                font.pixelSize: VLCStyle.fontSize_small
+            }
+            Slider {
+                Layout.preferredWidth: VLCStyle.dp(90, VLCStyle.scale)
+                Layout.alignment: Qt.AlignVCenter
+                from: 0.05; to: 1.0; stepSize: 0.05
+                value: canvas.brushFlow
+                onMoved: canvas.brushFlow = value
+            }
+            Widgets.LabelExt {
+                text: qsTr("Pigment")
+                color: theme.fg.secondary
+                font.pixelSize: VLCStyle.fontSize_small
+            }
+            Slider {
+                Layout.preferredWidth: VLCStyle.dp(90, VLCStyle.scale)
+                Layout.alignment: Qt.AlignVCenter
+                from: 0.0; to: 1.0; stepSize: 0.05
+                value: canvas.brushColorVariation
+                onMoved: canvas.brushColorVariation = value
+            }
+        }
+
+        /* Glitter (tool 17): amount, flake size, shimmer (spec §14.3 primary) */
+        RowLayout {
+            spacing: VLCStyle.margin_xsmall
+            visible: canvas.tool === 17
+
+            Widgets.LabelExt {
+                text: qsTr("Amount")
+                color: theme.fg.secondary
+                font.pixelSize: VLCStyle.fontSize_small
+            }
+            Slider {
+                Layout.preferredWidth: VLCStyle.dp(80, VLCStyle.scale)
+                Layout.alignment: Qt.AlignVCenter
+                from: 0.1; to: 2.0; stepSize: 0.05
+                value: canvas.glitterAmount
+                onMoved: canvas.glitterAmount = value
+            }
+            Widgets.LabelExt {
+                text: qsTr("Flake")
+                color: theme.fg.secondary
+                font.pixelSize: VLCStyle.fontSize_small
+            }
+            Slider {
+                Layout.preferredWidth: VLCStyle.dp(80, VLCStyle.scale)
+                Layout.alignment: Qt.AlignVCenter
+                from: 0.2; to: 2.5; stepSize: 0.05
+                value: canvas.glitterFlakeSize
+                onMoved: canvas.glitterFlakeSize = value
+            }
+            Widgets.LabelExt {
+                text: qsTr("Shimmer")
+                color: theme.fg.secondary
+                font.pixelSize: VLCStyle.fontSize_small
+            }
+            Slider {
+                Layout.preferredWidth: VLCStyle.dp(80, VLCStyle.scale)
+                Layout.alignment: Qt.AlignVCenter
+                from: 0.0; to: 1.0; stepSize: 0.05
+                value: canvas.glitterShimmer
+                onMoved: canvas.glitterShimmer = value
             }
         }
 

@@ -189,6 +189,7 @@ moc_headers = files(
     'paintbrush/pb_media_logic.hpp',
     'paintbrush/pb_project_store.hpp',
     'paintbrush/pb_export.hpp',
+    'paintbrush/pb_harvest.hpp',
 )
 
 if host_system == 'windows'
@@ -578,6 +579,21 @@ qt_plugin_sources = files(
     'paintbrush/pb_layer_model.cpp',
     'paintbrush/pb_project_store.cpp',
     'paintbrush/pb_export.cpp',
+    # Paintbrush 2.0: Harvest -> Compose -> Boost + Art Materials Runtime
+    'paintbrush/pb_harvest.cpp',
+    'paintbrush/pb_boost.cpp',
+    'paintbrush/pb_controller_art.cpp',
+    'paintbrush/art/runtime/material_registry.cpp',
+    'paintbrush/art/surface/paper_stock.cpp',
+    'paintbrush/art/surface/paper_renderer.cpp',
+    'paintbrush/art/stroke/bristle_brush.cpp',
+    'paintbrush/art/materials/glitter/glitter_material.cpp',
+    'paintbrush/art/finish/effects.cpp',
+    'paintbrush/art/style/mood.cpp',
+    'paintbrush/art/style/typography_style.cpp',
+    'paintbrush/art/style/badges.cpp',
+    # Paintbrush 2.0 Showroom: GPU Art Runtime (QRhi port of the CPU golden)
+    'paintbrush/art/gpu/pb_gpu_runtime.cpp',
 )
 
 if host_system == 'windows'
@@ -1007,6 +1023,10 @@ qml_modules += {
         'paintbrush/qml/PaintbrushInspectorDock.qml',
         'paintbrush/qml/PaintbrushMediaDrawer.qml',
         'paintbrush/qml/PaintbrushAssistantDock.qml',
+        'paintbrush/qml/PaintbrushHarvestTray.qml',
+        'paintbrush/qml/PaintbrushBoostBar.qml',
+        'paintbrush/qml/PaintbrushMoodPicker.qml',
+        'paintbrush/qml/PaintbrushTextEditorBar.qml',
     ),
 }
 

@@ -119,6 +119,25 @@ PaintbrushController::PaintbrushController(qt_intf_t *intf, QObject *parent)
     connect(&m_undoStack, &UndoStack::maskRestored,
             this, &PaintbrushController::onMaskRestored);
 
+    /* Paintbrush 2.0: tray + art-direction state are document-scoped */
+    connect(m_document.harvest(), &HarvestTrayModel::countChanged,
+            this, &PaintbrushController::harvestChanged);
+    connect(&m_document, &PaintbrushDocument::artStateChanged,
+            this, &PaintbrushController::artStateChanged);
+    connect(&m_document, &PaintbrushDocument::artStateChanged,
+            this, &PaintbrushController::applyMoodToCanvasTools);
+    connect(&m_document, &PaintbrushDocument::layersChanged,
+            this, &PaintbrushController::documentChanged);
+    m_boostTimeout.setSingleShot(true);
+    m_boostTimeout.setInterval(20000);
+    connect(&m_boostTimeout, &QTimer::timeout, this, [this]() {
+        if (m_boostBusy && m_boostAwaitingMask)
+        {
+            m_boostAwaitingMask = false;
+            finishBoost(QStringLiteral("(The bridge pose timed out, so the structure pass stands on its own.)"));
+        }
+    });
+
     /* a new blank canvas, like opening Paintbrush */
     m_document.resetDocument(QSize(1280, 720));
     emit documentChanged();
@@ -1221,7 +1240,15 @@ void PaintbrushController::onSegmentationMaskReady(const QImage &mask, double sc
                                                    const QString &method)
 {
     Q_UNUSED(method);
+    if (m_boostAwaitingMask)
+    {
+        /* this mask was requested by Boost for the bridge candidate frame */
+        m_boostAwaitingMask = false;
+        boostInsertBridge(mask, score);
+        return;
+    }
     m_objectMask = mask;
+    m_objectMaskScore = score;
     m_objectSelectBusy = false;
     m_objectSelected = !mask.isNull();
     if (m_canvas)
@@ -1236,6 +1263,12 @@ void PaintbrushController::onSegmentationMaskReady(const QImage &mask, double sc
 
 void PaintbrushController::onSegmentationError(const QString &message)
 {
+    if (m_boostAwaitingMask)
+    {
+        m_boostAwaitingMask = false;
+        finishBoost(QStringLiteral("(No clean bridge pose was found, so the structure pass stands on its own.)"));
+        return;
+    }
     m_objectSelectBusy = false;
     if (m_canvas)
         m_canvas->setObjectSelectBusy(false);
@@ -2175,8 +2208,8 @@ void PaintbrushController::insertStickerLayer(const QImage &raster,
         buffer.open(QIODevice::WriteOnly);
         seedMask.convertToFormat(QImage::Format_Grayscale8).save(&buffer, "PNG");
         layer.metadata[QStringLiteral("seedMask")] =
-            QStringLiteral("data:image/png;base64,") +
-            QString::fromLatin1(png.toBase64());
+            QString(QStringLiteral("data:image/png;base64,") +
+                    QString::fromLatin1(png.toBase64()));
     }
 
     /* A20: one typed InsertLayerCommand carries the immutable sticker asset

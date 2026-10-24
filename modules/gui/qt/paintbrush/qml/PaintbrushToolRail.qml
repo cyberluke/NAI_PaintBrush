@@ -60,6 +60,9 @@ Item {
                     { toolId: 7, icon: VLCIcons.transparency, tip: qsTr("Fill"), sparkle: false },
                     { toolId: 8, icon: VLCIcons.search, tip: qsTr("Eyedropper"), sparkle: false },
                     { toolId: 9, icon: VLCIcons.visualization, tip: qsTr("Spray"), sparkle: false },
+                    /* Paintbrush 2.0 art materials (pb_common.hpp ToolId 16/17) */
+                    { toolId: 16, icon: VLCIcons.renderer, tip: qsTr("Bristle Paint"), sparkle: false },
+                    { toolId: 17, icon: VLCIcons.shuffle, tip: qsTr("Glitter"), sparkle: false },
                     /* shape tools */
                     { toolId: 10, icon: VLCIcons.atob, tip: qsTr("Line"), sparkle: false },
                     { toolId: 11, icon: VLCIcons.space, tip: qsTr("Rectangle"), sparkle: false },
