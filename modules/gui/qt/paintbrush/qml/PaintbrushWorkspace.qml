@@ -249,6 +249,16 @@ Item {
                 checked: assistantDock.expanded
                 onClicked: assistantDock.expanded = !assistantDock.expanded
             }
+            /* explicit Inspector toggle: opens/closes the contextual drawer
+             * regardless of the current selection state */
+            Widgets.IconToolButton {
+                text: VLCIcons.list
+                description: inspectorDock.expanded ? qsTr("Hide inspector")
+                                                    : qsTr("Show inspector")
+                checkable: true
+                checked: inspectorDock.expanded
+                onClicked: inspectorDock.setOpen(!inspectorDock.expanded)
+            }
             Widgets.IconToolButton {
                 text: VLCIcons.add
                 description: qsTr("New blank canvas")

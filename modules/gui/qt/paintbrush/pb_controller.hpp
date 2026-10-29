@@ -432,6 +432,11 @@ public:
     Q_INVOKABLE void playerSeekBegin();
     Q_INVOKABLE void playerSeekEnd();
     Q_INVOKABLE void playerStop();
+    /* Close the attached video source: cancel thumbnail + exact-frame decode
+     * work, stop the playback session, clear the current source-frame/media
+     * state and hide the media drawer. The canvas and Harvest Tray (with its
+     * item provenance: MRL/PTS/thumbnails) are NOT touched. */
+    Q_INVOKABLE void closeVideo();
 
     /* -- helpers ----------------------------------------------------------- */
     Q_INVOKABLE QImage flattenedPreview() const;
@@ -597,6 +602,12 @@ private:
     QImage selectionCrop() const;
     QImage currentAiSource() const;
     QImage pristineSourceFrame() const;
+    /* Ensure a valid AI source raster exists before segmenting:
+     * if the document has no captured reference frame yet but a video is
+     * playing, decode the CURRENT player PTS through the edit frame source,
+     * adopt it as the document source frame, and return it. This lets
+     * Object Select work on live video without a "Use this frame" step. */
+    QImage ensureAiSourceFrame();
     QVector<QPointF> positivePointsForTracking() const;
     /* Exact-frame decode helpers (EditDecodeSource): all edit-pipeline
      * frame acquisition goes through these, never the playback player. */

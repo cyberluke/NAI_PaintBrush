@@ -25,6 +25,16 @@ Item {
     implicitWidth: row.implicitWidth + 2 * VLCStyle.margin_small
     implicitHeight: VLCStyle.dp(44, VLCStyle.scale)
 
+    /* concrete reason for the disabled primary verb, shown in the UI */
+    readonly property string keepDisabledReason:
+        !PaintbrushCtx.segmentationAvailable
+            ? qsTr("Object Select model is not configured (see diagnostics).")
+            : (PaintbrushCtx.objectSelected
+                   ? qsTr("Select an object with Object Select first.")
+                   : qsTr("Select an object on the frame first (Object Select)."))
+    readonly property string boostDisabledReason:
+        qsTr("Drop a sticker or image on the canvas first — Boost needs source art.")
+
     ColorContext {
         id: theme
         colorSet: ColorContext.View
@@ -53,7 +63,7 @@ Item {
             ToolTip.delay: 600
             ToolTip.text: PaintbrushCtx.canKeep
                           ? qsTr("Keep this moment in your tray")
-                          : qsTr("Select something on the frame first (Object Select)")
+                          : root.keepDisabledReason
         }
 
         Button {
@@ -64,7 +74,11 @@ Item {
             onClicked: PaintbrushCtx.boost()
             ToolTip.visible: hovered
             ToolTip.delay: 600
-            ToolTip.text: qsTr("Art-direct the composition: hierarchy, depth, motion. One undo.")
+            ToolTip.text: PaintbrushCtx.boostBusy
+                          ? qsTr("Applying the art direction…")
+                          : (PaintbrushCtx.canBoost
+                             ? qsTr("Art-direct the composition: hierarchy, depth, motion. One undo.")
+                             : qsTr("Drop a sticker or image onto the canvas first — Boost needs source art."))
         }
 
         Button {
@@ -100,7 +114,7 @@ Item {
             id: summaryLabel
             anchors.fill: parent
             anchors.margins: VLCStyle.margin_small
-            text: PaintbrushCtx.boostSummary
+            text: root.hintText
             color: theme.fg.primary
             font.pixelSize: VLCStyle.fontSize_small
             wrapMode: Text.WordWrap
@@ -108,20 +122,62 @@ Item {
         }
 
         Behavior on opacity { NumberAnimation { duration: 220 } }
-        Timer {
-            id: hideTimer
-            interval: 9000
-            onTriggered: summary.opacity = 0.0
-        }
+    }
+
+    /* Live disabled-reason hint: when a primary verb is unavailable, show the
+     * concrete reason under the bar (not merely on hover). Cleared once a
+     * Boost completes so the summary can take over. */
+    readonly property string hintText: {
+        if (summaryOwned)
+            return PaintbrushCtx.boostSummary
+        if (!PaintbrushCtx.canKeep && !PaintbrushCtx.boostBusy)
+            return root.keepDisabledReason
+        if (!PaintbrushCtx.canBoost && !PaintbrushCtx.boostBusy)
+            return root.boostDisabledReason
+        return ""
+    }
+    property bool showHint: false
+    property bool summaryOwned: false
+
+    /* a hint appears as soon as it has text and is cleared by the auto-hide
+     * timer */
+    onHintTextChanged: {
+        if (root.hintText.length > 0)
+            root.showHint = true
+        else
+            root.showHint = false
+    }
+    Timer {
+        id: hintTimer
+        interval: 9000
+        onTriggered: root.showHint = false
+    }
+    onShowHintChanged: {
+        if (root.showHint)
+            hintTimer.restart()
     }
 
     Connections {
         target: PaintbrushCtx
+        function onObjectSelectionChanged() {
+            if (root.hintText.length > 0)
+                showHint = true
+        }
         function onBoostStateChanged() {
             if (!PaintbrushCtx.boostBusy && PaintbrushCtx.boostSummary.length > 0) {
-                summary.opacity = 1.0
-                hideTimer.restart()
+                summaryOwned = true
+                showHint = true
+                hintTimer.restart()
+            } else if (!PaintbrushCtx.boostBusy) {
+                summaryOwned = false
+                hintTimer.restart()
             }
         }
+    }
+
+    Binding {
+        target: summary
+        property: "opacity"
+        value: root.showHint ? 1.0 : 0.0
     }
 }

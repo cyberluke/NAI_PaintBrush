@@ -36,14 +36,47 @@ Item {
 
     /* contextual open state: default closed, auto-opens for selections */
     property bool pinned: false
-    readonly property bool expanded: pinned
-        || canvas.hasSelection
-        || PaintbrushCtx.objectSelected
+    /* Explicit user dismissal: when true the inspector stays collapsed even
+     * while a selection/object is active (the fold button can always close
+     * it). Cleared by the topbar toggle and when a NEW selection is made. */
+    property bool manualClosed: false
+    /* collapsed-by-default disclosure for legacy voice/generation actions */
+    property bool legacyActionsOpen: false
+    readonly property bool expanded: (canvas.hasSelection
+                                     || PaintbrushCtx.objectSelected
+                                     || pinned)
+                                    && !manualClosed
     readonly property real drawerWidth: Math.min((parent ? parent.width : 320) * 0.26,
                                                  VLCStyle.dp(320, VLCStyle.scale))
 
+    /* open/close requested from outside (topbar toggle) */
+    function setOpen(open) {
+        manualClosed = !open
+        if (!open)
+            pinned = false
+    }
+
     function openDiagnostics() {
+        /* the dialog is a top-level Overlay child, so it lays out against
+         * the Overlay rather than this (possibly collapsed, 0-width) dock */
         diagnosticsDialog.open()
+    }
+
+    /* a NEW selection re-allows the contextual auto-open (an explicit
+     * dismissal only lasts for the current selection/object) */
+    Connections {
+        target: canvas
+        function onSelectionChanged(hasSel) {
+            if (hasSel)
+                manualClosed = false
+        }
+    }
+    Connections {
+        target: PaintbrushCtx
+        function onObjectSelectionChanged() {
+            if (PaintbrushCtx.objectSelected)
+                manualClosed = false
+        }
     }
 
     Rectangle {
@@ -79,10 +112,15 @@ Item {
             Widgets.IconToolButton {
                 text: root.pinned ? VLCIcons.close : VLCIcons.ic_fluent_chevron_right_24
                 description: root.pinned ? qsTr("Close inspector")
-                                         : qsTr("Keep inspector open")
-                checkable: true
-                checked: root.pinned
-                onClicked: root.pinned = !root.pinned
+                                         : qsTr("Dismiss inspector")
+                onClicked: {
+                    /* Dismiss always works, even mid-selection: the fold
+                     * button must be able to collapse the dock while
+                     * hasSelection/objectSelected would otherwise keep it
+                     * open. */
+                    root.pinned = false
+                    root.manualClosed = true
+                }
             }
         }
 
@@ -393,17 +431,35 @@ Item {
         }
 
         /* ------------------------------ AI actions (object / selection) */
-        Widgets.LabelExt {
-            text: qsTr("AI actions")
-            color: theme.fg.secondary
-            font.pixelSize: VLCStyle.fontSize_small
-            visible: PaintbrushCtx.objectSelected || canvas.hasSelection
-        }
+            /* Legacy voice/generation actions are collapsed by default so the
+             * primary Inspector stays clean after a plain Rect Select; the
+             * product verbs (Keep / Boost / Add to canvas / Export object / Cut)
+             * live on the canvas bars, not here. */
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: VLCStyle.margin_xsmall
+                visible: PaintbrushCtx.objectSelected || canvas.hasSelection
+                Widgets.IconToolButton {
+                    text: root.legacyActionsOpen ? VLCIcons.chevron_down
+                                                 : VLCIcons.ic_fluent_chevron_right_24
+                    description: qsTr("AI actions")
+                    checkable: true
+                    checked: root.legacyActionsOpen
+                    onClicked: root.legacyActionsOpen = !root.legacyActionsOpen
+                }
+                Widgets.LabelExt {
+                    text: qsTr("More AI actions")
+                    color: theme.fg.secondary
+                    font.pixelSize: VLCStyle.fontSize_small
+                    Layout.fillWidth: true
+                }
+            }
 
-        ColumnLayout {
-            Layout.fillWidth: true
-            spacing: VLCStyle.margin_xxxsmall
-            visible: PaintbrushCtx.objectSelected || canvas.hasSelection
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: VLCStyle.margin_xxxsmall
+                visible: (PaintbrushCtx.objectSelected || canvas.hasSelection)
+                         && root.legacyActionsOpen
 
             Widgets.ActionButtonPrimary {
                 Layout.fillWidth: true
@@ -638,7 +694,12 @@ Item {
         modal: true
         x: Overlay.overlay ? Math.round((Overlay.overlay.width - width) / 2) : 0
         y: Overlay.overlay ? Math.round((Overlay.overlay.height - height) / 2) : 0
-        width: Math.min(parent.width - VLCStyle.margin_large * 2, VLCStyle.dp(520, VLCStyle.scale))
+        /* layout against the top-level Overlay, never this (possibly collapsed
+         * to 0-width, i.e. when there is no selection) inspector dock */
+        width: Overlay.overlay
+               ? Math.min(Overlay.overlay.width - VLCStyle.margin_large * 2,
+                          VLCStyle.dp(520, VLCStyle.scale))
+               : VLCStyle.dp(520, VLCStyle.scale)
 
         contentItem: ColumnLayout {
             width: parent.width

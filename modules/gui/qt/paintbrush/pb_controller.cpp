@@ -1297,7 +1297,10 @@ void PaintbrushController::onCanvasObjectClick(QPointF canvasPos, bool positive,
     if (m_canvas)
         m_canvas->setObjectSelectBusy(true);
 
-    m_segmentation.segment(currentAiSource(), m_posPoints, m_negPoints, {});
+    /* Harvest: Object Select works over LIVE video at the current PTS — the
+     * player does not need a "Use this frame" reference layer first. */
+    const QImage source = ensureAiSourceFrame();
+    m_segmentation.segment(source, m_posPoints, m_negPoints, {});
 }
 
 void PaintbrushController::onMaskRefineStarted(const QImage &mask)
@@ -1539,6 +1542,46 @@ QImage PaintbrushController::currentAiSource() const
         return m_canvas->grabCanvasRegion(QRectF(QPointF(0, 0),
                                                  m_document.canvasSize()));
     return m_document.aiSourceImage();
+}
+
+QImage PaintbrushController::ensureAiSourceFrame()
+{
+    /* an existing reference/decoded source is authoritative */
+    QImage frame = pristineSourceFrame();
+    if (!frame.isNull())
+        return frame;
+
+    /* harvest on LIVE video: decode the current player PTS on demand and
+     * adopt it as the document source frame so Object Select has a raster
+     * to segment — no "Use this frame" prerequisite. */
+    if (playerHasVideo())
+    {
+        const QString mrl = currentMediaMRL();
+        const qint64 pts = playerTimeMs();
+        if (!mrl.isEmpty())
+        {
+            const DecodedFrame f = requestFrame(mrl, pts);
+            if (f.ok())
+            {
+                const QString title = currentMediaTitle();
+                m_document.setSourceFrame(FrameRef{mrl, title, f.ptsMs,
+                                                   f.image.width(),
+                                                   f.image.height()});
+                frame = f.image;
+                if (m_welcomeVisible)
+                {
+                    m_welcomeVisible = false;
+                    emit welcomeChanged();
+                }
+                setStatus(QStringLiteral("Framed video at %1 ms")
+                              .arg(f.ptsMs));
+            }
+        }
+    }
+    if (!frame.isNull() && frame.size() != m_document.canvasSize())
+        return frame.scaled(m_document.canvasSize(), Qt::KeepAspectRatio,
+                            Qt::SmoothTransformation);
+    return frame;
 }
 
 QImage PaintbrushController::objectCrop() const
@@ -3332,6 +3375,30 @@ void PaintbrushController::playerStop()
     m_thumbnails.cancel();
     m_intf->p_mainPlaylistController->stop();
     emit mediaStateChanged();
+}
+
+void PaintbrushController::closeVideo()
+{
+    /* cancel in-flight decode/thumbnail work against the outgoing media */
+    m_thumbnails.cancel();
+    m_editSource.clearCache();
+
+    /* stop playback: with no video output attached, playerHasVideo() becomes
+     * false and the media drawer + canvas video surface hide themselves. */
+    m_intf->p_mainPlaylistController->stop();
+
+    /* clear the current source-frame identity + source-media state so the
+     * next Open Video starts fresh (does NOT touch the canvas or the Harvest
+     * Tray — kept items keep their own MRL/PTS provenance). */
+    m_document.clearSourceMedia();
+    m_document.setSourceFrame(FrameRef{});
+    m_thumbnailsAutoMedia.clear();
+    m_thumbnailsAutoMedia.squeeze();
+
+    emit mediaStateChanged();
+    if (m_welcomeVisible)
+        return;
+    setStatus(QStringLiteral("Closed video."));
 }
 
 void PaintbrushController::onMediaTimer()

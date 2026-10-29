@@ -114,6 +114,12 @@ Item {
                 text: qsTr("Use this frame")
                 onClicked: PaintbrushCtx.captureVideoFrame()
             }
+
+            Widgets.IconToolButton {
+                description: qsTr("Close video")
+                text: VLCIcons.close
+                onClicked: PaintbrushCtx.closeVideo()
+            }
         }
 
         RowLayout {

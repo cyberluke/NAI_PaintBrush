@@ -57,7 +57,10 @@ import VLC.Paintbrush
         VideoSurface {
             id: videoSurface
             anchors.fill: parent
-            renderingEnabled: false
+            /* Harvest mode: render the LIVE video through the transparent
+             * canvas so Object Select / selection happens directly on the
+             * moving picture — no "Use this frame" required to see it. */
+            renderingEnabled: true
             videoSurfaceProvider: MainCtx.videoSurfaceProvider
             visible: PaintbrushCtx.playerHasVideo
         }

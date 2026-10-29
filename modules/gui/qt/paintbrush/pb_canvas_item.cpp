@@ -58,7 +58,15 @@ PaintbrushCanvasItem::PaintbrushCanvasItem(QQuickItem *parent)
      * input rate (up to ~1 kHz under a fast stroke) but the composite+upload
      * runs at a fixed ~120 Hz cadence, so synchronous per-dab compositing
      * never piles up on the UI thread. Input events flow freely; the render
-     * side batches one pass per tick and the scene graph paces the frames. */
+     * side batches one pass per tick and the scene graph paces the frames.
+     *
+     * The timer is SINGLE-SHOT: the 8 ms deadline must never be restarted by
+     * every high-rate WM_MOUSEMOVE (that would keep sliding the deadline under
+     * fast strokes and turn "fixed cadence" into "ink stutters behind the
+     * cursor"). Input paths only START the timer when it is not already armed;
+     * the timeout handler re-arms itself for the next tick whenever pending
+     * input or dirty tiles remain after this pass. */
+    m_repaintTimer.setSingleShot(true);
     m_repaintTimer.setInterval(8);
     connect(&m_repaintTimer, &QTimer::timeout, this, [this]() {
         /* consume the latest sampled input position first, then flush */
@@ -69,8 +77,10 @@ PaintbrushCanvasItem::PaintbrushCanvasItem(QQuickItem *parent)
                 continueStroke(m_pendingMove);
         }
         compositeDirtyTiles();
-        if (!m_dirtyTiles.isEmpty())
-            m_repaintTimer.start(); /* dabs landed during the pass */
+        /* single-shot: re-arm for the next tick if input or dabs arrived
+         * while this pass was running (the cadence must keep flowing). */
+        if (!m_dirtyTiles.isEmpty() || m_movePending)
+            m_repaintTimer.start();
         update();
     });
 
@@ -750,8 +760,12 @@ void PaintbrushCanvasItem::markTilesDirty(const QRect &canvasRect_)
             m_dirtyTiles.insert({tx, ty});
 
     /* coalesced: the repaint timer flushes the dirty set at a fixed cadence
-     * (compositeDirtyTiles + update), never synchronously per call */
-    m_repaintTimer.start();
+     * (compositeDirtyTiles + update), never synchronously per call. Only arm
+     * the timer if it is not already running — restarting it on every dab at
+     * ~1 kHz input would keep pushing the 8 ms deadline out and stutter the
+     * stroke behind the cursor. */
+    if (!m_repaintTimer.isActive())
+        m_repaintTimer.start();
     update();
 }
 
@@ -2843,7 +2857,11 @@ void PaintbrushCanvasItem::mouseMoveEvent(QMouseEvent *event)
          * latency bounded to one tick. */
         m_pendingMove = canvasPos;
         m_movePending = true;
-        m_repaintTimer.start();
+        /* Arm the flush cadence only if it is not already waiting; restarting
+         * the 8 ms timer on every WM_MOUSEMOVE keeps sliding the deadline and
+         * the stroke spins behind the cursor under fast moves. */
+        if (!m_repaintTimer.isActive())
+            m_repaintTimer.start();
         event->accept();
         return;
     }
