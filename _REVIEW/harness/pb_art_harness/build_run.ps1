@@ -42,6 +42,7 @@ $sources = @(
     "$src\art\materials\glitter\glitter_material.cpp",
     "$src\art\finish\effects.cpp",
     "$src\art\style\mood.cpp", "$src\art\style\typography_style.cpp", "$src\art\style\badges.cpp",
+    "$src\motion\pb_puppet.cpp", "$src\motion\pb_living.cpp",
     "$build\moc_pb_document.cpp", "$build\moc_pb_history.cpp",
     "$build\moc_pb_harvest.cpp", "$build\moc_pb_project_store.cpp"
 )

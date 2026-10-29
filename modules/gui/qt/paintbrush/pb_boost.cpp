@@ -315,7 +315,8 @@ int BoostTransaction::addHarvest(const HarvestItem &item, const QString &desc)
     return id;
 }
 
-void BoostTransaction::setArtState(const SetArtStateCommand::State &after, const QString &desc)
+void BoostTransaction::setArtState(const SetArtStateCommand::State &after,
+                                   const QString &desc)
 {
     auto cmd = std::make_unique<SetArtStateCommand>();
     cmd->before = SetArtStateCommand::capture(m_doc);
@@ -323,6 +324,37 @@ void BoostTransaction::setArtState(const SetArtStateCommand::State &after, const
     cmd->desc = desc;
     cmd->apply(m_doc);
     m_ops.push_back(std::move(cmd));
+}
+
+void BoostTransaction::setPuppet(int layerId, int assetId,
+                                 const motion::PuppetEffect &effect,
+                                 const QString &desc)
+{
+    CanvasLayer *l = m_doc.layerById(layerId);
+    if (!l)
+        return;
+    auto cmd = std::make_unique<SetPuppetCommand>();
+    cmd->layerId = layerId;
+    cmd->beforeAssetId = l->puppetAssetId;
+    cmd->beforeEffect = l->puppetEffect;
+    cmd->afterAssetId = assetId;
+    cmd->afterEffect = effect;
+    cmd->desc = desc;
+    cmd->apply(m_doc);
+    m_ops.push_back(std::move(cmd));
+}
+
+int BoostTransaction::addPuppetAsset(const motion::PuppetAsset &asset,
+                                     const QString &desc)
+{
+    auto cmd = std::make_unique<AddPuppetCommand>();
+    cmd->asset = asset;
+    cmd->asset.id = 0;                 /* store assigns */
+    cmd->desc = desc;
+    cmd->apply(m_doc);
+    const int id = cmd->asset.id;
+    m_ops.push_back(std::move(cmd));
+    return id;
 }
 
 std::unique_ptr<CompositeCommand> BoostTransaction::finish(const QString &desc)
@@ -682,6 +714,57 @@ int BoostEngine::insertBridgePose(BoostTransaction &tx, const BoostAnalysis &a,
                 .arg(harvestTimeText(derived.sourceFrame.ptsMs),
                      harvestTimeText(pa->ptsMs), harvestTimeText(pb->ptsMs)));
     return newId;
+}
+
+void BoostEngine::animateHero(BoostTransaction &tx, const BoostAnalysis &a)
+{
+    PaintbrushDocument &doc = tx.document();
+    const BoostAnalysis::Pose *hero = a.pose(a.heroLayerId);
+    if (!hero || hero->harvestId <= 0)
+        return;
+
+    /* the rule: at most ONE living layer per poster */
+    for (const CanvasLayer &l : doc.layers())
+        if (l.hasPuppet())
+            return;
+
+    /* the hero's harvest must be riggable; the asset is built on demand
+     * (rig once + auto source-motion window) inside the SAME undo step */
+    int assetId = doc.puppets()->assetIdByHarvest(hero->harvestId);
+    if (assetId < 0)
+    {
+        const HarvestItem *h = doc.harvest()->itemById(hero->harvestId);
+        if (!h || !h->isValid())
+            return;
+        QVector<motion::PuppetMotionScanner::FrameSample> samples;
+        for (const HarvestItem *it : doc.harvest()->sameSourceSequence(h->sourceFrame.mrl))
+        {
+            motion::PuppetMotionScanner::FrameSample s;
+            s.ptsMs = it->sourceFrame.ptsMs;
+            s.mask = it->mask;
+            s.quality = it->segmentationScore > 0.0 ? it->segmentationScore : 1.0;
+            samples.append(s);
+        }
+        motion::PuppetAsset asset = makeLivingAsset(*h, samples);
+        if (!asset.isValid())
+            return;
+        assetId = tx.addPuppetAsset(asset,
+            QStringLiteral("Living asset for harvest %1").arg(hero->harvestId));
+    }
+    if (assetId <= 0)
+        return;
+    const motion::PuppetAsset *asset = doc.puppets()->byId(assetId);
+    if (!asset)
+        return;
+
+    motion::PuppetEffect fx;
+    fx.kind = motion::MotionKind::Custom;
+    fx.amplitude = asset->defaultAmplitude;      /* photo-safe (0.65) */
+    fx.speed = 1.0f;
+    fx.loop = motion::LoopMode::Loop;
+    fx.durationMs = quint32(qMax<qint64>(1, asset->motion.durationMs()));
+    tx.setPuppet(hero->layerId, assetId, fx, QStringLiteral("Living hero"));
+    tx.note(QStringLiteral("Added a subtle living loop to the hero."));
 }
 
 QString BoostEngine::composeSummary(const QStringList &lines)

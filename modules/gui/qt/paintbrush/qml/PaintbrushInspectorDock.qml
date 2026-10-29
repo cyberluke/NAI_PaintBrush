@@ -106,6 +106,9 @@ Item {
 
             delegate: Rectangle {
                 required property int index
+                required property string name
+                required property bool layerVisible
+                required property string thumb
 
                 width: layerList.width
                 height: VLCStyle.dp(34, VLCStyle.scale)
@@ -124,7 +127,7 @@ Item {
                     Image {
                         Layout.preferredWidth: VLCStyle.dp(28, VLCStyle.scale)
                         Layout.preferredHeight: VLCStyle.dp(22, VLCStyle.scale)
-                        source: model.thumb
+                        source: thumb
                         fillMode: Image.PreserveAspectFit
                         asynchronous: true
                     }
@@ -133,14 +136,14 @@ Item {
                     Widgets.CheckButton {
                         Layout.preferredWidth: VLCStyle.dp(22, VLCStyle.scale)
                         Layout.preferredHeight: VLCStyle.dp(22, VLCStyle.scale)
-                        checked: model.visible
+                        checked: layerVisible
                         onClicked: PaintbrushCtx.setLayerVisible(index, checked)
                     }
 
                     /* real layer name */
                     Widgets.LabelExt {
                         Layout.fillWidth: true
-                        text: model.name
+                        text: name
                         color: theme.fg.primary
                         font.pixelSize: VLCStyle.fontSize_small
                         elide: Text.ElideRight
@@ -253,6 +256,76 @@ Item {
                                      PaintbrushCtx.document.currentLayerIndex,
                                      layerScaleSpin.value / 100.0,
                                      value)
+            }
+        }
+
+        /* ---------------------------------------- living harvest (stage 3)
+         * Motion group: Off/Subtle/Normal/Strong maps to photo-safe
+         * amplitudes (0 / 0.35 / 0.65 / 1.0). The layer needs a rigged
+         * asset first (rig it in the harvest tray). */
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: VLCStyle.margin_xsmall
+            /* currentLayerIndex is a notified property: it re-evaluates this
+             * binding on every layer/document change, so the group appears
+             * as soon as an asset is rigged */
+            visible: PaintbrushCtx.riggedAssetCount() > 0 &&
+                     PaintbrushCtx.document.currentLayerIndex >= 0
+
+            Widgets.LabelExt {
+                text: qsTr("Motion")
+                color: theme.fg.secondary
+                font.pixelSize: VLCStyle.fontSize_xsmall
+            }
+            ComboBox {
+                id: motionCombo
+                Layout.fillWidth: true
+                model: [qsTr("Off"), qsTr("Subtle"), qsTr("Normal"), qsTr("Strong")]
+                currentIndex: {
+                    const a = PaintbrushCtx.layerPuppetAmplitude(
+                                  PaintbrushCtx.document.currentLayerIndex)
+                    if (!PaintbrushCtx.layerHasPuppet(
+                            PaintbrushCtx.document.currentLayerIndex))
+                        return 0
+                    if (a <= 0.5)
+                        return 1
+                    if (a <= 0.85)
+                        return 2
+                    return 3
+                }
+                onActivated: {
+                    const idx = PaintbrushCtx.document.currentLayerIndex
+                    let assetId = PaintbrushCtx.layerPuppetAssetId(idx)
+                    if (assetId <= 0)
+                        assetId = PaintbrushCtx.firstRiggedAssetId()
+                    if (currentIndex === 0)
+                        PaintbrushCtx.removeLayerPuppet(idx)
+                    else if (assetId > 0)
+                        PaintbrushCtx.setLayerPuppet(idx, assetId,
+                            [0.35, 0.65, 1.0][currentIndex - 1])
+                }
+            }
+        }
+
+        /* Before/After moment: the static poster next to the living loop.
+         * The canvas rests at exactly the exported frame 0 while compared. */
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: VLCStyle.margin_xsmall
+            visible: PaintbrushCtx.riggedAssetCount() > 0 &&
+                     PaintbrushCtx.document.currentLayerIndex >= 0
+
+            Widgets.LabelExt {
+                text: qsTr("Compare")
+                color: theme.fg.secondary
+                font.pixelSize: VLCStyle.fontSize_xsmall
+            }
+            Switch {
+                id: compareSwitch
+                Layout.fillWidth: true
+                text: compareSwitch.checked ? qsTr("Static poster") : qsTr("Living loop")
+                checked: PaintbrushCtx.livingPreviewPaused()
+                onToggled: PaintbrushCtx.setLivingPreviewPaused(checked)
             }
         }
 

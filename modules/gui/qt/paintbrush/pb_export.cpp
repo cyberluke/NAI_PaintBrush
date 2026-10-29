@@ -11,6 +11,8 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QPainter>
+#include <QProcess>
+#include <QStandardPaths>
 
 namespace paintbrush {
 
@@ -144,6 +146,147 @@ QString ExportService::exportCutout(const QImage &cutout, const QString &path)
     const QImage trimmed = cutout.copy(QRect(minX, minY,
                                              maxX - minX + 1, maxY - minY + 1));
     return writeImage(trimmed, path, QStringLiteral("png"));
+}
+
+QString ExportService::exportLivingPoster(PaintbrushDocument *doc, const QString &dir,
+                                          const QString &stem,
+                                          qint64 durationMs, int fps,
+                                          bool paper, double scale)
+{
+    if (!doc)
+        return QStringLiteral("No document to export.");
+    if (durationMs <= 0)
+        return QStringLiteral("Duration must be positive.");
+    if (fps <= 0 || fps > 120)
+        return QStringLiteral("FPS must be between 1 and 120.");
+
+    QDir outDir(dir);
+    if (!outDir.exists() && !QDir().mkpath(dir))
+        return QStringLiteral("Cannot create %1.").arg(dir);
+
+    /* canonical time grid: the loop closes exactly at durationMs, and the
+     * first frame (t=0) equals the static poster for a phase-aligned loop */
+    const int frames = qMax(1, int(std::lround(double(durationMs) * fps / 1000.0)));
+    for (int i = 0; i < frames; ++i)
+    {
+        const qint64 t = qMin<qint64>(durationMs, qint64(double(i) * durationMs / frames));
+        QImage frame = paper
+            ? DocumentRenderer::renderScaled(*doc, float(scale), t)
+            : DocumentRenderer::renderTransparentAt(*doc, float(scale), t);
+        if (frame.isNull())
+            return QStringLiteral("Render failed at frame %1.").arg(i);
+        const QString path = outDir.filePath(
+            QStringLiteral("%1_%2.png").arg(stem,
+                QString::number(i).rightJustified(4, QLatin1Char('0'))));
+        const QString err = writeImage(frame, path, QStringLiteral("png"));
+        if (!err.isEmpty())
+            return err;
+    }
+    return {};
+}
+
+/* ------------------------------------------------- Living Showroom video */
+
+namespace {
+
+/* Deterministic probe order: PATH first, then the environments this
+ * project actually builds in (msys2, VLC contribs). */
+QString findFfmpeg()
+{
+    QString found = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    if (!found.isEmpty())
+        return found;
+    const QStringList candidates = {
+        QStringLiteral("C:/msys64/usr/bin/ffmpeg.exe"),
+        QStringLiteral("C:/msys64/mingw64/bin/ffmpeg.exe"),
+        QStringLiteral("C:/msys64/ucrt64/bin/ffmpeg.exe"),
+    };
+    for (const QString &c : candidates)
+        if (QFile::exists(c))
+            return c;
+    return {};
+}
+
+QString ffmpegEncoderProbe(const QString &ffmpeg, const QString &encoder)
+{
+    static QHash<QString, QString> s_cache;   /* encoder -> ffmpeg path or "" */
+    const auto it = s_cache.constFind(encoder);
+    if (it != s_cache.constEnd())
+        return it.value();
+    QString result;
+    QProcess probe;
+    probe.start(ffmpeg, { QStringLiteral("-hide_banner"), QStringLiteral("-encoders") });
+    if (probe.waitForStarted(3000) && probe.waitForFinished(8000))
+    {
+        const QByteArray out = probe.readAllStandardOutput() + probe.readAllStandardError();
+        if (out.contains(encoder.toUtf8()))
+            result = ffmpeg;
+    }
+    s_cache.insert(encoder, result);
+    return result;
+}
+
+} // namespace
+
+bool ExportService::canExportLivingVideo(const QString &format)
+{
+    const QString ffmpeg = findFfmpeg();
+    if (ffmpeg.isEmpty())
+        return false;
+    const QString encoder = format == QLatin1String("webm")
+        ? QStringLiteral("libvpx-vp9") : QStringLiteral("libx264");
+    return !ffmpegEncoderProbe(ffmpeg, encoder).isEmpty();
+}
+
+QString ExportService::exportLivingVideo(PaintbrushDocument *doc, const QString &dir,
+                                         const QString &stem, qint64 durationMs, int fps,
+                                         const QString &format, const QString &outPath)
+{
+    const QString ffmpeg = findFfmpeg();
+    if (ffmpeg.isEmpty())
+        return QStringLiteral("ffmpeg is not available on this system — install it or add it to PATH.");
+    const bool webm = format == QLatin1String("webm");
+    const QString encoder = webm ? QStringLiteral("libvpx-vp9") : QStringLiteral("libx264");
+    if (ffmpegEncoderProbe(ffmpeg, encoder).isEmpty())
+        return QStringLiteral("ffmpeg has no %1 encoder — the %2 export cannot be muxed.")
+            .arg(encoder, webm ? QStringLiteral("WebM/VP9 alpha") : QStringLiteral("MP4/H.264"));
+
+    /* canonical intermediate: the deterministic PNG sequence (paper for
+     * MP4, transparent for WebM alpha) */
+    const QString err = exportLivingPoster(doc, dir, stem, durationMs, fps,
+                                           !webm, 1.0);
+    if (!err.isEmpty())
+        return err;
+
+    QStringList args;
+    args << QStringLiteral("-y") << QStringLiteral("-hide_banner")
+         << QStringLiteral("-framerate") << QString::number(fps)
+         << QStringLiteral("-i")
+         << QDir(dir).filePath(QStringLiteral("%1_%2.png").arg(stem, QStringLiteral("%04d")))
+         << QStringLiteral("-c:v") << encoder;
+    if (webm)
+        args << QStringLiteral("-pix_fmt") << QStringLiteral("yuva420p")
+             << QStringLiteral("-auto-alt-ref") << QStringLiteral("0");
+    else
+        args << QStringLiteral("-pix_fmt") << QStringLiteral("yuv420p")
+             << QStringLiteral("-movflags") << QStringLiteral("+faststart");
+    args << outPath;
+
+    QProcess mux;
+    mux.start(ffmpeg, args);
+    if (!mux.waitForStarted(5000))
+        return QStringLiteral("Cannot start ffmpeg.");
+    if (!mux.waitForFinished(600000))
+    {
+        mux.kill();
+        return QStringLiteral("ffmpeg timed out while muxing the video.");
+    }
+    if (mux.exitCode() != 0 || !QFile::exists(outPath))
+        return QStringLiteral("ffmpeg failed to mux the video (%1).")
+            .arg(QString::fromUtf8(mux.readAllStandardError()).trimmed());
+    if (QFileInfo(outPath).size() <= 0)
+        return QStringLiteral("The muxed video is empty.");
+    return {};
 }
 
 } // namespace paintbrush

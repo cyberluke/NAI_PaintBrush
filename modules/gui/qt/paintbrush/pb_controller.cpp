@@ -13,6 +13,16 @@
 #include <QQuickItem>
 #include <QImage>
 #include <QBuffer>
+#include <memory>
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+/* SetCurrentProcessExplicitAppUserModelID lives in shell32 (resolved via
+ * the VLC core's imports); MinGW's shellapi.h gates it behind
+ * NTDDI_VERSION, so declare it explicitly. */
+extern "C" __declspec(dllimport) HRESULT WINAPI
+    SetCurrentProcessExplicitAppUserModelID(PCWSTR AppID);
+#endif
 #include <QFileInfo>
 #include <QClipboard>
 #include <QGuiApplication>
@@ -41,6 +51,16 @@ PaintbrushController::PaintbrushController(qt_intf_t *intf, QObject *parent)
      * on structural changes (document signals) and in-place mutations
      * (controller documentChanged) */
     m_layerModel = new PaintbrushLayerModel(&m_document, this, this);
+
+    /* Living Showroom clock: runs only while a visible living layer exists
+     * and the canvas is on screen; every tick advances the canonical time
+     * and recomposites the canvas through the document renderer. */
+    m_livingClock.setTimerType(Qt::PreciseTimer);
+    m_livingClock.setInterval(33);                     /* ~30 Hz */
+    connect(&m_livingClock, &QTimer::timeout,
+            this, &PaintbrushController::onLivingClockTick);
+    connect(&m_document, &PaintbrushDocument::layersChanged,
+            this, &PaintbrushController::refreshLivingClock);
 
     configureServices();
 
@@ -141,6 +161,12 @@ PaintbrushController::PaintbrushController(qt_intf_t *intf, QObject *parent)
     /* a new blank canvas, like opening Paintbrush */
     m_document.resetDocument(QSize(1280, 720));
     emit documentChanged();
+
+#ifdef Q_OS_WIN
+    /* product identity: this process is NAI PaintBrush — its own taskbar
+     * group and name, never grouped with a media player */
+    SetCurrentProcessExplicitAppUserModelID(L"NAI.PaintBrush");
+#endif
 
     m_mediaTimer.setInterval(250);
     connect(&m_mediaTimer, &QTimer::timeout, this, &PaintbrushController::onMediaTimer);
@@ -264,6 +290,83 @@ void PaintbrushController::setCanvasItem(QQuickItem *item)
             this, &PaintbrushController::onCanvasModified);
     connect(m_canvas, &PaintbrushCanvasItem::imageDropped,
             this, &PaintbrushController::onLayerDrop);
+    refreshLivingClock();
+
+    /* First attach: fit the initial document into the view so the paper
+     * fills the window and the user paints where they look (on a large
+     * display a zoom=1 1280x720 doc is only a corner patch, so strokes
+     * outside it silently clipped to nothing). The QML item usually has no
+     * size yet at this point, so retry on the first real size. */
+    auto fitted = std::make_shared<bool>(false);
+    auto tryFit = [canvas, fitted]() {
+        if (*fitted)
+            return;
+        if (canvas->width() > 0 && canvas->height() > 0)
+        {
+            *fitted = true;
+            canvas->fitToView();
+        }
+    };
+    tryFit();
+    connect(canvas, &QQuickItem::widthChanged, canvas, tryFit);
+    connect(canvas, &QQuickItem::heightChanged, canvas, tryFit);
+}
+
+/* ------------------------------------------------- Living Showroom clock */
+
+void PaintbrushController::setShowroomPreviewActive(bool active)
+{
+    if (m_showroomPreview == active)
+        return;
+    m_showroomPreview = active;
+    refreshLivingClock();
+}
+
+void PaintbrushController::setLivingPreviewPaused(bool paused)
+{
+    if (m_previewPaused == paused)
+        return;
+    m_previewPaused = paused;
+    refreshLivingClock();
+}
+
+void PaintbrushController::refreshLivingClock()
+{
+    const bool want = m_showroomPreview && !m_previewPaused && m_canvas
+        && m_canvas->isVisible() && m_document.hasVisibleLivingLayer();
+    if (want == m_livingClock.isActive())
+        return;
+    if (want)
+        m_livingClock.start();
+    else
+    {
+        m_livingClock.stop();
+        /* rest at the static poster (t=0): recomposite once */
+        m_animTimeMs = 0;
+        if (m_canvas)
+            m_canvas->setAnimTime(0);
+    }
+}
+
+void PaintbrushController::onLivingClockTick()
+{
+    if (!m_canvas)
+        return;
+    /* gate re-check per tick: layer hidden/removed, canvas minimized or
+     * workspace hidden -> the clock stops on its own */
+    if (!m_showroomPreview || m_previewPaused || !m_canvas->isVisible()
+        || !m_document.hasVisibleLivingLayer())
+    {
+        refreshLivingClock();
+        return;
+    }
+    /* editing gestures (stroke/interaction) drop the refresh rate so the
+     * preview never fights the user's input */
+    const int interval = m_canvas->strokeActive() ? 100 : 33; /* 10 vs 30 Hz */
+    if (m_livingClock.interval() != interval)
+        m_livingClock.setInterval(interval);
+    m_animTimeMs += interval;
+    m_canvas->setAnimTime(m_animTimeMs);
 }
 
 void PaintbrushController::fitInterfaceToDesktop()

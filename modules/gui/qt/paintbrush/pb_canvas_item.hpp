@@ -216,6 +216,16 @@ public:
     /* -- painting entry points used by the controller ------------------------ */
     void markCanvasDirty();          /* full re-composite */
 
+    /* -- Living Showroom: the canonical time axis ------------------------ */
+    /* The canvas composites living layers at this document time. Static
+     * documents (no living layer) always render at t=0 — byte-identical to
+     * the pre-Showroom path. The AnimationClock drives this at 24-30 Hz. */
+    void setAnimTime(qint64 timeMs);
+    qint64 animTimeMs() const { return m_animTimeMs; }
+    /* True while a stroke/interaction is in progress (the clock may drop
+     * its refresh rate during editing gestures). */
+    bool strokeActive() const { return m_strokeActive; }
+
 signals:
     void toolChanged(int tool);
     void fgColorChanged();
@@ -330,6 +340,11 @@ private:
     /* adaptive texture filtering: nearest on integer (pixel-art) zoom,
      * linear on continuous zoom (A25) */
     QSGTexture::Filtering adaptiveFiltering() const;
+    /* per-tool mouse cursor: paint tools get a round tip at the exact
+     * on-screen dab size filled with the current color, so the cursor
+     * always mirrors what the stroke will do */
+    void updateCursor();
+    QString toolName() const;
 
     PaintbrushDocument *m_doc = nullptr;
     UndoStack *m_undoStack = nullptr;
@@ -361,6 +376,7 @@ private:
 
     /* spray physics state (graffiti can) */
     QTimer m_sprayTimer;             /* continuous emission while held */
+    QTimer m_repaintTimer;           /* coalesced dirty-tile flush (~120 Hz) */
     QPointF m_sprayNozzle;           /* the can tip (canvas coords)      */
     QPointF m_sprayTarget;           /* where the hand points now        */
     QPointF m_sprayVel;              /* smoothed hand velocity           */
@@ -382,15 +398,20 @@ private:
     QSet<TileKey> m_dirtyTiles;
     QHash<TileKey, QSGTexture *> m_textures;
     QHash<TileKey, QSGTransformNode *> m_tileNodes;
-    bool m_texturesNeedRebuild = false;
+    QSet<TileKey> m_changedTiles;    /* tiles re-uploaded this frame */
     QSGNode *m_gridNode = nullptr;   /* overlay geometry, owned by scene graph */
 
     /* stroke state */
     bool m_strokeActive = false;
     bool m_strokePrimary = true;
     QPointF m_lastCanvasPos;
+    QPointF m_pendingMove;           /* latest sampled input position */
+    bool m_movePending = false;      /* a sampled move awaits the next tick */
     QRect m_strokeUnion;              /* layer-local coords */
     QList<QPair<QRect, QImage>> m_strokeBefore;
+
+    /* Living Showroom: canonical animation time (0 = static poster) */
+    qint64 m_animTimeMs = 0;
     bool m_strokeHadPaint = false;
     qreal m_currentPressure = 1.0;   /* 1.0 for mouse; tablet reports 0..1 */
 

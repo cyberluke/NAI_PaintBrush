@@ -438,9 +438,15 @@ vlc_module_begin ()
     add_string( "paintbrush-vlm-model", NULL, PB_VLM_MODEL_TEXT, nullptr )
     add_integer_with_range( "paintbrush-vlm-timeout", 60, 5, 600, PB_VLM_TIMEOUT_TEXT, nullptr )
     add_string( "paintbrush-vlm-api-key", NULL, PB_VLM_BASE_TEXT, nullptr )
+    add_bool( "paintbrush-vlm-insecure", false,
+              N_( "Allow insecure VLM connections" ),
+              N_( "Skip TLS validation for the vision gateway (A7). Intended only for trusted local development endpoints." ) )
     add_string( "paintbrush-image-base-url", NULL, PB_IMAGE_BASE_TEXT, PB_IMAGE_BASE_LONGTEXT )
     add_string( "paintbrush-image-model", NULL, PB_IMAGE_MODEL_TEXT, nullptr )
     add_string( "paintbrush-image-api-key", NULL, PB_IMAGE_MODEL_TEXT, nullptr )
+    add_bool( "paintbrush-image-insecure", false,
+              N_( "Allow insecure image-model connections" ),
+              N_( "Skip TLS validation for the image gateway (A7). Intended only for trusted local development endpoints." ) )
     add_string( "paintbrush-stt-base-url", NULL, PB_STT_BASE_TEXT, nullptr )
     add_string( "paintbrush-stt-model", NULL, PB_STT_MODEL_TEXT, nullptr )
     add_string( "paintbrush-tts-base-url", NULL, PB_TTS_BASE_TEXT, nullptr )
@@ -463,6 +469,9 @@ vlc_module_begin ()
     add_string( "paintbrush-assistant-model", "differential_sseproxy",
                 PB_ASSISTANT_MODEL_TEXT, nullptr )
     add_string( "paintbrush-assistant-api-key", NULL, PB_ASSISTANT_BASE_TEXT, nullptr )
+    add_bool( "paintbrush-assistant-insecure", false,
+              N_( "Allow insecure assistant connections" ),
+              N_( "Skip TLS validation for the assistant gateway (A7). Intended only for trusted local development endpoints." ) )
     add_integer_with_range( "paintbrush-assistant-timeout", 120, 5, 600,
                             PB_ASSISTANT_TIMEOUT_TEXT, nullptr )
     add_bool( "paintbrush-assistant-reasoning", true, PB_ASSISTANT_REASONING_TEXT, nullptr )
@@ -488,6 +497,12 @@ vlc_module_begin ()
                 N_( "Recent Paintbrush projects" ), N_( "Semicolon-separated list of recently opened Paintbrush projects." ) )
     add_bool( "paintbrush-demo-mode", false,
               N_( "Paintbrush demo mode" ), N_( "Show the strongest Paintbrush features for recording and demos." ) )
+    add_bool( "paintbrush-lookup-insecure", false,
+              N_( "Allow insecure product lookup connections" ),
+              N_( "Skip TLS validation for the product lookup endpoint (A7). Intended only for trusted local development endpoints." ) )
+    add_bool( "paintbrush-dev-insecure", false,
+              N_( "Allow insecure connections in development" ),
+              N_( "Master opt-out of TLS validation for every Paintbrush gateway (A7). Intended only for trusted local development endpoints." ) )
 
     /* Edit decode source (EditDecodeSource) tuning: the exact-frame
      * decoder used by thumbnails, tracking, sticker export and AI crops.

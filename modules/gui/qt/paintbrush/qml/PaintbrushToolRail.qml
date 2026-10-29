@@ -50,34 +50,34 @@ Item {
             Repeater {
                 model: [
                     /* selection tools */
-                    { toolId: 1, icon: VLCIcons.grid, tip: qsTr("Rect Select"), sparkle: false },
-                    { toolId: 2, icon: VLCIcons.history, tip: qsTr("Freeform Select"), sparkle: false },
-                    { toolId: 3, icon: VLCIcons.topbar_discover, tip: qsTr("Object Select (AI)"), sparkle: true },
-                    { toolId: 4, icon: VLCIcons.record, tip: qsTr("Pencil"), sparkle: false },
+                    { toolId: 1, glyph: VLCIcons.grid, tip: qsTr("Rect Select"), sparkle: false },
+                    { toolId: 2, glyph: VLCIcons.history, tip: qsTr("Freeform Select"), sparkle: false },
+                    { toolId: 3, glyph: VLCIcons.topbar_discover, tip: qsTr("Object Select (AI)"), sparkle: true },
+                    { toolId: 4, glyph: VLCIcons.record, tip: qsTr("Pencil"), sparkle: false },
                     /* paint tools */
-                    { toolId: 5, icon: VLCIcons.effect_filter, tip: qsTr("Brush"), sparkle: false },
-                    { toolId: 6, icon: VLCIcons.clear, tip: qsTr("Eraser"), sparkle: false },
-                    { toolId: 7, icon: VLCIcons.transparency, tip: qsTr("Fill"), sparkle: false },
-                    { toolId: 8, icon: VLCIcons.search, tip: qsTr("Eyedropper"), sparkle: false },
-                    { toolId: 9, icon: VLCIcons.visualization, tip: qsTr("Spray"), sparkle: false },
+                    { toolId: 5, glyph: VLCIcons.effect_filter, tip: qsTr("Brush"), sparkle: false },
+                    { toolId: 6, glyph: VLCIcons.clear, tip: qsTr("Eraser"), sparkle: false },
+                    { toolId: 7, glyph: VLCIcons.transparency, tip: qsTr("Fill"), sparkle: false },
+                    { toolId: 8, glyph: VLCIcons.search, tip: qsTr("Eyedropper"), sparkle: false },
+                    { toolId: 9, glyph: VLCIcons.visualization, tip: qsTr("Spray"), sparkle: false },
                     /* Paintbrush 2.0 art materials (pb_common.hpp ToolId 16/17) */
-                    { toolId: 16, icon: VLCIcons.renderer, tip: qsTr("Bristle Paint"), sparkle: false },
-                    { toolId: 17, icon: VLCIcons.shuffle, tip: qsTr("Glitter"), sparkle: false },
+                    { toolId: 16, glyph: VLCIcons.renderer, tip: qsTr("Bristle Paint"), sparkle: false },
+                    { toolId: 17, glyph: VLCIcons.shuffle, tip: qsTr("Glitter"), sparkle: false },
                     /* shape tools */
-                    { toolId: 10, icon: VLCIcons.atob, tip: qsTr("Line"), sparkle: false },
-                    { toolId: 11, icon: VLCIcons.space, tip: qsTr("Rectangle"), sparkle: false },
-                    { toolId: 12, icon: VLCIcons.aspect_ratio, tip: qsTr("Rounded Rectangle"), sparkle: false },
-                    { toolId: 13, icon: VLCIcons.circle, tip: qsTr("Ellipse"), sparkle: false },
-                    { toolId: 14, icon: VLCIcons.ic_fluent_text_change_case_24_regular, tip: qsTr("Text"), sparkle: false },
+                    { toolId: 10, glyph: VLCIcons.atob, tip: qsTr("Line"), sparkle: false },
+                    { toolId: 11, glyph: VLCIcons.space, tip: qsTr("Rectangle"), sparkle: false },
+                    { toolId: 12, glyph: VLCIcons.aspect_ratio, tip: qsTr("Rounded Rectangle"), sparkle: false },
+                    { toolId: 13, glyph: VLCIcons.circle, tip: qsTr("Ellipse"), sparkle: false },
+                    { toolId: 14, glyph: VLCIcons.ic_fluent_text_change_case_24_regular, tip: qsTr("Text"), sparkle: false },
                     /* navigation */
-                    { toolId: 15, icon: VLCIcons.ic_fluent_arrow_move, tip: qsTr("Move canvas"), sparkle: false }
+                    { toolId: 15, glyph: VLCIcons.ic_fluent_arrow_move, tip: qsTr("Move canvas"), sparkle: false }
                 ]
 
                 delegate: Basic.Button {
                     id: toolBtn
 
                     required property int toolId
-                    required property string icon
+                    required property string glyph
                     required property string tip
                     required property bool sparkle
 
@@ -91,7 +91,7 @@ Item {
 
                     /* large icon glyph; the tooltip carries the name */
                     contentItem: Text {
-                        text: toolBtn.icon
+                        text: toolBtn.glyph
                         font.family: VLCIcons.fontFamily
                         font.pixelSize: VLCStyle.fontSize_large
                         horizontalAlignment: Text.AlignHCenter

@@ -382,6 +382,42 @@ void AddHarvestCommand::revert(PaintbrushDocument &doc)
     doc.setDirty(true);
 }
 
+/* --------------------------------------------------- Living Harvest commands */
+
+void SetPuppetCommand::apply(PaintbrushDocument &doc)
+{
+    if (CanvasLayer *l = doc.layerById(layerId))
+    {
+        l->puppetAssetId = afterAssetId;
+        l->puppetEffect = afterEffect;
+        notifyLayerStateChanged(doc);
+    }
+}
+
+void SetPuppetCommand::revert(PaintbrushDocument &doc)
+{
+    if (CanvasLayer *l = doc.layerById(layerId))
+    {
+        l->puppetAssetId = beforeAssetId;
+        l->puppetEffect = beforeEffect;
+        notifyLayerStateChanged(doc);
+    }
+}
+
+void AddPuppetCommand::apply(PaintbrushDocument &doc)
+{
+    if (doc.puppets()->byId(asset.id))
+        return;
+    asset.id = doc.puppets()->add(asset);
+    doc.setDirty(true);
+}
+
+void AddPuppetCommand::revert(PaintbrushDocument &doc)
+{
+    doc.puppets()->remove(asset.id);
+    doc.setDirty(true);
+}
+
 /* -------------------------------------------------------------- undo log */
 
 UndoStack::UndoStack(QObject *parent)

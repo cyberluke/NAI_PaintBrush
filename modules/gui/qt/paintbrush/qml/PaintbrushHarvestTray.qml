@@ -217,6 +217,10 @@ Item {
             text: qsTr("Jump to this moment")
             onTriggered: PaintbrushCtx.seekToHarvest(trayMenu.harvestId)
         }
+        MenuItem {
+            text: qsTr("Make it living (rig this pose)")
+            onTriggered: PaintbrushCtx.rigHarvest(trayMenu.harvestId)
+        }
         MenuSeparator {}
         MenuItem {
             text: qsTr("Remove from tray")

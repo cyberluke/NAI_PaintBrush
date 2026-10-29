@@ -29,6 +29,34 @@ PaintbrushDocument::PaintbrushDocument(QObject *parent)
     m_lightRig = m.light;
     m_moodId = m.id;
     m_artSeed = QRandomGenerator::global()->generate() | 1u;
+    /* Living Harvest: rigs rebuild deterministically from the tray */
+    m_puppets.setRigBuilder([this](int harvestId) {
+        const HarvestItem *h = m_harvest.itemById(harvestId);
+        return h ? motion::PuppetRuntime::build(h->cutout, h->mask) : motion::PuppetRig();
+    });
+}
+
+bool PaintbrushDocument::hasVisibleLivingLayer() const
+{
+    for (const CanvasLayer &l : m_layers)
+        if (l.visible && l.hasPuppet() && m_puppets.byId(l.puppetAssetId))
+            return true;
+    return false;
+}
+
+int PaintbrushDocument::prunePuppetRefs()
+{
+    int cleared = 0;
+    for (CanvasLayer &l : m_layers) {
+        if (l.puppetAssetId > 0 && !m_puppets.byId(l.puppetAssetId)) {
+            l.puppetAssetId = -1;
+            l.puppetEffect = motion::PuppetEffect();
+            ++cleared;
+        }
+    }
+    if (cleared)
+        emit layersChanged();
+    return cleared;
 }
 
 /* -------------------------------------------------------- art direction */
@@ -517,6 +545,13 @@ DocumentRenderer::Context DocumentRenderer::contextFor(const PaintbrushDocument 
 QImage DocumentRenderer::effectiveSource(const CanvasLayer &layer, const Context &ctx,
                                          QPoint *originOffset)
 {
+    return effectiveSourceAt(layer, ctx, originOffset, nullptr, 0);
+}
+
+QImage DocumentRenderer::effectiveSourceAt(const CanvasLayer &layer, const Context &ctx,
+                                           QPoint *originOffset,
+                                           const PaintbrushDocument *doc, qint64 timeMs)
+{
     if (originOffset)
         *originOffset = QPoint(0, 0);
     if (layer.raster.isNull())
@@ -525,6 +560,16 @@ QImage DocumentRenderer::effectiveSource(const CanvasLayer &layer, const Context
     const float s = ctx.scale.exportScale;
     const bool scaled = !qFuzzyCompare(s, 1.0f);
     QImage src;
+
+    /* Living Harvest (stage 3): the layer's motion replaces the static
+     * raster at render time — the raster itself is never modified. The
+     * puppet frame is cutout-sized and flows through the same scale/mask/
+     * finish path as any other source. */
+    if (layer.hasPuppet() && doc) {
+        const motion::PuppetAsset *asset = doc->puppets()->byId(layer.puppetAssetId);
+        if (asset)
+            src = motion::PuppetRuntime::renderAtTime(*asset, layer.puppetEffect, timeMs);
+    }
 
     /* 1) source pixels at the context scale */
     if (scaled && !layer.materialState.isEmpty() &&
@@ -618,6 +663,28 @@ void DocumentRenderer::compositeLayer(QImage &target, const QRect &region,
     compositeLayer(target, region, layer, ctx);
 }
 
+void DocumentRenderer::compositeLayerAt(QImage &target, const QRect &region,
+                                        const CanvasLayer &layer,
+                                        const Context &ctx,
+                                        const PaintbrushDocument &doc, qint64 timeMs)
+{
+    if (layer.raster.isNull() || !layer.visible)
+        return;
+    if (!layer.hasEnabledEffects() && !layer.hasPuppet())
+    {
+        compositeLayerRaw(target, region, layer);
+        return;
+    }
+    QPoint off;
+    QImage src = effectiveSourceAt(layer, ctx, &off, &doc, timeMs);
+    CanvasLayer tmp = layer;
+    tmp.raster = src;
+    tmp.mask = QImage();
+    tmp.effects.clear();
+    tmp.position = layer.position + QPointF(off);
+    compositeLayerRaw(target, region, tmp);
+}
+
 namespace {
 
 /* Single-entry paper cache: the full-canvas paper at one (stock, seed, size,
@@ -680,36 +747,63 @@ void DocumentRenderer::paintPaper(QImage &target, const QRect &region, const Con
 void DocumentRenderer::composite(QImage &target, const QRect &region,
                                  const PaintbrushDocument &doc)
 {
+    composite(target, region, doc, 0);
+}
+
+void DocumentRenderer::composite(QImage &target, const QRect &region,
+                                 const PaintbrushDocument &doc, qint64 timeMs)
+{
     const Context ctx = contextFor(doc, 1.0f);
     paintPaper(target, region, ctx);
     const auto &layers = doc.layers();
     for (const CanvasLayer &layer : layers)
-        compositeLayer(target, region, layer, ctx);
+        compositeLayerAt(target, region, layer, ctx, doc, timeMs);
 }
 
 QImage DocumentRenderer::render(const PaintbrushDocument &doc)
 {
+    return render(doc, 0);
+}
+
+QImage DocumentRenderer::render(const PaintbrushDocument &doc, qint64 timeMs)
+{
     const QSize size = doc.canvasSize();
     if (size.isEmpty())
         return {};
-    return renderRegion(doc, QRect(QPoint(0, 0), size));
+    return renderRegion(doc, QRect(QPoint(0, 0), size), timeMs);
 }
 
 QImage DocumentRenderer::renderRegion(const PaintbrushDocument &doc,
                                       const QRect &region)
 {
+    return renderRegion(doc, region, 0);
+}
+
+QImage DocumentRenderer::renderRegion(const PaintbrushDocument &doc,
+                                      const QRect &region, qint64 timeMs)
+{
     if (region.isEmpty())
         return {};
     QImage result(region.size(), QImage::Format_ARGB32);
     result.fill(Qt::transparent);
-    composite(result, region, doc);
+    composite(result, region, doc, timeMs);
     return result;
 }
 
 QImage DocumentRenderer::renderScaled(const PaintbrushDocument &doc, float scale)
 {
+    return renderScaled(doc, scale, 0);
+}
+
+namespace {
+
+/* Shared export-scale render: paper on/off (living export needs transparent
+ * frames) and the canonical time for Living Harvest layers. */
+QImage renderScaledFrame(const PaintbrushDocument &doc, float scale,
+                         qint64 timeMs, bool paintPaper)
+{
     if (scale <= 0.0f || qFuzzyCompare(scale, 1.0f))
-        return render(doc);
+        return DocumentRenderer::render(doc, timeMs);
     const QSize canvas = doc.canvasSize();
     if (canvas.isEmpty())
         return {};
@@ -718,15 +812,16 @@ QImage DocumentRenderer::renderScaled(const PaintbrushDocument &doc, float scale
     QImage result(out, QImage::Format_ARGB32);
     result.fill(Qt::transparent);
 
-    const Context ctx = contextFor(doc, scale);
-    paintPaper(result, QRect(QPoint(0, 0), out), ctx);
+    const DocumentRenderer::Context ctx = DocumentRenderer::contextFor(doc, scale);
+    if (paintPaper)
+        DocumentRenderer::paintPaper(result, QRect(QPoint(0, 0), out), ctx);
 
     for (const CanvasLayer &layer : doc.layers())
     {
         if (!layer.visible || layer.raster.isNull())
             continue;
         QPoint off;
-        const QImage src = effectiveSource(layer, ctx, &off);
+        const QImage src = DocumentRenderer::effectiveSourceAt(layer, ctx, &off, &doc, timeMs);
         if (src.isNull())
             continue;
         /* src pixel -> (translate off) -> local/scale -> layer transform ->
@@ -746,6 +841,20 @@ QImage DocumentRenderer::renderScaled(const PaintbrushDocument &doc, float scale
         p.end();
     }
     return result;
+}
+
+} // namespace
+
+QImage DocumentRenderer::renderScaled(const PaintbrushDocument &doc, float scale,
+                                      qint64 timeMs)
+{
+    return renderScaledFrame(doc, scale, timeMs, true);
+}
+
+QImage DocumentRenderer::renderTransparentAt(const PaintbrushDocument &doc, float scale,
+                                             qint64 timeMs)
+{
+    return renderScaledFrame(doc, scale, timeMs, false);
 }
 
 QImage PaintbrushDocument::flattenedImage() const

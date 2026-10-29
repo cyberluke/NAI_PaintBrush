@@ -12,12 +12,14 @@
 #include "pb_controller.hpp"
 #include "pb_canvas_item.hpp"
 #include "pb_sticker.hpp"
+#include "pb_export.hpp"
 #include "art/style/mood.hpp"
 #include "art/style/typography_style.hpp"
 #include "art/style/badges.hpp"
 #include "art/surface/paper_renderer.hpp"
 
 #include <QBuffer>
+#include <QFileInfo>
 #include <QPainter>
 
 namespace paintbrush {
@@ -171,6 +173,177 @@ void PaintbrushController::seekToHarvest(int harvestId)
         playerSeek(h->sourceFrame.ptsMs);
 }
 
+/* ------------------------------------------------------------ living harvest */
+
+namespace {
+
+QVector<motion::PuppetMotionScanner::FrameSample> traySamples(
+    const HarvestTrayModel *tray, const QString &mrl)
+{
+    QVector<motion::PuppetMotionScanner::FrameSample> samples;
+    for (const HarvestItem *it : tray->sameSourceSequence(mrl))
+    {
+        motion::PuppetMotionScanner::FrameSample s;
+        s.ptsMs = it->sourceFrame.ptsMs;
+        s.mask = it->mask;
+        s.quality = it->segmentationScore > 0.0 ? it->segmentationScore : 1.0;
+        samples.append(s);
+    }
+    return samples;
+}
+
+} // namespace
+
+int PaintbrushController::rigHarvest(int harvestId)
+{
+    const HarvestItem *h = m_document.harvest()->itemById(harvestId);
+    if (!h || !h->isValid() || h->cutout.isNull())
+        return 0;
+    /* already rigged? the asset is reusable (rig once) */
+    const int existing = m_document.puppets()->assetIdByHarvest(harvestId);
+    if (existing > 0)
+        return existing;
+
+    motion::PuppetAsset asset =
+        makeLivingAsset(*h, traySamples(m_document.harvest(), h->sourceFrame.mrl));
+    if (!asset.isValid())
+    {
+        setStatus(QStringLiteral("This harvest has no riggable motion nearby — keep more poses of the same subject first."));
+        return 0;
+    }
+
+    auto cmd = std::make_unique<AddPuppetCommand>();
+    cmd->asset = asset;
+    cmd->desc = QStringLiteral("Rig living asset");
+    m_undoStack.pushCommand(std::move(cmd));
+    const int id = m_document.puppets()->assetIdByHarvest(harvestId);
+    if (m_canvas)
+        m_canvas->markCanvasDirty();
+    emit documentChanged();
+    setStatus(QStringLiteral("Living asset ready — one undo removes it, the original harvest is untouched."));
+    return id;
+}
+
+void PaintbrushController::setLayerPuppet(int index, int assetId, double amplitude)
+{
+    const CanvasLayer *layer = m_document.layerAt(index);
+    if (!layer)
+        return;
+    const motion::PuppetAsset *asset = m_document.puppets()->byId(assetId);
+    if (!asset)
+        return;
+    motion::PuppetEffect fx;
+    fx.kind = motion::MotionKind::Custom;
+    fx.amplitude = float(qBound(0.01, amplitude, 1.0));
+    fx.speed = 1.0f;
+    fx.loop = motion::LoopMode::Loop;
+    fx.durationMs = quint32(qMax<qint64>(1, asset->motion.durationMs()));
+
+    auto cmd = std::make_unique<SetPuppetCommand>();
+    cmd->layerId = layer->id;
+    cmd->beforeAssetId = layer->puppetAssetId;
+    cmd->beforeEffect = layer->puppetEffect;
+    cmd->afterAssetId = assetId;
+    cmd->afterEffect = fx;
+    cmd->desc = QStringLiteral("Living pose");
+    m_undoStack.pushCommand(std::move(cmd));
+    if (m_canvas)
+        m_canvas->markCanvasDirty();
+    emit documentChanged();
+    setStatus(QStringLiteral("Living pose on layer — undo restores the static figure."));
+}
+
+void PaintbrushController::removeLayerPuppet(int index)
+{
+    const CanvasLayer *layer = m_document.layerAt(index);
+    if (!layer || layer->puppetAssetId <= 0)
+        return;
+    auto cmd = std::make_unique<SetPuppetCommand>();
+    cmd->layerId = layer->id;
+    cmd->beforeAssetId = layer->puppetAssetId;
+    cmd->beforeEffect = layer->puppetEffect;
+    cmd->desc = QStringLiteral("Freeze living pose");
+    m_undoStack.pushCommand(std::move(cmd));
+    if (m_canvas)
+        m_canvas->markCanvasDirty();
+    emit documentChanged();
+    setStatus(QStringLiteral("Frozen — undo brings the living loop back."));
+}
+
+bool PaintbrushController::layerHasPuppet(int index) const
+{
+    const CanvasLayer *layer = m_document.layerAt(index);
+    return layer && layer->hasPuppet();
+}
+
+double PaintbrushController::layerPuppetAmplitude(int index) const
+{
+    const CanvasLayer *layer = m_document.layerAt(index);
+    return layer ? double(layer->puppetEffect.amplitude) : 0.0;
+}
+
+int PaintbrushController::layerPuppetAssetId(int index) const
+{
+    const CanvasLayer *layer = m_document.layerAt(index);
+    return layer ? layer->puppetAssetId : -1;
+}
+
+int PaintbrushController::riggedAssetCount() const
+{
+    return m_document.puppets()->assets().size();
+}
+
+int PaintbrushController::firstRiggedAssetId() const
+{
+    const auto &assets = m_document.puppets()->assets();
+    return assets.isEmpty() ? -1 : assets.first().id;
+}
+
+QString PaintbrushController::exportLivingPoster(const QUrl &dir, int durationMs,
+                                                 int fps, bool paper)
+{
+    if (dir.isEmpty())
+        return QStringLiteral("No folder chosen.");
+    QString path = dir.toLocalFile();
+    if (path.isEmpty())
+        path = dir.path();
+    const QString err = ExportService::exportLivingPoster(
+        &m_document, path, QStringLiteral("living_poster"), qint64(durationMs), fps, paper, 1.0);
+    if (err.isEmpty())
+        setStatus(QStringLiteral("Living Poster frames written to %1").arg(path));
+    else
+        setStatus(err);
+    return err;
+}
+
+QString PaintbrushController::exportLivingVideo(const QUrl &dir, int durationMs,
+                                                int fps, const QString &format,
+                                                const QUrl &outFile)
+{
+    QString dirPath = dir.toLocalFile();
+    if (dirPath.isEmpty())
+        dirPath = dir.path();
+    const QString outPath = outFile.toLocalFile().isEmpty()
+        ? outFile.path() : outFile.toLocalFile();
+    if (outPath.isEmpty())
+        return QStringLiteral("No output file chosen.");
+    const QString stem = QFileInfo(outPath).completeBaseName();
+    const QString err = ExportService::exportLivingVideo(
+        &m_document, dirPath, stem.isEmpty() ? QStringLiteral("living_poster") : stem,
+        qint64(durationMs), fps, format, outPath);
+    if (err.isEmpty())
+        setStatus(QStringLiteral("Living Poster written to %1 — don't generate the moment, keep it alive.")
+                      .arg(outPath));
+    else
+        setStatus(err);
+    return err;
+}
+
+bool PaintbrushController::canExportLivingVideo(const QString &format) const
+{
+    return ExportService::canExportLivingVideo(format);
+}
+
 /* -------------------------------------------------------------------- boost */
 
 bool PaintbrushController::canBoost() const
@@ -207,6 +380,9 @@ void PaintbrushController::boost()
     emit boostStateChanged();
     m_boostTx = std::make_unique<BoostTransaction>(m_document);
     BoostEngine::planDeterministic(*m_boostTx, m_boostAnalysis, m_boostOptions);
+    /* Living Harvest hidden tool: a subtle living loop on the hero joins the
+     * same undo step (skipped when a living layer already exists). */
+    BoostEngine::animateHero(*m_boostTx, m_boostAnalysis);
     if (m_canvas)
         m_canvas->markCanvasDirty();
     emit documentChanged();

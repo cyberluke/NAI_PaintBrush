@@ -15,6 +15,7 @@
 #include "pb_layer.hpp"
 #include "pb_media_logic.hpp"
 #include "pb_harvest.hpp"
+#include "motion/pb_living.hpp"
 #include "art/runtime/art_scale.hpp"
 #include "art/runtime/light_rig.hpp"
 #include "art/surface/paper_stock.hpp"
@@ -121,6 +122,11 @@ public:
                                const CanvasLayer &layer);
     static void compositeLayer(QImage &target, const QRect &region,
                                const CanvasLayer &layer, const Context &ctx);
+    /* Time-aware composite: a Living Harvest layer renders its puppet frame
+     * at `timeMs` instead of the static raster (the canonical time path). */
+    static void compositeLayerAt(QImage &target, const QRect &region,
+                                 const CanvasLayer &layer, const Context &ctx,
+                                 const PaintbrushDocument &doc, qint64 timeMs);
 
     /* The layer's effective source pixels: the raster (masked) with the
      * finish chain applied, plus the local-space offset of that image's
@@ -128,6 +134,11 @@ public:
      * material layer with state is re-rendered at ctx.scale. */
     static QImage effectiveSource(const CanvasLayer &layer, const Context &ctx,
                                   QPoint *originOffset);
+    /* Time-aware variant (Living Harvest layers); `doc` may be null for the
+     * plain (static) path. */
+    static QImage effectiveSourceAt(const CanvasLayer &layer, const Context &ctx,
+                                    QPoint *originOffset,
+                                    const PaintbrushDocument *doc, qint64 timeMs);
 
     /* Paint the document paper (PaperStock) into `target` for `region`. */
     static void paintPaper(QImage &target, const QRect &region, const Context &ctx);
@@ -135,18 +146,28 @@ public:
     /* Composite paper + all visible layers of `doc` bottom-to-top. */
     static void composite(QImage &target, const QRect &region,
                           const PaintbrushDocument &doc);
+    static void composite(QImage &target, const QRect &region,
+                          const PaintbrushDocument &doc, qint64 timeMs);
 
     /* Full-canvas render (the canonical flatten). */
     static QImage render(const PaintbrushDocument &doc);
+    static QImage render(const PaintbrushDocument &doc, qint64 timeMs);
 
     /* Render `region` (canvas coordinates) into a region-sized image. */
     static QImage renderRegion(const PaintbrushDocument &doc,
                                const QRect &region);
+    static QImage renderRegion(const PaintbrushDocument &doc,
+                               const QRect &region, qint64 timeMs);
 
     /* Export-resolution render (spec §55): the canvas at `scale` with paper,
      * material state and finish chains re-evaluated in world units (never a
      * bitmap upscale of the 1x flatten). scale == 1 is identical to render(). */
     static QImage renderScaled(const PaintbrushDocument &doc, float scale);
+    static QImage renderScaled(const PaintbrushDocument &doc, float scale,
+                               qint64 timeMs);
+    /* Transparent-frame variant (living export without paper). */
+    static QImage renderTransparentAt(const PaintbrushDocument &doc, float scale,
+                                      qint64 timeMs);
 };
 
 /* Canvas-space transform helpers shared by the document-level rotate/crop
@@ -260,6 +281,15 @@ public:
     /* Harvest tray — document-scoped (spec §5.4, §52). */
     HarvestTrayModel *harvest() { return &m_harvest; }
     const HarvestTrayModel *harvest() const { return &m_harvest; }
+    /* Living Harvest asset store — document-scoped. */
+    PuppetAssetStore *puppets() { return &m_puppets; }
+    const PuppetAssetStore *puppets() const { return &m_puppets; }
+    /* After a project load: drop puppet refs whose asset could not be
+     * rebuilt (missing harvest). Returns the count of cleared layers. */
+    int prunePuppetRefs();
+    /* Showroom gate: any VISIBLE layer carries a living asset. The
+     * AnimationClock runs only while this is true. */
+    bool hasVisibleLivingLayer() const;
     /* World scale for this document at `exportScale`. Canvas pixels are the
      * world unit at 1x (96 units/inch). */
     art::ArtScale artScale(float exportScale = 1.0f) const;
@@ -300,6 +330,7 @@ private:
     QString m_moodId;
     quint32 m_artSeed = 1;
     HarvestTrayModel m_harvest;
+    PuppetAssetStore m_puppets;
 
     QSize m_canvasSize;
     QList<CanvasLayer> m_layers;

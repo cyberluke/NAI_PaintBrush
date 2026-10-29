@@ -38,6 +38,10 @@ SOURCES = [
     ("paintbrush/art/style/badges.cpp", None),
     # Paintbrush 2.0 Showroom: GPU Art Runtime (QRhi)
     ("paintbrush/art/gpu/pb_gpu_runtime.cpp", None),
+    # Paintbrush Motion Toys: 2D puppet runtime (mask -> mesh -> ARAP)
+    ("paintbrush/motion/pb_puppet.cpp", None),
+    # Paintbrush Living Harvest: rig once + auto motion window + asset store
+    ("paintbrush/motion/pb_living.cpp", None),
 ]
 # QML files of the VLC.Paintbrush module to add to its qrc/qmldir generation
 QML = [

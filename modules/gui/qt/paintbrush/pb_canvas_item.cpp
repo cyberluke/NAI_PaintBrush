@@ -30,6 +30,8 @@
 #include <QUrl>
 #include <QClipboard>
 #include <QGuiApplication>
+#include <QCursor>
+#include <QPixmap>
 
 namespace paintbrush {
 
@@ -51,6 +53,28 @@ PaintbrushCanvasItem::PaintbrushCanvasItem(QQuickItem *parent)
     m_sprayTimer.setInterval(12); /* ~83 Hz emission */
     connect(&m_sprayTimer, &QTimer::timeout,
             this, &PaintbrushCanvasItem::emitSprayPuff);
+
+    /* Coalesced repaint pipeline ("streaming"): dabs mark tiles dirty at
+     * input rate (up to ~1 kHz under a fast stroke) but the composite+upload
+     * runs at a fixed ~120 Hz cadence, so synchronous per-dab compositing
+     * never piles up on the UI thread. Input events flow freely; the render
+     * side batches one pass per tick and the scene graph paces the frames. */
+    m_repaintTimer.setInterval(8);
+    connect(&m_repaintTimer, &QTimer::timeout, this, [this]() {
+        /* consume the latest sampled input position first, then flush */
+        if (m_movePending)
+        {
+            m_movePending = false;
+            if (m_strokeActive || m_dragging)
+                continueStroke(m_pendingMove);
+        }
+        compositeDirtyTiles();
+        if (!m_dirtyTiles.isEmpty())
+            m_repaintTimer.start(); /* dabs landed during the pass */
+        update();
+    });
+
+    updateCursor();
 }
 
 PaintbrushCanvasItem::~PaintbrushCanvasItem()
@@ -110,6 +134,86 @@ void PaintbrushCanvasItem::setTool(int tool)
     }
     emit toolChanged(tool);
     updateStatus(m_lastCanvasPos);
+    updateCursor();
+}
+
+QString PaintbrushCanvasItem::toolName() const
+{
+    switch (m_tool)
+    {
+    case TOOL_RECT_SELECT:     return QStringLiteral("Rect select");
+    case TOOL_FREEFORM_SELECT: return QStringLiteral("Lasso");
+    case TOOL_OBJECT_SELECT:   return QStringLiteral("Object select");
+    case TOOL_PENCIL:          return QStringLiteral("Pencil");
+    case TOOL_BRUSH:           return QStringLiteral("Brush");
+    case TOOL_ERASER:          return QStringLiteral("Eraser");
+    case TOOL_FILL:            return QStringLiteral("Fill");
+    case TOOL_EYEDROPPER:      return QStringLiteral("Eyedropper");
+    case TOOL_SPRAY:           return QStringLiteral("Spray");
+    case TOOL_LINE:            return QStringLiteral("Line");
+    case TOOL_RECTANGLE:       return QStringLiteral("Rectangle");
+    case TOOL_ROUNDED_RECT:    return QStringLiteral("Rounded rect");
+    case TOOL_ELLIPSE:         return QStringLiteral("Ellipse");
+    case TOOL_TEXT:            return QStringLiteral("Text");
+    case TOOL_PAN_ZOOM:        return QStringLiteral("Move canvas");
+    case TOOL_BRISTLE:         return QStringLiteral("Bristle");
+    case TOOL_GLITTER:         return QStringLiteral("Glitter");
+    default:                   return QStringLiteral("Tool");
+    }
+}
+
+void PaintbrushCanvasItem::updateCursor()
+{
+    switch (m_tool)
+    {
+    case TOOL_PENCIL:
+    case TOOL_BRUSH:
+    case TOOL_ERASER:
+    case TOOL_SPRAY:
+    case TOOL_BRISTLE:
+    case TOOL_GLITTER:
+    {
+        /* round tip cursor at the exact on-screen dab size, filled with the
+         * current color — the cursor IS the brush (eraser: white fill) */
+        const qreal dpr = window() ? window()->devicePixelRatio() : 1.0;
+        const qreal r = qMax<qreal>(3.0, m_brushSize * 0.5 * m_zoom);
+        const int sizeL = int(qCeil(r * 2 + 8));      /* logical px */
+        const int sizePx = int(qCeil(sizeL * dpr));
+        QPixmap pm(sizePx, sizePx);
+        pm.fill(Qt::transparent);
+        pm.setDevicePixelRatio(dpr);
+        {
+            QPainter p(&pm);
+            p.setRenderHint(QPainter::Antialiasing, true);
+            const QPointF c(sizeL / 2.0, sizeL / 2.0);
+            const bool erase = (m_tool == TOOL_ERASER);
+            QColor fill = erase ? QColor(255, 255, 255, 210) : m_fgColor;
+            fill.setAlpha(erase ? 210 : 170);
+            p.setPen(QPen(erase ? QColor(90, 90, 90, 220)
+                                : QColor(0, 0, 0, 200), 1.0));
+            p.setBrush(fill);
+            p.drawEllipse(c, r, r);
+            p.setPen(Qt::NoPen);
+            p.setBrush(QColor(0, 0, 0, 220));
+            p.drawEllipse(c, 1.0, 1.0);   /* precision center dot */
+        }
+        setCursor(QCursor(pm, sizeL / 2, sizeL / 2));
+        break;
+    }
+    case TOOL_TEXT:
+        setCursor(Qt::IBeamCursor);
+        break;
+    case TOOL_PAN_ZOOM:
+        setCursor(Qt::OpenHandCursor);
+        break;
+    case TOOL_FILL:
+    case TOOL_EYEDROPPER:
+        setCursor(Qt::CrossCursor);
+        break;
+    default:
+        setCursor(Qt::CrossCursor);
+        break;
+    }
 }
 
 void PaintbrushCanvasItem::setFgColor(const QColor &color)
@@ -118,6 +222,7 @@ void PaintbrushCanvasItem::setFgColor(const QColor &color)
         return;
     m_fgColor = color;
     emit fgColorChanged();
+    updateCursor();
 }
 
 void PaintbrushCanvasItem::setBgColor(const QColor &color)
@@ -135,6 +240,7 @@ void PaintbrushCanvasItem::setBrushSize(qreal size)
         return;
     m_brushSize = size;
     emit brushSizeChanged();
+    updateCursor();
 }
 
 void PaintbrushCanvasItem::setSprayDensity(qreal density)
@@ -578,6 +684,7 @@ void PaintbrushCanvasItem::setZoom(qreal zoom)
     m_zoom = zoom;
     emit zoomChanged();
     update();
+    updateCursor();   /* the brush-tip cursor size tracks the on-screen scale */
 }
 
 void PaintbrushCanvasItem::setPanOffset(const QPointF &offset)
@@ -642,7 +749,9 @@ void PaintbrushCanvasItem::markTilesDirty(const QRect &canvasRect_)
         for (int tx = x0; tx <= x1; ++tx)
             m_dirtyTiles.insert({tx, ty});
 
-    compositeDirtyTiles();
+    /* coalesced: the repaint timer flushes the dirty set at a fixed cadence
+     * (compositeDirtyTiles + update), never synchronously per call */
+    m_repaintTimer.start();
     update();
 }
 
@@ -664,8 +773,28 @@ void PaintbrushCanvasItem::compositeTile(int tx, int ty, QImage &tile) const
         return;
 
     /* layers, bottom to top — through the single canonical compositor so
-     * the screen always shows exactly what export/eyedropper/AI see */
-    DocumentRenderer::composite(tile, r, *m_doc);
+     * the screen always shows exactly what export/eyedropper/AI see. The
+     * Showroom time axis: living layers render at m_animTimeMs, everything
+     * else is unchanged (t=0 == the static path). */
+    DocumentRenderer::composite(tile, r, *m_doc, m_animTimeMs);
+
+    /* in-progress stroke preview: dabs live in the scratch tile until mouse
+     * release (commitScratch writes them into the layer), so the composite
+     * must blend the scratch on top or the stroke is invisible while
+     * drawing and only shows up on a later unrelated repaint */
+    if (m_strokeActive && !m_scratchTile.isNull())
+    {
+        const QRect overlap =
+            r.intersected(QRect(m_scratchOrigin, m_scratchTile.size()));
+        if (!overlap.isEmpty())
+        {
+            QPainter p(&tile);
+            p.setClipRect(tile.rect());
+            p.drawImage(overlap.topLeft() - r.topLeft(), m_scratchTile,
+                        overlap.translated(-m_scratchOrigin));
+            p.end();
+        }
+    }
 
     /* object selection mask overlay (AI cutout preview) */
     if (m_objectMaskVisible && !m_objectMask.isNull())
@@ -746,7 +875,8 @@ void PaintbrushCanvasItem::compositeDirtyTiles()
         compositeTile(key.x, key.y, tile);
         m_tiles.insert(key, tile);
     }
-    m_texturesNeedRebuild = true;
+    /* only the tiles composited now need their GPU textures re-uploaded */
+    m_changedTiles += dirty;
 }
 
 /* ---------------------------------------------------------- scene graph */
@@ -772,13 +902,16 @@ QSGNode *PaintbrushCanvasItem::updatePaintNode(QSGNode *oldNode,
 
     QQuickWindow *win = window();
 
-    /* (re)create textures for tiles whose content changed */
-    if (m_texturesNeedRebuild && win)
+    /* (re)create textures only for tiles whose content changed this pass;
+     * under a fast stroke that is 1-4 tiles per frame, never the whole doc */
+    if (win && !m_changedTiles.isEmpty())
     {
-        m_texturesNeedRebuild = false;
-        const auto tiles = m_tiles.keys();
-        for (const TileKey &key : tiles)
+        const auto changed = m_changedTiles;
+        m_changedTiles.clear();
+        for (const TileKey &key : changed)
         {
+            if (!m_tiles.contains(key))
+                continue;
             QSGTexture *&tex = m_textures[key];
             if (tex)
                 delete tex;
@@ -891,7 +1024,10 @@ void PaintbrushCanvasItem::itemChange(ItemChange change, const ItemChangeData &v
 {
     QQuickItem::itemChange(change, value);
     if (change == ItemSceneChange && value.window)
-        m_texturesNeedRebuild = true;
+    {
+        markAllTilesDirty();
+        updateCursor();   /* window is known now: regenerate at the real DPR */
+    }
 }
 
 /* ------------------------------------------------------------- painting */
@@ -1109,6 +1245,9 @@ void PaintbrushCanvasItem::commitScratch(const QString &desc)
     const QRect localUnion = m_strokeUnion.intersected(layer->raster.rect());
     if (!localUnion.isEmpty())
     {
+        /* refresh the display now: the scratch was just written into the
+         * layer raster, and nothing else triggers a repaint on release */
+        markTilesDirty(mappedRect(localUnion));
         emit strokeCommitted(mappedRect(localUnion));
         emit canvasModified();
     }
@@ -1282,18 +1421,28 @@ void PaintbrushCanvasItem::continueStroke(const QPointF &canvasPos)
         {
             /* normalize (canvas -> local) + stabilize (short moving
              * average) + velocity estimate, then dab along the smoothed
-             * segment */
+             * segment. Sparse events (coalesced moves under load) must
+             * follow the cursor directly, or the stroke trails behind. */
             const QPointF local = localFromCanvas(canvasPos);
             const qreal dist = QLineF(m_strokeSmooth, local).length();
             m_strokeSpeed = m_strokeSpeed * 0.7 + dist * 0.3;
-            m_stabilizer.append(local);
-            if (m_stabilizer.size() > 3)
-                m_stabilizer.removeFirst();
-            QPointF avg;
-            for (const QPointF &s : m_stabilizer)
-                avg += s;
-            avg /= m_stabilizer.size();
-            m_strokeSmooth = avg;
+            if (dist > 8.0)
+            {
+                m_strokeSmooth = local;
+                m_stabilizer.clear();
+                m_stabilizer.append(local);
+            }
+            else
+            {
+                m_stabilizer.append(local);
+                if (m_stabilizer.size() > 3)
+                    m_stabilizer.removeFirst();
+                QPointF avg;
+                for (const QPointF &s : m_stabilizer)
+                    avg += s;
+                avg /= m_stabilizer.size();
+                m_strokeSmooth = avg;
+            }
             strokeSegmentDabs(m_strokeLastDab, m_strokeSmooth);
             m_lastCanvasPos = canvasPos;
         }
@@ -1318,14 +1467,24 @@ void PaintbrushCanvasItem::continueStroke(const QPointF &canvasPos)
             /* same normalize + short-window stabilize as the brush so the
              * art tools inherit the proven stroke feel */
             const QPointF local = localFromCanvas(canvasPos);
-            m_stabilizer.append(local);
-            if (m_stabilizer.size() > 3)
-                m_stabilizer.removeFirst();
-            QPointF avg;
-            for (const QPointF &s : m_stabilizer)
-                avg += s;
-            avg /= m_stabilizer.size();
-            m_strokeSmooth = avg;
+            const qreal dist = QLineF(m_strokeSmooth, local).length();
+            if (dist > 8.0)
+            {
+                m_strokeSmooth = local;
+                m_stabilizer.clear();
+                m_stabilizer.append(local);
+            }
+            else
+            {
+                m_stabilizer.append(local);
+                if (m_stabilizer.size() > 3)
+                    m_stabilizer.removeFirst();
+                QPointF avg;
+                for (const QPointF &s : m_stabilizer)
+                    avg += s;
+                avg /= m_stabilizer.size();
+                m_strokeSmooth = avg;
+            }
             artStrokeSegment(m_strokeLastDab, m_strokeSmooth);
             m_lastCanvasPos = canvasPos;
         }
@@ -2677,7 +2836,14 @@ void PaintbrushCanvasItem::mouseMoveEvent(QMouseEvent *event)
     }
     if (m_strokeActive || m_dragging)
     {
-        continueStroke(canvasPos);
+        /* Coalesce the input stream: remember only the LATEST position and
+         * let the repaint tick sample it (~120 Hz). Processing every
+         * WM_MOUSEMOVE 1:1 queues per-event dab work behind fast moves and
+         * the stroke visibly lags the cursor; the latest-sample model keeps
+         * latency bounded to one tick. */
+        m_pendingMove = canvasPos;
+        m_movePending = true;
+        m_repaintTimer.start();
         event->accept();
         return;
     }
@@ -2689,6 +2855,7 @@ void PaintbrushCanvasItem::mouseReleaseEvent(QMouseEvent *event)
 {
     m_lastItemPos = event->position();
     const QPointF canvasPos = canvasFromItem(event->position());
+    m_movePending = false;   /* drop any unconsumed sampled move */
     if (m_panning)
     {
         m_panning = false;
@@ -2859,6 +3026,16 @@ void PaintbrushCanvasItem::markCanvasDirty()
     markAllTilesDirty();
 }
 
+void PaintbrushCanvasItem::setAnimTime(qint64 timeMs)
+{
+    if (m_animTimeMs == timeMs)
+        return;
+    m_animTimeMs = timeMs;
+    /* living layers span the whole canvas: recomposite all tiles at the
+     * canonical time and upload only the dirty ones (tile system) */
+    markAllTilesDirty();
+}
+
 void PaintbrushCanvasItem::notifyModified()
 {
     emit canvasModified();
@@ -2877,6 +3054,23 @@ void PaintbrushCanvasItem::updateStatus(const QPointF &canvasPos)
                                                  .arg(int(b.height()));
     }
     text += QStringLiteral("   zoom: %1%").arg(int(m_zoom * 100));
+    /* the app state is always visible: active tool + brush size + color,
+     * so the user's mental model matches what the next stroke will do */
+    text += QStringLiteral("   %1").arg(toolName());
+    switch (m_tool)
+    {
+    case TOOL_PENCIL:
+    case TOOL_BRUSH:
+    case TOOL_ERASER:
+    case TOOL_SPRAY:
+    case TOOL_BRISTLE:
+    case TOOL_GLITTER:
+        text += QStringLiteral(" %1px %2").arg(QString::number(m_brushSize, 'f', 0),
+                                               m_fgColor.name());
+        break;
+    default:
+        break;
+    }
     if (m_tool == TOOL_SPRAY)
         text += QStringLiteral("   flow: %1").arg(m_sprayFlow, 0, 'f', 1);
     if (m_gridVisible)

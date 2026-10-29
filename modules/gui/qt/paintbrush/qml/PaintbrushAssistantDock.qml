@@ -81,11 +81,11 @@ Item {
             anchors.fill: parent
             hoverEnabled: true
             onClicked: root.expanded = true
-        }
 
-        ToolTip.visible: pillMouse.hovered
-        ToolTip.text: qsTr("Creative companion")
-        ToolTip.delay: 600
+            ToolTip.visible: containsMouse
+            ToolTip.text: qsTr("Creative companion")
+            ToolTip.delay: 600
+        }
     }
 
     /* --------------------------------------------------- expanded chat */

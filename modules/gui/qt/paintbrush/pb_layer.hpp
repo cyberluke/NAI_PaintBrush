@@ -14,6 +14,7 @@
 
 #include "pb_common.hpp"
 #include "art/finish/effects.hpp"
+#include "motion/pb_puppet.hpp"
 
 #include <QString>
 #include <QImage>
@@ -107,6 +108,12 @@ public:
     /* Harvest provenance (spec §54): the HarvestItem id this layer derives
      * from, or 0 when it is not a harvested asset. */
     int harvestId = 0;
+    /* Living Harvest: the rigged puppet asset driving this layer's motion,
+     * and its time-dependent effect (amplitude/speed/phase/loop). The
+     * layer raster stays the STATIC harvested figure — the effect only
+     * applies at render time, so one typed undo removes the life. */
+    int puppetAssetId = -1;
+    motion::PuppetEffect puppetEffect;
 
     bool hasEnabledEffects() const
     {
@@ -114,6 +121,11 @@ public:
             if (e.enabled && e.type != art::EffectNode::None)
                 return true;
         return false;
+    }
+    /* Living layer: a puppet asset attached AND an audible amplitude. */
+    bool hasPuppet() const
+    {
+        return puppetAssetId > 0 && puppetEffect.amplitude > 0.01f;
     }
 };
 

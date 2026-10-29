@@ -84,7 +84,9 @@ public:
         SetRole,
         SetArtState,
         SetText,
-        AddHarvest
+        AddHarvest,
+        SetPuppet,
+        AddPuppet
     };
     virtual Kind kind() const = 0;
 };
@@ -103,6 +105,37 @@ public:
     Kind kind() const override { return Kind::AddHarvest; }
     QString description() const override { return desc; }
     qint64 bytes() const override;
+    void apply(PaintbrushDocument &doc) override;
+    void revert(PaintbrushDocument &doc) override;
+};
+
+/* Living Harvest: attach/detach the puppet asset + effect on one layer. The
+ * before/after pair restores the exact static figure on undo — the layer
+ * raster is never touched. */
+class SetPuppetCommand : public UndoCommand
+{
+public:
+    int layerId = 0;
+    int beforeAssetId = -1;
+    motion::PuppetEffect beforeEffect;
+    int afterAssetId = -1;
+    motion::PuppetEffect afterEffect;
+    QString desc;
+    Kind kind() const override { return Kind::SetPuppet; }
+    QString description() const override { return desc; }
+    void apply(PaintbrushDocument &doc) override;
+    void revert(PaintbrushDocument &doc) override;
+};
+
+/* Living Harvest: add a rigged puppet asset to the document store; revert
+ * removes it (used by Boost and rigHarvest so undo cleans the store too). */
+class AddPuppetCommand : public UndoCommand
+{
+public:
+    motion::PuppetAsset asset;   /* carries its stable id */
+    QString desc;
+    Kind kind() const override { return Kind::AddPuppet; }
+    QString description() const override { return desc; }
     void apply(PaintbrushDocument &doc) override;
     void revert(PaintbrushDocument &doc) override;
 };

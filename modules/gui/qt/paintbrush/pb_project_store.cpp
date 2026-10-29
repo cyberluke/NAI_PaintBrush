@@ -94,6 +94,14 @@ static QString layerToJson(const CanvasLayer &layer)
             QString::fromLatin1(layer.materialState.toBase64());
     if (layer.harvestId > 0)
         obj[QStringLiteral("harvestId")] = layer.harvestId;
+    if (layer.puppetAssetId > 0)
+    {
+        obj[QStringLiteral("puppetAssetId")] = layer.puppetAssetId;
+        const QByteArray fx = layer.puppetEffect.serialize();
+        if (!fx.isEmpty())
+            obj[QStringLiteral("puppetEffect")] =
+                QString::fromLatin1(fx.toBase64());
+    }
 
     if (!layer.raster.isNull())
     {
@@ -164,6 +172,11 @@ static QList<CanvasLayer> layersFromJson(const QJsonArray &array)
         layer.materialState = QByteArray::fromBase64(
             obj[QStringLiteral("materialState")].toString().toLatin1());
         layer.harvestId = obj[QStringLiteral("harvestId")].toInt(0);
+        layer.puppetAssetId = obj[QStringLiteral("puppetAssetId")].toInt(-1);
+        const QByteArray fxB64 = QByteArray::fromBase64(
+            obj[QStringLiteral("puppetEffect")].toString().toLatin1());
+        if (!fxB64.isEmpty())
+            layer.puppetEffect = motion::PuppetEffect::deserialize(fxB64);
 
         layers.append(std::move(layer));
     }
@@ -336,6 +349,12 @@ QString ProjectStore::saveToBytes(PaintbrushDocument *doc, QByteArray *out) cons
     root[QStringLiteral("art")] = artToJson(doc);
     root[QStringLiteral("harvest")] = harvestToJson(doc->harvest());
 
+    /* Living Harvest: the rig-less asset manifest (rigs rebuild from the
+     * tray on load, so saving them would be both redundant and stale). */
+    const QByteArray puppets = doc->puppets()->serializeManifest();
+    if (!puppets.isEmpty())
+        root[QStringLiteral("puppets")] = QString::fromLatin1(puppets.toBase64());
+
     *out = QJsonDocument(root).toJson(QJsonDocument::Indented);
     return {};
 }
@@ -440,6 +459,14 @@ QString ProjectStore::loadFromBytes(PaintbrushDocument *doc,
      * the defaults from resetDocument stay) */
     artFromJson(doc, root[QStringLiteral("art")].toObject());
     doc->harvest()->setItems(harvestFromJson(root[QStringLiteral("harvest")].toArray()));
+
+    /* Living Harvest: rebuild assets (rigs from the tray), then clear any
+     * layer refs whose asset could not be rebuilt (missing harvest). */
+    const QByteArray puppetsB64 = QByteArray::fromBase64(
+        root[QStringLiteral("puppets")].toString().toLatin1());
+    if (!puppetsB64.isEmpty())
+        doc->puppets()->loadManifest(puppetsB64);
+    doc->prunePuppetRefs();
 
     doc->setDirty(false);
     return {};

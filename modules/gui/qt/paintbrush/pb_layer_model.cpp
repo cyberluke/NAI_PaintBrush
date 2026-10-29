@@ -77,7 +77,7 @@ QHash<int, QByteArray> PaintbrushLayerModel::roleNames() const
     QHash<int, QByteArray> names;
     names.insert(IdRole, "id");
     names.insert(NameRole, "name");
-    names.insert(VisibleRole, "visible");
+    names.insert(VisibleRole, "layerVisible");
     names.insert(OpacityRole, "opacity");
     names.insert(ScaleRole, "scale");
     names.insert(RotationRole, "rotation");

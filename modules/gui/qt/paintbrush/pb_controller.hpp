@@ -163,6 +163,37 @@ public:
     /* Seek the player to the moment this harvest came from. */
     Q_INVOKABLE void seekToHarvest(int harvestId);
 
+    /* -- living harvest (stage 3) ---------------------------------------- */
+    /* Rig a tray item into a PuppetAsset (rig once, auto source-motion
+     * window). Non-destructive: the HarvestItem itself is untouched and the
+     * asset joins the undo stack. Returns the asset id (0 = not riggable). */
+    Q_INVOKABLE int rigHarvest(int harvestId);
+    /* Attach a rigged asset to a layer with an amplitude in 0..1
+     * (photo regime: 0.35 subtle, 0.65 normal, 1.0 strong but photo-safe).
+     * One undo restores the static figure. */
+    Q_INVOKABLE void setLayerPuppet(int index, int assetId, double amplitude);
+    Q_INVOKABLE void removeLayerPuppet(int index);
+    Q_INVOKABLE bool layerHasPuppet(int index) const;
+    Q_INVOKABLE double layerPuppetAmplitude(int index) const;
+    Q_INVOKABLE int layerPuppetAssetId(int index) const;
+    /* Number of rigged assets in the store (UI enables the Motion group). */
+    Q_INVOKABLE int riggedAssetCount() const;
+    /* First rigged asset id (UI falls back to it when the layer has none). */
+    Q_INVOKABLE int firstRiggedAssetId() const;
+    /* 3-second living poster: PNG frame sequence (canonical time grid,
+     * deterministic for a fixed document). */
+    Q_INVOKABLE QString exportLivingPoster(const QUrl &dir, int durationMs,
+                                           int fps, bool paper);
+    /* Living Showroom: mux the canonical frames into a REAL video file.
+     * format: "mp4" (H.264, paper) or "webm" (VP9, transparent alpha).
+     * Frames land next to the output file and stay (canonical
+     * intermediate). Returns an error message or empty. */
+    Q_INVOKABLE QString exportLivingVideo(const QUrl &dir, int durationMs, int fps,
+                                          const QString &format, const QUrl &outFile);
+    /* True only when the mux pipeline really works on this machine
+     * (ffmpeg + encoder present) — the UI never offers a fake export. */
+    Q_INVOKABLE bool canExportLivingVideo(const QString &format) const;
+
     /* -- boost (spec §24-§30) -------------------------------------------- */
     bool boostBusy() const { return m_boostBusy; }
     QString boostSummary() const { return m_boostSummary; }
@@ -246,6 +277,23 @@ public:
     /* -- QML canvas wiring ---------------------------------------------- */
     Q_INVOKABLE void setCanvasItem(QQuickItem *item);
     PaintbrushCanvasItem *canvas() const { return m_canvas; }
+
+    /* -- Living Showroom: live canvas preview -------------------------- */
+    /* The AnimationClock ticks 30 Hz (10 Hz while a stroke is active) but
+     * ONLY while a visible living layer exists and the canvas is on screen;
+     * every tick advances the canonical time and recomposites the canvas
+     * through DocumentRenderer::composite(doc, t). Static layers are never
+     * re-rendered differently — they are simply part of the same composite.
+     * When the clock stops, the canvas rests at t=0 == the static poster. */
+    Q_INVOKABLE void setShowroomPreviewActive(bool active);
+    Q_INVOKABLE bool showroomPreviewActive() const { return m_showroomPreview; }
+    /* True while the clock is actually running (QML status / diagnostics). */
+    Q_INVOKABLE bool livingPreviewActive() const { return m_livingClock.isActive(); }
+    /* Before/After moment: freeze the preview at the static poster (t=0).
+     * The clock stops; un-pausing resumes the living loop. The canvas rests
+     * at exactly the exported frame 0, so the comparison is honest. */
+    Q_INVOKABLE void setLivingPreviewPaused(bool paused);
+    Q_INVOKABLE bool livingPreviewPaused() const { return m_previewPaused; }
 
     /* -- window fitting --------------------------------------------------- */
     /* Clamp the Paintbrush interface window to the screen's available
@@ -626,6 +674,13 @@ private:
 
     QTimer m_mediaTimer;
     QTimer m_autosaveTimer;
+    /* Living Showroom clock: canonical time + canvas recomposite gate */
+    QTimer m_livingClock;
+    qint64 m_animTimeMs = 0;
+    bool m_showroomPreview = true;
+    bool m_previewPaused = false;    /* Before/After compare: rest at t=0 */
+    void onLivingClockTick();
+    void refreshLivingClock();
     /* MRL for which the thumbnail timeline was auto-started, so the timer
      * does not restart generation on every tick for the same media */
     QString m_thumbnailsAutoMedia;

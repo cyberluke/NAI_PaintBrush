@@ -5,10 +5,9 @@
  *****************************************************************************/
 
 import QtQuick
-import QtQuick.Layouts
-import QtQuick.Window
-import QtQuick.Dialogs
 import QtQuick.Controls
+import QtQuick.Dialogs
+import QtQuick.Layouts
 
 import VLC.MainInterface
 import VLC.Widgets as Widgets
@@ -100,6 +99,44 @@ Item {
         onAccepted: {
             if (selectedFile)
                 PaintbrushCtx.exportImage(selectedFile, exportFormat)
+        }
+    }
+
+    /* Living Poster: 3 s living poster — a PNG frame sequence written into
+     * the chosen folder (paper on: document paper; paper off: transparent). */
+    FileDialog {
+        id: exportLivingDialog
+        title: qsTr("Export Living Poster frames (3 s, 24 fps)")
+        fileMode: FileDialog.Directory
+        onAccepted: {
+            if (currentFolder)
+                PaintbrushCtx.exportLivingPoster(currentFolder, 3000, 24, true)
+        }
+    }
+
+    /* Living Showroom: REAL muxed video over the canonical frames. The
+     * buttons stay disabled until the mux pipeline is verified present
+     * (ffmpeg + encoder) — no fake exports. */
+    FileDialog {
+        id: exportLivingMp4Dialog
+        title: qsTr("Export Living Poster video (MP4/H.264)")
+        fileMode: FileDialog.SaveFile
+        nameFilters: ["MP4 video (*.mp4)"]
+        defaultSuffix: "mp4"
+        onAccepted: {
+            if (selectedFile)
+                PaintbrushCtx.exportLivingVideo(currentFolder, 3000, 24, "mp4", selectedFile)
+        }
+    }
+    FileDialog {
+        id: exportLivingWebmDialog
+        title: qsTr("Export Living Poster video (WebM/VP9, transparent)")
+        fileMode: FileDialog.SaveFile
+        nameFilters: ["WebM video (*.webm)"]
+        defaultSuffix: "webm"
+        onAccepted: {
+            if (selectedFile)
+                PaintbrushCtx.exportLivingVideo(currentFolder, 3000, 24, "webm", selectedFile)
         }
     }
 
@@ -247,6 +284,37 @@ Item {
                 description: qsTr("Export image…")
                 enabled: PaintbrushCtx.hasOpenDocument
                 onClicked: exportDialog.open()
+            }
+            /* Living Poster: ONE dominant choice — MP4/H.264, share-ready.
+             * WebM alpha and the canonical PNG frames live behind the
+             * advanced menu (never offered until the mux pipeline is
+             * verified present — no fake exports). */
+            Widgets.IconToolButton {
+                id: livingExportPrimary
+                text: VLCIcons.topbar_video
+                description: qsTr("Export Living Poster video (MP4)")
+                enabled: PaintbrushCtx.hasOpenDocument && PaintbrushCtx.riggedAssetCount() > 0 &&
+                         PaintbrushCtx.canExportLivingVideo("mp4")
+                onClicked: exportLivingMp4Dialog.open()
+            }
+            Widgets.IconToolButton {
+                id: livingExportAdvanced
+                text: VLCIcons.ic_fluent_arrow_sync_24_regular
+                description: qsTr("Living Poster export options…")
+                enabled: PaintbrushCtx.hasOpenDocument && PaintbrushCtx.riggedAssetCount() > 0
+                onClicked: livingExportMenu.popup(livingExportAdvanced, 0, livingExportAdvanced.height)
+            }
+            Menu {
+                id: livingExportMenu
+                MenuItem {
+                    text: qsTr("Living Poster video (WebM, transparent)")
+                    enabled: PaintbrushCtx.canExportLivingVideo("webm")
+                    onTriggered: exportLivingWebmDialog.open()
+                }
+                MenuItem {
+                    text: qsTr("Living Poster frames (PNG sequence, 3 s)")
+                    onTriggered: exportLivingDialog.open()
+                }
             }
             /* AI diagnostics: a diagnostics action instead of permanent
              * status dots in the creative space (A37/S5) */
@@ -499,6 +567,14 @@ Item {
 
     /* Fit to the desktop so the bottom chrome (palette + media drawer)
      * is never hidden behind the taskbar when the window was restored
-     * larger than the current screen. */
-    Component.onCompleted: PaintbrushCtx.fitInterfaceToDesktop()
+     * larger than the current screen. Also set the product identity:
+     * this is NAI PaintBrush, not a media player. The title is re-applied
+     * after the native window settles so no late default can override it. */
+    Component.onCompleted: {
+        MainCtx.intfMainWindow.title = qsTr("NAI PaintBrush")
+        Qt.callLater(() => {
+            MainCtx.intfMainWindow.title = qsTr("NAI PaintBrush")
+        })
+        PaintbrushCtx.fitInterfaceToDesktop()
+    }
 }

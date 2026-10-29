@@ -46,6 +46,30 @@ public:
 
     /* Trim transparent bounds of an RGBA image and write it. */
     static QString exportCutout(const QImage &cutout, const QString &path);
+
+    /* Living Harvest (stage 3): render a living poster loop as a PNG frame
+     * sequence. Frames are deterministic for a fixed doc (same seed, same
+     * time grid) and transparent (paper comes from the document renderer
+     * when `paper` is true; `paper=false` yields transparent frames for
+     * manual compositing). Writes `dir/<stem>_%04d.png`, 0-based.
+     * Returns an error message or empty. */
+    static QString exportLivingPoster(PaintbrushDocument *doc, const QString &dir,
+                                      const QString &stem,
+                                      qint64 durationMs, int fps,
+                                      bool paper, double scale);
+
+    /* Living Showroom: a REAL muxed video file over the canonical PNG
+     * sequence (which is kept as the deterministic intermediate).
+     *  - "mp4":  paper frames -> H.264/yuv420p (+faststart), share-ready;
+     *  - "webm": transparent frames -> VP9/yuva420p (alpha-capable).
+     * Requires an ffmpeg binary with the matching encoder; otherwise a
+     * clear error is returned (no fake export). Returns error or empty. */
+    static QString exportLivingVideo(PaintbrushDocument *doc, const QString &dir,
+                                     const QString &stem, qint64 durationMs, int fps,
+                                     const QString &format, const QString &outPath);
+    /* True when exportLivingVideo(format) can produce a real file on this
+     * machine (ffmpeg found + encoder available). Cached per format. */
+    static bool canExportLivingVideo(const QString &format);
 };
 
 } // namespace paintbrush

@@ -108,6 +108,13 @@ public:
     /* Add a derived harvest item to the tray (undo removes it). Returns id. */
     int addHarvest(const HarvestItem &item, const QString &desc);
     void setArtState(const SetArtStateCommand::State &after, const QString &desc);
+    /* Living Harvest: attach a puppet asset + effect to one layer (one undo
+     * restores the static figure). */
+    void setPuppet(int layerId, int assetId, const motion::PuppetEffect &effect,
+                   const QString &desc);
+    /* Living Harvest: add a rigged asset to the store (undo removes it).
+     * Returns the assigned asset id (0 on failure). */
+    int addPuppetAsset(const motion::PuppetAsset &asset, const QString &desc);
 
     /* Wrap everything into one undo step. Empty transactions return null. */
     std::unique_ptr<CompositeCommand> finish(const QString &desc);
@@ -156,6 +163,15 @@ public:
      * assigns the Transition role + motion finish. Returns the new layer id. */
     static int insertBridgePose(BoostTransaction &tx, const BoostAnalysis &a,
                                 const BoostOptions &o, HarvestItem derived);
+
+    /* Living Harvest hidden tool (animateHero): a subtle living loop on the
+     * HERO layer only — ghosts and transitions stay static. Rules:
+     *  - at most ONE living layer per poster (existing living layer wins);
+     *  - the hero must derive from a harvest with a riggable tray track;
+     *  - the asset is created on demand (rig once + auto motion window) and
+     *    joins the same undo step as the rest of the Boost.
+     * The effect amplitude is the asset's photo-safe default (0.65). */
+    static void animateHero(BoostTransaction &tx, const BoostAnalysis &a);
 
     /* One concise, confident sentence set (spec §44). */
     static QString composeSummary(const QStringList &lines);
