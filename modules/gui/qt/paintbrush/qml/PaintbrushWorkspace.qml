@@ -189,6 +189,15 @@ Item {
         }
     }
 
+    /* NAI Settings — separate from VLC Preferences; opened from the gear */
+    PaintbrushSettingsDialog {
+        id: settingsDialog
+    }
+    Connections {
+        target: inspectorDock
+        function onRequestSettings() { settingsDialog.open() }
+    }
+
     /* small top bar: workspace title + back to VLC + quick actions */
     Rectangle {
         id: topBar
@@ -326,12 +335,13 @@ Item {
                     onTriggered: exportLivingDialog.open()
                 }
             }
-            /* AI diagnostics: a diagnostics action instead of permanent
-             * status dots in the creative space (A37/S5) */
+            /* NAI Settings: the gear opens OUR settings, not VLC Preferences.
+             * Diagnostics is one of its sections (A37/S5 — no permanent
+             * status dots in the creative space). */
             Widgets.IconToolButton {
                 text: VLCIcons.settings
-                description: qsTr("AI diagnostics")
-                onClicked: inspectorDock.openDiagnostics()
+                description: qsTr("NAI Settings")
+                onClicked: settingsDialog.open()
             }
             Widgets.IconToolButton {
                 text: VLCIcons.history

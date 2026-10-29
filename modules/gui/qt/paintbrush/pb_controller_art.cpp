@@ -48,44 +48,63 @@ void PaintbrushController::keepSelection()
         setStatus(QStringLiteral("Select the moment first (Object Select), then Keep."));
         return;
     }
-    /* the exact frame this selection was made on */
-    FrameRef ref = m_document.sourceFrame();
+    /* The exact frame this selection was made on: prefer the ephemeral live
+     * harvest context (current PTS + frame-space mask) over the document's
+     * mutable sourceFrame. */
+    FrameRef ref;
     QImage frame;
-    if (ref.isValid())
+    QImage mask = m_objectMask;
+    if (m_liveCtx.valid() && !m_liveCtx.frame.isNull())
     {
-        const DecodedFrame f = m_editSource.request(ref);
-        if (f.ok())
-        {
-            frame = f.image;
-            ref.ptsMs = f.ptsMs; /* the verified PTS, never a guess */
-        }
+        ref = m_liveCtx.ref;
+        frame = m_liveCtx.frame;
+        /* the mask was produced in frame space by the live SAM path — no
+         * rescale, the mask's pixels already align with the decoded frame. */
+        if (mask.size() != frame.size())
+            mask = mask.scaled(frame.size(), Qt::IgnoreAspectRatio,
+                               Qt::SmoothTransformation);
     }
-    if (frame.isNull())
+    else
     {
-        /* still image / legacy document: harvest from the canvas pixels */
-        frame = pristineSourceFrame();
-        if (frame.isNull() && m_canvas)
-            frame = m_canvas->grabCanvasRegion(QRectF(QPointF(0, 0), m_document.canvasSize()));
-        if (ref.mrl.isEmpty())
+        /* compose / still mode: decode the captured reference frame */
+        ref = m_document.sourceFrame();
+        if (ref.isValid())
         {
-            ref.mrl = m_document.sourceMediaMRL().isEmpty()
-                          ? QStringLiteral("canvas://%1").arg(m_projectName.isEmpty()
-                                                                  ? QStringLiteral("untitled")
-                                                                  : m_projectName)
-                          : m_document.sourceMediaMRL();
-            ref.title = m_document.sourceMediaTitle();
-            ref.ptsMs = m_document.sourceTimeMs();
+            const DecodedFrame f = m_editSource.request(ref);
+            if (f.ok())
+            {
+                frame = f.image;
+                ref.ptsMs = f.ptsMs; /* the verified PTS, never a guess */
+            }
         }
+        if (frame.isNull())
+        {
+            /* still image / legacy document: harvest from the canvas pixels */
+            frame = pristineSourceFrame();
+            if (frame.isNull() && m_canvas)
+                frame = m_canvas->grabCanvasRegion(QRectF(QPointF(0, 0),
+                                                          m_document.canvasSize()));
+            if (ref.mrl.isEmpty())
+            {
+                ref.mrl = m_document.sourceMediaMRL().isEmpty()
+                              ? QStringLiteral("canvas://%1").arg(m_projectName.isEmpty()
+                                                                      ? QStringLiteral("untitled")
+                                                                      : m_projectName)
+                              : m_document.sourceMediaMRL();
+                ref.title = m_document.sourceMediaTitle();
+                ref.ptsMs = m_document.sourceTimeMs();
+            }
+        }
+        /* the mask lives in canvas space; map it onto the compose frame */
+        if (mask.size() != frame.size())
+            mask = mask.scaled(frame.size(), Qt::IgnoreAspectRatio,
+                               Qt::SmoothTransformation);
     }
     if (frame.isNull())
     {
         setStatus(QStringLiteral("Could not read the source frame for this moment."));
         return;
     }
-    /* the mask lives in canvas space; map it onto the frame */
-    QImage mask = m_objectMask;
-    if (mask.size() != frame.size())
-        mask = mask.scaled(frame.size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
 
     HarvestItem item = makeHarvestItem(0, ref, frame, mask, m_objectMaskScore,
                                        m_selectedTrackId >= 0

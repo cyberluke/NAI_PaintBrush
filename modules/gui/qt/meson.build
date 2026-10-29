@@ -1031,6 +1031,7 @@ qml_modules += {
         'paintbrush/qml/PaintbrushBoostBar.qml',
         'paintbrush/qml/PaintbrushMoodPicker.qml',
         'paintbrush/qml/PaintbrushTextEditorBar.qml',
+        'paintbrush/qml/PaintbrushSettingsDialog.qml',
     ),
 }
 

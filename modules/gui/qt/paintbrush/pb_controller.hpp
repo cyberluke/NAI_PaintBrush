@@ -33,6 +33,7 @@
 #include <QObject>
 #include <QImage>
 #include <QPointF>
+#include <QTransform>
 #include <QUrl>
 #include <QTimer>
 #include <QVariantList>
@@ -50,6 +51,44 @@ class QQuickItem;
 namespace paintbrush {
 
 class PaintbrushCanvasItem;
+
+/* Ephemeral context for a LIVE harvest frame: the exact decoded frame at a
+ * given player PTS plus the transforms that map between the on-canvas video
+ * viewport and the decoded pixels. Unlike the document's mutable
+ * `sourceFrame` (a captured reference/composition provenance), this is the
+ * player cursor — re-captured fresh on every SAM seed click so a later PTS
+ * can never reuse a stale earlier frame.
+ *
+ * Mapping is standard letterbox aspect-fit (the same geometry the VideoSurface
+ * displays): the full viewport is cleared to transparent and the frame is
+ * drawn scaled into its content rect leaving letterbox margins. */
+struct LiveFrameContext
+{
+    FrameRef ref;            /* current MRL + verified PTS               */
+    QImage frame;            /* decoded video pixels (native size)       */
+    QSize viewportSize;      /* the QML canvas-area size the video fills  */
+    QRectF contentRect;      /* aspect-fit rect inside the viewport      */
+    QTransform itemToFrame;  /* viewport QML point -> frame pixel         */
+    QTransform frameToItem;  /* frame pixel -> viewport QML point         */
+
+    bool valid() const { return !frame.isNull() && !contentRect.isEmpty(); }
+
+    /* Remap a viewport-space point into frame-pixel space (returns NaN on
+     * failure so callers can reject outside-the-video clicks). */
+    QPointF itemToFramePoint(const QPointF &p) const
+    {
+        if (!valid())
+            return { qQNaN(), qQNaN() };
+        return itemToFrame.map(p);
+    }
+    /* Remap a frame-pixel point into viewport space. */
+    QPointF frameToItemPoint(const QPointF &p) const
+    {
+        if (!valid())
+            return { qQNaN(), qQNaN() };
+        return frameToItem.map(p);
+    }
+};
 
 /* Owns the Paintbrush document, services and the player bridge. Exposed to
  * QML as the `PaintbrushCtx` singleton in the VLC.Paintbrush module. */
@@ -546,6 +585,7 @@ signals:
 
 private slots:
     void onCanvasObjectClick(QPointF canvasPos, bool positive, QPointF itemPos);
+    void onCanvasAskClick(QPointF canvasPos, QPointF itemPos);
     void onMaskRefineStarted(const QImage &mask);
     void onObjectMaskEdited(const QImage &mask);
     void onMaskRestored(const QImage &mask);
@@ -602,12 +642,15 @@ private:
     QImage selectionCrop() const;
     QImage currentAiSource() const;
     QImage pristineSourceFrame() const;
-    /* Ensure a valid AI source raster exists before segmenting:
-     * if the document has no captured reference frame yet but a video is
-     * playing, decode the CURRENT player PTS through the edit frame source,
-     * adopt it as the document source frame, and return it. This lets
-     * Object Select work on live video without a "Use this frame" step. */
-    QImage ensureAiSourceFrame();
+    /* Non-const: decode the CURRENT player PTS into an ephemeral
+     * LiveFrameContext (fresh every SAM seed click) complete with the
+     * viewport<->frame letterbox transforms. `viewportSize` is the on-canvas
+     * video area the click came from. Never mutates the document's
+     * sourceFrame — that is composition provenance, not the player cursor. */
+    LiveFrameContext captureLiveFrameContext(const QSize &viewportSize);
+    /* Map the document/source frame used for a compose-mode SAM/Keep onto
+     * the given viewport size (1:1 when the canvas matches the frame). */
+    LiveFrameContext composeFrameContext(const QSize &viewportSize) const;
     QVector<QPointF> positivePointsForTracking() const;
     /* Exact-frame decode helpers (EditDecodeSource): all edit-pipeline
      * frame acquisition goes through these, never the playback player. */
@@ -670,6 +713,12 @@ private:
     /* object selection click session */
     QVector<QPointF> m_posPoints;
     QVector<QPointF> m_negPoints;
+    /* Live harvest frame for the CURRENT SAM prompt session (points are held
+     * in FRAME space; reused only while MRL+PTS are unchanged). A change of
+     * MRL or PTS starts a fresh session so a 9s click is never combined with
+     * a 15s click. */
+    LiveFrameContext m_liveCtx;
+    FrameRef m_liveSessionRef;   /* the FrameRef the m_posPoints belong to */
 
     QVariantList m_assistantMessages;
     QVariantList m_lookupMatches;

@@ -1444,6 +1444,7 @@ libqml_module_paintbrush_a_QML = \
 	paintbrush/qml/PaintbrushInspectorDock.qml \
 	paintbrush/qml/PaintbrushMediaDrawer.qml \
 	paintbrush/qml/PaintbrushAssistantDock.qml
+	paintbrush/qml/PaintbrushSettingsDialog.qml
 libqml_module_paintbrush_a_Singleton_QML =
 libqml_module_paintbrush_a_SOURCES = $(QML_MODULE_paintbrush_SRC)
 nodist_libqml_module_paintbrush_a_SOURCES = paintbrush/qmlassets.cpp $(QML_MODULE_paintbrush_NODIST_EXTRA)

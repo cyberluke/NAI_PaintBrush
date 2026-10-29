@@ -13,6 +13,7 @@
 #include <QQuickItem>
 #include <QImage>
 #include <QBuffer>
+#include <QtMath>
 #include <memory>
 
 #ifdef Q_OS_WIN
@@ -280,6 +281,8 @@ void PaintbrushController::setCanvasItem(QQuickItem *item)
 
     connect(m_canvas, &PaintbrushCanvasItem::objectSelectClick,
             this, &PaintbrushController::onCanvasObjectClick);
+    connect(m_canvas, &PaintbrushCanvasItem::askClick,
+            this, &PaintbrushController::onCanvasAskClick);
     connect(m_canvas, &PaintbrushCanvasItem::maskRefineStarted,
             this, &PaintbrushController::onMaskRefineStarted);
     connect(m_canvas, &PaintbrushCanvasItem::objectMaskEdited,
@@ -1286,21 +1289,95 @@ void PaintbrushController::onCanvasObjectClick(QPointF canvasPos, bool positive,
         return;
     }
 
-    /* maintain per-session click prompts; shift-click adds more points */
-    if (positive)
-        m_posPoints.append(canvasPos);
-    else
-        m_negPoints.append(canvasPos);
+    /* Capture the CURRENT frame context (fresh PTS when a live video plays,
+     * or the compose reference for stills). Points are held and interpreted
+     * in FRAME space. */
+    const QSize viewport = m_canvas
+                               ? m_canvas->size().toSize()
+                               : m_document.canvasSize();
+    LiveFrameContext ctx = captureLiveFrameContext(viewport);
+    if (!ctx.valid())
+    {
+        setStatus(QStringLiteral("No video frame to select from (open a video "
+                                 "or capture a frame to canvas first)."));
+        return;
+    }
 
+    /* Map the click from viewport/canvas space into frame-pixel space. If the
+     * click fell in the letterbox margin (outside the video), reject it. */
+    const QPointF framePt = ctx.itemToFramePoint(canvasPos);
+    if (qIsNaN(framePt.x()) || qIsNaN(framePt.y()) ||
+        framePt.x() < 0 || framePt.y() < 0 ||
+        framePt.x() >= ctx.frame.width() || framePt.y() >= ctx.frame.height())
+    {
+        setStatus(QStringLiteral("Object Select needs a point inside the video."));
+        return;
+    }
+
+    /* Session scoping: a change of source frame (MRL or PTS) starts a fresh
+     * prompt session — a 9s click must never join a 15s click's inference.
+     * Same MRL+PTS keeps the session (repeated refinement benefits from the
+     * SAM embedding cache). */
+    const FrameRef shot = ctx.ref;
+    if (m_liveSessionRef.mrl != shot.mrl ||
+        m_liveSessionRef.ptsMs != shot.ptsMs)
+    {
+        m_liveSessionRef = shot;
+        m_posPoints.clear();
+        m_negPoints.clear();
+        if (m_visionHasResult)
+            m_visionHasResult = false; /* stale answer for a different shot */
+    }
+    if (positive)
+        m_posPoints.append(framePt);
+    else
+        m_negPoints.append(framePt);
+
+    m_liveCtx = ctx;
     m_objectSelectBusy = true;
     emit objectSelectionChanged();
     if (m_canvas)
         m_canvas->setObjectSelectBusy(true);
 
-    /* Harvest: Object Select works over LIVE video at the current PTS — the
-     * player does not need a "Use this frame" reference layer first. */
-    const QImage source = ensureAiSourceFrame();
-    m_segmentation.segment(source, m_posPoints, m_negPoints, {});
+    m_segmentation.segment(ctx.frame, m_posPoints, m_negPoints, {});
+}
+
+void PaintbrushController::onCanvasAskClick(QPointF canvasPos, QPointF itemPos)
+{
+    Q_UNUSED(canvasPos);
+    Q_UNUSED(itemPos);
+
+    if (!m_vision.isConfigured())
+    {
+        setStatus(m_vision.unavailableReason());
+        return;
+    }
+
+    /* Ask-anything: pick the richest context the user was pointing at —
+     * an object mask, a marquee selection, or the whole frame. */
+    if (m_objectSelected && !m_objectMask.isNull())
+    {
+        askAboutObject(QStringLiteral("What is this object? Describe it in detail."));
+    }
+    else if (m_canvas && m_canvas->hasSelection())
+    {
+        askAboutSelection(QStringLiteral(
+            "What is shown in this selection? Describe it in detail."));
+    }
+    else
+    {
+        /* no object/selection: ask about the whole current frame */
+        if (!m_vision.isConfigured())
+            return;
+        m_visionConversationId = QStringLiteral("frame-%1")
+                                     .arg(QDateTime::currentMSecsSinceEpoch());
+        m_visionHasResult = false;
+        emit visionStateChanged();
+        m_vision.ask(QImage(), currentAiSource(),
+                     QStringLiteral("What is shown in this frame? Describe it in detail."),
+                     m_visionConversationId);
+        setStatus(QStringLiteral("Asking about this frame…"));
+    }
 }
 
 void PaintbrushController::onMaskRefineStarted(const QImage &mask)
@@ -1544,44 +1621,93 @@ QImage PaintbrushController::currentAiSource() const
     return m_document.aiSourceImage();
 }
 
-QImage PaintbrushController::ensureAiSourceFrame()
+LiveFrameContext PaintbrushController::captureLiveFrameContext(const QSize &viewportSize)
 {
-    /* an existing reference/decoded source is authoritative */
-    QImage frame = pristineSourceFrame();
-    if (!frame.isNull())
-        return frame;
+    LiveFrameContext ctx;
+    ctx.viewportSize = viewportSize.isEmpty()
+                           ? m_document.canvasSize()
+                           : viewportSize;
 
-    /* harvest on LIVE video: decode the current player PTS on demand and
-     * adopt it as the document source frame so Object Select has a raster
-     * to segment — no "Use this frame" prerequisite. */
-    if (playerHasVideo())
+    /* Live harvest: decode the CURRENT player PTS into an ephemeral frame —
+     * always fresh, never a stale earlier frame. We do NOT touch the
+     * document's mutable sourceFrame (that is captured-frame/composition
+     * provenance, not the live player cursor). */
+    const QString mrl = currentMediaMRL();
+    if (!mrl.isEmpty() && playerHasVideo())
     {
-        const QString mrl = currentMediaMRL();
-        const qint64 pts = playerTimeMs();
-        if (!mrl.isEmpty())
+        const DecodedFrame f = requestFrame(mrl, playerTimeMs());
+        if (f.ok() && !f.image.isNull())
         {
-            const DecodedFrame f = requestFrame(mrl, pts);
-            if (f.ok())
+            ctx.ref = FrameRef{mrl, currentMediaTitle(), f.ptsMs,
+                               f.image.width(), f.image.height()};
+            ctx.frame = f.image;
+            if (m_welcomeVisible)
             {
-                const QString title = currentMediaTitle();
-                m_document.setSourceFrame(FrameRef{mrl, title, f.ptsMs,
-                                                   f.image.width(),
-                                                   f.image.height()});
-                frame = f.image;
-                if (m_welcomeVisible)
-                {
-                    m_welcomeVisible = false;
-                    emit welcomeChanged();
-                }
-                setStatus(QStringLiteral("Framed video at %1 ms")
-                              .arg(f.ptsMs));
+                m_welcomeVisible = false;
+                emit welcomeChanged();
             }
         }
     }
-    if (!frame.isNull() && frame.size() != m_document.canvasSize())
-        return frame.scaled(m_document.canvasSize(), Qt::KeepAspectRatio,
-                            Qt::SmoothTransformation);
-    return frame;
+    if (ctx.frame.isNull())
+    {
+        /* still image / compose mode: use the captured reference frame */
+        QImage frame = pristineSourceFrame();
+        if (frame.isNull() && m_canvas)
+            frame = m_canvas->grabCanvasRegion(
+                QRectF(QPointF(0, 0), m_document.canvasSize()));
+        if (frame.isNull())
+            return ctx;
+        ctx.frame = frame;
+        ctx.ref = m_document.sourceFrame(); /* may be default/invalid; Keep falls back */
+    }
+
+    /* letterbox aspect-fit: compute the content rect + transforms so a
+     * click landing on the visible video maps EXACTLY to decoded pixels
+     * (no geometric drift from blindly scaling to the canvas). */
+    const QSizeF fs = QSizeF(ctx.frame.size());
+    const QSizeF vs = QSizeF(ctx.viewportSize);
+    const qreal fit = vs.isEmpty() ? 1.0
+                                   : qMin(vs.width() / fs.width(),
+                                          vs.height() / fs.height());
+    const qreal cw = fs.width() * fit;
+    const qreal ch = fs.height() * fit;
+    ctx.contentRect = QRectF((vs.width() - cw) / 2.0,
+                             (vs.height() - ch) / 2.0, cw, ch);
+
+    /* viewport -> frame: subtract the letterbox origin, then divide by the
+     * scale factor (frame*fit = viewport px, so viewport = frame/fit). */
+    ctx.itemToFrame = QTransform().translate(-ctx.contentRect.left(),
+                                             -ctx.contentRect.top())
+                                  .scale(1.0 / fit, 1.0 / fit);
+    ctx.frameToItem = ctx.itemToFrame.inverted();
+    return ctx;
+}
+
+LiveFrameContext PaintbrushController::composeFrameContext(const QSize &viewportSize) const
+{
+    LiveFrameContext ctx;
+    ctx.viewportSize = viewportSize;
+    QImage frame = pristineSourceFrame();
+    if (frame.isNull() && m_canvas)
+        frame = m_canvas->grabCanvasRegion(
+            QRectF(QPointF(0, 0), m_document.canvasSize()));
+    ctx.frame = frame;
+    ctx.ref = m_document.sourceFrame();
+    if (!frame.isNull() && !viewportSize.isEmpty())
+    {
+        const QSizeF fs = QSizeF(frame.size());
+        const QSizeF vs = QSizeF(viewportSize);
+        const qreal fit = qMin(vs.width() / fs.width(), vs.height() / fs.height());
+        const qreal cw = fs.width() * fit;
+        const qreal ch = fs.height() * fit;
+        ctx.contentRect = QRectF((vs.width() - cw) / 2.0, (vs.height() - ch) / 2.0,
+                                 cw, ch);
+        ctx.itemToFrame = QTransform()
+                              .translate(-ctx.contentRect.left(), -ctx.contentRect.top())
+                              .scale(1.0 / fit, 1.0 / fit);
+        ctx.frameToItem = ctx.itemToFrame.inverted();
+    }
+    return ctx;
 }
 
 QImage PaintbrushController::objectCrop() const
@@ -3236,6 +3362,12 @@ void PaintbrushController::playerPlayPause()
 
 void PaintbrushController::playerSeek(qint64 timeMs)
 {
+    /* seek instrumentation (runtime probe: is the UI slider delivering its
+     * value, and does the player honour it?) — 4 probes: (A) press,
+     * (B) moved value, (C) C++ request, (D) actual post-seek time. */
+    qInfo("pb seek C: requested %lld ms (current=%lld)", (long long)timeMs,
+          (long long)playerTimeMs());
+
     /* the user took over the playhead: the thumbnail batch must not restore
      * its original position when it finishes. (During a slider drag the
      * batch is also suspended via playerSeekBegin/playerSeekEnd so it cannot
@@ -3244,12 +3376,14 @@ void PaintbrushController::playerSeek(qint64 timeMs)
 
     m_intf->p_mainPlayerController->setTime(VLCTime(timeMs * 1000));
     emit mediaStateChanged();
+    qInfo("pb seek D: after setTime=%lld ms (target=%lld)", (long long)playerTimeMs(),
+          (long long)timeMs);
 }
 
 void PaintbrushController::playerSeekBegin()
 {
-    /* user pressed the seek slider: suspend the thumbnail batch so it does
-     * not queue decodes behind a busy scrub (it never touches the player) */
+    /* (A) press probe — slider press reached the controller */
+    qInfo("pb seek A: slider pressed (current=%lld ms)", (long long)playerTimeMs());
     m_thumbnails.suspend();
 }
 

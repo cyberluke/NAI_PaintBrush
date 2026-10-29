@@ -47,6 +47,10 @@
         <file alias="rect_select_active.svg">paintbrush/pixmaps/tdesign/rect_select_active.svg</file>
         <file alias="rounded_rect.svg">paintbrush/pixmaps/tdesign/rounded_rect.svg</file>
         <file alias="rounded_rect_active.svg">paintbrush/pixmaps/tdesign/rounded_rect_active.svg</file>
+        <file alias="scan.svg">paintbrush/pixmaps/tdesign/scan.svg</file>
+        <file alias="scan_active.svg">paintbrush/pixmaps/tdesign/scan_active.svg</file>
+        <file alias="image_search.svg">paintbrush/pixmaps/tdesign/image_search.svg</file>
+        <file alias="image_search_active.svg">paintbrush/pixmaps/tdesign/image_search_active.svg</file>
         <file alias="spray.svg">paintbrush/pixmaps/tdesign/spray.svg</file>
         <file alias="spray_active.svg">paintbrush/pixmaps/tdesign/spray_active.svg</file>
         <file alias="text.svg">paintbrush/pixmaps/tdesign/text.svg</file>

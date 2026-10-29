@@ -91,7 +91,11 @@ Item {
                         PaintbrushCtx.playerSeek(seekSlider.value)
                     }
                 }
-                onMoved: seekThrottle.restart()
+                onMoved: {
+                    /* (B) moved-value probe — slider is delivering a value */
+                    console.slog("pb seek B: slider moved to " + seekSlider.value)
+                    seekThrottle.restart()
+                }
 
                 Timer {
                     id: seekThrottle
@@ -111,7 +115,7 @@ Item {
             }
 
             Widgets.ActionButtonPrimary {
-                text: qsTr("Use this frame")
+                text: qsTr("Add frame to canvas")
                 onClicked: PaintbrushCtx.captureVideoFrame()
             }
 

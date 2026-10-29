@@ -168,6 +168,7 @@ QString PaintbrushCanvasItem::toolName() const
     case TOOL_PAN_ZOOM:        return QStringLiteral("Move canvas");
     case TOOL_BRISTLE:         return QStringLiteral("Bristle");
     case TOOL_GLITTER:         return QStringLiteral("Glitter");
+    case TOOL_ASK:             return QStringLiteral("Ask");
     default:                   return QStringLiteral("Tool");
     }
 }
@@ -1412,6 +1413,13 @@ void PaintbrushCanvasItem::beginStroke(const QPointF &canvasPos, bool primary)
             else
                 emit objectSelectClick(canvasPos, true, itemFromCanvas(canvasPos));
         }
+        break;
+
+    case TOOL_ASK:
+        /* Ask-anything: a single click asks the VLM about the point (the
+         * controller picks the context: object / selection / whole frame). */
+        if (primary)
+            emit askClick(canvasPos, itemFromCanvas(canvasPos));
         break;
 
     case TOOL_PAN_ZOOM:

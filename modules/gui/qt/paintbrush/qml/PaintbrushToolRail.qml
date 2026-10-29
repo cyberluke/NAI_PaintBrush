@@ -70,7 +70,7 @@ Item {
                         /* selection tools */
                         { toolId: 1, iconBase: "rect_select", tip: qsTr("Rect Select"), sparkle: false },
                         { toolId: 2, iconBase: "freeform_select", tip: qsTr("Freeform Select"), sparkle: false },
-                        { toolId: 3, iconBase: "object_select", tip: qsTr("Object Select (AI)"), sparkle: true },
+                        { toolId: 3, iconBase: "scan", tip: qsTr("Object Select (AI)"), sparkle: true },
                         { toolId: 4, iconBase: "pencil", tip: qsTr("Pencil"), sparkle: false },
                         /* paint tools */
                         { toolId: 5, iconBase: "brush", tip: qsTr("Brush"), sparkle: false },
@@ -88,7 +88,10 @@ Item {
                         { toolId: 13, iconBase: "ellipse", tip: qsTr("Ellipse"), sparkle: false },
                         { toolId: 14, iconBase: "text", tip: qsTr("Text"), sparkle: false },
                         /* navigation */
-                        { toolId: 15, iconBase: "move", tip: qsTr("Move canvas"), sparkle: false }
+                        { toolId: 15, iconBase: "move", tip: qsTr("Move canvas"), sparkle: false },
+                        /* NAI AI: Ask-Anything — different interaction mode
+                         * (click a frame/region, VLM answers) */
+                        { toolId: 18, iconBase: "image_search", tip: qsTr("Ask"), sparkle: true }
                     ]
 
                     delegate: Basic.Button {
@@ -134,9 +137,12 @@ Item {
                             border.color: Qt.rgba(1.0, 1.0, 1.0, 0.25)
                         }
 
-                        /* sparkle indicator when the AI backend is available */
+                        /* capability dot: shows the relevant AI backend is configured.
+                         * Object Select = SAM3 (segmentation); Ask = VLM. */
                         Rectangle {
-                            visible: sparkle && PaintbrushCtx.segmentationAvailable
+                            visible: sparkle && (toolBtn.toolId === 18
+                                                 ? PaintbrushCtx.visionConfigured
+                                                 : PaintbrushCtx.segmentationAvailable)
                             width: 6
                             height: 6
                             radius: 3

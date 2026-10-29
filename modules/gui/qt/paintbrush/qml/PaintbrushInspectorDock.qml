@@ -56,11 +56,8 @@ Item {
             pinned = false
     }
 
-    function openDiagnostics() {
-        /* the dialog is a top-level Overlay child, so it lays out against
-         * the Overlay rather than this (possibly collapsed, 0-width) dock */
-        diagnosticsDialog.open()
-    }
+    /* ask the workspace to open NAI Settings (its diagnostics section) */
+    signal requestSettings()
 
     /* a NEW selection re-allows the contextual auto-open (an explicit
      * dismissal only lasts for the current selection/object) */
@@ -678,124 +675,15 @@ Item {
         }
 
         /* diagnostics action (A37): status dots are not part of the
-         * creative space — they live in the diagnostics dialog, fed by
-         * CapabilityReport-derived strings (S5) */
+         * creative space — they live in NAI Settings (diagnostics section).
+         * The inspector delegates the open request up to the workspace. */
         Widgets.IconToolButton {
             Layout.alignment: Qt.AlignRight
             text: VLCIcons.settings
-            description: qsTr("AI diagnostics")
-            onClicked: diagnosticsDialog.open()
+            description: qsTr("NAI Settings (diagnostics)")
+            onClicked: root.requestSettings()
         }
     }
-
-    Dialog {
-        id: diagnosticsDialog
-        title: qsTr("NAI Paintbrush diagnostics")
-        modal: true
-        x: Overlay.overlay ? Math.round((Overlay.overlay.width - width) / 2) : 0
-        y: Overlay.overlay ? Math.round((Overlay.overlay.height - height) / 2) : 0
-        /* layout against the top-level Overlay, never this (possibly collapsed
-         * to 0-width, i.e. when there is no selection) inspector dock */
-        width: Overlay.overlay
-               ? Math.min(Overlay.overlay.width - VLCStyle.margin_large * 2,
-                          VLCStyle.dp(520, VLCStyle.scale))
-               : VLCStyle.dp(520, VLCStyle.scale)
-
-        contentItem: ColumnLayout {
-            width: parent.width
-
-            /* capability truth (S5): one row per AI feature, status text
-             * derived from CapabilityReport — the dot color is green only
-             * when the capability is genuinely configured */
-            ColumnLayout {
-                Layout.fillWidth: true
-                spacing: VLCStyle.margin_xxxsmall
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: VLCStyle.margin_xsmall
-                    Rectangle {
-                        width: 8; height: 8; radius: 4
-                        color: PaintbrushCtx.segmentationAvailable ? "limegreen" : "#c33"
-                    }
-                    Widgets.LabelExt {
-                        Layout.fillWidth: true
-                        text: qsTr("Object Select — %1").arg(PaintbrushCtx.segmentationStatusText)
-                        color: theme.fg.secondary
-                        font.pixelSize: VLCStyle.fontSize_xsmall
-                        wrapMode: Text.WordWrap
-                    }
-                }
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: VLCStyle.margin_xsmall
-                    Rectangle {
-                        width: 8; height: 8; radius: 4
-                        color: PaintbrushCtx.visionConfigured ? "limegreen" : "#c33"
-                    }
-                    Widgets.LabelExt {
-                        Layout.fillWidth: true
-                        text: qsTr("Ask about this — %1").arg(PaintbrushCtx.visionStatusText)
-                        color: theme.fg.secondary
-                        font.pixelSize: VLCStyle.fontSize_xsmall
-                        wrapMode: Text.WordWrap
-                    }
-                }
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: VLCStyle.margin_xsmall
-                    Rectangle {
-                        width: 8; height: 8; radius: 4
-                        color: PaintbrushCtx.generationConfigured ? "limegreen" : "#c33"
-                    }
-                    Widgets.LabelExt {
-                        Layout.fillWidth: true
-                        text: qsTr("Image generation — %1").arg(PaintbrushCtx.generationStatusText)
-                        color: theme.fg.secondary
-                        font.pixelSize: VLCStyle.fontSize_xsmall
-                        wrapMode: Text.WordWrap
-                    }
-                }
-            }
-
-            ScrollView {
-                Layout.fillWidth: true
-                Layout.preferredHeight: VLCStyle.dp(260, VLCStyle.scale)
-                TextEdit {
-                    text: PaintbrushCtx.diagnosticsText
-                    readOnly: true
-                    font.family: "monospace"
-                    font.pixelSize: VLCStyle.fontSize_xsmall
-                    color: theme.fg.primary
-                    wrapMode: Text.WrapAnywhere
-                }
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: VLCStyle.margin_xsmall
-
-                Button {
-                    text: qsTr("Copy")
-                    onClicked: PaintbrushCtx.copyDiagnostics()
-                }
-                Button {
-                    text: qsTr("Clear AI cache")
-                    onClicked: PaintbrushCtx.clearAiCache()
-                }
-                Button {
-                    text: qsTr("Unload AI models")
-                    onClicked: PaintbrushCtx.unloadAiModels()
-                }
-                Button {
-                    text: qsTr("Reveal autosave")
-                    onClicked: Qt.openUrlExternally(
-                                   "file:///" + encodeURIComponent(PaintbrushCtx.autosavePath()))
-                }
-            }
-        }
-    }
-
     Dialog {
         id: textPromptDialog
         title: qsTr("Find by words")
