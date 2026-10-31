@@ -20,8 +20,9 @@
 layout(location = 0) in vec2 vPin;      // device px, top-left, y down
 
 layout(binding = 0) uniform sampler2D uSim;    // RGBA16F: r=height g=seed b=stuck a=glue (real cell units)
-layout(binding = 1) uniform sampler2D uColL;   // RGBA8 loose: r=slotA g=shareF b=slotB
-layout(binding = 3) uniform sampler2D uColB;   // RGBA8 bonded: r=slotA g=shareF b=slotB
+layout(binding = 1) uniform highp sampler2D uCol;  // RGBA8 packed, reference layout:
+                                                  //  r = loose A<<4 | B, g = loose B share (0..255)
+                                                  //  b = bonded A<<4 | B, a = bonded B share
 
 layout(std140, binding = 2) uniform ubuf {
     mat4 qt_Matrix;
@@ -76,22 +77,18 @@ vec4 simAtCell(vec2 worldCell)
     return texelFetch(uSim, c, 0);
 }
 
-// Real two-slot colour: choose A (slot v.r) or B (slot v.b) by share v.g.
-// Preserves discrete colours; B may be any palette slot (not A+1).
-vec3 slotColour(int a, int b, float share, float pick)
-{
-    if (pick < share && b >= 0)
-        return uPal[clamp(b, 0, 15)];
-    return uPal[clamp(a, 0, 15)];
-}
+// Real two-slot colour from the reference-packed uCol texture. Each sim cell
+// holds up to two colours of loose glitter (in RG) and two of glitter stuck to
+// the glue (in BA); a grain is one or the other by chance, so mixed glitter
+// reads as speckles of each colour rather than a blend.
 vec3 cellColour(ivec2 c, float pick, bool loose)
 {
-    vec4 v;
-    if (loose)
-        v = texelFetch(uColL, c, 0);
-    else
-        v = texelFetch(uColB, c, 0);
-    return slotColour(int(v.r + 0.5), int(v.b + 0.5), clamp(v.g, 0.0, 1.0), pick);
+    vec4 v = floor(texelFetch(uCol, c, 0) * 255.0 + 0.5);
+    vec2 lv = loose ? v.rg : v.ba;
+    int ab = int(lv.x);
+    int a = ab / 16;
+    int b = ab - a * 16;
+    return uPal[pick < lv.y / 255.0 ? b : a];
 }
 
 vec3 thinFilm(float cosI, float d)

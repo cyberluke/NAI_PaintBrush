@@ -979,6 +979,40 @@ void GlitterPowder::clearMaskedPowder(QImage &img, float originWorldX,
         }
 }
 
+/* ---- reference noise (cray4pasta/glitter-powder, exact equations) --------
+ * GLSL:
+ *   vec3 hash32(vec2 p){ vec3 p3 = fract(vec3(p.xyx)*vec3(.1031,.1030,.0973));
+ *     p3 += dot(p3, p3.yxz+33.33);
+ *     return fract((p3.xxy + p3.yzz)*p3.zyx); }
+ * All grain variation in render() flows through this 2D hash of the grain's
+ * absolute Voronoi id, so a large dense heap reads as an irregular packed-grain
+ * surface with no rows/columns/checkerboard. `fract` is the GLSL toward-floor
+ * version (x - floor(x)); the graders take both negative and >1 inputs. */
+static float gFract(float x) { return x - std::floor(x); }
+
+static QVector3D refHash32(float px, float py)
+{
+    float p3x = gFract(px * 0.1031f);
+    float p3y = gFract(py * 0.1030f);
+    float p3z = gFract(px * 0.0973f);                 /* p.xyx -> (x, y, x) */
+    /* dot(p3, p3.yxz + 33.33) = x*(y+33.33)+y*(x+33.33)+z*(z+33.33) */
+    const float dy = p3y + 33.33f, dx = p3x + 33.33f, dz = p3z + 33.33f;
+    const float d = p3x * dy + p3y * dx + p3z * dz;
+    p3x += d; p3y += d; p3z += d;
+    /* fract((p3.xxy + p3.yzz) * p3.zyx) = ((x+y)*z, (x+z)*y, (y+z)*x) */
+    return QVector3D(gFract((p3x + p3y) * p3z),
+                     gFract((p3x + p3z) * p3y),
+                     gFract((p3y + p3z) * p3x));
+}
+
+/* GLSL smoothstep(edge0, edge1, x) and mix(a, b, t). */
+static float gSmoothstep(float e0, float e1, float x)
+{
+    const float t = qBound(0.0f, (x - e0) / (e1 - e0), 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
+static float gMix(float a, float b, float t) { return a + (b - a) * t; }
+
 QImage GlitterPowder::render(const QSize &outSize, float outOriginWorldX,
                              float outOriginWorldY, float worldPerPx,
                              const ArtLightRig &rig, const PowderPalette &pal,
@@ -1025,189 +1059,247 @@ QImage GlitterPowder::render(const QSize &outSize, float outOriginWorldX,
     const QVector3D Ln = L.normalized();
     const QVector3D H = (Ln + QVector3D(0.0f, 0.0f, 1.0f)).normalized();
 
-    for (int y = gy0; y <= gy1; ++y)
-        for (int x = gx0; x <= gx1; ++x)
+    /* ---- CONTINUOUS GLOBAL Voronoi grain field (reference GPU, CPU) -------
+     * The reference derives ~one packed glass bead per output pixel from a
+     * 3x3-lookup Voronoi field in normalized viewport space (hash32-jittered
+     * cell centres), then shades each bead from the heightfield under its
+     * grain CENTRE. We reproduce that same continuous field here by sampling it
+     * at grain resolution (~one sample per Voronoi cell) instead of every pixel,
+     * which is the natural CPU analogue: grain positions come from the jittered
+     * centres in screen space, so a large dense heap is an irregular packed
+     * surface with NO rows/columns/checkerboard. The sim cells control only
+     * height/loose/bonded/colour/glue + the shuffle seed — never the layout. */
+    const float unit = qMin(float(outSize.width()), float(outSize.height()));
+    const float grainPx = qBound(2.5f, unit / 140.0f, 7.0f); /* ~1 css-px-per-grain, coarsened for CPU */
+    const float gscale = unit / grainPx;                    /* scale: g = p*scale */
+    const float stepX = qMax(0.6f, grainPx * 0.9f);
+    const float stepY = stepX;
+
+    /* Sample region = output viewport clipped to the pow-ish bounds (the cell
+     * scan above) and to where powder actually lives, so we never issue grain
+     * samples over empty paper and the interactive stroke stays cheap. */
+    float sx0 = outOriginWorldX, sx1 = outOriginWorldX + outSize.width() * worldPerPx;
+    float sy0 = outOriginWorldY, sy1 = outOriginWorldY + outSize.height() * worldPerPx;
+    float pMinX = 0, pMinY = 0, pMaxX = 0, pMaxY = 0;
+    if (powderBoundsWorld(pMinX, pMinY, pMaxX, pMaxY))
+    {
+        sx0 = qMax(sx0, pMinX); sx1 = qMin(sx1, pMaxX);
+        sy0 = qMax(sy0, pMinY); sy1 = qMin(sy1, pMaxY);
+    }
+    /* also keep the pow-ish cell-scan extent (viewport ∩ sim grid) as a bound */
+    sx0 = qMax(sx0, float(gx0) * cell);      sx1 = qMin(sx1, float(gx1 + 1) * cell);
+    sy0 = qMax(sy0, float(gy0) * cell);      sy1 = qMin(sy1, float(gy1 + 1) * cell);
+
+    p.setPen(Qt::NoPen);
+    const int gridW = m_cells.width(), gridH = m_cells.height();
+    const float padPx = grainPx * 1.2f;
+    if (sx1 > sx0 && sy1 > sy0 && worldPerPx > 0.0f)
+    {
+        /* px range of the sample grid (output px) */
+        const float pxBeg = (sx0 - outOriginWorldX) / worldPerPx - padPx;
+        const float pxEnd = (sx1 - outOriginWorldX) / worldPerPx + padPx;
+        const float pyBeg = (sy0 - outOriginWorldY) / worldPerPx - padPx;
+        const float pyEnd = (sy1 - outOriginWorldY) / worldPerPx + padPx;
+
+        /* heightfield read at an arbitrary world position (clamped, reference
+         * clamps the sim uv to the grid). */
+        auto hAt = [&](float wx, float wy) -> float
         {
-            const PowderCell &c = cellAt(idx(x, y));
-            const float tot = c.height;
-            if (tot <= 0.02f)
-                continue;
-            const float loose = c.height - c.stuck;
-            /* world position of the cell centre -> output px */
-            const float wx = (x + 0.5f) * cell;
-            const float wy = (y + 0.5f) * cell;
-            const float px = (wx - outOriginWorldX) / worldPerPx;
-            const float py = (wy - outOriginWorldY) / worldPerPx;
-            const float r = qMax(0.8f, cell * 0.5f / worldPerPx + 0.5f);
-            if (px < -r || py < -r || px > outSize.width() + r || py > outSize.height() + r)
-                continue;
+            int x = int(std::floor(wx / cell));
+            int y = int(std::floor(wy / cell));
+            x = std::clamp(x, 0, gridW - 1);
+            y = std::clamp(y, 0, gridH - 1);
+            return cellAt(idx(x, y)).height;
+        };
 
-            /* dominant colour from the loose or bonded layer */
-            QColor col = paperCol;
-            const int slot = loose > 0 ? c.lA : c.sA;
-            if (slot >= 0 && slot < slotsList.size())
-                col = slotsList[slot].color;
-
-            /* --- reference-style shaded grain (glitter-powder GPU look) ---
-             * smooth pile shading from the heightfield gradient (Lambert +
-             * narrow specular), a soft contact shadow on the paper, per-grain
-             * tone, and sparse holographic flakes — so the heap reads as a
-             * cohesive glossy mound, not scattered noise. */
-
-            /* deterministic per-cell hash for grain tone + flakes */
-            std::uint32_t hx = x;
-            hx = hx ^ 0x9E3779B9u; hx = (hx ^ (hx >> 16)) * 0x21f0aaadu;
-            hx = hx ^ (hx >> 15);
-            const float hf = ((hx & 0xFFFFu) / 65535.0f);
-            const float hg = (((hx >> 9) & 0xFFFFu) / 65535.0f);
-            const float hh = (((hx >> 18) & 0xFFFFu) / 65535.0f);
-            const float h4 = ((hx * 31u + y * 7u) & 0xFFFFu) / 65535.0f;
-
-            /* height fraction above the bed (drives shadow + specular) */
-            const float hFrac = qBound(0.0f, tot / 2.5f, 1.0f);
-
-            /* gradient of the neighbouring heights -> smooth surface normal
-             * (the reference: N = normalize( -grad, 1 )) */
-            auto atH = [&](int dx, int dy) -> float
+        for (float sy = pyBeg; sy <= pyEnd; sy += stepY)
+            for (float sx = pxBeg; sx <= pxEnd; sx += stepX)
             {
-                const int xx = qBound(1, x + dx, m_cells.width() - 2);
-                const int yy = qBound(1, y + dy, m_cells.height() - 2);
-                return cellAt(idx(xx, yy)).height;
-            };
-            const float gx = (atH(1, 0) - atH(-1, 0)) * 0.5f;
-            const float gy = (atH(0, 1) - atH(0, -1)) * 0.5f;
-            const QVector3D N = QVector3D(-gx * 0.9f, -gy * 0.9f, 1.0f).normalized();
+                /* pixel -> normalized viewport space (reference p) */
+                const float pnx = sx / unit - 0.5f;
+                const float pny = sy / unit - 0.5f;
+                const float gx = pnx * gscale, gy = pny * gscale;
+                const float gix = std::floor(gx), giy = std::floor(gy);
+                const float gfx = gx - gix, gfy = gy - giy;
 
-            /* light from the shared rig (outer Ln/H): Lambert + specular */
-            const float diff = qMax(0.0f, QVector3D::dotProduct(N, Ln));
-            const float spec = qMax(0.0f, QVector3D::dotProduct(N, H));
-            const float specPow = std::pow(spec, 45.0f);
-
-            /* per-grain tone: a few grains noticeably darker (ref step at .95) */
-            float tone = 0.80f + 0.26f * hg;
-            if (h4 > 0.95f)
-                tone *= 0.72f;
-
-            p.setPen(Qt::NoPen);
-
-            /* soft contact shadow on the paper, cast down-light */
-            const float sh = qBound(0.0f, (tot - 0.9f) / 2.0f, 1.0f);
-            p.setBrush(QColor(0, 0, 0, int(70 * sh + 40 * hFrac)));
-            p.drawEllipse(QPointF(px + r * 0.16f, py + r * 0.20f), r, r * 0.96f);
-
-            /* base grain shaded by the Lambert term and per-grain tone (§ P1-7:
-             * the tone must actually reach the albedo, not be dead code) */
-            QColor base = col;
-            base = base.darker(int(100 - 22 * diff * tone));
-            base.setAlpha(int(150 + 90 * hFrac));
-            p.setBrush(base);
-            p.drawEllipse(QPointF(px, py), r, r);
-
-            /* a small bright highlight on the light-facing rim (spec facet) */
-            if (diff > 0.25f)
-            {
-                QColor hi = col.lighter(int(130 + 60 * diff));
-                hi.setAlpha(int(qMin(255.0f, 140 + 80 * hFrac)));
-                p.setBrush(hi);
-                p.drawEllipse(QPointF(px - r * 0.22f, py - r * 0.22f),
-                              r * 0.5f, r * 0.5f);
-            }
-
-            /* narrow specular core on the mound — the glossy sparkle */
-            if (specPow * hFrac > 0.12f)
-            {
-                QColor glc = col.lighter(int(180 + 70 * hf));
-                glc.setAlpha(int(qMin(255.0f, 120 + 135 * specPow * hFrac)));
-                p.setBrush(glc);
-                p.drawEllipse(QPointF(px, py), r * 0.36f, r * 0.36f);
-            }
-
-            /* --- fine packed beads: the grain-by-grain texture ---------
-             * Each sim cell is ~1-4 px wide; sub-divide it into a small grid
-             * of beads. Only the ones whose seed falls under the (height-gated)
-             * local coverage are drawn, so a sparse heap reads as loose grains
-             * and a deep heap as a packed, glittery surface — exactly the
-             * reference's "packed glass beads" look. */
-            const float cover = qBound(0.0f, tot / 1.5f, 1.0f);
-            if (r >= 0.8f)
-            {
-                /* ~1 px beads within the cell */
-                const int beadN = std::max(1, int(std::ceil(r / 1.6f)));
-                const float cellR = qMax(0.5f, r * 0.32f);
-                for (int by = 0; by < beadN; ++by)
-                {
-                    for (int bx = 0; bx < beadN; ++bx)
+                /* 3x3 Voronoi field, exact reference equations */
+                float b1 = 8.0f, b2 = 8.0f;
+                float bRx = 0.0f, bRy = 0.0f, bIx = 0.0f, bIy = 0.0f, bPx = 0.0f, bPy = 0.0f;
+                for (int cy = -1; cy <= 1; ++cy)
+                    for (int cx = -1; cx <= 1; ++cx)
                     {
-                        /* deterministic bead position + seed */
-                        std::uint32_t bh = hx ^ (0x9e3779b9u
-                                                 * (uint32_t(bx + 1) + 0x1f123bb5u * uint32_t(by + 3)));
-                        const float bh1 = ((bh & 0xFFFFu) / 65535.0f);
-                        const float bh2 = (((bh >> 8) & 0xFFFFu) / 65535.0f);
-                        const float thresh = 0.55f + 0.5f * (1.0f - cover); /* sparse when thin */
-                        if (bh1 < thresh)
-                            continue;                     /* this bead is absent here */
-                        const float bcx = px + (bx + 0.5f - beadN * 0.5f) / beadN * (2 * r);
-                        const float bcy = py + (by + 0.5f - beadN * 0.5f) / beadN * (2 * r);
-                        const float br = cellR * (0.6f + 0.5f * bh2);
-                        /* per-bead tone: a few darker, most mid */
-                        const float btone = 0.78f + 0.24f * bh2;
-                        QColor beadCol = col.darker(int(130 - 34 * btone * diff));
-                        beadCol.setAlpha(int(qMin(255.0f, 140 + 100 * hFrac * cover)));
-                        p.setBrush(beadCol);
-                        p.drawEllipse(QPointF(bcx, bcy), br, br);
+                        const float ccx = float(cx), ccy = float(cy);
+                        const QVector3D h = refHash32(gix + ccx, giy + ccy);
+                        const float ptx = ccx + 0.15f + 0.7f * h.x();
+                        const float pty = ccy + 0.15f + 0.7f * h.y();
+                        const float rx = ptx - gfx, ry = pty - gfy;
+                        const float dd = rx * rx + ry * ry;
+                        if (dd < b1)
+                        {
+                            b2 = b1; b1 = dd;
+                            bRx = rx; bRy = ry;
+                            bIx = gix + ccx; bIy = giy + ccy;
+                            bPx = gix + ptx; bPy = giy + pty;
+                        }
+                        else if (dd < b2)
+                        {
+                            b2 = dd;
+                        }
                     }
-                }
-            }
+                const float dist = std::sqrt(b1);
+                const float edge = std::sqrt(b2) - dist;
 
-            /* --- holographic shimmer (time-driven sparkle) --------------
-             * Each eligible grain carries a small glint whose BRIGHTNESS pulses
-             * continuously with the explicit render phase t (reference uTime),
-             * so a change in render time always moves the sparkle (no hard
-             * threshold that could stay static between two phases). */
-            const float t = (timeMs > 0) ? float((timeMs % 4000) / 1000.0) : 0.0f;
-            const float rate = 0.6f + 1.4f * hg;
-            const float phase = h4 * 6.2832f + t * rate;
-            const float amp = 0.5f + 0.5f * std::sin(phase);
-            if (hh > 0.22f && specPow * hFrac > 0.04f && amp > 0.30f)
-            {
-                const float sw = qMax(0.35f, r * 0.30f);
-                const float alpha = 60.0f + 170.0f * amp;
-                QColor glintc = col.lighter(int(200 + 55 * amp));
-                glintc.setAlpha(int(qMin(255.0f, alpha)));
-                p.setBrush(glintc);
-                p.drawEllipse(QPointF(px + (hf - 0.5f) * r * 0.8f,
-                                      py + (hg - 0.5f) * r * 0.8f), sw, sw);
-                /* white core on the brightest flashes */
-                if (amp > 0.90f)
+                /* grain centre -> output px -> world (single mapping) */
+                const float gcxPx = (bPx / gscale) * unit + 0.5f * outSize.width();
+                const float gcyPx = (bPy / gscale) * unit + 0.5f * outSize.height();
+                const float gw = outOriginWorldX + gcxPx * worldPerPx;
+                const float ghw = outOriginWorldY + gcyPx * worldPerPx;
+                int scx = int(std::floor(gw / cell));
+                int scy = int(std::floor(ghw / cell));
+                scx = std::clamp(scx, 0, gridW - 1);
+                scy = std::clamp(scy, 0, gridH - 1);
+                const PowderCell &cg = cellAt(idx(scx, scy));
+                const float hVal = cg.height;
+                if (hVal <= 0.02f)
+                    continue;                       /* no powder under this grain */
+
+                /* reference coverage gates from the heightfield under the grain */
+                const float stuckLow = cg.stuck;
+                const float glueAmtCell = cg.glue;
+                const float bonded = gSmoothstep(0.02f, 0.25f, stuckLow);
+                const float looseH = qMax(hVal - stuckLow, 0.0f);
+
+                /* shuffle seed is the 2D grain-identity offset (reference s) */
+                const float s = cg.seed;
+                const float sidx = bIx + s * 13.17f;
+                const float sidy = bIy + s * 13.17f;
+                const QVector3D gh  = refHash32(sidx + 71.3f,         sidy + 71.3f);
+                const QVector3D gh2 = refHash32(sidx * 1.37f + 5.1f,  sidy * 1.37f + 5.1f);
+                const QVector3D gh3 = refHash32(sidx * 0.73f + 19.0f, sidy * 0.73f + 19.0f);
+                const QVector3D gj  = refHash32(sidx * 2.31f + 9.7f,  sidy * 2.31f + 9.7f);
+
+                /* two-slot colour: loose vs bonded by the grain hash, then the
+                 * A/B share -> a discrete slot (speckles, never a blend). */
+                const bool loose = gh.y() < qBound(0.0f, looseH / 0.9f, 1.0f);
+                int slotA = loose ? cg.lA : cg.sA;
+                int slotB = loose ? cg.lB : cg.sB;
+                const float share = loose ? cg.lF : cg.sF;
+                const int slot = (gj.z() < share) ? slotB : slotA;
+                QColor tintCol = paperCol;
+                if (slot >= 0 && slot < slotsList.size())
+                    tintCol = slotsList[slot].color;
+
+                /* all grain variation is 2D-hash of the absolute Voronoi id */
+                const float rad = 0.5f + 0.12f * gh.x();
+                const float rr = dist / rad;
+                const float inBead = 1.0f - gSmoothstep(0.82f, 1.0f, rr);
+                const float glueAmt = gSmoothstep(0.15f, 0.85f,
+                                                  glueAmtCell + (gh.x() - 0.5f) * 0.55f) * bonded;
+                const float exposedGlue = glueAmt * (1.0f - gSmoothstep(0.25f, 1.1f, looseH));
+                const float present = (gh.y() < qBound(0.0f, looseH / 0.9f, 1.0f) ||
+                                       gh.y() < glueAmt) ? 1.0f : 0.0f;
+                const float deep = gSmoothstep(0.4f, 1.4f,
+                                               looseH + std::pow(glueAmt, 1.5f) * 1.6f);
+                if (present <= 0.001f)
+                    continue;
+
+                /* multi-scale pile normal + per-grain bead normal (reference) */
+                float gradx = 0.0f, grady = 0.0f;
+                for (int k = 0; k < 3; ++k)
                 {
-                    QColor wc(255, 255, 255);
-                    wc.setAlpha(int(200 * (amp - 0.90f) / 0.10f));
-                    p.setBrush(wc);
-                    p.drawEllipse(QPointF(px + (hf - 0.5f) * r * 0.8f,
-                                          py + (hg - 0.5f) * r * 0.8f),
-                                  sw * 0.4f, sw * 0.4f);
+                    const float o = cell * (1.5f + 3.0f * float(k));
+                    const float ww = 2.0f * o;
+                    gradx += (hAt(gw + o, ghw) - hAt(gw - o, ghw)) / ww;
+                    grady += (hAt(gw, ghw + o) - hAt(gw, ghw - o)) / ww;
+                }
+                const QVector3D N = QVector3D(-gradx * (cell / worldPerPx),
+                                              -grady * (cell / worldPerPx),
+                                              1.0f).normalized();
+                const float nbx = -bRx / rad, nby = -bRy / rad;
+                const float rrGate = rr <= 1.0f ? 1.0f : 0.0f;
+                const QVector3D Nb = (N
+                    + QVector3D(nbx * 0.9f, nby * 0.9f, 0.0f) * rrGate).normalized();
+                const float diff = qBound(0.0f, QVector3D::dotProduct(Nb, Ln), 1.0f);
+                const float macroDiff = qBound(0.0f, QVector3D::dotProduct(N, Ln), 1.0f);
+
+                /* shading: tone applied to achievable albedo, specular core */
+                float tone = (0.80f + 0.26f * gh.z()) * (1.0f + 0.05f * exposedGlue);
+                tone *= gMix(1.0f, 0.72f, gh3.y() > 0.95f ? 1.0f : 0.0f);
+                const float tr = tintCol.redF(), tg = tintCol.greenF(), tb = tintCol.blueF();
+                const float tmax = qMax(qMax(tr, tg), qMax(tb, 0.04f));
+                const float sr = tr / tmax, sg = tg / tmax, sb = tb / tmax;
+                const float ar = tr * tone, ag = tg * tone, ab = tb * tone;
+                const float bd = 0.80f + 0.30f * diff;
+                float cr = ar * bd, cg2 = ag * bd, cb = ab * bd;
+                const float edgeMix = gSmoothstep(0.0f, 0.22f, edge);
+                cr *= gMix(0.84f, 1.0f, edgeMix);
+                cg2 *= gMix(0.84f, 1.0f, edgeMix);
+                cb *= gMix(0.84f, 1.0f, edgeMix);
+                const float specN = qMax(0.0f, QVector3D::dotProduct(Nb, H));
+                const float specPow = std::pow(specN, 45.0f);
+                cr += gMix(1.0f, sr, 0.5f) * specPow * 0.35f;
+                cg2 += gMix(1.0f, sg, 0.5f) * specPow * 0.35f;
+                cb += gMix(1.0f, sb, 0.5f) * specPow * 0.35f;
+
+                /* paper + soft contact shadow behind the bead */
+                const float ax = -Ln.x(), ay = -Ln.y();
+                const float alen = std::sqrt(ax * ax + ay * ay) + 1e-6f;
+                float sh = 0.0f;
+                for (int k = 1; k <= 3; ++k)
+                    sh += gSmoothstep(0.3f, 7.0f, hAt(gw - (ax / alen) * float(k) * 7.0f * cell,
+                                                      ghw - (ay / alen) * float(k) * 7.0f * cell));
+                const float shadow = 0.10f * (sh / 3.0f) + 0.06f * gSmoothstep(0.1f, 1.0f, hVal);
+                const float bgr = qMax(0.0f, tr - shadow);
+                const float bgg = qMax(0.0f, tg - shadow);
+                const float bgb = qMax(0.0f, tb - shadow * 0.97f);
+                /* gap powder between the beads: bright tint but gently macro-lit
+                 * (keeps a deep heap cohesive and the slot colour legible) */
+                const float gpr = tr * (0.90f + 0.10f * macroDiff);
+                const float gpg = tg * (0.90f + 0.10f * macroDiff);
+                const float gpb = tb * (0.90f + 0.10f * macroDiff);
+                const float baseR = gMix(bgr, gpr, deep);
+                const float baseG = gMix(bgg, gpg, deep);
+                const float baseB = gMix(bgb, gpb, deep);
+                const float aOut = qMin(1.0f,
+                    0.45f + 0.55f * inBead * present + 0.40f * deep
+                    + 0.18f * diff * macroDiff);
+                const int aOut8 = int(qBound(0.0f, aOut, 1.0f) * 255.0f);
+
+                /* coverage disc fills the surrounding Voronoi cell so a deep
+                 * heap never shows transparent gaps between beads (the bead
+                 * disc is then shaded on top). */
+                const float covR = grainPx * 0.75f;
+                const float radPx = rad * grainPx;
+                p.setBrush(QColor(int(qBound(0.0f, baseR, 1.0f) * 255.0f),
+                                  int(qBound(0.0f, baseG, 1.0f) * 255.0f),
+                                  int(qBound(0.0f, baseB, 1.0f) * 255.0f),
+                                  aOut8));
+                p.drawEllipse(QPointF(gcxPx, gcyPx), covR, covR);
+                p.setBrush(QColor(int(qBound(0.0f, cr, 1.0f) * 255.0f),
+                                  int(qBound(0.0f, cg2, 1.0f) * 255.0f),
+                                  int(qBound(0.0f, cb, 1.0f) * 255.0f),
+                                  aOut8));
+                p.drawEllipse(QPointF(gcxPx, gcyPx), radPx, radPx);
+
+                /* --- time-driven shimmer: a per-grain glint in the bright
+                 * specular core, keyed to the 2D grain id so a change in
+                 * timeMs always moves a few pixels (reference uTime). ---- */
+                const float t = (timeMs > 0) ? float((timeMs % 4000) / 1000.0) : 0.0f;
+                const float rate = 0.6f + 1.4f * gh.y();
+                const float phase = gh2.y() * 6.2832f + t * rate;
+                const float amp = 0.5f + 0.5f * std::sin(phase);
+                if (specPow > 0.02f && amp > 0.30f)
+                {
+                    const float sw = qMax(0.35f, radPx * 0.34f);
+                    const float alpha = qMin(255.0f, 60.0f + 170.0f * amp);
+                    QColor glintc(255, int(qBound(0.0f, 1.0f - 0.25f * amp, 1.0f) * 255.0f),
+                                  255, int(alpha));
+                    p.setBrush(glintc);
+                    p.drawEllipse(QPointF(gcxPx + (gh.x() - 0.5f) * radPx * 0.8f,
+                                          gcyPx + (gh.z() - 0.5f) * radPx * 0.8f), sw, sw);
                 }
             }
-
-            /* sparse holographic mirror flakes (a small fraction of grains
-             * catch the light like the reference's larger glitter leaves) */
-            if (hh > 0.960f)
-            {
-                const float fr = qMax(0.5f, r * 0.42f);
-                QColor fl = col.lighter(int(165 + 90 * hf));
-                fl.setAlpha(235);
-                p.setBrush(fl);
-                p.drawEllipse(QPointF(px + (hf - 0.5f) * r * 1.1f,
-                                      py + (hg - 0.5f) * r * 1.1f), fr, fr);
-                /* white core at near-perfect facet alignment */
-                QColor core(255, 255, 255);
-                core.setAlpha(int(190 * specPow + 30));
-                p.setBrush(core);
-                p.drawEllipse(QPointF(px + (hf - 0.5f) * r * 1.1f,
-                                      py + (hg - 0.5f) * r * 1.1f),
-                              fr * 0.34f, fr * 0.34f);
-            }
-        }
+    }
 
     /* Airborne flakes caught in the breath: bright additive sparkles that arc
      * and fall. Only present while a blow is running; retired flakes vanish. */

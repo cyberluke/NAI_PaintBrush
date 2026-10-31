@@ -279,6 +279,26 @@ int main(int argc, char **argv)
         lit.save("pb_powder_cpu_light90.png");
     }
 
+    /* ---- dense-lattice audit sheet ------------------------------------
+     * A LARGE dense heap rendered big enough to inspect whether the CPU grain
+     * field shows any regular rows/columns/checkerboard (the bug this render
+     * path removed). Not a counted check — saved for visual inspection only. */
+    {
+        GlitterPowder lat;
+        lat.reset(QSize(192, 192), 4.0f, 77u);
+        const float wc = (192 / 2.0f) * 4.0f;
+        GlitterParams lp; lp.amount = 1.6f; lp.flakeSize = 0.8f;
+        lp.color = pal.colors[0];
+        for (int i = 0; i < 9; ++i)
+            for (int j = 0; j < 9; ++j)
+                lat.pourGlitter(wc + (i - 4) * 12.0f, wc + (j - 4) * 12.0f,
+                                16.0f + 3.0f * float((i * 7 + j) % 5), lp);
+        lat.relax(); lat.relax(); lat.decayFlow();
+        QImage latSheet = lat.render(QSize(256, 256), wc - 128, wc - 128, 1.0f,
+                                     ArtLightRig(), pal, nullptr, ArtScale(), 0);
+        latSheet.save("pb_powder_cpu_dense_lattice.png");
+    }
+
     std::printf("\n%d/%d harness checks passed.\n", s_pass, s_checks);
     return s_pass == s_checks ? 0 : 1;
 }

@@ -18,6 +18,7 @@
 #include "art/stroke/bristle_brush.hpp"
 #include "art/materials/glitter/glitter_material.hpp"
 #include "art/materials/glitter/glitter_powder.hpp"
+#include "art/gpu/pb_gpu_runtime.hpp"
 
 #include <QQuickItem>
 #include <QColor>
@@ -495,6 +496,13 @@ private:
     art::glitter::PowderPalette m_powderPal;   /* render palette (single source) */
     QRect m_powderUnion;
     bool m_powderReady = false;   /* grid sized/reset once for the current layer */
+    /* Dedicated offscreen GPU runtime for the DETERMINISTIC COMMIT bake of the
+     * powder (and future paint/glitter paths) at t=0. The live preview stays
+     * on the CPU Voronoi fallback until the interactive scene-graph node is
+     * landed; once a stroke commits, renderPowderUnion() bakes the union
+     * through the same powder.frag surface so the document + export are GPU. */
+    art::GpuRuntime m_gpuRender;   /* lazily initialized; best-effort only */
+    bool m_gpuRenderTried = false;
     /* Long-press breath (reference blowOnLongPress): holding a powder/smear
      * stroke still for ~0.6 s blows the loose powder away, leaving what's
      * bonded to the glue. */

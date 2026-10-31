@@ -595,6 +595,7 @@ qt_plugin_sources = files(
     'paintbrush/art/style/badges.cpp',
     # Paintbrush 2.0 Showroom: GPU Art Runtime (QRhi port of the CPU golden)
     'paintbrush/art/gpu/pb_gpu_runtime.cpp',
+                'paintbrush/art/gpu/pb_powder_surface.cpp',
     # Paintbrush Motion Toys: 2D puppet runtime (mask -> mesh -> ARAP)
     'paintbrush/motion/pb_puppet.cpp',
     # Paintbrush Living Harvest: rig once + auto motion window + asset store

@@ -295,14 +295,11 @@ bool GpuRuntime::initialize(bool preferD3D11)
         m_powderSimDummy->create();
         m_powderColDummy = m_rhi->newTexture(QRhiTexture::RGBA8, QSize(1, 1), 1, {});
         m_powderColDummy->create();
-        m_powderColDummyB = m_rhi->newTexture(QRhiTexture::RGBA8, QSize(1, 1), 1, {});
-        m_powderColDummyB->create();
     }
     m_pipelines->powderBindings->setBindings({
         QRhiShaderResourceBinding::uniformBuffer(2, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage, m_pipelines->powderUb),
         QRhiShaderResourceBinding::sampledTexture(0, QRhiShaderResourceBinding::FragmentStage, m_powderSimDummy, m_pipelines->powderSim),
         QRhiShaderResourceBinding::sampledTexture(1, QRhiShaderResourceBinding::FragmentStage, m_powderColDummy, m_pipelines->powderCol),
-        QRhiShaderResourceBinding::sampledTexture(3, QRhiShaderResourceBinding::FragmentStage, m_powderColDummyB, m_pipelines->powderCol),
     });
     if (!m_pipelines->powderBindings->create())
         return false;
@@ -428,8 +425,6 @@ void GpuRuntime::shutdown()
     m_powderSimDummy = nullptr;
     delete m_powderColDummy;
     m_powderColDummy = nullptr;
-    delete m_powderColDummyB;
-    m_powderColDummyB = nullptr;
     delete m_pipelines;
     m_pipelines = nullptr;
     delete m_rhi;
@@ -866,31 +861,35 @@ QImage GpuRuntime::renderPowder(const QSize &outSize,
         }
     }
 
-    /* --- two-slot colour textures (RGBA8) ------------------------------
-     *  uColL: r=loose slotA  g=loose shareF  b=loose slotB
-     *  uColB: r=bonded slotA g=bonded shareF b=bonded slotB
-     * B is a real palette slot (may differ from A arbitrarily). a unused. */
-    QByteArray colLBuf(W * H * 4, '\0');
-    QByteArray colBBuf(W * H * 4, '\0');
+    /* --- packed colour texture (RGBA8), reference uCol layout ----------
+     *  R = loose  A<<4 | B   (two palette slots, four bits each)
+     *  G = loose  B share    0..255
+     *  B = bonded A<<4 | B
+     *  A = bonded B share    0..255
+     * The shader decodes with floor(texelFetch(uCol).* 255 + 0.5) so the
+     * palette indices survive (no 0..15 -> 0..1 sampler normalization loss). */
+    QByteArray colBuf(W * H * 4, '\0');
     for (int y = 0; y < H; ++y)
     {
         for (int x = 0; x < W; ++x)
         {
             const glitter::PowderCell &c = powder.powderCellAt(y * W + x);
             const size_t o = size_t(y * W + x) * 4;
-            colLBuf[o + 0] = quint8(qBound(0, c.lA, palN - 1));
-            colLBuf[o + 1] = quint8(qBound(0.0f, c.lF, 1.0f) * 255.0f);
-            colLBuf[o + 2] = quint8(qBound(0, c.lB, palN - 1));
-            colBBuf[o + 0] = quint8(qBound(0, c.sA, palN - 1));
-            colBBuf[o + 1] = quint8(qBound(0.0f, c.sF, 1.0f) * 255.0f);
-            colBBuf[o + 2] = quint8(qBound(0, c.sB, palN - 1));
+            const int maxSlot = qMin(palN - 1, 15);
+            const int loA = qBound(0, c.lA, maxSlot);
+            const int loB = qBound(0, c.lB, maxSlot);
+            const int bdA = qBound(0, c.sA, maxSlot);
+            const int bdB = qBound(0, c.sB, maxSlot);
+            colBuf[o + 0] = quint8((loA << 4) | (loB & 0x0F));
+            colBuf[o + 1] = quint8(qBound(0.0f, c.lF, 1.0f) * 255.0f);
+            colBuf[o + 2] = quint8((bdA << 4) | (bdB & 0x0F));
+            colBuf[o + 3] = quint8(qBound(0.0f, c.sF, 1.0f) * 255.0f);
         }
     }
 
     QRhiTexture *simTex = m_rhi->newTexture(QRhiTexture::RGBA16F, QSize(W, H), 1, {});
-    QRhiTexture *colLTex = m_rhi->newTexture(QRhiTexture::RGBA8, QSize(W, H), 1, {});
-    QRhiTexture *colBTex = m_rhi->newTexture(QRhiTexture::RGBA8, QSize(W, H), 1, {});
-    if (!simTex->create() || !colLTex->create() || !colBTex->create())
+    QRhiTexture *colTex = m_rhi->newTexture(QRhiTexture::RGBA8, QSize(W, H), 1, {});
+    if (!simTex->create() || !colTex->create())
         return {};
     /* a float sampler needs a linear float filter on most backends */
     QRhiSampler *simSampler = m_rhi->newSampler(QRhiSampler::Linear, QRhiSampler::Linear,
@@ -936,11 +935,9 @@ QImage GpuRuntime::renderPowder(const QSize &outSize,
     u->uploadTexture(simTex, { QRhiTextureUploadEntry(0, 0,
                             QRhiTextureSubresourceUploadDescription(simHalf.constData(),
                                                                     quint32(simHalf.size()))) });
-    /* colour textures as owned QImages (removes the colour swap on ARGB) */
-    QImage colL((const uchar *)colLBuf.constData(), W, H, W * 4, QImage::Format_RGBA8888);
-    QImage colB((const uchar *)colBBuf.constData(), W, H, W * 4, QImage::Format_RGBA8888);
-    u->uploadTexture(colLTex, colL.copy());
-    u->uploadTexture(colBTex, colB.copy());
+    /* packed colour texture as an owned QImage (removes ARGB swap) */
+    QImage colI((const uchar *)colBuf.constData(), W, H, W * 4, QImage::Format_RGBA8888);
+    u->uploadTexture(colTex, colI.copy());
     u->updateDynamicBuffer(m_pipelines->powderUb, 0, kUbSize, ub.constData());
 
     /* per-call SRB (layout must match the powder pipeline's) */
@@ -948,8 +945,7 @@ QImage GpuRuntime::renderPowder(const QSize &outSize,
     srb->setBindings({
         QRhiShaderResourceBinding::uniformBuffer(2, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage, m_pipelines->powderUb),
         QRhiShaderResourceBinding::sampledTexture(0, QRhiShaderResourceBinding::FragmentStage, simTex, simSampler),
-        QRhiShaderResourceBinding::sampledTexture(1, QRhiShaderResourceBinding::FragmentStage, colLTex, m_pipelines->powderCol),
-        QRhiShaderResourceBinding::sampledTexture(3, QRhiShaderResourceBinding::FragmentStage, colBTex, m_pipelines->powderCol),
+        QRhiShaderResourceBinding::sampledTexture(1, QRhiShaderResourceBinding::FragmentStage, colTex, m_pipelines->powderCol),
     });
     if (!srb->create())
         return {};
@@ -975,8 +971,7 @@ QImage GpuRuntime::renderPowder(const QSize &outSize,
     delete simSampler;
     QImage result = readback(m_target, outSize);
     delete simTex;
-    delete colLTex;
-    delete colBTex;
+    delete colTex;
     return unPremultiply(result);
 }
 

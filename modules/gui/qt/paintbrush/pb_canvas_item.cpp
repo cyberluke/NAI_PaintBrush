@@ -916,13 +916,40 @@ void PaintbrushCanvasItem::renderPowderUnion()
         return;
     captureBeforeRegion(u);
     ensureScratch(u);
-    /* No wall-clock: this is the canonical COMMITTED pass, so the shimmer is
-         * rendered at a deterministic phase (t=0). The static raster result is
-         * invariant to when the stroke finished. */
-    QImage flakes = m_powder.render(u.size(), float(u.x()), float(u.y()), 1.0f,
-                                    m_doc->lightRig(), m_powderPal,
-                                    m_doc->paperStock(), m_doc->artScale(1.0f),
-                                    0);
+
+    /* Deterministic COMMIT bake: t=0 through the GPU powder.frag surface so the
+     * committed document + export carry the reference GPU look. Falls back to
+     * the CPU Voronoi renderer if no offscreen GPU runtime could be created
+     * (or the bake produced nothing). */
+    QImage flakes;
+    bool bakedGpu = false;
+    if (!m_gpuRenderTried) {
+        m_gpuRenderTried = true;
+        m_gpuRender.initialize(true);
+    }
+    if (m_gpuRender.isReady()) {
+        flakes = m_gpuRender.renderPowder(u.size(), m_powder, m_powderPal,
+                                          float(u.x()), float(u.y()), 1.0f,
+                                          m_doc->lightRig(), m_doc->paperStock(),
+                                          /*timeMs=*/0, /*uiDpr=*/1);
+        if (!flakes.isNull()) {
+            int nonBg = 0;
+            const int npx = flakes.width() * flakes.height();
+            const QRgb *px = reinterpret_cast<const QRgb *>(flakes.constBits());
+            const QRgb bg = flakes.color(0);
+            for (int i = 0; i < npx && nonBg < 8; ++i)
+                if (px[i] != bg)
+                    ++nonBg;
+            bakedGpu = nonBg > 0;
+        }
+    }
+    if (!bakedGpu) {
+        flakes = m_powder.render(u.size(), float(u.x()), float(u.y()), 1.0f,
+                                 m_doc->lightRig(), m_powderPal,
+                                 m_doc->paperStock(), m_doc->artScale(1.0f),
+                                 0);
+    }
+
     QPainter p(&m_scratchTile);
     p.setCompositionMode(QPainter::CompositionMode_Source);
     p.drawImage(u.topLeft() - m_scratchOrigin, layer->raster, u);
@@ -938,6 +965,7 @@ void PaintbrushCanvasItem::renderPowderUnion()
     p.end();
     markTilesDirty(mappedRect(u));
     m_strokeHadPaint = true;
+    qDebug() << "pb_powder commit" << u.size() << "gpu=" << bakedGpu;
 }
 
 void PaintbrushCanvasItem::startPowderBlow()
