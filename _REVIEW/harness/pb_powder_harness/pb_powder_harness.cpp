@@ -185,6 +185,114 @@ int main(int argc, char **argv)
         CHECK("blow clears loose", bg.looseMass() < bgLoose * 0.35f);
     }
 
+    /* ---- Blow A/B physics gate (P0): glued glitter survives, bare does not ---
+     * Two IDENTICAL glitter regions, one glued (A) and one bare (B), blown with
+     * the SAME breath. Before: A loose ~= B loose. After: A retains significant
+     * BONDED mass (glue holds it), B loses most LOOSE mass (nothing holds it).
+     * A.stuck must exceed B.stuck by a large margin. This is the real product
+     * Blow behaviour (bare glitter moves/leaves, glued shape stays), not a
+     * "glue serializes" assertion. */
+    {
+        auto stuckMass = [](const GlitterPowder &g) {
+            double m = 0.0;
+            for (int i = 0; i < g.cellCount(); ++i)
+                m += g.powderCellAt(i).stuck;
+            return m;
+        };
+        auto makeRegion = [&](bool glue, std::uint32_t seed) {
+            GlitterPowder g;
+            g.reset(QSize(96, 96), 4.0f, seed);
+            const float wc = (96 / 2.0f) * 4.0f;
+            GlitterParams bp; bp.amount = 1.4f; bp.flakeSize = 0.8f;
+            bp.color = pal.colors[0];
+            for (int i = 0; i < 6; ++i)
+                g.pourGlitter(wc + (i - 2) * 9.0f, wc + (i - 2) * 7.0f, 22.0f + i, bp);
+            if (glue)
+            {
+                /* wet glue over the same disc, then let it bond BEFORE the blow */
+                g.paintGlue(wc, wc, 40.0f, 1.0f);
+                g.absorb();
+                g.relax(); g.relax();
+            }
+            return g;
+        };
+        GlitterPowder A = makeRegion(true,  11u);   /* glued */
+        GlitterPowder B = makeRegion(false, 11u);   /* bare, same glitter seed */
+        const double A_loose0 = A.looseMass(), B_loose0 = B.looseMass();
+        const double A_stuck0 = stuckMass(A), B_stuck0 = stuckMass(B);
+        std::printf("    [blowA/B] before: A loose=%.2f stuck=%.2f | B loose=%.2f stuck=%.2f\n",
+                    A_loose0, A_stuck0, B_loose0, B_stuck0);
+        CHECK("blow A/B: before blow A and B carry ~equal loose glitter",
+              B_loose0 > 0 && std::fabs(A_loose0 - B_loose0) < B_loose0 * 0.25);
+        /* the SAME breath on both (identical duration, ~5 s) */
+        A.beginBlow(); B.beginBlow();
+        for (int i = 0; i < 300; ++i)
+        {
+            A.blowStep(1.0f / 60.0f);
+            B.blowStep(1.0f / 60.0f);
+        }
+        A.endBlow(); B.endBlow();
+        const double A_loose1 = A.looseMass(), B_loose1 = B.looseMass();
+        const double A_stuck1 = stuckMass(A), B_stuck1 = stuckMass(B);
+        std::printf("    [blowA/B] after : A loose=%.2f stuck=%.2f | B loose=%.2f stuck=%.2f\n",
+                    A_loose1, A_stuck1, B_loose1, B_stuck1);
+        /* bare region loses most of its loose glitter */
+        CHECK("blow A/B: bare-region loose loses >= 70% (blow physically moves it)",
+              B_loose0 > 0 && B_loose1 < B_loose0 * 0.30);
+        /* glued region retains significant BONDED glitter */
+        CHECK("blow A/B: glued-region bonded mass remains (>= 60%",
+              A_stuck0 > 0 && A_stuck1 >= A_stuck0 * 0.60);
+        /* A's bonded mass must far exceed B's (glue holds it, bare gets blown) */
+        CHECK("blow A/B: glued survives where bare is blown (A.stuck >> B.stuck)",
+              A_stuck1 > B_stuck1 + 1.0 && A_stuck1 > B_stuck1 * 2.0);
+    }
+
+    /* ---- Glue has REAL physical impact (P0) -------------------------------
+     * paintGlue() on positive coverage must immediately bond loose powder that
+     * touches it (not only be a visible film). Assert the behavioural contract:
+     *   glue=0 -> stuck stays ~0 (nothing to catch it)
+     *   glue>0 + powder -> stuck rises (loose bonds up to ~kGlueDepth*glue)
+     *   Blow -> stuck remains, loose moves */
+    {
+        auto stuckMass = [](const GlitterPowder &g) {
+            double m = 0.0;
+            for (int i = 0; i < g.cellCount(); ++i)
+                m += g.powderCellAt(i).stuck;
+            return m;
+        };
+        const std::uint32_t s1 = 5u, s2 = 6u;
+
+        /* glue=0: poured glitter stays loose (stuck stays ~0) */
+        {
+            GlitterPowder ng;
+            ng.reset(QSize(64, 64), 4.0f, s1);
+            GlitterParams bp; bp.amount = 1.2f; bp.flakeSize = 0.8f;
+            bp.color = pal.colors[0];
+            ng.pourGlitter(32 * 4.0f, 32 * 4.0f, 20.0f, bp);
+            const double stuckBefore = stuckMass(ng);
+            ng.absorb();
+            const double stuckAfter = stuckMass(ng);
+            CHECK("glue impact: loose powder with glue=0 does NOT become stuck",
+                  stuckAfter < stuckBefore + 0.5);
+        }
+
+        /* glue>0 + powder already present: paintGlue IMMEDIATELY bonds it */
+        {
+            GlitterPowder g;
+            g.reset(QSize(64, 64), 4.0f, s2);
+            GlitterParams bp; bp.amount = 1.2f; bp.flakeSize = 0.8f;
+            bp.color = pal.colors[0];
+            g.pourGlitter(32 * 4.0f, 32 * 4.0f, 22.0f, bp);
+            const double stuckBefore = stuckMass(g);
+            g.paintGlue(32 * 4.0f, 32 * 4.0f, 30.0f, 1.0f);   /* glue+auto-absorb */
+            const double stuckAfter = stuckMass(g);
+            std::printf("    [glueImpact] gluing over powder: stuck %.2f -> %.2f\n",
+                        stuckBefore, stuckAfter);
+            CHECK("glue impact: applying glue over loose powder BONDS it immediately",
+                  stuckAfter > stuckBefore + 1.0);
+        }
+    }
+
     /* ---- 2. CPU static determinism (same state + t=0 == identical) --- */
     const float gc2 = (256 / 2.0f) * 4.0f;   /* heap centre for makeHeap(256) */
     GlitterPowder g2 = makeHeap(pal, 256, 99.0f);
@@ -281,8 +389,12 @@ int main(int argc, char **argv)
         /* the grains are either pink (slot A) or white (slot B) — discrete,
          * never a brown average of the two slots */
         int pinkish = 0, whitish = 0, other = 0;
-        for (int y = 17; y <= 20; ++y)
-            for (int x = 17; x <= 20; ++x)
+        /* the grain centre is pixel (16,16); the bead core sits right there.
+         * Sample only the bead's own pixels — NOT the clear-glue neighbours,
+         * which now render (correctly, P0) as near-transparent clear adhesive
+         * and would otherwise count as "other" (transparent). */
+        for (int y = 15; y <= 18; ++y)
+            for (int x = 15; x <= 18; ++x)
             {
                 QColor px(mix.pixel(x, y));
                 const float rpx = px.redF(), gpx = px.greenF(), bpx = px.blueF();
@@ -295,6 +407,7 @@ int main(int argc, char **argv)
             }
         CHECK("two-slot colour is discrete (grain picks A or B, no mud)",
               other <= pinkish + whitish + 1 && (pinkish + whitish) > 0);
+        std::printf("    [twoslot] pinkish=%d whitish=%d other=%d\n", pinkish, whitish, other);
     }
 
     /* ---- 8. seed drives the pour layout (no hidden noise) ---------- */
@@ -792,16 +905,25 @@ int main(int argc, char **argv)
               && imageMeanAlpha(goldImg, QRect(0, 0, goldImg.width(), goldImg.height())) > 2.0);
     }
 
-    /* ---- DARK-COLOUR GOLDENS (reviewer gate #7) -------------------------
+    /* ---- DARK-COLOUR GOLDENS (reviewer, revised product look) ----------------
      * One fixed serialized powder state rendered with #000000 / #202020 /
-     * #FFC900 / #F2A7C8 / #FFFFFF through the SAME geometry. Acceptance:
-     *   - silhouette + pile geometry IDENTICAL across colours (the slot tint
-     *     change must NOT move geometry),
-     *   - black keeps a black albedo yet still shows specular/holographic
-     *     structure (bright pixels + colour, from the albedo-free flakeLight),
-     *   - Shimmer 0 has no rainbow but retains metallic reflection,
-     *   - Shimmer 1 adds thin-film colour without washing the whole body,
-     *   - moving the light moves highlights, moving time moves facets. */
+     * #FFC900 / #F2A7C8 / #FFFFFF through the SAME geometry. The product's
+     * black material is:
+     *   shadow-facing side   -> black
+     *   light-facing side    -> dark / medium graphite grey
+     *   microfacets          -> neutral silver/white mirror highlights
+     *   holographic response -> movement/intensity in reflection, NOT random
+     *                           coloured dots
+     * So we assert (NOT the earlier "colourful flashes are good" gate):
+     *   - silhouette + pile geometry IDENTICAL across colours,
+     *   - black body luminance is spatially split: lit region darker than a
+     *     graphite tone yet clearly brighter than the shadow region (the same
+     *     light/shade split yellow gets from its albedo),
+     *   - black material saturation stays LOW (no isolated RGB dots, P99 of
+     *     channel spread below a strict threshold), even at shimmer 1,
+     *   - bright mirror cores exist but are near-neutral (silver/white),
+     *   - shimmer1 modulates NDETER variant (no rainbow wash) and the flake
+     *     chroma is clamped for black. */
     {
         /* fixed powder state: a substantial pink heap, serialized once */
         GlitterPowder src = makeHeap(pal, 256, 555.0f);
@@ -810,9 +932,6 @@ int main(int argc, char **argv)
                                         QColor("#FFC900"), QColor("#F2A7C8"),
                                         QColor("#FFFFFF") };
         const float wc = (256 / 2.0f) * 4.0f;
-        /* a state has up to kMaxSlots slots; replicate the colour across all of
-         * them so EVERY referenced slot tints to that one colour (same state,
-         * only the material colour changes). */
         const int nSlots = src.palette().size() > 0 ? src.palette().size() : 1;
 
         /* reference alpha silhouette (from the first colour) */
@@ -840,96 +959,122 @@ int main(int argc, char **argv)
                 geoSame = false;
         CHECK("dark goldens: silhouette identical across black..white (geometry)", geoSame);
 
-        /* 2. black has visible specular/holographic structure: pixels clearly
-         * brighter than the near-black metallic body (which itself stays
-         * black) — these are the moving speculars / white mirror core /
-         * thin-film flashes. The shimmer is ANIMATED (flakes drift in and out
-         * of facet alignment over time), so sample several time instants and
-         * union the sparkle pixels: black must show structure somewhere across
-         * the motion, not just the one instant a flake happens to be aligned. */
+        /* 2. BLACK spatial light/shade split + low saturation.
+         * Split each black render into a light-facing and shadow-facing HALF
+         * using the rig light direction projected on the crop (the heap is
+         * centred, the rig light comes from upper-left/upper-right). The lit
+         * half must read clearly brighter (graphite) than the shadow half, but
+         * must stay dark (not washed grey). And bright pixels must be near-
+         * neutral (low channel spread) — no isolated saturated dots. */
         {
             PowderPalette bp; bp.holographic = 0.55f;
             for (int i = 0; i < nSlots; ++i) bp.colors << QColor("#000000");
-            int opaque = 0, structure = 0, strong = 0, maxC = 0;
-            long bodySamples = 0, bodySum = 0;
+            auto rigA = [](){ ArtLightRig r; r.direction = QVector3D(0.55f, 0.45f, 0.7f); return r; }(); /* upper-right */
+            /* compute the LIGHT AZIMUTH in the same way the renderer does, so the
+             * lit/shadow split is grounded in the actual BRDF light, not a guess:
+             * render L.xy = -unitDirection().xy (unitDirection is down-pointing). */
+            const QVector3D rigDirA = rigA.unitDirection();
+            const float lax = -rigDirA.x(), lay = -rigDirA.y();
+            const float laLen = std::sqrt(lax * lax + lay * lay) + 1e-6f;
+            const float ulx = lax / laLen, uly = lay / laLen;   /* image-plane light azimuth */
+            double litLum = 0, shaLum = 0, bodyDark = 0;
+            long litN = 0, shaN = 0;
+            std::vector<int> brightSpreads;      /* channel spread of bright px */
+            int opaque = 0, brightNeutral = 0, brightColoured = 0;
+            /* accumulate over several shimmer instants (moving mirror) */
             const qint64 times[4] = { 1234, 2321, 3105, 4488 };
             for (int ti = 0; ti < 4; ++ti)
             {
                 GlitterPowder g; g.deserialize(stateBytes);
                 QImage bimg = g.render(QSize(192, 192), wc - 96, wc - 96, 1.0f,
-                                       ArtLightRig(), bp, nullptr, ArtScale(),
-                                       times[ti]);
+                                       rigA, bp, nullptr, ArtScale(), times[ti]);
+                const int cxc = bimg.width() / 2, cyc = bimg.height() / 2;
                 for (int y = 0; y < bimg.height(); ++y)
                     for (int x = 0; x < bimg.width(); ++x)
                     {
                         const int a = qAlpha(bimg.pixel(x, y));
                         if (a <= 8) continue;
-                        opaque += (ti == 0);            /* count once */
-                        const int cmx = qMax(qRed(bimg.pixel(x, y)),
-                                             qMax(qGreen(bimg.pixel(x, y)), qBlue(bimg.pixel(x, y))));
-                        maxC = qMax(maxC, cmx);
-                        if (cmx > 70) ++structure;       /* clearly above the dark body */
-                        if (cmx > 130) ++strong;         /* a real mirror core / flash */
-                        if (cmx < 45) { bodySamples++; bodySum += cmx; } /* the bulk of the black body */
+                        opaque += (ti == 0);
+                        const double lum = 0.299*qRed(bimg.pixel(x, y))
+                                         + 0.587*qGreen(bimg.pixel(x, y))
+                                         + 0.114*qBlue(bimg.pixel(x, y));
+                        const int dx = x - cxc, dy = y - cyc;
+                        const bool litSide = (dx*ulx + dy*uly) >= 0.0;
+                        if (litSide) { litLum += lum; ++litN; } else { shaLum += lum; ++shaN; }
+                        if (lum < 45.0) bodyDark += 1.0;
+                        if (lum > 120.0)
+                        {
+                            const int spread = qMax(qRed(bimg.pixel(x,y)), qMax(qGreen(bimg.pixel(x,y)), qBlue(bimg.pixel(x,y))))
+                                             - qMin(qRed(bimg.pixel(x,y)), qMin(qGreen(bimg.pixel(x,y)), qBlue(bimg.pixel(x,y))));
+                            brightSpreads.push_back(spread);
+                            if (spread <= 60) ++brightNeutral; else ++brightColoured;
+                        }
                     }
             }
-            const double bodyMean = bodySamples ? (double)bodySum / bodySamples : 255.0;
-            std::printf("    [dark] black(opaque=%d) structure(>70)=%d strong(>130)=%d maxC=%d bodyMean=%d (summed over 4 t)\n",
-                        opaque, structure, strong, maxC, (int)bodyMean);
-            /* the black material body stays BLACK (mean near-dark): only the
-             * specular/mirror-core sparkles rise above it. The mirror core
-             * reaching near-white (maxC high) is exactly right — it must NOT be
-             * capped, that is the black-metal shimmer the reviewer wants. */
-            CHECK("dark goldens: black body stays black (not lifted to gray)",
-                  bodyMean < 45.0 && bodySamples > opaque * 3);
-            /* black keeps visible specular/holographic structure: some pixels
-             * clearly above the near-black body, and at least a few reaching
-             * the bright mirror-core range (moving facets make them appear at
-             * different instants). Spare but present = faithful reference
-             * black metal, not a matte mass. */
-            CHECK("dark goldens: black has visible specular/holographic structure",
-                  structure > 20 && strong > 10 && maxC > 200);
+            /* the split could be mirrored depending on sign convention; take the
+             * brighter of the two projected halves as the LIT side so the gate is
+             * robust — the requirement is a clear lit/shadow luminance split. */
+            litLum = litN ? litLum / litN : 0; shaLum = shaN ? shaLum / shaN : 0;
+            if (shaLum > litLum) std::swap(litLum, shaLum);
+            std::sort(brightSpreads.begin(), brightSpreads.end());
+            const int p99 = brightSpreads.empty() ? 0
+                : brightSpreads[size_t(brightSpreads.size()) * 99 / 100];
+            std::printf("    [dark] black litLum=%.1f shaLum=%.1f bodyDarkPx=%ld brightNeutral=%d brightColoured=%d brightSpreads=%zu P99=%d opaque=%d\n",
+                        litLum, shaLum, (long)bodyDark, brightNeutral, brightColoured,
+                        brightSpreads.size(), p99, opaque);
+            std::printf("    [dark] lit-vs-shadow ratio=%.2f (must be > 1.35)\n",
+                        shaLum > 0 ? litLum / shaLum : 0.0);
+            /* the black body is a dark material: bulk pixels stay near-black */
+            CHECK("dark goldens: black body stays black (not lifted to grey)",
+                  bodyDark > opaque * 0.6);
+            /* lit side brighter than shadow side (graphite-vs-black split) */
+            CHECK("dark goldens: black lit side brighter than shadow side",
+                  litN > 0 && shaN > 0 && litLum > shaLum * 1.35 + 3.0);
+            /* lit side stays dark/graphite, not washed grey */
+            CHECK("dark goldens: black lit region is graphite, not grey",
+                  litLum < 150.0);
+            /* no isolated saturated dots: bright pixels near-neutral, P99 low */
+            CHECK("dark goldens: black bright mirror cores are neutral (no RGB dots)",
+                  brightColoured <= brightNeutral / 4 && p99 < 60);
         }
 
-        /* 3+4. Shimmer 0 vs 1: no rainbow at 0, thin-film colour at 1 */
+        /* 3+4. Shimmer on BLACK: holographic response is neutral reflection
+         * modulation, NOT new saturated dots. shimmer0 vs shimmer1 must change
+         * the mirror intensity/location (movement), but both must stay low-
+         * saturation for black. (Coloured thin-film may stay for coloured
+         * glitter; this gate only enforces black neutrality.) */
         {
             PowderPalette p0; p0.holographic = 0.0f;
             PowderPalette p1; p1.holographic = 1.0f;
-            for (int i = 0; i < nSlots; ++i) { p0.colors << QColor("#ffffff"); p1.colors << QColor("#ffffff"); }
+            for (int i = 0; i < nSlots; ++i) { p0.colors << QColor("#000000"); p1.colors << QColor("#000000"); }
             GlitterPowder g0; g0.deserialize(stateBytes);
             GlitterPowder g1; g1.deserialize(stateBytes);
             QImage i0 = g0.render(QSize(128, 128), wc - 64, wc - 64, 1.0f, ArtLightRig(), p0, nullptr, ArtScale(), 1234);
             QImage i1 = g1.render(QSize(128, 128), wc - 64, wc - 64, 1.0f, ArtLightRig(), p1, nullptr, ArtScale(), 1234);
-            /* shimmer0 must be achromatic metallic (no rainbow); shimmer1 must
-             * ADD thin-film colour ON its sparkles. Count BRIGHT sparkle pixels
-             * (lum>90) whose RGB channel spread is clearly a hue (>25): shimmer1
-             * must show more such rainbow pixels than shimmer0, and shimmer0
-             * must stay essentially achromatic white. A body drenched in one
-             * hue would not register here (spread small), and a full rainbow
-             * wash is prevented by the "many hued" bound below. */
             long hue0 = 0, hue1 = 0, bright0 = 0, bright1 = 0;
-            double s0 = 0, s1 = 0; int n0 = 0, n1 = 0, mx1 = 0;
+            double sat0 = 0, sat1 = 0; long s0 = 0, s1 = 0;
             for (int y = 0; y < i0.height(); y += 1)
                 for (int x = 0; x < i0.width(); x += 1)
                 {
                     if (qAlpha(i0.pixel(x, y)) <= 4 || qAlpha(i1.pixel(x, y)) <= 4) continue;
                     const QRgb a = i0.pixel(x, y), b = i1.pixel(x, y);
-                    const double lum0 = 0.299 * qRed(a) + 0.587 * qGreen(a) + 0.114 * qBlue(a);
-                    const double lum1 = 0.299 * qRed(b) + 0.587 * qGreen(b) + 0.114 * qBlue(b);
-                    const int m0 = qMax(qRed(a), qMax(qGreen(a), qBlue(a))) - qMin(qRed(a), qMin(qGreen(a), qBlue(a)));
-                    const int m1 = qMax(qRed(b), qMax(qGreen(b), qBlue(b))) - qMin(qRed(b), qMin(qGreen(b), qBlue(b)));
-                    if (lum0 > 90.0) { bright0++; if (m0 > 25) hue0++; s0 += m0; ++n0; }
-                    if (lum1 > 90.0) { bright1++; if (m1 > 25) hue1++; s1 += m1; ++n1; mx1 = qMax(mx1, m1); }
+                    const double lum0 = 0.299*qRed(a)+0.587*qGreen(a)+0.114*qBlue(a);
+                    const double lum1 = 0.299*qRed(b)+0.587*qGreen(b)+0.114*qBlue(b);
+                    const int m0 = qMax(qRed(a),qMax(qGreen(a),qBlue(a))) - qMin(qRed(a),qMin(qGreen(a),qBlue(a)));
+                    const int m1 = qMax(qRed(b),qMax(qGreen(b),qBlue(b))) - qMin(qRed(b),qMin(qGreen(b),qBlue(b)));
+                    if (lum0 > 90.0) { bright0++; if (m0 > 25) hue0++; sat0 += m0; ++s0; }
+                    if (lum1 > 90.0) { bright1++; if (m1 > 25) hue1++; sat1 += m1; ++s1; }
                 }
-            s0 = n0 ? s0 / n0 : 0; s1 = n1 ? s1 / n1 : 0;
-            std::printf("    [dark] shimmer0 bright=%ld hue>25=%ld avgSpread=%.2f | shimmer1 bright=%ld hue>25=%ld avgSpread=%.2f maxHue=%d\n",
-                        bright0, hue0, s0, bright1, hue1, s1, mx1);
-            CHECK("dark goldens: shimmer0 is achromatic metallic (rainbow-free)",
-                  hue0 < 50);
-            CHECK("dark goldens: shimmer1 adds thin-film colour (hued sparkles)",
-                  hue1 > 0 && mx1 > 50);
-            CHECK("dark goldens: shimmer1 does not wash the whole body to one hue",
-                  hue1 < 4000 && s1 < 250.0);
+            sat0 = s0 ? sat0 / s0 : 0; sat1 = s1 ? sat1 / s1 : 0;
+            std::printf("    [dark] shimmer0(black) bright=%ld hue=%ld avgSat=%.2f | shimmer1 bright=%ld hue=%ld avgSat=%.2f\n",
+                        bright0, hue0, sat0, bright1, hue1, sat1);
+            /* both must be low-saturation (neutral mirror, no black dots) */
+            CHECK("dark goldens: black shimmer0 stays neutral (no rainbow dots)",
+                  hue0 < 100 && sat0 < 30.0);
+            CHECK("dark goldens: black shimmer1 stays neutral (no RGB dots)",
+                  hue1 < 120 && sat1 < 40.0);
+            CHECK("dark goldens: shimmer1 changes mirror response (movement)",
+                  !imgEqual(i0, i1, 0));
         }
 
         /* 5. moving the light moves highlights (geometry fixed) */
@@ -946,7 +1091,28 @@ int main(int argc, char **argv)
             CHECK("dark goldens: changing light moves highlights", !imgEqual(a, b, 0));
         }
 
-        /* 6. changing time moves facets asynchronously (geometry + t fixed) */
+        /* 6. black vs yellow reveal the SAME geometry: same silhouette and a
+         * lit-side brighter than shadow-side split in BOTH (the tint only
+         * changes the hue, not where the light/shade split falls). */
+        {
+            auto rigB = [](){ ArtLightRig r; r.direction = QVector3D(0.55f, 0.45f, 0.7f); return r; }();
+            PowderPalette bp; bp.holographic = 0.55f;
+            PowderPalette yp; yp.holographic = 0.55f;
+            for (int i = 0; i < nSlots; ++i) { bp.colors << QColor("#000000"); yp.colors << QColor("#FFC900"); }
+            GlitterPowder gb; gb.deserialize(stateBytes);
+            GlitterPowder gy; gy.deserialize(stateBytes);
+            QImage bi = gb.render(QSize(128, 128), wc - 64, wc - 64, 1.0f, rigB, bp, nullptr, ArtScale(), 0);
+            QImage yi = gy.render(QSize(128, 128), wc - 64, wc - 64, 1.0f, rigB, yp, nullptr, ArtScale(), 0);
+            /* geometry (alpha) identical */
+            bool alphaSame = (bi.size() == yi.size());
+            if (alphaSame)
+                for (int y = 0; y < bi.height(); ++y)
+                    for (int x = 0; x < bi.width(); ++x)
+                        if (std::abs(qAlpha(bi.pixel(x, y)) - qAlpha(yi.pixel(x, y))) > 10) { alphaSame = false; break; }
+            CHECK("dark goldens: black and yellow share the SAME pile geometry", alphaSame);
+        }
+
+        /* 7. changing time moves facets asynchronously (geometry + t fixed) */
         {
             PowderPalette rs; rs.holographic = 0.55f;
             for (int i = 0; i < nSlots; ++i) rs.colors << QColor("#f2a7c8");

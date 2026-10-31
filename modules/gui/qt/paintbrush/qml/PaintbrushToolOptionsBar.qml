@@ -37,6 +37,27 @@ Rectangle {
 
     required property PaintbrushCanvas canvas
 
+    /* TEMP-PROOF (reviewer qrc/qmlcache check): a unique build marker + a
+     * startup geometry log prove the running app is loading THIS qml (not a
+     * stale qrc/qmlcache copy). Remove after the GUI gate is accepted. */
+    objectName: "PaintbrushToolOptionsBar_marker_e48-toolbar-v2"
+    Component.onCompleted: {
+        /* existing initial rebuild of the toolbar cells */
+        rebuild()
+        /* TEMP-PROOF (reviewer qrc/qmlcache check): log the geometry + build
+         * marker so we can prove the running app loads THIS qml, not stale. */
+        console.log("PB_QML ToolOptionsBar onCompleted x=" + x + " y=" + y
+                    + " w=" + width + " h=" + height + " z=" + z
+                    + " marker=" + objectName)
+    }
+    onWidthChanged: logGeom()
+    onHeightChanged: logGeom()
+    onYChanged: logGeom()
+    function logGeom() {
+        console.log("PB_QML ToolOptionsBar geom x=" + x + " y=" + y
+                    + " w=" + width + " h=" + height + " z=" + z)
+    }
+
     ColorContext {
         id: theme
         colorSet: ColorContext.View
@@ -46,7 +67,7 @@ Rectangle {
      * any wrapped-contentHeight so the bar can never grow into the palette. */
     readonly property real _oneRow: VLCStyle.dp(32, VLCStyle.scale)
                                    + VLCStyle.margin_xsmall
-    height: _oneRow + VLCStyle.margin_medium * 2
+    height: _oneRow + VLCStyle.margin_xsmall * 2
     color: theme.bg.primary
     border.width: 1
     border.color: theme.border
@@ -174,8 +195,6 @@ Rectangle {
 
         optionBar.items = out
     }
-
-    Component.onCompleted: rebuild()
 
     /* Declarative action dispatch (P0.3): the toolbar emits triggered(action,
      * value) — one observable path, no JS callbacks in the item model. */

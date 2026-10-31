@@ -26,6 +26,23 @@ Item {
 
     required property PaintbrushCanvas canvas
 
+    /* TEMP-PROOF (reviewer qrc/qmlcache check): a unique build marker + a
+     * startup geometry log prove the running app is loading THIS qml (not a
+     * stale qrc/qmlcache copy). Remove after the GUI gate is accepted. */
+    objectName: "PaintbrushPaletteBar_marker_e48-toolbar-v2"
+    Component.onCompleted: {
+        console.log("PB_QML PaletteBar onCompleted x=" + x + " y=" + y
+                    + " w=" + width + " h=" + height + " z=" + z
+                    + " marker=" + objectName)
+    }
+    onWidthChanged: logGeom()
+    onHeightChanged: logGeom()
+    onYChanged: logGeom()
+    function logGeom() {
+        console.log("PB_QML PaletteBar geom x=" + x + " y=" + y
+                    + " w=" + width + " h=" + height + " z=" + z)
+    }
+
     ColorContext {
         id: theme
         colorSet: ColorContext.View

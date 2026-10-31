@@ -1321,21 +1321,21 @@ CanvasLayer *PaintbrushCanvasItem::ensurePowderLayer()
     return m_doc->currentLayer();
 }
 
-void PaintbrushCanvasItem::renderPowderUnion()
+void PaintbrushCanvasItem::renderPowderPreview()
 {
-    pbCrashTrace("renderPowderUnion enter");
+    pbCrashTrace("renderPowderPreview enter");
     CanvasLayer *layer = m_doc ? m_doc->currentLayer() : nullptr;
     if (!layer || layer->raster.isNull()) {
-        pbCrashTrace("renderPowderUnion exit (no layer)");
+        pbCrashTrace("renderPowderPreview exit (no layer)");
         return;
     }
     if (m_powderUnion.isNull() || m_powderUnion.isEmpty()) {
-        pbCrashTrace("renderPowderUnion exit (no union)");
+        pbCrashTrace("renderPowderPreview exit (no union)");
         return;
     }
     const QRect u = m_powderUnion.intersected(layer->raster.rect());
     if (u.isEmpty()) {
-        pbCrashTrace("renderPowderUnion exit (empty union)");
+        pbCrashTrace("renderPowderPreview exit (empty union)");
         return;
     }
     captureBeforeRegion(u);
@@ -1429,12 +1429,20 @@ void PaintbrushCanvasItem::renderPowderUnion()
     pbCrashTrace("markTilesDirty");
     markTilesDirty(mappedRect(u));
     m_strokeHadPaint = true;
-    pbCrashTrace("renderPowderUnion exit");
-    qDebug() << "pb_powder commit" << u.size() << "gpu=" << bakedGpu;
-    /* the committed raster is now a cached bake of the authoritative state */
-    CanvasLayer *cur = layer;
-    if (cur && !m_powder.isEmpty())
-        persistPowderStateToLayer(cur);
+    pbCrashTrace("renderPowderPreview exit");
+    qDebug() << "pb_powder preview" << u.size() << "gpu=" << bakedGpu;
+}
+
+/* Commit-bake path: render the union then persist the authoritative material
+ * state onto the layer (the raster stays a cached bake). Used at operation
+ * FINALIZE (stroke end / pour / finished blow AFTER endBlow has been called
+ * once) — never during a live blow's per-step preview. */
+void PaintbrushCanvasItem::renderPowderUnion()
+{
+    renderPowderPreview();
+    CanvasLayer *layer = m_doc ? m_doc->currentLayer() : nullptr;
+    if (layer && !m_powder.isEmpty())
+        persistPowderStateToLayer(layer);
 }
 
 /* Persist the authoritative GlitterPowder physical state onto the layer. The
@@ -1444,7 +1452,12 @@ void PaintbrushCanvasItem::persistPowderStateToLayer(CanvasLayer *layer)
 {
     if (!layer)
         return;
-    m_powder.endBlow();          /* drop transient blow momentum before capturing */
+    /* PERSISTENCE IS SIDE-EFFECT FREE (P0 reviewer): we do NOT call
+     * m_powder.endBlow() here. Ending a breath belongs to the OPERATION
+     * lifecycle (finalizePowderOperation), never to serialization — otherwise
+     * every preview render during a live breath resets the transient blow
+     * state and the breath self-cancels. This function only records the
+     * authoritative physics state; callers finalize the operation explicitly. */
     if (m_powder.isEmpty()) {
         /* nothing left (fully erased/blown): record no material state */
         if (layer->materialPreset == art::glitter::kPowderMaterialPreset)
@@ -1504,7 +1517,9 @@ void PaintbrushCanvasItem::startPowderBlow()
     m_powderBlowing = true;
     m_powderBlowAge = 0.0f;
     m_powderRenderAcc = 0.0f;
-    renderPowderUnion();
+    /* initial live preview of the yet-running field: render-only (never
+     * persists or ends the breath — P0 side-effect-free preview). */
+    renderPowderPreview();
 }
 
 void PaintbrushCanvasItem::stepPowderBlow(float dtSec)
@@ -1519,24 +1534,29 @@ void PaintbrushCanvasItem::stepPowderBlow(float dtSec)
      * after the breath has visibly run (>= 0.8 s), never on the opening ramp. */
     const bool finished = m_powderBlowAge > 3.5f
                           || (moved == 0 && m_powderBlowAge > 0.8f);
-    /* Render the evolving field at ~30 Hz (physics steps every tick; the
-     * full-union render is the expensive part and doesn't need 120 Hz). */
+    /* Render the evolving field at ~30 Hz. This is a LIVE PREVIEW (render-only),
+     * so it must NOT persist material state or end the breath — the preview is
+     * side-effect free (P0): persistence/endBlow/undo belong to finalize. */
     m_powderRenderAcc += dtSec;
     if (m_powderRenderAcc >= 1.0 / 30.0)
     {
         m_powderRenderAcc = 0.0f;
-        renderPowderUnion();
+        renderPowderPreview();
     }
     if (finished)
     {
-        renderPowderUnion();   /* final pass */
+        /* ---- FINALIZE the breath exactly once ----
+         * 1) end the breath's transient state ONCE (drop per-step momentum),
+         * 2) bake the settled raster + persist the authoritative material state,
+         * 3) commit ONE atomic undo. Never render-persist mid-breath again. */
+        m_powder.endBlow();
         m_powderBlowing = false;
         m_powderBlowSince = 0.0f;
         m_powderBlowAge = 0.0f;
         m_powderRenderAcc = 0.0f;
-        /* finish the stroke so the blown result is committed once */
         if (m_strokeActive)
         {
+            /* commit the stroke (renderPowderUnion persists the settled state) */
             endArtStroke(m_powderHoldPos);
         }
         else if (m_blowStandalone)
@@ -1545,7 +1565,7 @@ void PaintbrushCanvasItem::stepPowderBlow(float dtSec)
              * blown result + material state as exactly ONE atomic undo */
             if (m_strokeHadPaint)
             {
-                renderPowderUnion();
+                renderPowderUnion();   /* render + persist settled material */
                 commitScratch(QStringLiteral("Blow"));
             }
             m_powderUnion = QRect();
@@ -1663,11 +1683,20 @@ void PaintbrushCanvasItem::compositeTile(int tx, int ty, QImage &tile) const
      * else is unchanged (t=0 == the static path). */
     DocumentRenderer::composite(tile, r, *m_doc, m_animTimeMs);
 
-    /* in-progress stroke preview: dabs live in the scratch tile until mouse
-     * release (commitScratch writes them into the layer), so the composite
-     * must blend the scratch on top or the stroke is invisible while
-     * drawing and only shows up on a later unrelated repaint */
-    if (m_strokeActive && !m_scratchTile.isNull())
+    /* in-progress stroke / transient-material preview: dabs live in the scratch
+     * tile until release (commitScratch writes them into the layer), so the
+     * composite must blend the scratch on top or the stroke is invisible while
+     * drawing and only shows up on a later unrelated repaint.
+     *
+     * A transient ART preview exists ANY time material is mid-operation but not
+     * yet committed to the layer — that includes an active pointer stroke AND
+     * a standalone momentary Blow (m_powderBlowing && m_blowStandalone), whose
+     * scratch preview must also be visible while the breath runs. P0: standalone
+     * Blow's preview is invisible without this (it never sets m_strokeActive). */
+    const bool hasTransientArtPreview =
+        m_strokeActive
+        || (m_powderBlowing && m_blowStandalone);
+    if (hasTransientArtPreview && !m_scratchTile.isNull())
     {
         const QRect overlap =
             r.intersected(QRect(m_scratchOrigin, m_scratchTile.size()));

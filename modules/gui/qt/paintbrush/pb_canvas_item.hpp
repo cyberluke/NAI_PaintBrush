@@ -592,10 +592,17 @@ qint64 m_lastPowderPreviewMs = 0;
     /* Long-press breath helpers (reference blowOnLongPress). */
     void startPowderBlow();
     void stepPowderBlow(float dtSec);
-    void renderPowderUnion();    /* re-render m_powderUnion from the sim */
+    /* render-only live preview of the powder material union. Side-effect free:
+     * composes the current sim state into the scratch tile + marks the tiles
+     * dirty, but does NOT persist material state, end a blow, or mutate undo
+     * (P0 — a live breath must be able to render every frame without the
+     * preview canceling itself). */
+    void renderPowderPreview();
+    void renderPowderUnion();    /* render + persist-material (commit paths) */
     /* Persist the authoritative powder physical material state onto the layer
      * (materialPreset = "material.glitter.powder", materialState = serialized
-     * GlitterPowder). The raster stays a cached bake. */
+     * GlitterPowder). The raster stays a cached bake. SIDE-EFFECT FREE: does
+     * NOT call endBlow (operation finalization owns that). */
     void persistPowderStateToLayer(CanvasLayer *layer);
 
     /* selection state */

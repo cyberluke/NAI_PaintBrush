@@ -443,8 +443,18 @@ void GlitterPowder::paintGlue(float wx, float wy, float radiusWorld, float cover
                 }
         }
     if (coverage > 0)
+    {
         m_activeCells = m_activeCells.united(
             QRect(x0, y0, x1 - x0 + 1, y1 - y0 + 1));
+        /* P0: painting POSITIVE glue must have physical impact IMMEDIATELY. Glue
+         * drawn beneath existing loose glitter bonds it right away, so a user
+         * who glues over already-deposited powder catches it without waiting for
+         * the next explicit absorb. Scope the bond sweep to the affected region.
+         * The intended workflow (Glue -> Glitter/Pour -> absorb -> Blow ->
+         * bonded survives) is unchanged; this makes Glue's adhesion real, not
+         * just a visible film. */
+        absorb(QRect(x0, y0, x1 - x0 + 1, y1 - y0 + 1));
+    }
 }
 
 /* Sample the full-resolution glue field (0..1) with bilinear interpolation at an
@@ -1859,19 +1869,45 @@ QImage GlitterPowder::render(const QSize &outSize, float outOriginWorldX,
                 cg2 += gMix(1.0f, sg, 0.5f) * specPow * 0.35f;
                 cb += gMix(1.0f, sb, 0.5f) * specPow * 0.35f;
 
-                /* --- reference flakeLight (tiny mirror on the grain) -------
-                 * Adds the albedo-free specular/holographic energy to the bead:
-                 * moving facets, metallic reflections and thin-film flashes.
-                 * For a BLACK tint the albedo stays black but THIS term still
-                 * supplies the white near-perfect mirror core and (at uHolo>0)
-                 * the holographic flashes, so black reads as a dark metallic
-                 * pile with depth and glints, not a matte mass (P1 #6). */
+                /* --- DARK-MATERIAL BROAD NEUTRAL MIRROR (product look) ------
+                 * For very dark powder the diffuse albedo contributes ~nothing,
+                 * so we add a BROAD NORMAL/HEIGHT-CONTROLLED neutral reflection
+                 * (graphite-lit side vs black shadow side) independent of the
+                 * diffuse base. `darkness` rises as the base tint's luminance
+                 * falls; the term is spatially governed by the macro normal,
+                 * the rig light and the half-vector — NOT a per-grain coloured
+                 * dot. A grain facing the light reads graphite grey, a shadow
+                 * grain stays black, giving black the SAME geometry reveal that
+                 * yellow gets from its albedo lighting. */
+                const float tintLuma = 0.299f * tr + 0.587f * tg + 0.114f * tb;
+                const float darkness = 1.0f - gSmoothstep(0.04f, 0.32f, tintLuma);
+                const float macroSpec = std::pow(std::pow(qMax(0.0f, QVector3D::dotProduct(N, H)), 3.0f)
+                                                 , 3.0f);   /* broad ~x9 cone */
+                const float shadowFade = 0.12f + 0.88f * macroDiff;
+                const float broadMirror = darkness * (0.10f + 0.42f * macroSpec) * shadowFade;
+                cr += broadMirror; cg2 += broadMirror; cb += broadMirror;
+
+                /* --- per-grain flake: narrow neutral mirror split ----------
+                 * A sparse per-grain highlight edge (moving with time). For DARK
+                 * material the chromatic (rainbow) part is clamped to near-zero
+                 * so black never shows isolated cyan/green/red dots; only the
+                 * neutral mirror core survives, and it stays close to neutral
+                 * white so it reads as a specular flash, not a coloured pixel. */
                 const float timeSec = (timeMs > 0) ? (float(timeMs) / 1000.0f) : 0.0f;
                 const float holo = qBound(0.0f, pal.holographic, 1.0f);
                 {
                     float flR, flG, flB, isF;
                     cFlakeLight(sidx, sidy, 0.06f, exposedGlue, N, Ln, H,
                                 tr, tg, tb, holo, timeSec, flR, flG, flB, isF);
+                    /* chroma-limit: for dark material bleed the saturated rainbow
+                     * toward its luminance (neutral silver mirror) and keep only a
+                     * faint specular modulation. The white mirror core in
+                     * cFlakeLight is already neutral. */
+                    const float chromaScale = 1.0f - 0.95f * darkness;
+                    const float flLum = 0.299f * flR + 0.587f * flG + 0.114f * flB;
+                    flR = gMix(flLum, flR, chromaScale);
+                    flG = gMix(flLum, flG, chromaScale);
+                    flB = gMix(flLum, flB, chromaScale);
                     const float fw = isF * inBead * 0.7f;
                     cr += flR * fw; cg2 += flG * fw; cb += flB * fw;
                 }
@@ -1901,44 +1937,53 @@ QImage GlitterPowder::render(const QSize &outSize, float outOriginWorldX,
                 const int aOut8 = int(qBound(0.0f, aOut, 1.0f) * 255.0f);
 
                 /* --- WET GLUE FILM (glue-only grain) ----------------------
-                 * A transparent clear adhesive: low-alpha neutral film with a
-                 * raised glossy centre, a subtle darker/refractive rim and a
-                 * light-dependent highlight. Rendered over the paper wherever
-                 * the grain's Voronoi cell carries glue with no powder. The
-                 * film must stay visible on both light AND dark paper, so it is
-                 * a translucent mid-tone with a bright specular edge rather
-                 * than a dark or light baked fill. */
+                 * A CLEAR ADHESIVE (product look, P0 — not white paint):
+                 *   near-transparent clear body      alpha ~0.03..0.10
+                 *   subtle darker/refractive rim      alpha ~0.03..0.10
+                 *   small white spec highlight        alpha ~0.08..0.25
+                 * Absent: an opaque/semi-opaque white fill or a paper-coloured
+                 * body baked into the material layer. Over light paper it reads
+                 * as a faint wet sheen; over dark paper a subtle glassy glaze —
+                 * never a white brush stroke. */
                 if (glueOnly)
                 {
                     /* the glue film fills the grain's Voronoi coverage disc so a
                      * continuous glue stroke forms an unbroken sheet */
                     const float covR = covRPx;
-                    /* distance from the grain centre normalized to the disc */
                     const float rnf = rr;                 /* 0 centre .. ~1 edge */
-                    const float rim = rnf;                /* darker/refractive edge */
-                    /* glossy raised centre: bright towards the light, falling
-                     * off at the rim (a subtle dome). */
-                    const float gloss = gMix(1.0f, 0.35f, gSmoothstep(0.1f, 0.9f, rim));
-                    const float hli = 0.55f + 0.45f * diff;   /* light-dependent */
-                    /* refractive edge adds a faint cool/violet cast */
-                    const float edgeCast = gSmoothstep(0.55f, 0.98f, rim);
-                    const float baseA = gMix(0.16f, 0.34f, wetGlue); /* transparent film */
-                    const float refrA = baseA + 0.10f * edgeCast;
-                    const float filmA = qBound(0.02f, refrA * hli, 0.55f);
-                    /* neutral adhesive base so it reads on any paper */
-                    const float baseTint = gMix(0.92f, 0.82f, edgeCast);
-                    const float specA = std::pow(qMax(0.0f, QVector3D::dotProduct(Nb, H)), 40.0f);
-                    const float glR = baseTint * (0.90f + 0.10f * hli)
-                                        + 0.90f * specA * gloss;
-                    const float glG = baseTint * (0.93f + 0.07f * hli)
-                                        - 0.08f * edgeCast + 0.90f * specA * gloss;
-                    const float glB = baseTint * (1.00f) - 0.06f * edgeCast
-                                        + 0.92f * specA * gloss;
-                    p.setBrush(QColor(int(qBound(0.0f, glR, 1.0f) * 255.0f),
-                                      int(qBound(0.0f, glG, 1.0f) * 255.0f),
-                                      int(qBound(0.0f, glB, 1.0f) * 255.0f),
-                                      int(qBound(0.0f, filmA, 1.0f) * 255.0f)));
+                    const float rim = rnf;                /* refractive edge */
+                    /* near-transparent clear body: alpha scales with the wet glue
+                     * amount but stays LOW (never a semi-opaque white fill) */
+                    const float bodyA = qBound(0.02f, wetGlue * (0.05f + 0.05f * rim), 0.10f);
+                    /* neutral/dark rim: a whisper of cool refractive darkening at
+                     * the film edge */
+                    const float edgeCast = gSmoothstep(0.5f, 0.98f, rim);
+                    const float rimA = 0.03f + 0.07f * edgeCast;   /* 0.03..0.10 */
+                    /* white spec highlight: small, from the light rig half-vector,
+                     * concentrated at the raised/glossy part of the film */
+                    const float gloss = gMix(0.8f, 0.25f, gSmoothstep(0.0f, 0.7f, rim));
+                    const float specA = std::pow(qMax(0.0f, QVector3D::dotProduct(Nb, H)), 48.0f);
+                    const float hli = 0.35f + 0.65f * diff;      /* light-dependent */
+                    const float specAlpha = qBound(0.0f, specA * gloss * hli, 0.25f);
+
+                    /* 1. clear body (low alpha, near-neutral, slightly cool) */
+                    p.setBrush(QColor(246, 248, 252, int(bodyA * 255)));
                     p.drawEllipse(QPointF(gcxPx, gcyPx), covR, covR);
+                    /* 2. refractive darker rim (subtle, low alpha) */
+                    if (rimA > 0.03f)
+                    {
+                        p.setBrush(QColor(0, 0, 0, int(rimA * 255)));
+                        p.drawEllipse(QPointF(gcxPx, gcyPx), covR, covR);
+                    }
+                    /* 3. small white spec highlight (highest alpha, most visible */
+                    if (specAlpha > 0.02f)
+                    {
+                        const float hR = qMax(0.35f, covR * 0.35f);
+                        p.setBrush(QColor(255, 255, 255, int(specAlpha * 255)));
+                        p.drawEllipse(QPointF(gcxPx + (gh.x() - 0.5f) * covR * 0.4f,
+                                              gcyPx + (gh.z() - 0.5f) * covR * 0.4f),
+                                      hR, hR);
+                    }
                     /* skip the powder bead + glint: this is pure adhesive */
                     continue;
                 }
@@ -2057,6 +2102,21 @@ QImage GlitterPowder::render(const QSize &outSize, float outOriginWorldX,
                 float flR = 1, flG = 1, flB = 1, isF = 0;
                 cFlakeLight(fsidx, fsidy, 1.0f, onGlue, N, Ln, H,
                             fr, fg, fb, holo, timeSec, flR, flG, flB, isF);
+                /* DARK-MATERIAL CHROMA LIMIT: for a near-black flake the thin-film
+                 * rainbow must NOT become an isolated red/green/blue/magenta dot.
+                 * Bleed the chromatic energy toward its neutral luminance so the
+                 * specular flash stays silver/white (the reviewer's product look
+                 * for black glitter). Colourful thin-film may stay for coloured
+                 * glitter, never for black. */
+                const float flLuma0 = 0.299f * fr + 0.587f * fg + 0.114f * fb;
+                const float darkC = 1.0f - gSmoothstep(0.04f, 0.32f, flLuma0);
+                const float chromaScale = 1.0f - 0.95f * darkC;
+                {
+                    const float ll = 0.299f * flR + 0.587f * flG + 0.114f * flB;
+                    flR = gMix(ll, flR, chromaScale);
+                    flG = gMix(ll, flG, chromaScale);
+                    flB = gMix(ll, flB, chromaScale);
+                }
                 const float peak = qMax(flR, qMax(flG, flB));
                 const float soft = radius * (0.18f
                         + 0.7f * qBound(0.0f, peak - 0.8f, 1.0f) * (0.3f + size));

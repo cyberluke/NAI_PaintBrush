@@ -354,32 +354,65 @@ Item {
         }
     }
 
-    /* palette bar — declared BEFORE mainRow so the row's anchors.bottom
-     * binding sees it (forward-reference layout collapse avoidance) */
-    PaintbrushPaletteBar {
-        id: paletteBar
-
+    /* ---- BOTTOM CHROME -------------------------------------------------
+     * One explicit layout container owns the bottom bar ordering, so the tool
+     * options and colour palette are NEVER cross-anchored to each other as
+     * independent siblings (which could interleave/overlap). Layout:
+     *     canvas / mainRow  { bottom = bottomChrome.top }
+     *     ---------------
+     *     tool options      { directly above the palette }
+     *     ---------------
+     *     colour palette    { at the window bottom }
+     *     ---------------
+     *      window bottom
+     * Invariant (checked at runtime, debug): optionsBar.bottom <= paletteBar.top
+     * and the two rectangles never intersect. */
+    Item {
+        id: bottomChrome
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        height: VLCStyle.dp(64, VLCStyle.scale)
-        canvas: paintbrushCanvas
-    }
+        /* options (a fixed one row) above the palette (a fixed 64dp colour
+         * surface) + the gap between them; the layout owns this ordering. */
+        height: optionsRow
+                + VLCStyle.margin_xxxsmall   /* gap between the two bars */
+                + VLCStyle.dp(64, VLCStyle.scale)
 
-    /* the unified horizontal per-tool option toolbar (SOLID): the same
-     * PaintbrushToolbar component that renders the vertical rail, shown as a
-     * second bar between the canvas row and the palette. It carries the
-     * precision toggles plus the active tool's option sliders, and sits ABOVE
-     * the palette so it can never be painted over. */
-    PaintbrushToolOptionsBar {
-        id: toolOptionsBar
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.leftMargin: VLCStyle.margin_small
-        anchors.rightMargin: VLCStyle.margin_small
-        anchors.bottom: paletteBar.top
-        canvas: paintbrushCanvas
-        z: 7
+        /* the one-row options toolbar height (fixed, decoupled from any
+         * wrapped row); matches PaintbrushToolOptionsBar's own height so the
+         * layout allocates exactly one cell row + the vertical margins.
+         * NOTE: VLCStyle has NO margin_medium — use margin_xsmall. */
+        readonly property real optionsRow: VLCStyle.dp(32, VLCStyle.scale)
+                                           + VLCStyle.margin_xsmall * 3
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 0
+
+            /* the unified horizontal per-tool option toolbar (SOLID): the same
+             * PaintbrushToolbar cell delegate as the vertical rail, one row,
+             * clip:true, horizontal scroll. Never wraps, never overlaps the
+             * palette. */
+            PaintbrushToolOptionsBar {
+                id: toolOptionsBar
+                Layout.fillWidth: true
+                Layout.preferredHeight: bottomChrome.optionsRow
+                Layout.leftMargin: VLCStyle.margin_small
+                Layout.rightMargin: VLCStyle.margin_small
+                Layout.bottomMargin: VLCStyle.margin_xxxsmall
+                canvas: paintbrushCanvas
+                z: 7
+            }
+
+            /* palette bar — a completely separate 64dp colour surface (FG/BG +
+             * swatches + picker). Never holds icons/sliders. */
+            PaintbrushPaletteBar {
+                id: paletteBar
+                Layout.fillWidth: true
+                Layout.preferredHeight: VLCStyle.dp(64, VLCStyle.scale)
+                canvas: paintbrushCanvas
+            }
+        }
     }
 
     /* center: canvas with tool rail; the inspector drawer and the companion
@@ -388,7 +421,7 @@ Item {
         id: mainRow
 
         anchors.top: topBar.bottom
-        anchors.bottom: toolOptionsBar.top
+        anchors.bottom: bottomChrome.top
         anchors.left: parent.left
         anchors.right: parent.right
         spacing: 0
@@ -452,7 +485,7 @@ Item {
         id: harvestTray
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.bottom: textEditorBar.visible ? textEditorBar.top : toolOptionsBar.top
+        anchors.bottom: textEditorBar.visible ? textEditorBar.top : bottomChrome.top
         height: implicitHeight
         canvas: paintbrushCanvas
         dropTarget: canvasView
@@ -468,7 +501,7 @@ Item {
 
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.bottom: toolOptionsBar.top
+        anchors.bottom: bottomChrome.top
         canvas: paintbrushCanvas
         z: 4
 
@@ -501,7 +534,7 @@ Item {
         id: assistantDock
 
         anchors.right: parent.right
-        anchors.bottom: paletteBar.top
+        anchors.bottom: bottomChrome.top
         anchors.rightMargin: VLCStyle.margin_normal
         anchors.bottomMargin: VLCStyle.margin_normal
         z: 5
@@ -616,5 +649,31 @@ Item {
             MainCtx.intfMainWindow.title = qsTr("NAI PaintBrush")
         })
         PaintbrushCtx.fitInterfaceToDesktop()
+        /* TEMP-PROOF (reviewer qrc/qmlcache + bottom-chrome): the debug build
+         * asserts the options bar sits entirely ABOVE the palette and the two
+         * rectangles never intersect. Delete after the GUI gate. */
+        Qt.callLater(() => {
+            if (toolOptionsBar && paletteBar) {
+                /* both bars live inside bottomChrome's ColumnLayout, so their
+                 * positions are comparable in bottomChrome coordinates */
+                const oTop = toolOptionsBar.mapToItem(bottomChrome, 0, 0).y
+                const pTop = paletteBar.mapToItem(bottomChrome, 0, 0).y
+                const oBottom = oTop + toolOptionsBar.height
+                const ok = (oBottom <= pTop + 0.5)
+                console.log("PB_QML containment options.bottom=" + oBottom
+                            + " palette.top=" + pTop
+                            + " intersect=" + (oBottom > pTop)
+                            + " OK=" + ok
+                            + " bg.height=" + bottomChrome.height
+                            + " bg.optionsRow=" + bottomChrome.optionsRow
+                            + " options.h=" + toolOptionsBar.height
+                            + " options.impH=" + toolOptionsBar.implicitHeight
+                            + " palette.h=" + paletteBar.height
+                            + " bg.y=" + bottomChrome.y
+                            + " bg.map=" + bottomChrome.mapToItem(bottomChrome.parent, 0, 0).y)
+                /* assert hard containment (options entirely above palette) */
+                console.assert(ok, "PB_QML options bar overlaps palette!")
+            }
+        })
     }
 }

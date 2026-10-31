@@ -242,7 +242,25 @@ void main()
 
     vec3 rainbow; float isFlake;
     vec3 flake = flakeLight(sid, 0.06, exposedGlue, N, L, H, tint, rainbow, isFlake);
+    /* DARK-MATERIAL CHROMA LIMIT: a near-black tint must not turn the flake's
+     * thin-film rainbow into isolated RGB dots. Bleed the chromatic energy to
+     * its luminance (neutral silver mirror), keeping a specular flash not a
+     * coloured particle. */
+    float tintLuma = dot(tint, vec3(0.299, 0.587, 0.114));
+    float darkness = 1.0 - smoothstep(0.04, 0.32, tintLuma);
+    float flakeLum = dot(flake, vec3(0.299, 0.587, 0.114));
+    flake = mix(vec3(flakeLum), flake, 1.0 - 0.95 * darkness);
     bead += flake * isFlake * inBead * 0.7;
+
+    /* DARK-MATERIAL BROAD NEUTRAL MIRROR: for very dark powder the diffuse
+     * albedo contributes ~nothing, so a BROAD normal/light-controlled neutral
+     * reflection reveals the graphite-lit side vs the black shadow side — the
+     * same geometry that coloured glitter shows via its albedo. The macro
+     * normal, rig light and half-vector drive the split (not a per-grain dot). */
+    float macroSpec = pow(pow(max(dot(N, H), 0.0), 3.0), 3.0);   /* broad ~x9 cone */
+    float shadowFade = 0.12 + 0.88 * macroDiff;
+    float broadMirror = darkness * (0.10 + 0.42 * macroSpec) * shadowFade;
+    bead += vec3(broadMirror);
 
     vec3 gapPowder = tint * 0.935 * (0.76 + 0.26 * macroDiff);
     vec3 col = mix(mix(bg, gapPowder, deep), bead, inBead * present);
@@ -294,6 +312,11 @@ void main()
         vec3 tintF = cellColour(ct, fc.x, r2.y < clamp(looseF / 1.2, 0.0, 1.0));
         vec3 rb; float isF;
         vec3 lit = flakeLight(fsid, 1.0, onGlue, N, L, H, tintF, rb, isF);
+        /* dark flake chroma limit: no isolated RGB dot on near-black material */
+        float tLum = dot(tintF, vec3(0.299, 0.587, 0.114));
+        float tDark = 1.0 - smoothstep(0.04, 0.32, tLum);
+        float litLum = dot(lit, vec3(0.299, 0.587, 0.114));
+        lit = mix(vec3(litLum), lit, 1.0 - 0.95 * tDark);
         float peak = max(lit.r, max(lit.g, lit.b));
         float soft = radius * (0.18 + 0.7 * clamp(peak - 0.8, 0.0, 1.0) * (0.3 + size));
         float d2 = length(fg - c);
@@ -325,7 +348,6 @@ void main()
          * glue field provides the crisp presence even where the coarse cell
          * says no powder (glue-only cells must show the wet adhesive). */
         float gluePres = glueAt(world);
-        float support = max(max(inBead * present, deep), gluePres);
         float glueA = smoothstep(0.08, 0.5,
                                  max(glueAmtCell, gluePres)) * (1.0 - bonded)
                     * (1.0 - smoothstep(0.05, 0.6, h));
@@ -335,17 +357,27 @@ void main()
          * heap depth, then beads sit on top and wet glue glosses over. */
         vec3 mat = gapPowder * deep;
         mat = mix(mat, bead, inBead * present);
+        /* ---- WET GLUE as a CLEAR adhesive (P0, not white paint) ----
+         * Over transparent the glue must read as "clear wet glue", never a
+         * white/paper-coloured brush. We emit only:
+         *   - a near-transparent cool body (clear, very low contribution),
+         *   - a subtle darker refractive rim,
+         *   - a small WHITE specular glint from the light rig half-vector.
+         * glueCover stays LOW so the film composites transparently. */
         if (glueA > 0.001)
         {
             vec2 gGm = vec2(heightAt(world + vec2(uWorldCell, 0.0)) - heightAt(world - vec2(uWorldCell, 0.0)),
                             heightAt(world + vec2(0.0, uWorldCell)) - heightAt(world - vec2(0.0, uWorldCell)));
             vec3 Ng = normalize(vec3(-gGm * 2.2, 1.0));
             float rim = clamp(length(gGm) * 1.6, 0.0, 1.0);
-            float gloss = pow(max(dot(Ng, H), 0.0), 70.0);
-            /* translucent raised gloss, NOT paper-tinted: a clear film that
-             * stages slight specular. */
-            vec3 glueCol = vec3(0.9, 0.92, 0.95) * (0.925 - 0.12 * rim) + gloss * 0.85;
-            mat = mix(mat, glueCol, glueA);
+            /* clear body: a whisper of cool, near-neutral, low contribution */
+            vec3 clearBody = vec3(0.995, 0.997, 1.0) * (1.0 - 0.06 * rim);
+            float bodyA = 0.05 * glueA;           /* very low alpha */
+            mat = mix(mat, clearBody, min(bodyA, 0.12));
+            /* small white specular glint (highest of the clear-film alpha) */
+            float gloss = pow(max(dot(Ng, H), 0.0), 72.0);
+            float hli = 0.3 + 0.7 * max(dot(Ng, L), 0.0);
+            mat += vec3(1.0) * (gloss * hli * (0.08 + 0.17 * glueA));
         }
         /* soft contact shadow rides WITH the material (dimming it), never
          * baked onto paper. Matches the CPU material renderer, which darkens
@@ -354,8 +386,10 @@ void main()
         float shadowCap = clamp(shadow, 0.0, 0.5);
         mat = mat * (1.0 - 0.55 * shadowCap);
 
-        float a = clamp(support, 0.0, 1.0)
-                + 0.5 * smoothstep(0.08, 0.3, glueA);
+/* coverage alpha: real powder is opaque-supportive; a glue-only (clear
+         * adhesive) film stays TRANSPARENT (low alpha, never a white paint fill). */
+        float a = clamp(max(inBead * present, deep), 0.0, 1.0)
+                + (0.06 + 0.16 * smoothstep(0.15, 0.85, glueA)) * gluePres;
         a = min(a, 1.0);
 
         /* no pure-black material: this palette has no black colour, so a
