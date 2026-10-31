@@ -37,6 +37,29 @@ static int s_pass = 0;
          if (ok) ++s_pass; \
          std::printf("  [%s] %s\n", ok ? "PASS" : "FAIL", name); } while (0)
 
+/* Run a Blow using the EXACT GUI controller lifecycle (P0 #3): the real
+ * PaintbrushCanvasItem::stepPowderBlow finish predicate, not a hand-picked
+ * blowStep() count. Steps at ~60 Hz and stops when the loose bed has settled
+ * AND no airborne flake is still in flight (flakes keep landing/off-paging),
+ * or after a generous safety cap. Mirrors the controller so the harness proves
+ * the same operation the GUI runs. */
+static void runBlowLifecycle(GlitterPowder &g)
+{
+    g.beginBlow();
+    float age = 0.0f;
+    const float dt = 1.0f / 60.0f;
+    while (age <= 12.0f)
+    {
+        const int moved = g.blowStep(dt);
+        age += dt;
+        const bool bedSettled = age > 3.5f || (moved == 0 && age > 0.8f);
+        const bool airborne = g.hasActiveParticles();
+        if ((bedSettled && !airborne) || age > 12.0f)
+            break;
+    }
+    g.endBlow();
+}
+
 static bool imgEqual(const QImage &a, const QImage &b, int tol = 0)
 {
     if (a.size() != b.size())
@@ -153,7 +176,6 @@ int main(int argc, char **argv)
     GlitterPowder g = makeHeap(pal);
     CHECK("pour deposits mass (> 0 loose)", g.looseMass() > 0.0f);
     const int bondedBefore = g.bondedCount();
-    const int looseBefore = g.looseCount();
     /* paint wet glue over the heap, then absorb bonds the loose layer */
     g.paintGlue(g.cellW() / 2.0f * 4.0f, g.cellH() / 2.0f * 4.0f, 120.0f, 1.0f);
     g.absorb();
@@ -175,14 +197,13 @@ int main(int argc, char **argv)
         for (int i = 0; i < 5; ++i)
             bg.pourGlitter(wc + (i - 2) * 7.0f, wc + (i - 2) * 5.0f, 20.0f + i, bp);
         const float bgLoose = bg.looseMass();
-        bg.beginBlow();
-        int total = 0;
-        for (int i = 0; i < 360; ++i)          /* a continuous ~6 s breath at 60 Hz */
-            total += bg.blowStep(1.0f / 60.0f);
-        std::printf("    [dbg] blow total moves=%d loose %.2f -> %.2f\n",
-                    total, bgLoose, bg.looseMass());
-        CHECK("blow moves loose powder", total > 0);
+        runBlowLifecycle(bg);
+        std::printf("    [dbg] blow total (lifecycle) loose %.2f -> %.2f airborneAfter=%d\n",
+                    bgLoose, bg.looseMass(), bg.hasActiveParticles());
+        CHECK("blow moves loose powder", bgLoose > 0.0f && bg.looseMass() < bgLoose);
         CHECK("blow clears loose", bg.looseMass() < bgLoose * 0.35f);
+        CHECK("blow leaves no airborne flakes at settle",
+              !bg.hasActiveParticles());
     }
 
     /* ---- Blow A/B physics gate (P0): glued glitter survives, bare does not ---
@@ -224,18 +245,19 @@ int main(int argc, char **argv)
                     A_loose0, A_stuck0, B_loose0, B_stuck0);
         CHECK("blow A/B: before blow A and B carry ~equal loose glitter",
               B_loose0 > 0 && std::fabs(A_loose0 - B_loose0) < B_loose0 * 0.25);
-        /* the SAME breath on both (identical duration, ~5 s) */
-        A.beginBlow(); B.beginBlow();
-        for (int i = 0; i < 300; ++i)
-        {
-            A.blowStep(1.0f / 60.0f);
-            B.blowStep(1.0f / 60.0f);
-        }
-        A.endBlow(); B.endBlow();
+        /* the SAME breath on both, run through the GUI's own finish lifecycle
+         * (settled loose bed AND no airborne flakes remain — P0 #3), not a
+         * hand-picked step count */
+        runBlowLifecycle(A);
+        runBlowLifecycle(B);
         const double A_loose1 = A.looseMass(), B_loose1 = B.looseMass();
         const double A_stuck1 = stuckMass(A), B_stuck1 = stuckMass(B);
         std::printf("    [blowA/B] after : A loose=%.2f stuck=%.2f | B loose=%.2f stuck=%.2f\n",
                     A_loose1, A_stuck1, B_loose1, B_stuck1);
+        /* after the breath settles NO airborne flakes are left (the canonical
+         * commit wouldn't bake transient particles — P0 #1) */
+        CHECK("blow A/B: after settle neither region has airborne flakes",
+              !A.hasActiveParticles() && !B.hasActiveParticles());
         /* bare region loses most of its loose glitter */
         CHECK("blow A/B: bare-region loose loses >= 70% (blow physically moves it)",
               B_loose0 > 0 && B_loose1 < B_loose0 * 0.30);
@@ -534,6 +556,73 @@ int main(int argc, char **argv)
         {
             CHECK("P0.12 deserialize(materialState) grid preserved", false);
         }
+    }
+
+    /* ---- End-to-end golden through the GUI lifecycle (P0 #1/#3) ----------
+     * The reviewer's required path: Glue -> Pour -> Blow (run through the exact
+     * GUI controller finish predicate, not a fixed step count) -> airborne
+     * settle -> canonical commit (serialize) -> deserialize -> re-bake the
+     * canonical raster. Asserts:
+     *   (a) the breath settles with ZERO airborne flakes — a canonical commit
+     *       never bakes transient particle mass absent from materialState
+     *   (b) mass accounting: the loose powder lifted+blown is gone from the
+     *       settled field, bonded glue mass survives
+     *   (c) canonical raster == deserialize-rendered raster (materialState is
+     *       authoritative and reproducible). */
+    {
+        /* --- build the material exactly like the GUI's Glue->Pour ->Blow */
+        GlitterPowder e2e;
+        e2e.reset(QSize(96, 96), 4.0f, 20260901u);
+        const float wc = (96 / 2.0f) * 4.0f;
+        GlitterParams e2p; e2p.amount = 1.5f; e2p.flakeSize = 0.8f;
+        e2p.color = pal.colors[0];
+        /* Glue: a wet glue disc */
+        e2e.paintGlue(wc, wc, 30.0f, 1.0f);
+        /* Pour: glitter over the glue (and slightly beyond) */
+        e2e.pourGlitter(wc, wc, 26.0f, e2p);
+        e2e.relax(); e2e.relax(); e2e.decayFlow();
+        /* bond to the glue so some powder becomes stuck */
+        e2e.absorb();
+        const double stuckBeforeBlow = ([](const GlitterPowder &g){
+            double m = 0.0; for (int i=0;i<g.cellCount();++i) m += g.powderCellAt(i).stuck; return m; })(e2e);
+        const double looseBeforeBlow = e2e.looseMass();
+        CHECK("e2e golden: glue bonds some powder before the blow",
+              stuckBeforeBlow > 0.0 && looseBeforeBlow > 0.0);
+        /* Blow through the EXACT GUI finish lifecycle, then settle */
+        runBlowLifecycle(e2e);
+        /* (a) at the canonical commit moment nothing is airborne */
+        CHECK("e2e golden: no airborne flakes at canonical commit",
+              !e2e.hasActiveParticles());
+        /* (b) mass accounting: bonding survives the blow */
+        const double stuckAfterBlow = ([](const GlitterPowder &g){
+            double m = 0.0; for (int i=0;i<g.cellCount();++i) m += g.powderCellAt(i).stuck; return m; })(e2e);
+        CHECK("e2e golden: bonded mass survives the blow (glue holds it)",
+              stuckAfterBlow > 0.0 && stuckAfterBlow >= stuckBeforeBlow * 0.60);
+        CHECK("e2e golden: loose powder was blown off (mass accounting)",
+              e2e.looseMass() < looseBeforeBlow);
+        /* (c) canonical commit: render the settled state at t=0 (this is what
+         * layer.raster would store), serialize, deserialize, re-bake and compare */
+        const QRect view(40, 40, 96, 96);
+        const QImage canonicalRaster = e2e.render(view.size(), (float)view.x(), (float)view.y(),
+                                                  1.0f, ArtLightRig(), pal, nullptr, ArtScale(), 0);
+        const QByteArray canonicalState = e2e.serialize();
+        GlitterPowder reopened2;
+        CHECK("e2e golden: canonical commit deserializes cleanly",
+              reopened2.deserialize(canonicalState));
+        CHECK("e2e golden: deserialized state is airborne-free too",
+              !reopened2.hasActiveParticles());
+        const QImage rebaked = reopened2.render(view.size(), (float)view.x(), (float)view.y(),
+                                                1.0f, ArtLightRig(), pal, nullptr, ArtScale(), 0);
+        CHECK("e2e golden: canonical raster == deserialize-rebaked raster",
+              imgEqual(canonicalRaster, rebaked, 2));
+        /* (determinism P2 #8) a SECOND reload renders identically: the RNG is
+         * persisted, so the state is fully reproducible */
+        GlitterPowder reopened3;
+        CHECK("e2e golden: second reload accepts state", reopened3.deserialize(canonicalState));
+        const QImage rebaked3 = reopened3.render(view.size(), (float)view.x(), (float)view.y(),
+                                                 1.0f, ArtLightRig(), pal, nullptr, ArtScale(), 0);
+        CHECK("e2e golden: reload is deterministic (same raster twice)",
+              imgEqual(rebaked, rebaked3, 0));
     }
 
     /* ---- P0.7 crop-invariant CPU rendering ------------------------------
@@ -852,18 +941,14 @@ int main(int argc, char **argv)
         gold.pourGlitterMain(true, pink);
         gold.relax(); gold.decayFlow();
         /* 3. Blow: loose pink over the ring either bonds or drifts off */
-        gold.beginBlow();
-        for (int i = 0; i < 220; ++i) gold.blowStep(1.0f / 60.0f);
-        gold.endBlow();
+        runBlowLifecycle(gold);
         /* 4. second (inner) glue ring */
         paintGlueRing(wc, wc, ringR * 0.5f, ringW);
         /* 5. Pour blue over the inner bare glue (earlier pink is left alone) */
         gold.pourGlitterMain(true, blue);
         gold.relax(); gold.decayFlow();
         /* 6. Blow again */
-        gold.beginBlow();
-        for (int i = 0; i < 220; ++i) gold.blowStep(1.0f / 60.0f);
-        gold.endBlow();
+        runBlowLifecycle(gold);
         /* 7. yellow + green crossing glitter (brush sprinkles, not pour) */
         gold.pourGlitter(wc + ringR * 0.5f, wc - 6.0f, 12.0f, yellow);
         gold.pourGlitter(wc - 2.0f, wc + ringR * 0.2f, 12.0f, green);
@@ -873,9 +958,7 @@ int main(int argc, char **argv)
         gold.absorb();
         gold.relax(); gold.decayFlow();
         /* 9. final Blow */
-        gold.beginBlow();
-        for (int i = 0; i < 180; ++i) gold.blowStep(1.0f / 60.0f);
-        gold.endBlow();
+        runBlowLifecycle(gold);
 
         CHECK("pour golden: material covers meaningful area (both rings+pours)",
               gold.looseMass() + gold.bondedCount() * 0.1f > 0.0f

@@ -572,6 +572,12 @@ private:
      * stroke: the breath must still commit its result atomically on finish
      * (P0.10). Cleared once the breath ends. */
     bool m_blowStandalone = false;
+    /* Eraser change-detection (P0/P1 #4): the physical eraser removes loose +
+     * bonded + glue, so an op that erased a glue-only or 100%-bonded area has
+     * zero loose mass yet still changed material. We fingerprint the affine
+     * rect before vs after the erase dabs and commit when they differ. */
+    quint64 m_eraseFingerprintBefore = 0;
+    quint64 m_eraseFingerprintAfter = 0;
 QPointF m_powderHoldPos;         /* where the pointer is being held */
 bool m_powderHoldEver = false;   /* a real drag sampled (not a pure click) */
 /* Presentation-only shimmer clock: advances with wall time DURING a stroke so

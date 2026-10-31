@@ -18,6 +18,7 @@
 #include <QtMath>
 #include <cmath>
 #include <algorithm>
+#include <cstring>
 
 namespace paintbrush {
 namespace art {
@@ -29,8 +30,8 @@ static float gSmoothstep(float e0, float e1, float x);
 /* Reference constants (glitter_engine.js). */
 static const float kRepose    = 0.42f;   /* base angle of repose (thr) */
 static const float kFloor     = 0.10f;   /* push/plow floor depth */
-static const float kClingMax  = 0.6f;    /* max powder clinging to finger */
-static const float kGlueDepth = 1.2f;    /* glue holds ~1.2 cells of powder */
+static const float kClingMax  = 6.0f;    /* max powder on the fingertip (ref CLING_MAX=6) */
+static const float kGlueDepth = 1.4f;    /* glue holds ~1.4 cells of powder (ref GLUE_DEPTH=1.4) */
 
 PowderPalette defaultPowderPalette()
 {
@@ -59,18 +60,66 @@ void GlitterPowder::reset(const QSize &cells, float worldCellSize, std::uint32_t
     /* full-resolution glue field: sub-res per cell, zeroed (P0.2) */
     const int gw = cells.width() * kGlueSubRes, gh = cells.height() * kGlueSubRes;
     m_glueField.fill(0, gw * gh);
+    m_particlesActive = false;
+    m_flakes.clear();
+    m_flakeCount = 0;
+    m_maxFlakes = 0;
+    m_carried = 0.0f;
+    m_carriedSlot = -1;
     setSeed(seed);
 }
 
 void GlitterPowder::setSeed(std::uint32_t seed)
 {
-    m_rng.seed(seed);
+    m_baseSeed = seed ? seed : 1u;
+    m_rngCounter = 0u;
+    m_rng.seed(m_baseSeed);
+}
+
+/* Deterministic stochastic draws (reviewer P2 #8). The RNG stream is keyed by
+ * {baseSeed, counter}, and the counter is persisted in serialize(), so a
+ * deserialized document continues the EXACT same random sequence as the
+ * pre-reload document — no fresh-arbitrary-seed break in reproducibility. The
+ * draws are chained through a fresh split of QRandomGenerator seeded from a
+ * hand-mixed hash so counter == n always yields the same value regardless of
+ * how many draws happened before in some earlier run. */
+namespace {
+std::uint32_t rngHash(std::uint32_t seed, std::uint64_t counter)
+{
+    std::uint64_t x = std::uint64_t(seed) ^ (counter * 0x9E3779B97F4A7C15ull);
+    x ^= x >> 30;
+    x *= 0xBF58476D1CE4E5B9ull;
+    x ^= x >> 27;
+    x *= 0x94D049BB133111EBull;
+    x ^= x >> 31;
+    return std::uint32_t(x);
+}
+} // namespace
+
+float GlitterPowder::nextFloat()
+{
+    QRandomGenerator g(rngHash(m_baseSeed, m_rngCounter++));
+    return g.generateDouble();
+}
+
+float GlitterPowder::nextFloatUnit(float hi)
+{
+    return nextFloat() * hi;
+}
+
+int GlitterPowder::nextBounded(int n)
+{
+    return int(nextFloat() * double(n));
 }
 
 void GlitterPowder::endBlow()
 {
     /* a finished breath leaves settled height/glue/colour; drop the transient
-     * per-step momentum so a later serialization captures a clean surface */
+     * per-step momentum so a later serialization captures a clean surface. The
+     * controller MUST NOT call this while airborne flakes are still in flight
+     * (hasActiveParticles() — see the P0 #1 invariant): ending the breath and
+     * persisting `materialState` while transient particle mass exists would
+     * bake a raster whose particles are not in the state. */
     m_blowTime = 0.0f;
     if (!m_outM.isEmpty()) {
         for (int i = 0; i < m_outM.size(); ++i)
@@ -78,10 +127,16 @@ void GlitterPowder::endBlow()
         for (int i = 0; i < m_mIn.size(); ++i)
             m_mIn[i] = 0.0f;
     }
+    /* the breath is over, so drop any dust still clinging to the finger */
+    m_carried = 0.0f;
+    m_carriedSlot = -1;
 }
 
 /* Physical Eraser: removes powder AND glue under a disc (never the raster
- * eraser). Matches the reference erasing by really taking material away. */
+ * eraser). Matches the reference erasing by really taking material away.
+ * Restructured into two independent passes (reviewer P1 #5): a coarse-cell
+ * physics pass (loose + bonded + glue) and a single full-res glue-field pass
+ * over the exact disc bbox, each subpixel visited once. */
 void GlitterPowder::erase(float wx, float wy, float radiusWorld, float amount)
 {
     if (radiusWorld <= 0.0f || m_cells.width() <= 0 || m_cells.height() <= 0)
@@ -90,7 +145,9 @@ void GlitterPowder::erase(float wx, float wy, float radiusWorld, float amount)
     const int rCells = int(std::ceil(radiusWorld / cell)) + 1;
     const int cxc = int(std::floor(wx / cell));
     const int cyc = int(std::floor(wy / cell));
-    float erasedMass = 0.0f;
+    const float rw2 = radiusWorld * radiusWorld * 1.44f;   /* ~1.2x soft cap */
+
+    /* PASS 1 — coarse cells in the disc (loose + bonded + glue physics). */
     for (int dy = -rCells; dy <= rCells; ++dy)
     {
         for (int dx = -rCells; dx <= rCells; ++dx)
@@ -102,14 +159,13 @@ void GlitterPowder::erase(float wx, float wy, float radiusWorld, float amount)
             const float wy0 = (cy + 0.5f) * cell;
             const float ddx = wx0 - wx, ddy = wy0 - wy;
             const float d2 = ddx * ddx + ddy * ddy;
-            if (d2 > radiusWorld * radiusWorld * 1.44f)   /* ~1.2x, soft cap */
+            if (d2 > rw2)
                 continue;
             const float fall = gSmoothstep(radiusWorld * 1.44f, 0.0f, std::sqrt(d2));
             const float a = qBound(0.0f, amount * qMax(0.0f, fall), 1.0f);
             if (a <= 0.0f)
                 continue;
             PowderCell &c = cellAt(idx(cx, cy));
-            erasedMass += c.height * a;
             c.height = qMax(0.0f, c.height * (1.0f - a));
             c.stuck = qMax(0.0f, c.stuck * (1.0f - a));
             c.glue = qMax(0.0f, c.glue * (1.0f - a * 0.9f));
@@ -120,29 +176,38 @@ void GlitterPowder::erase(float wx, float wy, float radiusWorld, float amount)
                 c.height = 0.0f; c.stuck = 0.0f; c.glue = 0.0f;
                 c.lA = c.lB = c.sA = c.sB = -1; c.lF = c.sF = 0.0f;
             }
-            /* clear the same disc in the full-res glue field (P0.2) */
-            if (c.glue <= 0.002f && !m_glueField.isEmpty())
+        }
+    }
+
+    /* PASS 2 — the same disc in the full-res glue field, each subpixel once
+     * over the exact bbox (the old code re-scanned a big region inside every
+     * coarse cell, re-clearing far too much). */
+    if (!m_glueField.isEmpty())
+    {
+        int s0 = int(std::floor((wx - radiusWorld) / cell * kGlueSubRes));
+        int s1 = int(std::ceil((wx + radiusWorld) / cell * kGlueSubRes));
+        int t0 = int(std::floor((wy - radiusWorld) / cell * kGlueSubRes));
+        int t1 = int(std::ceil((wy + radiusWorld) / cell * kGlueSubRes));
+        const int subW = m_cells.width() * kGlueSubRes, subH = m_cells.height() * kGlueSubRes;
+        s0 = std::max(0, s0); s1 = std::min(subW - 1, s1);
+        t0 = std::max(0, t0); t1 = std::min(subH - 1, t1);
+        if (s1 >= s0 && t1 >= t0)
+        {
+            for (int syy = t0; syy <= t1; ++syy)
             {
-                const int s0 = std::max(0, int((cx - rCells) * kGlueSubRes));
-                const int s1 = std::min(m_cells.width() * kGlueSubRes - 1,
-                                        int((cx + rCells + 1) * kGlueSubRes));
-                const int st0 = std::max(0, int((cy - rCells) * kGlueSubRes));
-                const int st1 = std::min(m_cells.height() * kGlueSubRes - 1,
-                                         int((cy + rCells + 1) * kGlueSubRes));
-                for (int syy = st0; syy <= st1; ++syy)
-                    for (int sxx = s0; sxx <= s1; ++sxx)
-                    {
-                        const float wxx = (sxx + 0.5f) / float(kGlueSubRes) * cell;
-                        const float wyy = (syy + 0.5f) / float(kGlueSubRes) * cell;
-                        const float ddx = wxx - wx, ddy = wyy - wy;
-                        if (ddx * ddx + ddy * ddy > radiusWorld * radiusWorld)
-                            continue;
-                        m_glueField[glueFieldIndex(sxx, syy)] = 0;
-                    }
+                const float wyy = (syy + 0.5f) / float(kGlueSubRes) * cell;
+                const int row = syy * subW;
+                for (int sxx = s0; sxx <= s1; ++sxx)
+                {
+                    const float wxx = (sxx + 0.5f) / float(kGlueSubRes) * cell;
+                    const float ddx = wxx - wx, ddy = wyy - wy;
+                    if (ddx * ddx + ddy * ddy > radiusWorld * radiusWorld)
+                        continue;
+                    m_glueField[row + sxx] = 0;
+                }
             }
         }
     }
-    (void)erasedMass;
     if (m_activeCells.isValid())
         m_activeCells = m_activeCells.intersected(QRect(0, 0, m_cells.width() - 1, m_cells.height() - 1));
 }
@@ -165,18 +230,19 @@ QByteArray GlitterPowder::serialize() const
     QDataStream ds(&out, QIODevice::WriteOnly);
     ds.setVersion(QDataStream::Qt_6_0);
     ds << quint32(0x474C5450u)   /* "GLTP" */
-       << quint32(2u)            /* version 2 = adds full-res glue field (P0.2) */
+       << quint32(3u)            /* version 3 = persists deterministic RNG state
+                                    (baseSeed + counter) — reviewer P2 #8 */
        << quint32(m_cells.width()) << quint32(m_cells.height())
        << float(m_worldCellSize)
        << quint32(m_palette.size());
     for (const QColor &c : m_palette)
         ds << float(c.redF()) << float(c.greenF()) << float(c.blueF());
-    /* persist a deterministic PRNG seed (the engine's live `m_rng` is not
-     * readable from a const method; a fresh deterministic pump on load keeps
-     * the sim's own later pours stable). */
-    const quint32 seed = quint32(qint64(m_cells.width()) * 1299709u
-                                 ^ qint64(m_cells.height()) * 104729u);
-    ds << seed
+    /* persist the deterministic PRNG stream: {baseSeed, counter}. On reload the
+     * engine reseeds from {baseSeed, counter} so a reloaded document continues
+     * the EXACT same stochastic sequence as the pre-reload one — reloading does
+     * not change the random sequence a later Pour/Push/Blow produces (the
+     * deterministic persisted-material model; reviewer P2 #8). */
+    ds << quint32(m_baseSeed) << quint64(m_rngCounter)
        << (m_activeCells.isValid() ? quint32(1u) : quint32(0u));
     if (m_activeCells.isValid())
         ds << qint32(m_activeCells.x()) << qint32(m_activeCells.y())
@@ -214,7 +280,7 @@ bool GlitterPowder::deserialize(const QByteArray &bytes)
     quint32 palN;
     ds >> magic >> ver >> w >> h >> worldCell >> palN;
     if (ds.status() != QDataStream::Ok || magic != 0x474C5450u
-        || (ver != 1u && ver != 2u))
+        || (ver != 1u && ver != 2u && ver != 3u))
         return false;
     if (w == 0 || h == 0 || w > 65536u || h > 65536u)
         return false;
@@ -231,7 +297,22 @@ bool GlitterPowder::deserialize(const QByteArray &bytes)
         pal.append(QColor::fromRgbF(qBound(0.0, r, 1.0), qBound(0.0, g, 1.0), qBound(0.0, b, 1.0)));
     }
     quint32 seed, hasActive;
-    ds >> seed >> hasActive;
+    quint64 rngCounter = 0u;
+    if (ver >= 3u)
+    {
+        /* v3: {baseSeed, counter} so the reload continues the exact attached
+         * RNG stream (reviewer P2 #8). */
+        ds >> seed >> rngCounter >> hasActive;
+        if (seed == 0u) seed = 1u;
+    }
+    else
+    {
+        /* v1/v2: a single legacy seed (derived from the grid); the old loader
+         * started a fresh deterministic stream from it. Map it to baseSeed so
+         * legacy state continues to play deterministically from {seed, 0}.*/
+        ds >> seed >> hasActive;
+        rngCounter = 0u;
+    }
     QRect active;
     if (hasActive)
     {
@@ -243,7 +324,9 @@ bool GlitterPowder::deserialize(const QByteArray &bytes)
     m_cells = QSize(int(w), int(h));
     m_worldCellSize = worldCell;
     m_palette = pal;
-    m_rng.seed(seed);
+    m_baseSeed = seed > 0u ? seed : 1u;
+    m_rngCounter = rngCounter;
+    m_rng.seed(m_baseSeed);
     m_cellsData.resize(int(w) * int(h));
     for (int i = 0; i < m_cellsData.size(); ++i)
     {
@@ -292,8 +375,15 @@ bool GlitterPowder::deserialize(const QByteArray &bytes)
     m_dh.clear(); m_outM.clear(); m_mIn.clear(); m_pX.clear(); m_pY.clear();
     m_inA.clear(); m_inB.clear(); m_inF.clear();
     m_blowTime = 0.0f;
+    /* airborne flakes are transient and never serialized (the canonical
+     * materialState holds only the settled field) — clear the fleet + count so
+     * a reload starts with nothing in the air */
     m_particlesActive = false;
     m_flakes.clear();
+    m_flakeCount = 0;
+    m_maxFlakes = 0;
+    m_carried = 0.0f;
+    m_carriedSlot = -1;
     return true;
 }
 
@@ -365,8 +455,14 @@ static void reduceFourSlots(int &A, int &B, float &F, const MixSlot w[4])
 
 /* Colour mix for the blow "incoming colour" lane (reference iA/iB/iF): merge a
  * moving powder's two-slot colour into a running target accumulation. Keeps the
- * two dominant slots, sharing a third between them (same reduction as mixInto). */
-static void combineSlots(int &A, int &B, float &F, int a2, int b2, float f2, float m2)
+ * two dominant slots, sharing a third between them (same reduction as mixInto).
+ * `oldMass` is the mass ALREADY accumulated in the target incoming lane before
+ * this contribution — it weights the existing A/B the way upstream's
+ * mixInto(iA,iB,iF,j,mIn[j],...,m2) does (m1 = mIn[j], m2 = the new weight), so
+ * the colour ratios reflect the REAL accumulated incoming masses in arrival
+ * order, not a bogus fixed 1.0 on the incumbent (reviewer P1 #7). */
+static void combineSlots(int &A, int &B, float &F, int a2, int b2, float f2,
+                         float oldMass, float m2)
 {
     if (m2 <= 0.0f || a2 < 0)
         return;
@@ -376,8 +472,8 @@ static void combineSlots(int &A, int &B, float &F, int a2, int b2, float f2, flo
         return;
     }
     const MixSlot w[4] = {
-        { A, 1.0f * (1.0f - F) },
-        { B, B < 0 ? 0.0f : 1.0f * F },
+        { A, std::max(0.0f, oldMass) * (1.0f - F) },
+        { B, B < 0 ? 0.0f : std::max(0.0f, oldMass) * F },
         { a2, m2 * (1.0f - f2) },
         { b2, b2 < 0 ? 0.0f : m2 * f2 },
     };
@@ -402,6 +498,10 @@ void GlitterPowder::paintGlue(float wx, float wy, float radiusWorld, float cover
     const int y0 = std::max(0, int(std::floor(cy - R)));
     const int y1 = std::min(m_cells.height() - 1, int(std::ceil(cy + R)));
     const float R2 = R * R;
+
+    /* PASS 1 — coarse-cell physics mask: update only the coarse `glue` field
+     * (the adhesion approximation the physics reads), once per cell. */
+    const QRect coarseRect(x0, y0, x1 - x0 + 1, y1 - y0 + 1);
     for (int y = y0; y <= y1; ++y)
         for (int x = x0; x <= x1; ++x)
         {
@@ -414,38 +514,51 @@ void GlitterPowder::paintGlue(float wx, float wy, float radiusWorld, float cover
                 c.glue = std::max(0.0f, c.glue - g);
             else
                 c.glue = std::min(1.0f, c.glue + g * coverage);
+        }
 
-            /* P0.2: write the SAME disc into the full-resolution glue field at
-             * sub-res so the render gets a crisp edge (not upscaled cells). */
-            const int s0 = std::max(0, int((x - R) * kGlueSubRes));
-            const int s1 = std::min(m_cells.width() * kGlueSubRes - 1,
-                                    int((x + 1 + R) * kGlueSubRes));
-            const int st0 = std::max(0, int((y - R) * kGlueSubRes));
-            const int st1 = std::min(m_cells.height() * kGlueSubRes - 1,
-                                     int((y + 1 + R) * kGlueSubRes));
-            for (int syy = st0; syy <= st1; ++syy)
+    /* PASS 2 — full-resolution glue field over the EXACT subpixel bounding box
+     * [wx-r, wx+r] × [wy-r, wy+r]. Each sub-res sample is visited exactly once
+     * per dab (the old code re-scanned a big region for EVERY coarse cell,
+     * re-applying coverage to the same subpixel many times and saturating it
+     * to 255). */
+    if (!m_glueField.isEmpty())
+    {
+        int s0 = int(std::floor((wx - radiusWorld) / cell * kGlueSubRes));
+        int s1 = int(std::ceil((wx + radiusWorld) / cell * kGlueSubRes));
+        int t0 = int(std::floor((wy - radiusWorld) / cell * kGlueSubRes));
+        int t1 = int(std::ceil((wy + radiusWorld) / cell * kGlueSubRes));
+        const int subW = m_cells.width() * kGlueSubRes, subH = m_cells.height() * kGlueSubRes;
+        s0 = std::max(0, s0); s1 = std::min(subW - 1, s1);
+        t0 = std::max(0, t0); t1 = std::min(subH - 1, t1);
+        const float rw2 = radiusWorld * radiusWorld;
+        if (s1 >= s0 && t1 >= t0)
+        {
+            for (int syy = t0; syy <= t1; ++syy)
+            {
+                const float wyy = (syy + 0.5f) / float(kGlueSubRes) * cell;
+                const int row = syy * subW;
                 for (int sxx = s0; sxx <= s1; ++sxx)
                 {
-                    /* sub-res world position */
                     const float wxx = (sxx + 0.5f) / float(kGlueSubRes) * cell;
-                    const float wyy = (syy + 0.5f) / float(kGlueSubRes) * cell;
                     const float ddx = wxx - wx, ddy = wyy - wy;
                     const float dd2 = ddx * ddx + ddy * ddy;
-                    if (dd2 > radiusWorld * radiusWorld)
+                    if (dd2 > rw2)
                         continue;
                     const float g1 = 1.0f - std::min(1.0f, std::sqrt(dd2) / radiusWorld);
-                    quint8 &fv = m_glueField[glueFieldIndex(sxx, syy)];
+                    quint8 &fv = m_glueField[row + sxx];
                     const int cur = fv;
                     if (coverage < 0)
                         fv = quint8(std::max(0, cur - int(g1 * 255)));
                     else
                         fv = quint8(std::min(255, cur + int(g1 * coverage * 255)));
                 }
+            }
         }
+    }
+
     if (coverage > 0)
     {
-        m_activeCells = m_activeCells.united(
-            QRect(x0, y0, x1 - x0 + 1, y1 - y0 + 1));
+        m_activeCells = m_activeCells.isNull() ? coarseRect : m_activeCells.united(coarseRect);
         /* P0: painting POSITIVE glue must have physical impact IMMEDIATELY. Glue
          * drawn beneath existing loose glitter bonds it right away, so a user
          * who glues over already-deposited powder catches it without waiting for
@@ -453,7 +566,7 @@ void GlitterPowder::paintGlue(float wx, float wy, float radiusWorld, float cover
          * The intended workflow (Glue -> Glitter/Pour -> absorb -> Blow ->
          * bonded survives) is unchanged; this makes Glue's adhesion real, not
          * just a visible film. */
-        absorb(QRect(x0, y0, x1 - x0 + 1, y1 - y0 + 1));
+        absorb(coarseRect);
     }
 }
 
@@ -550,7 +663,35 @@ int GlitterPowder::ensurePowderPaletteSlot(const QColor &color)
         m_palette.append(color);
         return m_palette.size() - 1;
     }
-    /* palette full: reuse the nearest existing colour */
+    /* palette full: reuse the nearest existing colour, but FIRST free any slot
+     * whose colour is no longer anywhere on the paper (or in the air) — the
+     * reference's freeSlots(). After 16 historically-used colours, a genuinely
+     * gone colour's slot is reusable instead of permanently quantizing new
+     * colours to the nearest survivor. */
+    {
+        QVector<bool> used(m_palette.size(), false);
+        for (const PowderCell &c : m_cellsData)
+        {
+            if (c.lA >= 0 && c.lA < m_palette.size()) used[c.lA] = true;
+            if (c.lB >= 0 && c.lB < m_palette.size()) used[c.lB] = true;
+            if (c.sA >= 0 && c.sA < m_palette.size()) used[c.sA] = true;
+            if (c.sB >= 0 && c.sB < m_palette.size()) used[c.sB] = true;
+        }
+        for (const AirborneFlake &f : m_flakes)
+            if (f.active && f.slot >= 0 && f.slot < m_palette.size())
+                used[f.slot] = true;
+        if (m_carried > 0.0f && m_carriedSlot >= 0 && m_carriedSlot < m_palette.size())
+            used[m_carriedSlot] = true;
+        for (int i = 0; i < used.size(); ++i)
+        {
+            if (!used[i])
+            {
+                m_palette[i] = color;
+                return i;
+            }
+        }
+    }
+    /* truly nothing free: reuse the nearest existing colour */
     int best = 0;
     float bestD = 1e30f;
     for (int i = 0; i < m_palette.size(); ++i)
@@ -599,7 +740,7 @@ void GlitterPowder::pourHeap(int slot, float cx, float cy, float rCells,
                              float rag, float lumps, float dust)
 {
     const float r = qMax(0.5f, rCells);
-    const float seedOff = m_rng.generateDouble() * 100.0f;
+    const float seedOff = nextFloat() * 100.0f;
     const float sx = 1.08f * std::pow(2.0f, stretch * 0.8f);
     const float sy = 0.85f * std::pow(2.0f, -stretch * 0.8f);
     const float ext = r * 2.4f * std::max(sx, sy);
@@ -748,8 +889,22 @@ void GlitterPowder::pourGlitterMain(bool fit, const GlitterParams &p)
              lumps, dust);
 }
 
+void GlitterPowder::beginPushGesture()
+{
+    /* a fresh decade: nothing clings to the finger yet (reference plow starts
+     * each stroke with carried = 0) */
+    m_carried = 0.0f;
+    m_carriedSlot = -1;
+}
+
+void GlitterPowder::endPushGesture()
+{
+    m_carried = 0.0f;
+    m_carriedSlot = -1;
+}
+
 void GlitterPowder::smear(float wx, float wy, float fx, float fy,
-                          float radiusWorld, float carried)
+                          float radiusWorld, float /*carried*/)
 {
     const float cell = m_worldCellSize;
     const float cx = wx / cell, cy = wy / cell;
@@ -786,25 +941,39 @@ void GlitterPowder::smear(float wx, float wy, float fx, float fy,
              * +inf after a few relaxes, which NaN's the shader's hash lookups
              * and renders the material a solid black band. */
             c.seed = std::fmod(c.seed + 1.0f, 1024.0f);
-            const float cling = std::min(take * 0.15f, std::max(0.0f, kClingMax - carried));
-            carried += cling;   /* a little sticks to the finger */
+            /* persistent finger-carry across the whole Push gesture (ref):
+             * a little clings to the finger, capped at CLING_MAX = 6. The
+             * colour of what clings is picked from the cell it left. */
+            const float cling = std::min(take * 0.15f, std::max(0.0f, kClingMax - m_carried));
+            if (cling > 0.0f && (m_carried < 0.05f
+                                 || nextFloat() < cling / (m_carried + cling)))
+                m_carriedSlot = (c.lB >= 0 && nextFloat() < c.lF) ? c.lB : c.lA;
+            m_carried += cling;   /* a little sticks to the finger */
             const float pushed = take - cling;
-            float ux = (d ? ox / d : m_rng.generateDouble() - 0.5f) + fx * 1.2f;
-            float uy = (d ? oy / d : m_rng.generateDouble() - 0.5f) + fy * 1.2f;
+            float ux = (d ? ox / d : nextFloat() - 0.5f) + fx * 1.2f;
+            float uy = (d ? oy / d : nextFloat() - 0.5f) + fy * 1.2f;
             const float ul = std::hypot(ux, uy);
             ux /= ul; uy /= ul;
-            const float reach = R + 0.8f + m_rng.generateDouble() * 1.5f;
+            const float reach = R + 0.8f + nextFloat() * 1.5f;
             const float tx = cx + ux * reach, ty = cy + uy * reach;
-            /* splat the pushed powder where it lands (2x2 bilinear) */
-            const int j = clampCell(tx - 0.5f, ty - 0.5f);
-            (void)j;
+            /* splat the pushed powder where it lands (reference bilinear) */
             addLoose(clampCell(tx, ty), pushed, c.lA, c.lB, c.lF);
         }
-    /* shed a little cling behind the finger (a dusty trail) */
-    const float shed = carried * 0.04f;
-    const int shedAt = clampCell(cx - fx * R * 0.7f, cy - fy * R * 0.7f);
-    PowderCell &s = cellAt(shedAt);
-    s.height += shed;
+    /* the finger sheds a little of what clings to it, leaving a dusty trail
+     * behind it (reference shed = carried*0.04, 3 specks of shed/3 around the
+     * back of the finger) */
+    const float shed = m_carried * 0.04f;
+    m_carried -= shed;
+    for (int k = 0; k < 3; ++k)
+    {
+        const float a = nextFloat() * 6.2831853f * 2.0f, rr = nextFloat() * R * 0.8f;
+        const float bx = cx - fx * R * 0.7f + std::cos(a) * rr;
+        const float by = cy - fy * R * 0.7f + std::sin(a) * rr;
+        const float sm = shed / 3.0f;
+        if (sm > 1e-4f && m_carriedSlot >= 0)
+            addLoose(clampCell(bx, by), sm, m_carriedSlot, -1, 0.0f);
+    }
+    (void)shed;
 }
 
 void GlitterPowder::absorb(const QRect &cellRect, float rate)
@@ -1018,7 +1187,7 @@ void GlitterPowder::hydrateFromRaster(const QImage &layer, float worldPerPx)
             cellc.sA = -1; cellc.sB = -1; cellc.sF = 0.0f;
             cellc.vx = cellc.vy = 0.0f;
             cellc.flow = 0.0f;
-            cellc.seed = m_rng.generateDouble() * 1024.0f;
+            cellc.seed = nextFloat() * 1024.0f;
         }
     /* hydration rebuilds the whole field, so the active region is exactly the
      * rect that actually held powder (empty field -> nothing to sweep) */
@@ -1062,6 +1231,10 @@ int GlitterPowder::blowStep(float dtSec)
     if (gusts < 0) gusts = 0.0f;
     const float gust = 1.2f * ramp * std::max(0.0f, lungs * gusts + puff * ramp);
     const bool windOn = gust > 0.01f;
+    /* publish the wind geometry so in-flight flakes (stepParticles) are pushed
+     * with the same cone/gust as the bed advection */
+    m_windMx = mx; m_windMy = my; m_windD0 = d0;
+    m_windGust = gust; m_windAim = aim; m_windCA = ca; m_windSA = sa;
 
     /* -- per-step buffers ------------------------------------------------ */
     /* Sweep regions (cell coords), scoped to where powder actually lives:
@@ -1165,9 +1338,9 @@ const float spd = 1.0f;
                                      + (0.1f + 0.01f * loose) * f * k + 0.02f * sp * k);
             if (m < 1e-4f) continue;
             const float ux = c.vx / sp, uy = c.vy / sp, step = sp * k;
-            const float lat = (m_rng.generateDouble() - 0.5f) * (0.6f + 0.35f * step);
-            const float tx = (x + 0.5f) + ux * step - uy * lat + (m_rng.generateDouble() - 0.5f) * 0.6f;
-            const float ty = (y + 0.5f) + uy * step + ux * lat + (m_rng.generateDouble() - 0.5f) * 0.6f;
+            const float lat = (nextFloat() - 0.5f) * (0.6f + 0.35f * step);
+            const float tx = (x + 0.5f) + ux * step - uy * lat + (nextFloat() - 0.5f) * 0.6f;
+            const float ty = (y + 0.5f) + uy * step + ux * lat + (nextFloat() - 0.5f) * 0.6f;
             m_dh[i] -= m; m_outM[i] += m;
             const float sx = tx - 0.5f, sy = ty - 0.5f;
             const int xi = int(std::floor(sx)), yi = int(std::floor(sy));
@@ -1184,27 +1357,33 @@ const float spd = 1.0f;
                 {
                     const int t = targets[q];
                     const float w = wgt[q] * m;
-                    m_dh[t] += w; m_mIn[t] += w;
+                    m_dh[t] += w;
                     m_pX[t] += w * c.vx; m_pY[t] += w * c.vy;
-                    /* carry the source colour along (reference mixInto into iA/iB/iF) */
-                    combineSlots(m_inA[t], m_inB[t], m_inF[t], c.lA, c.lB, c.lF, w);
+                    /* carry the source colour along (reference mixInto into
+                     * iA/iB/iF): pass the PRE-increment accumulated mass so
+                     * the existing incoming lane is weighted by its real mass,
+                     * then add this contribution (reviewer P1 #7). */
+                    combineSlots(m_inA[t], m_inB[t], m_inF[t],
+                                 c.lA, c.lB, c.lF, m_mIn[t], w);
+                    m_mIn[t] += w;
                 }
             }
             c.seed = std::fmod(c.seed + 1.0f, 1024.0f);
             /* a few flat flakes catch the air and lift off the bed; the lifted
              * mass becomes an airborne particle that arcs and falls, carrying
-             * its colour, instead of just vanishing from the heightfield */
-            if (f > 0 && m > 0.01f && m_rng.generateDouble() < f * f * 0.12f * k)
+             * its colour and mass, and splats back into the bed on landing
+             * (reviewer P0 #1/#2); uses the deterministic RNG */
+            if (f > 0 && m > 0.01f && nextFloat() < f * f * 0.12f * k)
             {
                 const float lift = std::min(m * 0.5f, 0.05f);
                 m_dh[i] -= lift; m_outM[i] += lift;
                 if (m_particlesActive)
                 {
-                    const float psp = (40.0f + 110.0f * f * m_rng.generateDouble()) * spd;
+                    const float psp = (40.0f + 110.0f * f * nextFloat()) * spd;
                     const float spM = std::hypot(c.vx, c.vy) || 1.0f;
                     spawnFlake(x + 0.5f, y + 0.5f,
                                c.vx / spM, c.vy / spM, psp,
-                               4.0f + 14.0f * m_rng.generateDouble(),
+                               4.0f + 14.0f * nextFloat(),  /* vertical launch vz */
                                lift, c.lA >= 0 ? c.lA : 0);
                 }
             }
@@ -1264,56 +1443,149 @@ void GlitterPowder::ensureParticlePool()
     {
         m_maxFlakes = 1600;                 /* bounded fleet like the reference */
         m_flakes.fill(AirborneFlake(), m_maxFlakes);
+        m_flakeCount = 0;
     }
 }
 
-void GlitterPowder::spawnFlake(float wx, float wy, float ux, float uy,
-                               float speed, float size, float mass,
-                               int slot)
+/* Spawn one airborne flake (reference `spawn`): a flat flake kicked up or
+ * lifted by the breath, carrying its own MASS and colour slot. Physics is in
+ * cell coordinates (reference), converted to world/device only in the renderer.
+ *   wx,wy   cell position of the bed cell it lifts from
+ *   hx,hy   horizontal launch direction (unit)
+ *   hSpeed  horizontal launch speed (cell/s; the breath's `psp`)
+ *   vz      VERTICAL launch velocity in cell/s — the reference passes
+ *           `4 + 14*random` HERE (the reviewer's exact argument-mapping bug:
+ *           NAI used to put it in `size`). -vz pulls it back down to a
+ *           terminal fall `vt` (they float).
+ *   mass    the powder mass carried (reference stores it and splats it back on
+ *           landing — must NOT be Q_UNUSED)
+ *   slot    the palette slot its colour came from */
+void GlitterPowder::spawnFlake(float wx, float wy, float hx, float hy,
+                               float hSpeed, float vz, float mass, int slot)
 {
     ensureParticlePool();
-    /* find a free slot; if the fleet is full, recycle the oldest */
-    int pick = -1;
-    for (int i = 0; i < m_maxFlakes; ++i)
-        if (!m_flakes[i].active) { pick = i; break; }
-    if (pick < 0)
-        pick = int(m_rng.bounded(m_maxFlakes));
+    /* Compact pool: flakes live in [0, m_flakeCount) so stepParticles iterates
+     * exactly the active ones. Append at the end; if the fleet is full, recycle
+     * the oldest (index 0). */
+    int pick = m_flakeCount;
+    if (pick >= m_maxFlakes)
+    {
+        pick = 0;
+        m_flakes[pick].active = false;   /* overshadow the oldest */
+    }
+    else
+    {
+        ++m_flakeCount;
+    }
     AirborneFlake &f = m_flakes[pick];
-    f.x = wx * m_worldCellSize;   /* cell-space -> world units */
-    f.y = wy * m_worldCellSize;
-    f.z = 0.0f;
-    /* world-units velocity: cell speed -> world */
-    f.vx = ux * speed * m_worldCellSize * 0.05f;
-    f.vy = uy * speed * m_worldCellSize * 0.05f;
-    f.vz = (2.0f + 4.0f * m_rng.generateDouble()) * m_worldCellSize;   /* upward kick */
-    f.rot = m_rng.generateDouble() * 6.2831f;
-    f.spin = (m_rng.generateDouble() - 0.5f) * 12.0f;
-    f.size = size;
-    f.life = 0.6f + 0.6f * m_rng.generateDouble();   /* ~1.2 s arc */
-    f.slot = slot;
     f.active = true;
-    Q_UNUSED(mass);
+    /* physics in CELL coordinates; the renderer scales to device px */
+    f.x = wx; f.y = wy; f.z = 0.5f;
+    f.vx = hx * hSpeed; f.vy = hy * hSpeed; f.vz = vz;          /* cell/s */
+    f.mass = mass> 0.0f ? mass : 0.0f;                          /* carried mass */
+    f.slot = slot;
+    /* mirror spin (reference): axis + signed rotation rate */
+    f.axis = nextFloat() * 6.2831853f;
+    f.rate = (nextFloat() < 0.5f ? -1.0f : 1.0f) * (3.0f + nextFloat() * 12.0f);
+    f.spin = f.axis;
+    /* thin-film cycle seed + visual size (independent of vz — the reference
+     * generates size separately from the launch velocity) */
+    f.film = 250.0f + nextFloat() * 350.0f;
+    f.size = (1.6f + 3.4f * nextFloat() * nextFloat());          /* 1.6..5 */
+    /* slow terminal fall: they float */
+    f.vt = 5.0f + nextFloat() * 9.0f;
+    /* flutter (horizontal drift wobble) */
+    f.flutter = 3.0f + nextFloat() * 6.0f;
+    f.phase = nextFloat() * 100.0f;
 }
 
+/* Airborne flakes catch the air like sails: they drift, flutter and tumble
+ * (twinkling) and settle back into the powder. Reference `stepParticles`:
+ *   - horizontal drag (exp(-4 dt))
+ *   - vertical: vz accelerates toward a TERMINAL fall -vt (gravity 60*dt),
+ *     so up-casts arc and fall
+ *   - flutter: sinusoids driven by sim time + a per-flake phase, weighted by
+ *     whether it's falling
+ *   - the wind field (from the current blowStep's geometry) pushes them while
+ *     the gust is strong
+ *   - when z crosses the bed inside the grid, the flake SPLATS its mass back
+ *     into the heightfield (its colour returns to the paper) instead of
+ *     silently disappearing (reviewer P0 #2); off-page flakes are gone */
 void GlitterPowder::stepParticles(float dtSec)
 {
-    for (AirborneFlake &f : m_flakes)
+    const int W = m_cells.width();
+    const float t = m_blowTime;
+    const float drag = std::exp(-4.0f * dtSec);
+    const bool windOn = m_windGust > 0.03f;
+    const float windCA = m_windCA, windSA = m_windSA;
+
+    int n = 0;
+    while (n < m_flakeCount)
     {
-        if (!f.active)
-            continue;
-        f.life -= dtSec;
-        if (f.life <= 0.0f) { f.active = false; continue; }
-        /* shallow gravitation pulls the flake back down; a little drag */
-        f.vz -= 9.0f * m_worldCellSize * dtSec;
-        const float drag = 1.0f - std::min(1.0f, 1.2f * dtSec);
+        AirborneFlake &f = m_flakes[n];
         f.vx *= drag; f.vy *= drag;
-        f.x += f.vx * dtSec;
-        f.y += f.vy * dtSec;
-        f.z = std::max(0.0f, f.z + f.vz * dtSec);
-        f.rot += f.spin * dtSec;
-        /* landed back on the bed / fell out of the world: retire */
-        if (f.z <= 0.0f && f.life < 0.8f) { f.active = false; }
+        /* rising then falling toward a terminal fall speed (they float) */
+        f.vz = std::max(f.vz - 60.0f * dtSec, -f.vt);
+        const float falling = f.vz < 0.0f ? 1.0f : 0.3f;
+        /* turbulence (hash noise on sim position + time) + per-flake flutter */
+        const float wF = 6.0f * (vnoise(m_rng, f.x * 0.02f, t * 0.2f) - 0.5f);
+        const float wY = 6.0f * (vnoise(m_rng, f.y * 0.02f + 40.0f, t * 0.2f) - 0.5f);
+        const float fa = std::sin(t * 4.0f + f.phase) * f.flutter * falling;
+        const float fb = std::cos(t * 3.1f + f.phase * 1.7f) * f.flutter * falling;
+        if (windOn)
+        {
+            /* wind cone at the flake (same geometry as blowStep) */
+            const float rx = f.x - m_windMx, ry = f.y - m_windMy;
+            const float d = std::hypot(rx, ry);
+            const float ad = d > 1e-6f ? std::atan2(ry, rx) : 0.0f;
+            float off = ad - m_windAim;
+            off = std::atan2(std::sin(off), std::cos(off));
+            const float conef = std::exp(-(off / 0.5f) * (off / 0.5f));
+            const float fallf = 0.7f + 0.3f / (1.0f + std::max(0.0f, d - m_windD0) / (0.8f * W));
+            const float drift = t * 55.0f;
+            const float ex = f.x - windCA * drift, ey = f.y - windSA * drift;
+            const float turb = 0.4f + 1.2f * vnoise(m_rng, ex * 0.035f, ey * 0.035f + 5.0f);
+            const float push = 170.0f * m_windGust * conef * fallf * turb;
+            const float fa2 = std::cos(ad), fsa = std::sin(ad);
+            f.vx += fa2 * push * dtSec; f.vy += fsa * push * dtSec;
+        }
+        f.x += (f.vx + wF + fa) * dtSec;
+        f.y += (f.vy + wY + fb) * dtSec;
+        f.z += f.vz * dtSec;
+        f.spin += f.rate * dtSec;
+        const bool gone = f.x < -10.0f || f.y < -10.0f || f.x > W + 10.0f || f.y > m_cells.height() + 10.0f;
+        const bool inside = f.x >= 1.0f && f.y >= 1.0f && f.x < W - 2.0f && f.y < m_cells.height() - 2.0f;
+        if (f.z <= 0.0f || gone)
+        {
+            if (f.z <= 0.0f && inside)
+                splat(f.x, f.y, f.mass, f.slot);   /* return the mass to the bed */
+            const int last = --m_flakeCount;
+            m_flakes[n] = m_flakes[last];
+            m_flakes[last].active = false;
+            continue;                              /* don't advance n for the swap */
+        }
+        ++n;
     }
+}
+
+/* Reference splat(): deposit loose powder mass bilinearly at a world-cell
+ * position, in the flake's palette slot (used when an airborne flake lands). */
+void GlitterPowder::splat(float x, float y, float m, int slot)
+{
+    if (m <= 0.0f || slot < 0)
+        return;
+    const int W = m_cells.width();
+    const float sxx = x - 0.5f, syy = y - 0.5f;
+    const int xi = int(std::floor(sxx)), yi = int(std::floor(syy));
+    if (xi < 1 || yi < 1 || xi >= m_cells.width() - 2 || yi >= m_cells.height() - 2)
+        return;
+    const float fx = sxx - xi, fy = syy - yi;
+    const int i = yi * W + xi;
+    addLoose(i,     m * (1 - fx) * (1 - fy), slot, -1, 0.0f);
+    addLoose(i + 1, m * fx * (1 - fy),        slot, -1, 0.0f);
+    addLoose(i + W, m * (1 - fx) * fy,        slot, -1, 0.0f);
+    addLoose(i + W + 1, m * fx * fy,          slot, -1, 0.0f);
+    m_cellsData[i].seed = std::fmod(m_cellsData[i].seed + 1.0f, 1024.0f);
 }
 
 int GlitterPowder::looseCount() const
@@ -1363,6 +1635,73 @@ float GlitterPowder::looseMassInRect(float wx0, float wy0, float wx1, float wy1)
                 m += v;
         }
     return m;
+}
+
+bool GlitterPowder::hasMaterialInRect(float wx0, float wy0,
+                                      float wx1, float wy1) const
+{
+    const float cell = m_worldCellSize;
+    const int x0 = std::max(0, int(std::floor(wx0 / cell)));
+    const int y0 = std::max(0, int(std::floor(wy0 / cell)));
+    const int x1 = std::min(m_cells.width() - 1, int(std::ceil(wx1 / cell)));
+    const int y1 = std::min(m_cells.height() - 1, int(std::ceil(wy1 / cell)));
+    for (int y = y0; y <= y1; ++y)
+        for (int x = x0; x <= x1; ++x)
+        {
+            const PowderCell &c = cellAt(idx(x, y));
+            /* loose + bonded powder, or wet glue — any physical material */
+            if (c.height > 0.002f || c.glue > 0.02f)
+                return true;
+        }
+    return false;
+}
+
+quint64 GlitterPowder::materialRectFingerprint(float wx0, float wy0,
+                                               float wx1, float wy1) const
+{
+    quint64 h = 1469598103934665603ull; /* FNV-1a */
+    const auto mix = [&h](quint64 v) {
+        h ^= v;
+        h *= 1099511628211ull;
+    };
+    const float cell = m_worldCellSize;
+    const int x0 = std::max(0, int(std::floor(wx0 / cell)));
+    const int y0 = std::max(0, int(std::floor(wy0 / cell)));
+    const int x1 = std::min(m_cells.width() - 1, int(std::ceil(wx1 / cell)));
+    const int y1 = std::min(m_cells.height() - 1, int(std::ceil(wy1 / cell)));
+    for (int y = y0; y <= y1; ++y)
+        for (int x = x0; x <= x1; ++x)
+        {
+            const PowderCell &c = cellAt(idx(x, y));
+            std::uint32_t b;
+            std::memcpy(&b, &c.height, sizeof(b)); mix(b);
+            std::memcpy(&b, &c.stuck,  sizeof(b)); mix(b);
+            std::memcpy(&b, &c.glue,   sizeof(b)); mix(b);
+            mix(std::uint32_t(c.lA & 0xff) | std::uint32_t(c.lB & 0xff) << 8
+                | std::uint32_t(c.sA & 0xff) << 16 | std::uint32_t(c.sB & 0xff) << 24);
+        }
+    /* fold in the sub-res glue field in the same window (crisp edge moves count) */
+    if (!m_glueField.isEmpty())
+    {
+        const int s0 = std::max(0, int(x0 * kGlueSubRes));
+        const int s1 = std::min(m_cells.width() * kGlueSubRes - 1, int((x1 + 1) * kGlueSubRes) - 1);
+        const int t0 = std::max(0, int(y0 * kGlueSubRes));
+        const int t1 = std::min(m_cells.height() * kGlueSubRes - 1, int((y1 + 1) * kGlueSubRes) - 1);
+        for (int yy = t0; yy <= t1; yy += 2)      /* stride 2 keeps the hash cheap */
+            for (int xx = s0; xx <= s1; xx += 2)
+                mix(m_glueField[glueFieldIndex(xx, yy)]);
+    }
+    return h;
+}
+
+bool GlitterPowder::hasActiveParticles() const
+{
+    if (m_flakes.isEmpty())
+        return false;
+    for (const AirborneFlake &f : m_flakes)
+        if (f.active)
+            return true;
+    return false;
 }
 
 bool GlitterPowder::isEmpty() const
@@ -2159,33 +2498,39 @@ QImage GlitterPowder::render(const QSize &outSize, float outOriginWorldX,
     }
 
     /* Airborne flakes caught in the breath: bright additive sparkles that arc
-     * and fall. Only present while a blow is running; retired flakes vanish. */
-    if (m_particlesActive && !m_flakes.isEmpty())
+     * and fall. Only present while a blow is running; retired flakes vanish.
+     * Flake physics is kept in CELL coordinates (reference); convert to world
+     * and device px here. */
+    if (m_particlesActive && m_flakeCount > 0 && !m_flakes.isEmpty())
     {
         p.setCompositionMode(QPainter::CompositionMode_Plus);
         p.setPen(Qt::NoPen);
+        const float cell = m_worldCellSize;
         for (const AirborneFlake &f : m_flakes)
         {
             if (!f.active)
                 continue;
-            const float px = (f.x - outOriginWorldX) / worldPerPx;
-            const float py = (f.y - outOriginWorldY) / worldPerPx
-                             - (f.z / worldPerPx);          /* lift above the bed */
-            const float pr = qMax(0.5f, f.size * 0.5f / worldPerPx);
+            const float wx = f.x * cell, wy = f.y * cell, wz = f.z * cell;
+            const float px = (wx - outOriginWorldX) / worldPerPx;
+            const float py = (wy - outOriginWorldY) / worldPerPx
+                             - (wz / worldPerPx);          /* lift above the bed */
+            const float pr = qMax(0.5f, f.size * (cell * 0.1f) / worldPerPx);
             if (px < -pr || py < -pr || px > outSize.width() + pr
                 || py > outSize.height() + pr)
                 continue;
             QColor pcol = paperCol;
             if (f.slot >= 0 && f.slot < slotsList.size())
                 pcol = slotsList[f.slot].color;
-            /* brighter as it's freshly lifted, dimming as it falls out */
-            const float bright = qMax(0.0f, std::min(1.0f, f.life * 1.6f));
+            /* freshly-lifted flakes are bright; dim as they fall back out */
+            const float falling = f.vz < 0.0f ? 1.0f : 0.35f;
+            const float bright = qMax(0.0f, std::min(1.0f, 0.4f + 0.6f * falling));
             pcol.setAlpha(int(240 * bright));
             p.setBrush(pcol);
             p.save();
             p.translate(px, py);
-            p.rotate(f.rot * 57.2958f);
-            p.drawEllipse(QPointF(0, 0), pr, pr * 0.6f);
+            /* the mirror spins about its axis, tumbling as it falls */
+            p.rotate(f.spin * 57.2958f);
+            p.drawEllipse(QPointF(0, 0), pr, pr * (1.0f - 0.4f * falling));
             p.restore();
         }
         p.setCompositionMode(QPainter::CompositionMode_SourceOver);

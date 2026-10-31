@@ -72,18 +72,29 @@ struct PowderCell
     int  sA = -1, sB = -1;   float sF = 0.0f;
 };
 
-/* A single airborne flake caught in the breath (reference's particle pool):
- * world position, velocity, a shallow gravitation, spin, size, brightness and
- * the palette slot it lifts from. Short-lived; spawned as the wind lifts flat
- * flakes and rendered as a bright, additive sparkle that arcs and falls. */
+/* A single airborne flake caught in the breath (reference's particle pool).
+ * Ported ~1:1 from cray4pasta/glitter-powder `spawn`/`stepParticles`: a flat
+ * flake carries a per-flake MASS, its own terminal fall velocity `vt`, flutter
+ * strength `flutter` / phase `phase`, mirror-axis spin `axis`, thin-film cycle
+ * `film`, and falls until `z` crosses the bed, where it splats() its mass back
+ * into the heightfield (never silently destroyed). `vz` is the vertical
+ * launch velocity (reference passes `4 + 14*random` there), shared by the
+ * bottom-lift path; `size` is the fanned-out visual flake radius generated
+ * independently. World units (x/y/mm all meters/cells); cell-space physics,
+ * world/device conversion happens only in the renderer. */
 struct AirborneFlake
 {
-    float x = 0.0f, y = 0.0f, z = 0.0f;
-    float vx = 0.0f, vy = 0.0f, vz = 0.0f;
-    float rot = 0.0f, spin = 0.0f;
-    float size = 1.0f;
-    float life = 0.0f;
-    int   slot = 0;
+    float x = 0.0f, y = 0.0f, z = 0.0f;   /* world position (z = height above bed) */
+    float vx = 0.0f, vy = 0.0f, vz = 0.0f; /* world velocity (vz = vertical launch) */
+    float mass = 0.0f;                     /* powder mass the flake carries */
+    float spin = 0.0f, rate = 0.0f;        /* current spin + spin rate */
+    float axis = 0.0f;                     /* mirror axis of the spinning flake */
+    float film = 0.0f;                     /* thin-film cycle phase seed */
+    float size = 1.0f;                     /* visual radius scale (reference 1.6..5) */
+    float vt  = 0.0f;                      /* terminal fall speed (clamps vz) */
+    float flutter = 0.0f;                  /* flutter strength of the drift */
+    float phase = 0.0f;                    /* per-flake flutter phase offset */
+    int   slot = 0;                        /* palette slot it lifts from */
     bool  active = false;
 };
 
@@ -125,9 +136,20 @@ public:
     void pourGlitterMain(bool fit, const GlitterParams &p);
 
     /* SMEAR / plow: push loose grains outward biased by (fx,fy); bonded
-     * (stuck) stay. Some clings to the finger and is shed behind. */
+     * (stuck) stay. `carried` is IGNORED — the cling mass and its colour live
+     * in the engine (`m_carried` / `m_carriedSlot`), persistent across the
+     * whole Push gesture so powder really sticks to the finger and sheds
+     * behind (reference CLING_MAX = 6, not 0.6). The controller calls
+     * beginPushGesture() once when the Push stroke starts and endPushGesture()
+     * when it lets go, so carrying is reset per gesture exactly like the
+     * reference. */
     void smear(float wx, float wy, float fx, float fy, float radiusWorld,
-               float carried);
+               float /*carried*/ = 0.0f);
+    /* Push-gesture bookkeeping: reset/read the persistent finger-carry state
+     * so powder clings across dabs within one stroke but is dropped at its
+     * end. */
+    void beginPushGesture();
+    void endPushGesture();
 
     /* Bond loose powder to the glue (called each step). `cellRect` scopes the
      * sweep to a cell-coords rect; an invalid rect sweeps the ACTIVE region
@@ -187,6 +209,25 @@ public:
     /* Loose (free) powder mass inside a world-space rect — used to tell whether
      * a plow/smear actually pushed anything (cheap, scoped to the rect). */
     float looseMassInRect(float wx0, float wy0, float wx1, float wy1) const;
+    /* Total PHYSICAL material inside a world-space rect: loose + bonded powder
+     * + wet glue. Used to tell whether an Eraser actually changed material even
+     * when it removed a 100%-bonded or glue-only area (whose loose mass is
+     * zero) — the loose-mass heuristic alone is not enough for the physical
+     * eraser. */
+    bool hasMaterialInRect(float wx0, float wy0, float wx1, float wy1) const;
+    /* Deterministic before/after material fingerprint of a rect: a 64-bit hash
+     * over the affected cells' (height, stuck, glue, low colour slot s) and the
+     * sub-res glue field in that window. The Eraser controller compares this
+     * before vs after an eraser dab to drive undo/commit exactly, instead of
+     * guessing from loose mass. */
+    quint64 materialRectFingerprint(float wx0, float wy0,
+                                    float wx1, float wy1) const;
+    /* True while any airborne flake is still in flight. The Blow controller
+     * MUST NOT finalize/commit while this is true: a canonical bake that
+     * serializes `materialState` must never contain transient particle mass
+     * that `materialState` doesn't hold (the raster == materialState invariant,
+     * reviewer P0 #1). */
+    bool hasActiveParticles() const;
     bool isEmpty() const;
     /* Material-state predicates. A plain raster/paint layer is not a material;
      * a Glitter Powder physical layer is a material when it carries any powder
@@ -285,6 +326,22 @@ private:
     inline int glueFieldIndex(int subX, int subY) const
     { return subY * (m_cells.width() * kGlueSubRes) + subX; }
     QRandomGenerator m_rng;
+    /* Deterministic-RNG accounting (reviewer P2 #8): every stochastic draw the
+     * engine makes goes through nextFloat()/nextBounded(), which bump
+     * m_rngCounter and draw from a stream seeded entirely by the persisted
+     * {m_baseSeed, m_rngCounter}. serialize() persists m_rngCounter (+ the base
+     * seed), so reload reproduces the SAME random sequence for a given
+     * {grid, seed, operation ordering} — a reloaded document continues the
+     * deterministic persisted material model instead of inventing a fresh
+     * sequence (which is what seeding only from gridW/gridH did before). */
+    std::uint32_t m_baseSeed = 1u;
+    std::uint64_t m_rngCounter = 0u;
+    float nextFloat();
+    float nextFloatUnit(float hi);
+    int nextBounded(int n);
+    /* persistent Push-gesture carry (reference `carried` / `carriedSlot`) */
+    float m_carried = 0.0f;
+    int   m_carriedSlot = -1;
     /* the palette slots currently in use (grow on demand, freed when empty) */
     QVector<QColor> m_palette;
     /* per-step momentum bookkeeping for blowStep (reference outM/mIn/pX/pY/dh)
@@ -309,11 +366,17 @@ private:
     bool m_particlesActive = false;
     /* Airborne-flake fleet (bounded pool). */
     void ensureParticlePool();
-    void spawnFlake(float wx, float wy, float ux, float uy, float speed,
-                    float size, float mass, int slot);
+    void spawnFlake(float wx, float wy, float hx, float hy, float hSpeed,
+                    float vz, float mass, int slot);
     void stepParticles(float dtSec);
+    void splat(float x, float y, float m, int slot);
     QVector<AirborneFlake> m_flakes;
     int m_maxFlakes = 0;
+    int m_flakeCount = 0;
+    /* wind geometry snapshot published by blowStep so stepParticles can push
+     * in-flight flakes with the same cone/gust as the bed advection */
+    float m_windMx = 0.0f, m_windMy = 0.0f, m_windD0 = 0.0f;
+    float m_windGust = 0.0f, m_windAim = 0.0f, m_windCA = 1.0f, m_windSA = 0.0f;
     void ensureBlowBuffers();
 };
 

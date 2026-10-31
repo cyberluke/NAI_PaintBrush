@@ -870,6 +870,10 @@ void PaintbrushCanvasItem::beginArtStroke(const QPointF &local)
               m_powder.cellW(), m_powder.cellH(), m_powder.worldCellSize(),
               m_brushSize, int(m_powderTool));
         m_powderUnion = QRect();
+        /* P1 #6: a Push gesture keeps a finger-carry across all its dabs
+         * (reference carried/CLING_MAX = 6). Reset it at the stroke start. */
+        if (m_powderTool == POWDER_PUSH)
+            m_powder.beginPushGesture();
         artStrokeSegment(local, local);
     }
 }
@@ -949,16 +953,29 @@ if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
         const QPointF trans = len > 0.0 ? QPointF(delta.x() / len, delta.y() / len) : QPointF();
         int steps = qMax(1, int(len / step));
 
-        /* A plow/smear/erase only changes things when there is existing powder to
-         * push/remove; snapshot the scoped loose mass first so an empty gesture
-         * doesn't commit a pointless (empty) undo entry. */
+        /* A plow/smear can only change things when there is loose powder to push.
+         * For the PHYSICAL ERASER, however, loose mass alone is not enough: it
+         * also removes fully-bonded powder and wet glue (whose loose mass is
+         * zero). Use the before/after material-state fingerprint so erasing a
+         * glue-only or 100%-bonded area still commits an undo (P0/P1 #4).
+         * We snapshot here and compare against the post-stroke fingerprint at
+         * the end of the stroke. */
         const QRectF beforeB = QRectF(fromLocal, toLocal).normalized()
                                    .adjusted(-radius - 6, -radius - 6, radius + 6, radius + 6);
-        const bool toStringHasMaterial =
+        bool toStringHasMaterial =
             m_powderTool == POWDER_GLUE || m_powderTool == POWDER_GLITTER
             || m_powder.looseMassInRect(float(beforeB.left()), float(beforeB.top()),
                                         float(beforeB.right()), float(beforeB.bottom()))
                    > 0.002f;
+        if (m_powderTool == POWDER_ERASER)
+            m_eraseFingerprintBefore =
+                m_powder.materialRectFingerprint(float(beforeB.left()),
+                                                 float(beforeB.top()),
+                                                 float(beforeB.right()),
+                                                 float(beforeB.bottom()));
+        /* after the erase runs below, a changed physical fingerprint means the
+         * operation really removed material and must commit */
+        m_eraseFingerprintAfter = m_eraseFingerprintBefore;
 
         /* P0.6: the authoritative dirty bounds come from the PHYSICAL MATERIAL
          * bounds (old ∪ new), never just the pointer segment. The sim expands
@@ -985,7 +1002,9 @@ if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
                                      m_powderParams);
                 break;
             case POWDER_PUSH:
-                /* smear/plow existing loose grains; bonded stay; creates nothing */
+                /* smear/plow existing loose grains; bonded stay; creates nothing.
+                 * The finger-carry lives in the engine (beginPushGesture kept it
+                 * for this whole gesture), so no per-dab carried is passed. */
                 m_powder.smear(float(p.x()), float(p.y()), float(trans.x()),
                                float(trans.y()), radius, 0.0f);
                 break;
@@ -1062,6 +1081,20 @@ if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
             p.setCompositionMode(QPainter::CompositionMode_SourceOver);
             p.drawImage(affected.topLeft() - m_scratchOrigin, flakes);
             p.end();
+        }
+        if (m_powderTool == POWDER_ERASER)
+        {
+            /* the physical eraser removed loose+bonded+glue; compare the
+             * before/after material-state fingerprint so erasing a glue-only or
+             * fully-bonded region (loose mass zero) still commits the operation
+             * (P0/P1 #4). */
+            m_eraseFingerprintAfter =
+                m_powder.materialRectFingerprint(float(beforeB.left()),
+                                                 float(beforeB.top()),
+                                                 float(beforeB.right()),
+                                                 float(beforeB.bottom()));
+            if (m_eraseFingerprintAfter != m_eraseFingerprintBefore)
+                toStringHasMaterial = true;
         }
         if (toStringHasMaterial)
             m_strokeHadPaint = true;
@@ -1159,6 +1192,10 @@ else if ((m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
         renderPowderUnion();
         pbCrashTrace("endArtStroke -> renderPowderUnion return");
     }
+    /* P1 #6: drop the persistent Push finger-carry at the stroke end exactly as
+     * the reference resets `carried` when the finger lifts. */
+    if (m_powderTool == POWDER_PUSH)
+        m_powder.endPushGesture();
 if (m_strokeHadPaint)
     {
         const QString name = m_tool == TOOL_GLITTER ? QStringLiteral("Glitter")
@@ -1531,9 +1568,20 @@ void PaintbrushCanvasItem::stepPowderBlow(float dtSec)
     /* A breath runs a few seconds, or until the loose powder is all gone. The
      * first fraction of a second is a gentle ramp where the wind hasn't built
      * velocity yet, so `moved` may be 0 briefly — only end on `moved == 0`
-     * after the breath has visibly run (>= 0.8 s), never on the opening ramp. */
-    const bool finished = m_powderBlowAge > 3.5f
-                          || (moved == 0 && m_powderBlowAge > 0.8f);
+     * after the breath has visibly run (>= 0.8 s), never on the opening ramp.
+     * P0 #1: we MUST NOT finalize/commit while airborne flakes are still in
+     * flight — a canonical bake that serializes `materialState` would otherwise
+     * contain transient particle mass that `materialState` doesn't hold,
+     * breaking the raster == materialState invariant. So the breath finishes
+     * only once the loose bed is settled AND no flake is airborne (the flakes
+     * keep stepping until they land/off-page). A generous safety cap still
+     * force-ends a runaway (even then the transient fleet is dropped at the
+     * settled commit). */
+    const bool bedSettled = m_powderBlowAge > 3.5f
+                            || (moved == 0 && m_powderBlowAge > 0.8f);
+    const bool airborne = m_powder.hasActiveParticles();
+    const bool finished = (bedSettled && !airborne)
+                          || m_powderBlowAge > 12.0f;
     /* Render the evolving field at ~30 Hz. This is a LIVE PREVIEW (render-only),
      * so it must NOT persist material state or end the breath — the preview is
      * side-effect free (P0): persistence/endBlow/undo belong to finalize. */
