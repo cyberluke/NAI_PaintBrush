@@ -111,6 +111,36 @@ public:
     FrameRef last() const override;
     bool canDecode() const override;
 
+    /* Asynchronous exact-frame acquisition (P0#4): submit a decode request
+     * WITHOUT blocking the caller. The preparation is identical to request();
+     * the only difference is the caller returns immediately and the
+     * `frameDecoded` signal is emitted (on the Qt GUI thread) when the frame
+     * is ready. A request whose media or PTS changed before it finished is
+     * still delivered with its DecodedFrame marked `ok()` according to its
+     * OWN PTS verification; it is the controller's job to discard it if the
+     * session moved on — the synchronous `request()` stays for harness, export
+     * and background workflows. Requests submitted async are still serialized
+     * through the single preparser thumbnailer thread.
+     *
+     * `token` is an opaque caller tag shipped back verbatim on the signal so
+     * the controller can validate the identity of what actually got decoded.
+     *
+     * The returned DecodedFrame may be empty (`ok()` false) when the decode
+     * failed — the signal is emitted either way (for the failure case the
+     * DecodedFrame has a null image).
+     *
+     * Returns true iff the request was successfully submitted to the preparser
+     * AND one of `frameDecoded` / `frameDecodeFailed` is guaranteed to fire; a
+     * synchronous submission failure (bad ref, no item, submit rejected) is
+     * reported here so the caller can release any in-flight bookkeeping and
+     * retry — it is NOT followed by a signal. */
+    bool requestAsync(const FrameRef &ref, const QString &token);
+
+signals:
+    void frameDecoded(const QString &token, const paintbrush::DecodedFrame &frame);
+    void frameDecodeFailed(const QString &token, const QString &message);
+
+public:
     /* Clear the decoded-frame LRU cache. */
     void clearCache();
 

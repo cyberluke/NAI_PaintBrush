@@ -15,16 +15,35 @@ import VLC.Style
 import VLC.Paintbrush
 
 /* NAI Settings — a dedicated dialog, separate from VLC Preferences.
- * Sections: AI Models, Providers, Device, Media, Diagnostics. This is an
- * HONEST read-only view of what is actually configured at runtime (from the
- * same capability report that powers the diagnostics), so a "configured"
- * model is shown only when its backend really exists — no fake toggles or
- * supermarket switches for features without a backend. */
+ * Sections: AI Models, Providers, Device, Media, Diagnostics. Editable fields
+ * exist ONLY for capabilities that actually have a backend (SAM model/device,
+ * VLM/model, assistant/model, exact-frame decode policy); every such field
+ * persists into the Paintbrush/VLC configuration layer (no second settings
+ * store) and Apply hot-reconfigures what is safe or reports restart-required.
+ * Capability status is honest and shows POSITIVE text when a capability is
+ * green — never an "UnavailableReason" string on an available row. Secrets
+ * are never displayed in clear text. */
 Dialog {
     id: root
 
     title: qsTr("NAI Settings")
     modal: true
+
+    function apply() {
+        const note = PaintbrushCtx.applyNaiSettings(
+            samModelField.text.trim(),
+            samDeviceField.text.trim(),
+            vlmUrlField.text.trim(),
+            vlmModelField.text.trim(),
+            assistantUrlField.text.trim(),
+            assistantModelField.text.trim(),
+            parseInt(ptsField.text, 10) || 250)
+        statusLabel.text = note
+        if (!PaintbrushCtx.settingsRestartRequired)
+            statusLabel.color = "limegreen"
+        else
+            statusLabel.color = theme.accent
+    }
     x: Overlay.overlay ? Math.round((Overlay.overlay.width - width) / 2) : 0
     y: Overlay.overlay ? Math.round((Overlay.overlay.height - height) / 2) : 0
     width: Overlay.overlay
@@ -70,6 +89,19 @@ Dialog {
                         font.pixelSize: VLCStyle.fontSize_xsmall
                     }
                 }
+                /* SAM model path + device (real, editable) */
+                TextField {
+                    id: samModelField
+                    Layout.fillWidth: true
+                    placeholderText: qsTr("SAM3 model path")
+                    text: PaintbrushCtx.settingsSamModel
+                }
+                TextField {
+                    id: samDeviceField
+                    Layout.fillWidth: true
+                    placeholderText: qsTr("SAM device (auto / cpu / gpu / npu)")
+                    text: PaintbrushCtx.settingsSamDevice
+                }
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: VLCStyle.margin_xsmall
@@ -83,6 +115,18 @@ Dialog {
                         wrapMode: Text.WordWrap
                         font.pixelSize: VLCStyle.fontSize_xsmall
                     }
+                }
+                TextField {
+                    id: vlmUrlField
+                    Layout.fillWidth: true
+                    placeholderText: qsTr("VLM endpoint URL")
+                    text: PaintbrushCtx.settingsVlmUrl
+                }
+                TextField {
+                    id: vlmModelField
+                    Layout.fillWidth: true
+                    placeholderText: qsTr("VLM model")
+                    text: PaintbrushCtx.settingsVlmModel
                 }
                 RowLayout {
                     Layout.fillWidth: true
@@ -105,8 +149,9 @@ Dialog {
                         color: PaintbrushCtx.trackingAvailable ? "limegreen" : "#c33" }
                     Widgets.LabelExt {
                         Layout.fillWidth: true
-                        text: qsTr("Object tracking — %1")
-                                  .arg(PaintbrushCtx.trackingUnavailableReason)
+                        text: PaintbrushCtx.trackingAvailable
+                              ? qsTr("Object tracking — %1").arg(PaintbrushCtx.trackingStatusText)
+                              : qsTr("Object tracking — %1").arg(PaintbrushCtx.trackingUnavailableReason)
                         color: theme.fg.secondary
                         wrapMode: Text.WordWrap
                         font.pixelSize: VLCStyle.fontSize_xsmall
@@ -119,12 +164,32 @@ Dialog {
                         color: PaintbrushCtx.assistantConfigured ? "limegreen" : "#c33" }
                     Widgets.LabelExt {
                         Layout.fillWidth: true
-                        text: qsTr("AI companion — %1")
-                                  .arg(PaintbrushCtx.assistantUnavailableReason)
+                        text: PaintbrushCtx.assistantConfigured
+                              ? qsTr("AI companion — Ready")
+                              : qsTr("AI companion — %1").arg(PaintbrushCtx.assistantUnavailableReason)
                         color: theme.fg.secondary
                         wrapMode: Text.WordWrap
                         font.pixelSize: VLCStyle.fontSize_xsmall
                     }
+                }
+                TextField {
+                    id: assistantUrlField
+                    Layout.fillWidth: true
+                    placeholderText: qsTr("Assistant endpoint URL")
+                    text: PaintbrushCtx.settingsAssistantUrl
+                }
+                TextField {
+                    id: assistantModelField
+                    Layout.fillWidth: true
+                    placeholderText: qsTr("Assistant model")
+                    text: PaintbrushCtx.settingsAssistantModel
+                }
+                Widgets.LabelExt {
+                    text: PaintbrushCtx.settingsSecretsPresent
+                          ? qsTr("API keys are configured via environment/preferences (never shown).")
+                          : qsTr("No API keys configured.")
+                    color: theme.fg.secondary
+                    font.pixelSize: VLCStyle.fontSize_xsmall
                 }
 
                 Widgets.LabelExt {
@@ -147,8 +212,9 @@ Dialog {
                         color: PaintbrushCtx.lookupAvailable ? "limegreen" : "#c33" }
                     Widgets.LabelExt {
                         Layout.fillWidth: true
-                        text: qsTr("Product lookup — %1")
-                                  .arg(PaintbrushCtx.lookupUnavailableReason)
+                        text: PaintbrushCtx.lookupAvailable
+                              ? qsTr("Product lookup — Ready")
+                              : qsTr("Product lookup — %1").arg(PaintbrushCtx.lookupUnavailableReason)
                         color: theme.fg.secondary
                         wrapMode: Text.WordWrap
                         font.pixelSize: VLCStyle.fontSize_xsmall
@@ -165,8 +231,8 @@ Dialog {
                 Widgets.LabelExt {
                     Layout.fillWidth: true
                     text: PaintbrushCtx.segmentationAvailable
-                          ? qsTr("SAM runs on: %1").arg(PaintbrushCtx.segmentationStatusText)
-                          : qsTr("No local segmentation device configured.")
+                          ? qsTr("SAM runtime: %1").arg(PaintbrushCtx.segmentationStatusText)
+                          : qsTr("No local segmentation device configured (below).")
                     color: theme.fg.secondary
                     wrapMode: Text.WordWrap
                     font.pixelSize: VLCStyle.fontSize_xsmall
@@ -188,6 +254,22 @@ Dialog {
                     wrapMode: Text.WordWrap
                     font.pixelSize: VLCStyle.fontSize_xsmall
                 }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: VLCStyle.margin_xsmall
+                    Widgets.LabelExt {
+                        text: qsTr("Exact-frame PTS tolerance (ms):")
+                        color: theme.fg.secondary
+                        font.pixelSize: VLCStyle.fontSize_xsmall
+                    }
+                    TextField {
+                        id: ptsField
+                        Layout.preferredWidth: VLCStyle.dp(80, VLCStyle.scale)
+                        text: PaintbrushCtx.settingsPtsToleranceMs
+                        validator: IntValidator { bottom: 20; top: 2000 }
+                        color: theme.fg.primary
+                    }
+                }
 
                 /* ------------------------------------------ Diagnostics */
                 Widgets.LabelExt {
@@ -206,9 +288,22 @@ Dialog {
             }
         }
 
-        DialogButtonBox {
-            standardButtons: DialogButtonBox.Close
+        /* Apply status / restart-required notice */
+        Widgets.LabelExt {
+            id: statusLabel
             Layout.fillWidth: true
+            text: PaintbrushCtx.settingsRestartRequired
+                  ? qsTr("Model/endpoint changes take effect after restart.")
+                  : ""
+            color: theme.accent
+            wrapMode: Text.WordWrap
+            font.pixelSize: VLCStyle.fontSize_xsmall
+        }
+
+        DialogButtonBox {
+            standardButtons: DialogButtonBox.Cancel | DialogButtonBox.Apply
+            Layout.fillWidth: true
+            onApplied: root.apply()
         }
     }
 }

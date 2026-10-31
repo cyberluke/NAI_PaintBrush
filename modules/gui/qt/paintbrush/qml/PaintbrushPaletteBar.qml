@@ -13,12 +13,14 @@ import VLC.Widgets as Widgets
 import VLC.Style
 import VLC.Paintbrush
 
-/* Compact Paintbrush-style palette (A39): foreground/background colors, the
- * classic swatches, a tool-option context section that shows ONLY the
- * active tool's options (one Size group for drawing/shape tools, one Flow
- * group for Spray — never two Size labels), and the precision toggles
- * (grid/rulers/snap/pressure). Eyedropper integration happens on the canvas
- * (Pick tool). The color dialog uses a real SV plane + hue rail (A40). */
+/* Compact Paintbrush-style palette (A39): foreground/background colors and the
+ * classic swatches. The tool-option context section AND the precision toggles
+ * (grid/rulers/snap/pressure) live in the dedicated horizontal
+ * PaintbrushToolOptionsBar (built from the SAME unified PaintbrushToolbar
+ * component as the vertical rail), so the option sliders are never crowded
+ * out — this bar keeps the colour surface only. Eyedropper integration happens
+ * on the canvas (Pick tool). The color dialog uses a real SV plane + hue rail
+ * (A40). */
 Item {
     id: root
 
@@ -111,182 +113,13 @@ Item {
             }
         }
 
+        /* Per-tool options (size/amount/flake/glue/loose/shimmer) and the
+         * precision toggles (grid/rulers/snap/pressure) moved OUT of this
+         * bar into the dedicated horizontal PaintbrushToolOptionsBar (also
+         * rendered by the unified PaintbrushToolbar component) so the option
+         * sliders can never be crowded out by the grid/ruler buttons. This
+         * bar keeps the colour surface only. */
         Item { Layout.fillWidth: true }
-
-        /* --------------------------- tool-option context section (A39) */
-        /* Only the active tool's options render here. One group at a time:
-         * Spray shows its Flow slider; the drawing/shape tools show a
-         * single Size slider. There is never more than one Size label. */
-
-        /* Spray flow (tool 9) */
-        RowLayout {
-            spacing: VLCStyle.margin_xsmall
-            visible: canvas.tool === 9
-
-            Widgets.LabelExt {
-                text: qsTr("Flow")
-                color: theme.fg.secondary
-                font.pixelSize: VLCStyle.fontSize_small
-            }
-            Slider {
-                Layout.preferredWidth: VLCStyle.dp(90, VLCStyle.scale)
-                Layout.alignment: Qt.AlignVCenter
-                from: 0.1
-                to: 4.0
-                stepSize: 0.1
-                value: canvas.sprayFlow
-                onMoved: canvas.sprayFlow = value
-            }
-            Widgets.LabelExt {
-                text: canvas.sprayFlow.toFixed(1)
-                color: theme.fg.secondary
-                font.pixelSize: VLCStyle.fontSize_small
-            }
-        }
-
-        /* Brush size (pencil/brush/eraser/shapes/bristle/glitter) — the ONLY
-         * Size group */
-        RowLayout {
-            spacing: VLCStyle.margin_xsmall
-            visible: canvas.tool >= 4 && canvas.tool <= 6
-                     || canvas.tool >= 10 && canvas.tool <= 13
-                     || canvas.tool === 16 || canvas.tool === 17
-
-            Widgets.LabelExt {
-                text: qsTr("Size")
-                color: theme.fg.secondary
-                font.pixelSize: VLCStyle.fontSize_small
-            }
-            Slider {
-                Layout.preferredWidth: VLCStyle.dp(140, VLCStyle.scale)
-                Layout.alignment: Qt.AlignVCenter
-                from: 1
-                to: (canvas.tool === 16 || canvas.tool === 17) ? 160 : 64
-                value: canvas.brushSize
-                onMoved: canvas.brushSize = value
-            }
-            Widgets.LabelExt {
-                text: Math.round(canvas.brushSize)
-                color: theme.fg.secondary
-                font.pixelSize: VLCStyle.fontSize_small
-            }
-        }
-
-        /* Bristle paint (tool 16): flow + pigment variation (spec §13) */
-        RowLayout {
-            spacing: VLCStyle.margin_xsmall
-            visible: canvas.tool === 16
-
-            Widgets.LabelExt {
-                text: qsTr("Flow")
-                color: theme.fg.secondary
-                font.pixelSize: VLCStyle.fontSize_small
-            }
-            Slider {
-                Layout.preferredWidth: VLCStyle.dp(90, VLCStyle.scale)
-                Layout.alignment: Qt.AlignVCenter
-                from: 0.05; to: 1.0; stepSize: 0.05
-                value: canvas.brushFlow
-                onMoved: canvas.brushFlow = value
-            }
-            Widgets.LabelExt {
-                text: qsTr("Pigment")
-                color: theme.fg.secondary
-                font.pixelSize: VLCStyle.fontSize_small
-            }
-            Slider {
-                Layout.preferredWidth: VLCStyle.dp(90, VLCStyle.scale)
-                Layout.alignment: Qt.AlignVCenter
-                from: 0.0; to: 1.0; stepSize: 0.05
-                value: canvas.brushColorVariation
-                onMoved: canvas.brushColorVariation = value
-            }
-        }
-
-        /* Glitter (tool 17): amount, flake size, shimmer (spec §14.3 primary) */
-        RowLayout {
-            spacing: VLCStyle.margin_xsmall
-            visible: canvas.tool === 17
-
-            Widgets.LabelExt {
-                text: qsTr("Amount")
-                color: theme.fg.secondary
-                font.pixelSize: VLCStyle.fontSize_small
-            }
-            Slider {
-                Layout.preferredWidth: VLCStyle.dp(80, VLCStyle.scale)
-                Layout.alignment: Qt.AlignVCenter
-                from: 0.1; to: 2.0; stepSize: 0.05
-                value: canvas.glitterAmount
-                onMoved: canvas.glitterAmount = value
-            }
-            Widgets.LabelExt {
-                text: qsTr("Flake")
-                color: theme.fg.secondary
-                font.pixelSize: VLCStyle.fontSize_small
-            }
-            Slider {
-                Layout.preferredWidth: VLCStyle.dp(80, VLCStyle.scale)
-                Layout.alignment: Qt.AlignVCenter
-                from: 0.2; to: 2.5; stepSize: 0.05
-                value: canvas.glitterFlakeSize
-                onMoved: canvas.glitterFlakeSize = value
-            }
-            Widgets.LabelExt {
-                text: qsTr("Shimmer")
-                color: theme.fg.secondary
-                font.pixelSize: VLCStyle.fontSize_small
-            }
-            Slider {
-                Layout.preferredWidth: VLCStyle.dp(80, VLCStyle.scale)
-                Layout.alignment: Qt.AlignVCenter
-                from: 0.0; to: 1.0; stepSize: 0.05
-                value: canvas.glitterShimmer
-                onMoved: canvas.glitterShimmer = value
-            }
-        }
-
-        /* precision drawing: grid + snap + pen pressure */
-        Button {
-            Layout.alignment: Qt.AlignVCenter
-            text: qsTr("Grid")
-            checkable: true
-            checked: canvas.gridVisible
-            onClicked: canvas.gridVisible = !canvas.gridVisible
-        }
-        Button {
-            Layout.alignment: Qt.AlignVCenter
-            text: qsTr("Rulers")
-            checkable: true
-            checked: canvas.rulersVisible
-            onClicked: canvas.rulersVisible = !canvas.rulersVisible
-        }
-        Slider {
-            id: gridSpacingSlider
-            Layout.preferredWidth: VLCStyle.dp(70, VLCStyle.scale)
-            Layout.alignment: Qt.AlignVCenter
-            from: 8
-            to: 128
-            stepSize: 8
-            visible: canvas.gridVisible
-            value: canvas.gridSpacing
-            onMoved: canvas.gridSpacing = value
-        }
-        Button {
-            Layout.alignment: Qt.AlignVCenter
-            text: qsTr("Snap")
-            checkable: true
-            checked: canvas.snapToGrid
-            enabled: canvas.gridVisible
-            onClicked: canvas.snapToGrid = !canvas.snapToGrid
-        }
-        Button {
-            Layout.alignment: Qt.AlignVCenter
-            text: qsTr("Pen")
-            checkable: true
-            checked: canvas.pressureEnabled
-            onClicked: canvas.pressureEnabled = !canvas.pressureEnabled
-        }
     }
 
     /* custom color dialog */

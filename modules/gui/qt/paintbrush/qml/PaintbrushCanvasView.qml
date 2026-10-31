@@ -30,6 +30,12 @@ import VLC.Paintbrush
 
         required property PaintbrushCanvas canvas
 
+        /* The canvas item fills this area and can be panned/zoomed far past
+         * its bounds; clipping here (and on the parent host in the workspace)
+         * keeps the document content inside the canvas area so it can NEVER
+         * paint over the tool rail, the top CSD buttons or the palette. */
+        clip: true
+
         /* pick a "nice" ruler tick interval (in document pixels) so ticks are
          * not closer than ~40 view pixels at the current zoom */
         function rulerStep(zoom) {
@@ -53,27 +59,30 @@ import VLC.Paintbrush
             canvas.visible = true
         }
 
-        /* anchors the native video window to the canvas area */
+        /* anchors the native video window to the canvas area. The LIVE video
+         * is the visual source ONLY in HarvestVideo presentation (P0#1):
+         * VideoSurface.renderingEnabled is not a playback switch — the
+         * presentation split is driven by the controller's presentationMode.
+         * In ComposeCanvas mode the video surface is hidden and the normal
+         * document canvas is the visual source. */
         VideoSurface {
             id: videoSurface
             anchors.fill: parent
-            /* Harvest mode: render the LIVE video through the transparent
-             * canvas so Object Select / selection happens directly on the
-             * moving picture — no "Use this frame" required to see it. */
             renderingEnabled: true
             videoSurfaceProvider: MainCtx.videoSurfaceProvider
             visible: PaintbrushCtx.playerHasVideo
+                     && PaintbrushCtx.presentationMode === 0 /* HarvestVideo */
         }
 
-        /* checkerboard behind transparent content; hidden while a video is
-         * loaded so the video picture serves as the canvas backdrop.
-         * Cells are positioned manually (not via Grid/Repeater) so the number
-         * of items is always consistent, avoiding QML "Grid contains more
-         * visible items than rows*columns" warnings when the area is resized. */
+        /* checkerboard behind transparent content; hidden when the live video
+         * is the visual source (HarvestVideo) so the video picture serves as
+         * the canvas backdrop. In ComposeCanvas mode the document canvas is
+         * shown over this backdrop exactly as before. */
         Repeater {
             id: checkerGrid
 
-            visible: !PaintbrushCtx.playerHasVideo
+            visible: !(PaintbrushCtx.playerHasVideo
+                       && PaintbrushCtx.presentationMode === 0) /* HarvestVideo */
 
             readonly property int cellSize: 16
             readonly property int cols: Math.max(1, Math.ceil(parent.width / cellSize))
@@ -136,12 +145,7 @@ import VLC.Paintbrush
                 description: qsTr("Ask about this…")
                 text: VLCIcons.info
                 visible: PaintbrushCtx.objectSelected || canvas.hasSelection
-                onClicked: {
-                    if (PaintbrushCtx.objectSelected)
-                        PaintbrushCtx.askAboutObject(qsTr("What is this object?"))
-                    else
-                        PaintbrushCtx.askAboutSelection(qsTr("What is shown in this selection?"))
-                }
+                onClicked: PaintbrushCtx.beginAsk()
             }
             Widgets.IconToolButton {
                 description: qsTr("Track in video")
@@ -185,6 +189,63 @@ import VLC.Paintbrush
                 text: VLCIcons.clear
                 visible: canvas.hasSelection
                 onClicked: canvas.selectionClear()
+            }
+        }
+    }
+
+    /* compact Ask input (P1#11): appears after the Ask tool click / the
+     * selection-bar Ask button establishes visual context. The user types a
+     * question and Enter sends the VLM request — no assistant panel, no
+     * auto-sent fixed prompt. */
+    Rectangle {
+        id: askBar
+        anchors.top: selectionBar.visible ? selectionBar.bottom : parent.top
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.margins: VLCStyle.margin_small
+        height: askRow.height + VLCStyle.margin_small * 2
+        width: Math.min(parent.width - VLCStyle.margin_normal * 4,
+                        askRow.width + VLCStyle.margin_normal * 2)
+        radius: VLCStyle.margin_small
+        color: theme.bg.primary
+        border.width: 1
+        border.color: theme.accent
+        visible: PaintbrushCtx.askInputVisible
+
+        RowLayout {
+            id: askRow
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.margins: VLCStyle.margin_small
+            spacing: VLCStyle.margin_xsmall
+
+            TextField {
+                id: askField
+                Layout.fillWidth: true
+                placeholderText: PaintbrushCtx.askInputPlaceholder
+                focus: true
+                onAccepted: {
+                    const t = askField.text.trim()
+                    if (t.length) {
+                        PaintbrushCtx.submitAsk(askField.text)
+                        askField.clear()
+                    }
+                }
+                Keys.onEscapePressed: {
+                    PaintbrushCtx.cancelAsk()
+                    askField.clear()
+                }
+            }
+            Widgets.IconToolButton {
+                description: qsTr("Send")
+                text: VLCIcons.ok
+                onClicked: {
+                    const t = askField.text.trim()
+                    if (t.length) {
+                        PaintbrushCtx.submitAsk(askField.text)
+                        askField.clear()
+                    }
+                }
             }
         }
     }

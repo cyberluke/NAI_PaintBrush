@@ -17,6 +17,7 @@
 #include "pb_document.hpp"
 #include "art/stroke/bristle_brush.hpp"
 #include "art/materials/glitter/glitter_material.hpp"
+#include "art/materials/glitter/glitter_powder.hpp"
 
 #include <QQuickItem>
 #include <QColor>
@@ -33,6 +34,7 @@
 class QSGNode;
 class QSGTransformNode;
 class QSGTexture;
+class QSGSimpleTextureNode;
 
 namespace paintbrush {
 
@@ -73,6 +75,7 @@ class PaintbrushCanvasItem : public QQuickItem
     Q_PROPERTY(qreal glitterFlakeSize READ glitterFlakeSize WRITE setGlitterFlakeSize NOTIFY artParamsChanged FINAL)
     Q_PROPERTY(qreal glitterShimmer READ glitterShimmer WRITE setGlitterShimmer NOTIFY artParamsChanged FINAL)
     Q_PROPERTY(qreal glitterAdhesion READ glitterAdhesion WRITE setGlitterAdhesion NOTIFY artParamsChanged FINAL)
+    Q_PROPERTY(qreal powderLoose READ powderLoose WRITE setPowderLoose NOTIFY artParamsChanged FINAL)
     Q_PROPERTY(qreal brushFlow READ brushFlow WRITE setBrushFlow NOTIFY artParamsChanged FINAL)
     Q_PROPERTY(qreal brushColorVariation READ brushColorVariation WRITE setBrushColorVariation NOTIFY artParamsChanged FINAL)
 
@@ -85,6 +88,8 @@ public:
     void setGlitterShimmer(qreal v);
     qreal glitterAdhesion() const { return m_glitterParams.adhesion; }
     void setGlitterAdhesion(qreal v);
+    qreal powderLoose() const { return m_glitterParams.looseMix; }
+    void setPowderLoose(qreal v);
     qreal brushFlow() const { return m_brushFlow; }
     void setBrushFlow(qreal v);
     qreal brushColorVariation() const { return m_brushColorVariation; }
@@ -173,6 +178,36 @@ public:
     Q_INVOKABLE void paintObjectMaskSegment(const QPointF &from, const QPointF &to,
                                             bool subtract);
     Q_INVOKABLE void endObjectMaskStroke();
+
+    /* -- live harvest overlay (P0#3): the object selection mask over the LIVE
+     * video, rendered in VIEWPORT/item space (independent of any document
+     * zoom/pan). Unlike the document-space `m_objectMask`, this overlay is
+     * built from the authoritative NATIVE frame mask mapped through the
+     * frame<->viewport transform — the authoritative mask is never rescaled
+     * destructively for display. `nativeMask` is the frame-space mask,
+     * `contentRect` is the aspect-fit rect inside this item (item coords),
+     * and `frameToItem` maps frame pixels into item coords. */
+    void setLiveHarvestOverlay(const QImage &nativeMask, const QRectF &contentRect,
+                               const QTransform &frameToItem);
+    void clearLiveHarvestOverlay();
+    bool liveHarvestOverlayValid() const { return m_liveHarvestOverlayValid; }
+    /* The current viewport-space display image for the live overlay (used by
+     * the controller to rebuild it after refinement). */
+    QImage liveHarvestOverlayImage() const { return m_liveHarvestOverlay; }
+    /* Re-derive the live-harvest overlay for the CURRENT item size when the
+     * canvas viewport is resized. Keeps the authoritative native mask (in
+     * `m_objectMask` for a live selection) byte-identical and only re-maps it
+     * into the new item/viewport space (P0#3). No-op unless a live overlay is
+     * active. */
+    void rebuildLiveHarvestOverlayForCurrentSize();
+
+    /* Presentation split (P0#1): when true the canvas is in HarvestVideo mode
+     * — it renders NO opaque document/paper tiles (so the live VLC video that
+     * is anchored behind shows through) and only the live-harvest mask
+     * overlay + an interaction surface are active. When false it renders the
+     * normal document composition exactly as before. */
+    void setVideoHarvestMode(bool on);
+    bool videoHarvestMode() const { return m_videoHarvestMode; }
 
     /* -- manual selection operations -------------------------------------- */
     Q_INVOKABLE void selectionInvert();
@@ -389,6 +424,18 @@ private:
 
     QImage m_objectMask;               /* grayscale binary mask (canvas size) */
     double m_objectScore = 0.0;
+    /* Live harvest overlay (viewport-space display of the native mask);
+     * stored as an ARGB32 item-space image plus its content rect. Rendered
+     * as a dedicated scene node on top of the document, independent of the
+     * document zoom/pan transform. */
+    QImage m_liveHarvestOverlay;
+    QRectF m_liveHarvestContentRect;
+    QTransform m_liveHarvestFrameToItem;
+    bool m_liveHarvestOverlayValid = false;
+    QSGSimpleTextureNode *m_liveOverlayNode = nullptr; /* owned by scene graph */
+    QSGTexture *m_liveOverlayTexture = nullptr;      /* owned by scene graph */
+    bool m_liveOverlayNodeChanged = false;
+    bool m_videoHarvestMode = false; /* P0#1: transparent over the live video */
 
     /* freehand mask refinement stroke state */
     bool m_maskPaintActive = false;
@@ -442,9 +489,31 @@ private:
     QPointF m_glitterLast;
     QRect m_glitterUnion;            /* layer-local affected rect */
     QString m_glitterPaletteId;
+    /* glitter POWDER engine (reference 1:1 physics) + its palette params */
+    art::glitter::GlitterPowder m_powder;
+    art::GlitterParams m_powderParams;
+    art::glitter::PowderPalette m_powderPal;   /* render palette (single source) */
+    QRect m_powderUnion;
+    bool m_powderReady = false;   /* grid sized/reset once for the current layer */
+    /* Long-press breath (reference blowOnLongPress): holding a powder/smear
+     * stroke still for ~0.6 s blows the loose powder away, leaving what's
+     * bonded to the glue. */
+    bool m_powderBlowing = false;
+    qreal m_powderBlowSince = 0.0;   /* seconds held still */
+    qreal m_powderBlowAge = 0.0;     /* seconds the breath has run */
+    qreal m_powderRenderAcc = 0.0;   /* breath render accumulator (~30 Hz) */
+    QPointF m_powderHoldPos;         /* where the pointer is being held */
+    bool m_powderHoldEver = false;   /* a real drag sampled (not a pure click) */
     void beginArtStroke(const QPointF &local);
     void artStrokeSegment(const QPointF &fromLocal, const QPointF &toLocal);
     void endArtStroke(const QPointF &local);
+    void ensurePowder(bool force = false);   /* (re)size the powder engine grid to
+                                                cover the layer; idempotent within a
+                                                stroke unless `force` is true */
+    /* Long-press breath helpers (reference blowOnLongPress). */
+    void startPowderBlow();
+    void stepPowderBlow(float dtSec);
+    void renderPowderUnion();    /* re-render m_powderUnion from the sim */
 
     /* selection state */
     QPointF m_dragStartCanvas;

@@ -69,6 +69,7 @@ PaintbrushCanvasItem::PaintbrushCanvasItem(QQuickItem *parent)
     m_repaintTimer.setSingleShot(true);
     m_repaintTimer.setInterval(8);
     connect(&m_repaintTimer, &QTimer::timeout, this, [this]() {
+        const bool powderStroke = m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR;
         /* consume the latest sampled input position first, then flush */
         if (m_movePending)
         {
@@ -76,10 +77,27 @@ PaintbrushCanvasItem::PaintbrushCanvasItem(QQuickItem *parent)
             if (m_strokeActive || m_dragging)
                 continueStroke(m_pendingMove);
         }
+        /* Long-press breath for the powder/smear tools: while a stroke is held
+         * still, track the idle time on the fixed tick and start blowing once it
+         * passes ~0.6 s; keep stepping the breath until the loose powder is gone
+         * or the breath runs out. */
+        if (powderStroke && m_strokeActive && !m_powderBlowing)
+        {
+            if (m_powderBlowSince < 0.6f)
+                m_powderBlowSince += 1.0 / 120.0;
+            if (m_powderBlowSince >= 0.6f)
+                startPowderBlow();
+        }
+        else if (m_powderBlowing)
+        {
+            stepPowderBlow(1.0 / 120.0);
+        }
         compositeDirtyTiles();
-        /* single-shot: re-arm for the next tick if input or dabs arrived
-         * while this pass was running (the cadence must keep flowing). */
-        if (!m_dirtyTiles.isEmpty() || m_movePending)
+        /* single-shot: re-arm for the next tick if input, dabs arrived, or a
+         * powder hold/breath is still in progress (the cadence must keep
+         * flowing through a hold so the long-press is actually recognised). */
+        if (!m_dirtyTiles.isEmpty() || m_movePending || m_powderBlowing
+            || (powderStroke && m_strokeActive))
             m_repaintTimer.start();
         update();
     });
@@ -142,6 +160,16 @@ void PaintbrushCanvasItem::setTool(int tool)
         m_maskPaintUnion = QRect();
         clearObjectMask();
     }
+    /* Glitter-family tools (glitter, powder, smear) default to a 12px brush —
+     * the old shared 6px default produced tiny, faint deposits. Only RAISE on
+     * tool entry so picking the tool always starts at a usable size; the user
+     * can still lower it afterwards via the palette Size slider. */
+    if ((tool == TOOL_GLITTER || tool == TOOL_GLITTER_POWDER
+         || tool == TOOL_SMEAR)
+        && m_brushSize < 12.0)
+    {
+        setBrushSize(12.0);
+    }
     emit toolChanged(tool);
     updateStatus(m_lastCanvasPos);
     updateCursor();
@@ -168,6 +196,8 @@ QString PaintbrushCanvasItem::toolName() const
     case TOOL_PAN_ZOOM:        return QStringLiteral("Move canvas");
     case TOOL_BRISTLE:         return QStringLiteral("Bristle");
     case TOOL_GLITTER:         return QStringLiteral("Glitter");
+    case TOOL_GLITTER_POWDER:  return QStringLiteral("Glitter powder");
+    case TOOL_SMEAR:           return QStringLiteral("Smear");
     case TOOL_ASK:             return QStringLiteral("Ask");
     default:                   return QStringLiteral("Tool");
     }
@@ -183,6 +213,8 @@ void PaintbrushCanvasItem::updateCursor()
     case TOOL_SPRAY:
     case TOOL_BRISTLE:
     case TOOL_GLITTER:
+    case TOOL_GLITTER_POWDER:
+    case TOOL_SMEAR:
     {
         /* round tip cursor at the exact on-screen dab size, filled with the
          * current color — the cursor IS the brush (eraser: white fill) */
@@ -366,6 +398,8 @@ bool PaintbrushCanvasItem::shouldSnap() const
     case TOOL_SPRAY:
     case TOOL_BRISTLE:
     case TOOL_GLITTER:
+    case TOOL_GLITTER_POWDER:
+    case TOOL_SMEAR:
     case TOOL_LINE:
     case TOOL_RECTANGLE:
     case TOOL_ROUNDED_RECT:
@@ -457,6 +491,7 @@ void PaintbrushCanvasItem::setGlitterAmount(qreal v)
     if (qFuzzyCompare(qreal(m_glitterParams.amount), v))
         return;
     m_glitterParams.amount = float(v);
+    m_powderParams.amount = float(v);   /* mirror: next powder stroke uses it */
     emit artParamsChanged();
 }
 
@@ -466,6 +501,7 @@ void PaintbrushCanvasItem::setGlitterFlakeSize(qreal v)
     if (qFuzzyCompare(qreal(m_glitterParams.flakeSize), v))
         return;
     m_glitterParams.flakeSize = float(v);
+    m_powderParams.flakeSize = float(v);
     emit artParamsChanged();
 }
 
@@ -475,6 +511,7 @@ void PaintbrushCanvasItem::setGlitterShimmer(qreal v)
     if (qFuzzyCompare(qreal(m_glitterParams.shimmer), v))
         return;
     m_glitterParams.shimmer = float(v);
+    m_powderParams.shimmer = float(v);
     emit artParamsChanged();
 }
 
@@ -484,6 +521,17 @@ void PaintbrushCanvasItem::setGlitterAdhesion(qreal v)
     if (qFuzzyCompare(qreal(m_glitterParams.adhesion), v))
         return;
     m_glitterParams.adhesion = float(v);
+    m_powderParams.adhesion = float(v);
+    emit artParamsChanged();
+}
+
+void PaintbrushCanvasItem::setPowderLoose(qreal v)
+{
+    v = qBound<qreal>(0.0, v, 1.0);
+    if (qFuzzyCompare(qreal(m_glitterParams.looseMix), v))
+        return;
+    m_glitterParams.looseMix = float(v);
+    m_powderParams.looseMix = float(v);
     emit artParamsChanged();
 }
 
@@ -516,6 +564,25 @@ void PaintbrushCanvasItem::setGlitterPalette(const QVector<QColor> &palette, con
  * glitter. The grain grid lives in layer-local units, which ARE world units at
  * 1x, so export re-renders the same state at any scale (spec §11, §55). */
 static constexpr float kGlitterFlakeWorld = 1.6f;
+
+/* Bounded art-material grid: grows the world cell size so a layer-sized grid
+ * never exceeds the memory cap (~2M cells). Used by BOTH the glitter grain
+ * grid and the powder heightfield so a small flake-size slider value or a very
+ * large canvas NEVER silently disables the tool (the old behaviour switched to
+ * the brush — which looked like "the tool does nothing"). Returns the final
+ * cell size to use (cell is in/out). */
+static QSize boundedArtGrid(const QSize &layer, float &cell, qint64 maxCells)
+{
+    const qint64 w = qMax(1, layer.width()), h = qMax(1, layer.height());
+    const qint64 ideal = (qint64(w / qMax(0.01f, cell)) + 2)
+                       * (qint64(h / qMax(0.01f, cell)) + 2);
+    if (ideal > maxCells)
+    {
+        const float grow = float(qSqrt(double(ideal) / double(maxCells)));
+        cell *= qMax(1.0f, grow);
+    }
+    return QSize(int(w / cell) + 2, int(h / cell) + 2);
+}
 
 void PaintbrushCanvasItem::beginArtStroke(const QPointF &local)
 {
@@ -550,18 +617,30 @@ void PaintbrushCanvasItem::beginArtStroke(const QPointF &local)
             (std::uint32_t(m_undoStack ? m_undoStack->count() : 0) * 40503u + 7u);
         m_glitterParams.color = m_fgColor;
         /* the grain grid covers the whole layer in layer-local world units */
-        const float cell = art::glitter::glitterWorldCellSize(m_glitterParams, kGlitterFlakeWorld);
-        const QSize cells(int(layer->raster.width() / cell) + 2,
-                          int(layer->raster.height() / cell) + 2);
-        if (cells.width() * cells.height() > 4 * 1024 * 1024)
-        {
-            /* bounded sim: refuse absurd grids rather than allocate GBs */
-            setTool(TOOL_BRUSH);
-            return;
-        }
+        float cell = art::glitter::glitterWorldCellSize(m_glitterParams, kGlitterFlakeWorld);
+        const QSize cells = boundedArtGrid(layer->raster.size(), cell, 2 * 1024 * 1024);
         m_glitterState.reset(cells, cell);
         m_glitterLast = local;
         m_glitterUnion = QRect();
+        artStrokeSegment(local, local);
+    }
+    else if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
+    {
+        m_glitterParams.seed = m_doc->artSeed() ^
+            (std::uint32_t(m_undoStack ? m_undoStack->count() : 0) * 40503u + 7u);
+        m_glitterParams.color = m_fgColor;
+        m_powderReady = false;
+        m_powderBlowing = false;
+        m_powderBlowSince = 0.0f;
+        m_powderBlowAge = 0.0f;
+        m_powderRenderAcc = 0.0f;
+        m_powderHoldPos = local;
+        m_powderHoldEver = false;
+        ensurePowder(true);
+        qInfo("pb powder: stroke begin (grid %dx%d cell %.2f, brush %.1f)",
+              m_powder.cellW(), m_powder.cellH(), m_powder.worldCellSize(),
+              m_brushSize);
+        m_powderUnion = QRect();
         artStrokeSegment(local, local);
     }
 }
@@ -594,6 +673,81 @@ void PaintbrushCanvasItem::artStrokeSegment(const QPointF &fromLocal, const QPoi
             m_strokeHadPaint = true;
             markTilesDirty(mappedRect(painted.translated(m_scratchOrigin)));
         }
+        m_strokeLastDab = toLocal;
+        return;
+    }
+
+if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
+    {
+        /* ensure the powder engine covers the layer (bounded grid) */
+        ensurePowder();
+        const float radius = float(qMax<qreal>(3.0, m_brushSize) * 0.5);
+        const QLineF seg(fromLocal, toLocal);
+        const qreal len = seg.length();
+        const qreal step = qMax<qreal>(1.0, radius * 0.35);
+        const QPointF delta = toLocal - fromLocal;
+        const QPointF trans = len > 0.0 ? QPointF(delta.x() / len, delta.y() / len) : QPointF();
+        int steps = qMax(1, int(len / step));
+
+        /* A plow/smear only changes things when there is loose powder to push;
+         * snapshot the scoped loose mass first so an empty smear doesn't commit
+         * a pointless (empty) undo entry. */
+        const QRectF beforeB = QRectF(fromLocal, toLocal).normalized()
+                                   .adjusted(-radius - 6, -radius - 6, radius + 6, radius + 6);
+        const bool smearHasMaterial =
+            m_tool == TOOL_GLITTER_POWDER
+            || m_powder.looseMassInRect(float(beforeB.left()), float(beforeB.top()),
+                                        float(beforeB.right()), float(beforeB.bottom()))
+                   > 0.002f;
+
+        for (int i = 0; i <= steps; ++i)
+        {
+            const QPointF p = len > 0.0 ? seg.pointAt(qreal(i) / steps) : fromLocal;
+            if (m_tool == TOOL_GLITTER_POWDER)
+            {
+                /* pour loose powder (reference deposit) with adhesive bonding;
+                 * the Loose control scales how much glue actually binds the
+                 * fresh deposit (looseMix = fraction treated as loose grains) */
+                m_powder.paintGlue(float(p.x()), float(p.y()), radius,
+                                   m_powderParams.adhesion * 0.5f
+                                       * (1.0f - 0.7f * m_powderParams.looseMix));
+                m_powder.pourGlitter(float(p.x()), float(p.y()), radius,
+                                     m_powderParams);
+            }
+            else
+            {
+                /* smear/plow: push loose grains along the stroke; bonded stay */
+                m_powder.smear(float(p.x()), float(p.y()), float(trans.x()),
+                               float(trans.y()), radius, 0.0f);
+            }
+        }
+        m_powder.relax();
+        m_powder.decayFlow();
+
+        const QRectF r = QRectF(fromLocal, toLocal).normalized()
+                             .adjusted(-radius - 4, -radius - 4, radius + 4, radius + 4);
+        const QRect affected = r.toAlignedRect().intersected(layer->raster.rect());
+        if (affected.isEmpty())
+            return;
+        m_powderUnion = m_powderUnion.isNull() ? affected : m_powderUnion.united(affected);
+        captureBeforeRegion(affected);
+        ensureScratch(affected);
+        /* live preview: render the powder region (deterministic) */
+        QImage flakes = m_powder.render(affected.size(), float(affected.x()),
+                                        float(affected.y()), 1.0f,
+                                        m_doc->lightRig(), m_powderPal,
+                                        m_doc->paperStock(), m_doc->artScale(1.0f));
+        {
+            QPainter p(&m_scratchTile);
+            p.setCompositionMode(QPainter::CompositionMode_Source);
+            p.drawImage(affected.topLeft() - m_scratchOrigin, layer->raster, affected);
+            p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+            p.drawImage(affected.topLeft() - m_scratchOrigin, flakes);
+            p.end();
+        }
+        if (smearHasMaterial)
+            m_strokeHadPaint = true;
+        markTilesDirty(mappedRect(affected));
         m_strokeLastDab = toLocal;
         return;
     }
@@ -675,16 +829,175 @@ void PaintbrushCanvasItem::endArtStroke(const QPointF &local)
         p.end();
         markTilesDirty(mappedRect(u));
     }
+else if ((m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
+         && layer && m_strokeHadPaint && !m_powderUnion.isEmpty())
+    {
+        /* final powder pass over the full union (reseeds + clears masked
+         * committed powder + overlays current sim, then marks tiles dirty) */
+        renderPowderUnion();
+    }
     if (m_strokeHadPaint)
-        commitScratch(m_tool == TOOL_GLITTER ? QStringLiteral("Glitter")
-                                             : QStringLiteral("Bristle paint"));
+    {
+        const QString name = m_tool == TOOL_GLITTER ? QStringLiteral("Glitter")
+                            : m_tool == TOOL_GLITTER_POWDER ? QStringLiteral("Glitter powder")
+                            : m_tool == TOOL_SMEAR ? QStringLiteral("Smear")
+                            : QStringLiteral("Bristle paint");
+        commitScratch(name);
+    }
     if (m_tool == TOOL_BRISTLE)
         m_bristle.endStroke();
     m_strokeBefore.clear();
     m_strokeUnion = QRect();
     m_scratchTile = QImage();
     m_scratchSeeded = QRect();
+    m_powderReady = false;
+    m_powderBlowing = false;
+    m_powderBlowSince = 0.0f;
+    m_powderBlowAge = 0.0f;
+    m_powderRenderAcc = 0.0f;
+    m_powderHoldEver = false;
     m_glitterUnion = QRect();
+    m_powderUnion = QRect();
+}
+
+void PaintbrushCanvasItem::ensurePowder(bool force)
+{
+    CanvasLayer *layer = m_doc ? m_doc->currentLayer() : nullptr;
+    if (!layer)
+        return;
+    /* powder cells are larger than glitter grains (a coarse flake grid); the
+     * grid is ADAPTIVELY bounded so a small flake-size or a huge canvas never
+     * silently disables the tool (see boundedArtGrid) */
+    float cell = art::glitter::powderWorldCellSize(m_glitterParams, kGlitterFlakeWorld);
+    const QSize cells = boundedArtGrid(layer->raster.size(), cell, 2 * 1024 * 1024);
+    /* Idempotent within a stroke: once the grid covers the current layer we
+     * don't reset it every segment (a reset would wipe powder poured by
+     * earlier samples of the same stroke). Only `force` (stroke begin, or a
+     * layer that actually changed) rebuilds from scratch. */
+    if (!force && m_powderReady && m_powder.cellW() == cells.width()
+        && m_powder.cellH() == cells.height())
+        return;
+    std::uint32_t seed = m_doc->artSeed() ^
+        (std::uint32_t(m_undoStack ? m_undoStack->count() : 0) * 40503u + 7u);
+    m_powder.reset(cells, cell, seed);
+    /* the reference's palette is the single source of truth: deposit slot 0 = the
+     * signature pink so the sim and the render agree, and cache it for clearing
+     * committed powder back to the paper colour during a hydrate-blow. */
+    m_powderPal = art::glitter::defaultPowderPalette();
+    m_powderParams = m_glitterParams;
+    m_powderParams.seed = seed;
+    m_powderParams.palette = m_powderPal.colors;
+    /* clear/hydrate-restore committed powder back onto the document's actual
+     * paper colour, not a hardcoded white */
+    if (const art::PaperStock *ps = m_doc->paperStock())
+        m_powderPal.paper = ps->baseColor;
+    m_powderReady = true;
+}
+
+void PaintbrushCanvasItem::renderPowderUnion()
+{
+    CanvasLayer *layer = m_doc ? m_doc->currentLayer() : nullptr;
+    if (!layer || layer->raster.isNull())
+        return;
+    if (m_powderUnion.isNull() || m_powderUnion.isEmpty())
+        return;
+    const QRect u = m_powderUnion.intersected(layer->raster.rect());
+    if (u.isEmpty())
+        return;
+    captureBeforeRegion(u);
+    ensureScratch(u);
+    QImage flakes = m_powder.render(u.size(), float(u.x()), float(u.y()), 1.0f,
+                                    m_doc->lightRig(), m_powderPal,
+                                    m_doc->paperStock(), m_doc->artScale(1.0f));
+    QPainter p(&m_scratchTile);
+    p.setCompositionMode(QPainter::CompositionMode_Source);
+    p.drawImage(u.topLeft() - m_scratchOrigin, layer->raster, u);
+    /* Hydrate-blow: the sim now owns the previously-committed powder cells;
+     * erase their old pixels back to the paper so the breath actually clears
+     * them (fixes the "committed powder never leaves the raster" bug). */
+    if (m_powder.hasPowderMask())
+        m_powder.clearMaskedPowder(m_scratchTile, float(m_scratchOrigin.x()),
+                                   float(m_scratchOrigin.y()), 1.0f,
+                                   m_powderPal.paper);
+    p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+    p.drawImage(u.topLeft() - m_scratchOrigin, flakes);
+    p.end();
+    markTilesDirty(mappedRect(u));
+    m_strokeHadPaint = true;
+}
+
+void PaintbrushCanvasItem::startPowderBlow()
+{
+    if (m_powderBlowing
+        || (m_tool != TOOL_GLITTER_POWDER && m_tool != TOOL_SMEAR))
+        return;
+    /* A pure press-and-hold (no drag: `m_powderHoldEver` stays false) is the
+     * reference's "blow" gesture — it should clear powder a PREVIOUS stroke
+     * already committed. Hydrate the heightfield from the raster for that case
+     * (overwriting the phantom first dab). A drag-then-hold blows the freshly
+     * poured spread (the sim already holds it), so no hydration needed there. */
+    if (!m_powderHoldEver)
+    {
+        CanvasLayer *layer = m_doc ? m_doc->currentLayer() : nullptr;
+        if (layer && !layer->raster.isNull())
+        {
+            ensurePowder(false);
+            m_powder.hydrateFromRaster(layer->raster, 1.0f);
+            /* the breath sweeps powder anywhere across (and off) the page, so
+             * render the re-hydrated powder bounds grown by a travel margin —
+             * keeps pushed flakes visible without a full-canvas render budget */
+            float minx = 0, miny = 0, maxx = 0, maxy = 0;
+            if (m_powder.powderBoundsWorld(minx, miny, maxx, maxy))
+            {
+                const float margin = std::max(96.0f, layer->raster.width() * 0.12f);
+                m_powderUnion = QRectF(minx, miny, (maxx - minx) + margin,
+                                       (maxy - miny) + 24.0f).toAlignedRect()
+                                    .intersected(layer->raster.rect());
+            }
+            else
+            {
+                m_powderUnion = QRect();
+            }
+        }
+    }
+    m_powder.beginBlow();
+    m_powderBlowing = true;
+    m_powderBlowAge = 0.0f;
+    m_powderRenderAcc = 0.0f;
+    renderPowderUnion();
+}
+
+void PaintbrushCanvasItem::stepPowderBlow(float dtSec)
+{
+    if (!m_powderBlowing)
+        return;
+    m_powderBlowAge += dtSec;
+    const int moved = m_powder.blowStep(dtSec);
+    /* A breath runs a few seconds, or until the loose powder is all gone. The
+     * first fraction of a second is a gentle ramp where the wind hasn't built
+     * velocity yet, so `moved` may be 0 briefly — only end on `moved == 0`
+     * after the breath has visibly run (>= 0.8 s), never on the opening ramp. */
+    const bool finished = m_powderBlowAge > 3.5f
+                          || (moved == 0 && m_powderBlowAge > 0.8f);
+    /* Render the evolving field at ~30 Hz (physics steps every tick; the
+     * full-union render is the expensive part and doesn't need 120 Hz). */
+    m_powderRenderAcc += dtSec;
+    if (m_powderRenderAcc >= 1.0 / 30.0)
+    {
+        m_powderRenderAcc = 0.0f;
+        renderPowderUnion();
+    }
+    if (finished)
+    {
+        renderPowderUnion();   /* final pass */
+        m_powderBlowing = false;
+        m_powderBlowSince = 0.0f;
+        m_powderBlowAge = 0.0f;
+        m_powderRenderAcc = 0.0f;
+        /* finish the stroke so the blown result is committed once */
+        if (m_strokeActive)
+            endArtStroke(m_powderHoldPos);
+    }
 }
 
 void PaintbrushCanvasItem::setZoom(qreal zoom)
@@ -906,9 +1219,32 @@ QSGNode *PaintbrushCanvasItem::updatePaintNode(QSGNode *oldNode,
         return nullptr;
     }
 
-    QSGTransformNode *root = static_cast<QSGTransformNode *>(oldNode);
+    /* The returned top node is a container that owns the document-transform
+     * root (all document content in canvas coords) plus the viewport-space
+     * live-harvest overlay node (item coords, on top of the video). */
+    QSGNode *container = oldNode;
+    QSGTransformNode *root = nullptr;
+    if (container)
+    {
+        /* oldNode is the container; child 0 = document root, child 1 =
+         * overlay node (when present). */
+        for (QSGNode *child = container->firstChild(); child;
+             child = child->nextSibling())
+        {
+            if (child->type() == QSGNode::TransformNodeType)
+            {
+                root = static_cast<QSGTransformNode *>(child);
+                break;
+            }
+        }
+    }
     if (!root)
+    {
+        if (!container)
+            container = new QSGNode();
         root = new QSGTransformNode();
+        container->appendChildNode(root);
+    }
 
     QMatrix4x4 matrix;
     matrix.translate(m_panOffset.x(), m_panOffset.y());
@@ -982,49 +1318,111 @@ QSGNode *PaintbrushCanvasItem::updatePaintNode(QSGNode *oldNode,
         m_gridNode = nullptr;
     }
 
-    /* ensure one transform node per tile, positioned in canvas coords */
-    const auto tileKeys = m_tiles.keys();
-    for (const TileKey &key : tileKeys)
+    /* In HarvestVideo mode the document tiles are NOT rendered (the live
+     * video anchored behind shows through); prune any existing tile nodes so
+     * nothing opaque is drawn over the video. */
+    if (m_videoHarvestMode)
     {
-        QSGTransformNode *node = m_tileNodes.value(key);
-        if (!node)
+        const auto keys = m_tileNodes.keys();
+        for (const TileKey &key : keys)
         {
-            node = new QSGTransformNode();
-            m_tileNodes.insert(key, node);
-            root->appendChildNode(node);
-            QMatrix4x4 tileMatrix;
-            tileMatrix.translate(key.x * TILE, key.y * TILE);
-            node->setMatrix(tileMatrix);
-        }
-        QSGSimpleTextureNode *texNode = nullptr;
-        for (QSGNode *child = node->firstChild(); child; child = child->nextSibling())
-        {
-            if (child->type() == QSGNode::GeometryNodeType)
+            if (QSGTransformNode *node = m_tileNodes.take(key))
             {
-                texNode = static_cast<QSGSimpleTextureNode *>(child);
-                break;
+                root->removeChildNode(node);
+                delete node;
             }
         }
-        if (!texNode)
+        /* fall through to the overlay node below */
+    }
+    else
+    {
+        /* ensure one transform node per tile, positioned in canvas coords */
+        const auto tileKeys = m_tiles.keys();
+        for (const TileKey &key : tileKeys)
         {
-            texNode = new QSGSimpleTextureNode();
-            node->appendChildNode(texNode);
-        }
-        const QRect r = tileRect(key.x, key.y);
-        QSGTexture *tex = m_textures.value(key);
-        if (tex)
-        {
-            texNode->setTexture(tex);
-            texNode->setRect(0, 0, r.width(), r.height());
-        }
-        else
-        {
-            texNode->setTexture(nullptr);
-            texNode->setRect(0, 0, 0, 0);
+            QSGTransformNode *node = m_tileNodes.value(key);
+            if (!node)
+            {
+                node = new QSGTransformNode();
+                m_tileNodes.insert(key, node);
+                root->appendChildNode(node);
+                QMatrix4x4 tileMatrix;
+                tileMatrix.translate(key.x * TILE, key.y * TILE);
+                node->setMatrix(tileMatrix);
+            }
+            QSGSimpleTextureNode *texNode = nullptr;
+            for (QSGNode *child = node->firstChild(); child; child = child->nextSibling())
+            {
+                if (child->type() == QSGNode::GeometryNodeType)
+                {
+                    texNode = static_cast<QSGSimpleTextureNode *>(child);
+                    break;
+                }
+            }
+            if (!texNode)
+            {
+                texNode = new QSGSimpleTextureNode();
+                node->appendChildNode(texNode);
+            }
+            const QRect r = tileRect(key.x, key.y);
+            QSGTexture *tex = m_textures.value(key);
+            if (tex)
+            {
+                texNode->setTexture(tex);
+                texNode->setRect(0, 0, r.width(), r.height());
+            }
+            else
+            {
+                texNode->setTexture(nullptr);
+                texNode->setRect(0, 0, 0, 0);
+            }
         }
     }
 
-    return root;
+    /* ---- live harvest overlay node (viewport space, over the video) ------ */
+    /* A dedicated node OUTSIDE the document-transform root so the mask stays
+     * glued to the video regardless of document zoom/pan. */
+    if (m_liveHarvestOverlayValid && !m_liveHarvestOverlay.isNull()
+        && win)
+    {
+        if (m_liveOverlayNodeChanged || !m_liveOverlayNode)
+        {
+            /* release the previous texture before rebuilding */
+            if (m_liveOverlayTexture)
+            {
+                delete m_liveOverlayTexture;
+                m_liveOverlayTexture = nullptr;
+            }
+            if (m_liveOverlayNode)
+            {
+                container->removeChildNode(m_liveOverlayNode);
+                delete m_liveOverlayNode;
+                m_liveOverlayNode = nullptr;
+            }
+            m_liveOverlayNode = new QSGSimpleTextureNode();
+            m_liveOverlayTexture = win->createTextureFromImage(m_liveHarvestOverlay);
+            m_liveOverlayNode->setTexture(m_liveOverlayTexture);
+            m_liveOverlayNode->setRect(0, 0, m_liveHarvestOverlay.width(),
+                                       m_liveHarvestOverlay.height());
+            m_liveOverlayNode->setFiltering(QSGTexture::Linear);
+            container->appendChildNode(m_liveOverlayNode);
+            m_liveOverlayNodeChanged = false;
+        }
+    }
+    else if (m_liveOverlayNode)
+    {
+        container->removeChildNode(m_liveOverlayNode);
+        delete m_liveOverlayNode;
+        m_liveOverlayNode = nullptr;
+        if (m_liveOverlayTexture)
+        {
+            delete m_liveOverlayTexture;
+            m_liveOverlayTexture = nullptr;
+        }
+        m_liveOverlayNodeChanged = false;
+    }
+
+    return container;
 }
 
 void PaintbrushCanvasItem::geometryChange(const QRectF &newGeometry,
@@ -1032,7 +1430,32 @@ void PaintbrushCanvasItem::geometryChange(const QRectF &newGeometry,
 {
     QQuickItem::geometryChange(newGeometry, oldGeometry);
     if (newGeometry.size() != oldGeometry.size())
+    {
+        /* The live harvest overlay is item-sized AND its letterbox transform
+         * depends on the viewport size. Rebuild it from the authoritative
+         * native mask against the new size (P0#3); on failure fall back to
+         * hiding the overlay rather than keeping a stale one glued to the
+         * old geometry. */
+        if (m_liveHarvestOverlayValid && !m_liveHarvestOverlay.isNull()
+            && !m_objectMask.isNull())
+        {
+            const int oldW = qMax(1, int(oldGeometry.width()));
+            const int oldH = qMax(1, int(oldGeometry.height()));
+            const int newW = qMax(1, int(newGeometry.width()));
+            const int newH = qMax(1, int(newGeometry.height()));
+            /* skip rebuild if the item was momentarily zero-sized */
+            if (newW > 0 && newH > 0)
+            {
+                rebuildLiveHarvestOverlayForCurrentSize();
+                return; /* rebuilt and re-rendered; no extra generic update */
+            }
+            Q_UNUSED(oldW); Q_UNUSED(oldH);
+        }
+        m_liveHarvestOverlay = QImage();
+        m_liveHarvestOverlayValid = false;
+        m_liveOverlayNodeChanged = true;
         update();
+    }
 }
 
 void PaintbrushCanvasItem::itemChange(ItemChange change, const ItemChangeData &value)
@@ -1288,6 +1711,8 @@ void PaintbrushCanvasItem::strokeSegment(const QPointF &from, const QPointF &to)
         break;
     case TOOL_BRISTLE:
     case TOOL_GLITTER:
+    case TOOL_GLITTER_POWDER:
+    case TOOL_SMEAR:
         artStrokeSegment(localFromCanvas(from), localFromCanvas(to));
         break;
     default:
@@ -1328,6 +1753,8 @@ void PaintbrushCanvasItem::beginStroke(const QPointF &canvasPos, bool primary)
 
     case TOOL_BRISTLE:
     case TOOL_GLITTER:
+    case TOOL_GLITTER_POWDER:
+    case TOOL_SMEAR:
         m_lastCanvasPos = canvasPos;
         m_strokeRemainder = 0.0;
         m_strokeSpeed = 0.0;
@@ -1484,6 +1911,8 @@ void PaintbrushCanvasItem::continueStroke(const QPointF &canvasPos)
 
     case TOOL_BRISTLE:
     case TOOL_GLITTER:
+    case TOOL_GLITTER_POWDER:
+    case TOOL_SMEAR:
         if (m_strokeActive)
         {
             /* same normalize + short-window stabilize as the brush so the
@@ -1509,6 +1938,21 @@ void PaintbrushCanvasItem::continueStroke(const QPointF &canvasPos)
             }
             artStrokeSegment(m_strokeLastDab, m_strokeSmooth);
             m_lastCanvasPos = canvasPos;
+            /* powder/smear: moving the pointer cancels/defers the long-press
+             * breath; a real (non-click) drag is what a breath should wait for.
+             * `m_powderHoldEver` is set ONLY once the pointer has actually
+             * travelled (>2 px), so sub-pixel pressure jitter on a pure
+             * press-and-hold doesn't flip the gesture out of hydrate mode. */
+            if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
+            {
+                if (QLineF(m_powderHoldPos, m_strokeSmooth).length() > 2.0)
+                {
+                    m_powderHoldEver = true;
+                    m_powderBlowSince = 0.0f;
+                    m_powderHoldPos = m_strokeSmooth;
+                    m_powderBlowing = false;
+                }
+            }
         }
         break;
 
@@ -1612,6 +2056,8 @@ void PaintbrushCanvasItem::endStroke(const QPointF &canvasPos, bool primary)
 
     case TOOL_BRISTLE:
     case TOOL_GLITTER:
+    case TOOL_GLITTER_POWDER:
+    case TOOL_SMEAR:
         if (m_strokeActive)
             endArtStroke(localFromCanvas(canvasPos));
         break;
@@ -2602,6 +3048,100 @@ void PaintbrushCanvasItem::clearObjectMask()
     markAllTilesDirty();
 }
 
+void PaintbrushCanvasItem::setLiveHarvestOverlay(const QImage &nativeMask,
+                                                 const QRectF &contentRect,
+                                                 const QTransform &frameToItem)
+{
+    /* Build a VIEWPORT-space display image from the AUTHORITATIVE native
+     * (frame-space) mask. `nativeMask` is never modified here — it is mapped
+     * into item coordinates for display only (P0#3). */
+    m_liveHarvestOverlayValid = !nativeMask.isNull() && !contentRect.isEmpty();
+    if (!m_liveHarvestOverlayValid)
+    {
+        clearLiveHarvestOverlay();
+        return;
+    }
+
+    const int iw = qMax(1, int(width()));
+    const int ih = qMax(1, int(height()));
+    QImage overlay(iw, ih, QImage::Format_ARGB32);
+    overlay.fill(Qt::transparent);
+
+    /* Trace the native mask silhouette (frame coords) and map it into item
+     * coordinates with the frame<->viewport transform. This preserves the
+     * native mask byte-for-byte (it is not rescaled); only the display path
+     * is transformed. */
+    const QPainterPath nativePath = maskToPath(nativeMask);
+    if (!nativePath.isEmpty())
+    {
+        const QPainterPath itemPath = frameToItem.map(nativePath);
+        QPainter p(&overlay);
+        p.setRenderHint(QPainter::Antialiasing, false);
+        p.setPen(QPen(QColor(30, 90, 220), 2));
+        p.setBrush(QColor(60, 90, 200, 90));
+        p.drawPath(itemPath);
+        p.end();
+    }
+
+    m_liveHarvestOverlay = overlay;
+    m_liveHarvestContentRect = contentRect;
+    m_liveHarvestFrameToItem = frameToItem;
+    /* overlay node update is driven by the scene graph in updatePaintNode */
+    m_liveOverlayNodeChanged = true;
+    update();
+}
+
+void PaintbrushCanvasItem::clearLiveHarvestOverlay()
+{
+    m_liveHarvestOverlay = QImage();
+    m_liveHarvestOverlayValid = false;
+    m_liveOverlayNodeChanged = true;
+    update();
+}
+
+void PaintbrushCanvasItem::rebuildLiveHarvestOverlayForCurrentSize()
+{
+    /* A live overlay is active only when the authoritative native mask and
+     * the item are both present. `m_objectMask` carries that native mask for
+     * a live selection (frame space), so its size IS the native frame size. */
+    if (!m_liveHarvestOverlayValid || m_objectMask.isNull())
+        return;
+
+    const QSizeF vs = QSizeF(width(), height());
+    const QSizeF fs = QSizeF(m_objectMask.size());
+    if (vs.isEmpty() || fs.isEmpty())
+        return;
+
+    /* Recomputed letterbox aspect-fit for the CURRENT viewport size — the
+     * same geometry as buildSelectionTransforms (pb_selection.hpp), kept in
+     * lock-step so the displayed overlay matches the selection context. */
+    const qreal fit = qMin(vs.width() / fs.width(), vs.height() / fs.height());
+    const qreal cw = fs.width() * fit;
+    const qreal ch = fs.height() * fit;
+    const QRectF contentRect((vs.width() - cw) / 2.0,
+                             (vs.height() - ch) / 2.0, cw, ch);
+
+    /* item -> frame (see buildSelectionTransforms: scale then translate). */
+    const QTransform itemToFrame =
+        QTransform().scale(1.0 / fit, 1.0 / fit)
+                    .translate(-contentRect.left(), -contentRect.top());
+    const QTransform frameToItem = itemToFrame.inverted();
+
+    setLiveHarvestOverlay(m_objectMask, contentRect, frameToItem);
+}
+
+void PaintbrushCanvasItem::setVideoHarvestMode(bool on)
+{
+    if (m_videoHarvestMode == on)
+        return;
+    m_videoHarvestMode = on;
+    /* In HarvestVideo mode the canvas stops rendering its opaque document
+     * tiles so the live video (anchored behind) shows through. Rebuild the
+     * scene graph accordingly. */
+    markAllTilesDirty();
+    update();
+}
+
 QImage PaintbrushCanvasItem::currentObjectMask() const
 {
     return m_objectMask;
@@ -2660,9 +3200,26 @@ void PaintbrushCanvasItem::paintObjectMask(const QPointF &canvasPos, bool subtra
     if (m_objectMask.format() != QImage::Format_Grayscale8)
         m_objectMask = maskToImage(m_objectMask);
 
-    const qreal pressure = pressureFactor();
-    const qreal radius = qMax(qreal(1.0), m_brushSize * 0.5 * pressure);
-    const QRectF af = QRectF(canvasPos.x() - radius, canvasPos.y() - radius,
+    /* In live Harvest mode `m_objectMask` is the AUTHORITATIVE native
+     * (frame-space) mask and the freehand pointer must be mapped back into
+     * frame space (P0#3): document->item->frame. The display overlay is
+     * rebuilt from the refined native mask so the authoritative mask is never
+     * destructively rescaled. */
+    const bool live = m_liveHarvestOverlayValid;
+    QPointF target = canvasPos;
+    qreal radius = qMax(qreal(1.0), m_brushSize * 0.5 * pressureFactor());
+    if (live)
+    {
+        const QTransform frameToItem = m_liveHarvestFrameToItem;
+        const QTransform itemToFrame = frameToItem.inverted();
+        target = itemToFrame.map(itemFromCanvas(canvasPos));
+        /* scale the brush radius from on-screen px to frame px */
+        const qreal scale = qMax(qreal(0.001),
+                                 qSqrt(qAbs(frameToItem.m11() * frameToItem.m22())));
+        radius = radius / scale;
+    }
+
+    const QRectF af = QRectF(target.x() - radius, target.y() - radius,
                              radius * 2.0, radius * 2.0);
     const QRect affected = af.toAlignedRect().intersected(m_objectMask.rect());
     if (affected.isEmpty())
@@ -2674,8 +3231,8 @@ void PaintbrushCanvasItem::paintObjectMask(const QPointF &canvasPos, bool subtra
         uchar *line = m_objectMask.scanLine(y);
         for (int x = affected.left(); x <= affected.right(); ++x)
         {
-            const qreal dx = (x + 0.5) - canvasPos.x();
-            const qreal dy = (y + 0.5) - canvasPos.y();
+            const qreal dx = (x + 0.5) - target.x();
+            const qreal dy = (y + 0.5) - target.y();
             if (dx * dx + dy * dy <= r2)
             {
                 if (subtract)
@@ -2688,7 +3245,16 @@ void PaintbrushCanvasItem::paintObjectMask(const QPointF &canvasPos, bool subtra
     m_maskPaintDirty = true;
     m_maskPaintUnion = m_maskPaintUnion.isNull()
         ? affected : m_maskPaintUnion.united(affected);
-    markTilesDirty(affected);
+    if (live)
+    {
+        /* rebuild the viewport display overlay from the refined native mask */
+        setLiveHarvestOverlay(m_objectMask, m_liveHarvestContentRect,
+                              m_liveHarvestFrameToItem);
+    }
+    else
+    {
+        markTilesDirty(affected);
+    }
 }
 
 void PaintbrushCanvasItem::paintObjectMaskSegment(const QPointF &from,
@@ -3091,6 +3657,8 @@ void PaintbrushCanvasItem::updateStatus(const QPointF &canvasPos)
     case TOOL_SPRAY:
     case TOOL_BRISTLE:
     case TOOL_GLITTER:
+    case TOOL_GLITTER_POWDER:
+    case TOOL_SMEAR:
         text += QStringLiteral(" %1px %2").arg(QString::number(m_brushSize, 'f', 0),
                                                m_fgColor.name());
         break;

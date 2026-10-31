@@ -53,11 +53,11 @@ Item {
                 description: qsTr("Previous frame")
                 onClicked: PaintbrushCtx.playerFramePrev()
             }
-            Widgets.IconToolButton {
-                text: PaintbrushCtx.playerTimeMs > 0 ? VLCIcons.pause_filled : VLCIcons.play
-                description: qsTr("Play / pause")
-                onClicked: PaintbrushCtx.playerPlayPause()
-            }
+Widgets.IconToolButton {
+    text: PaintbrushCtx.playerIsPlaying ? VLCIcons.pause_filled : VLCIcons.play
+    description: qsTr("Play / pause")
+    onClicked: PaintbrushCtx.playerPlayPause()
+}
             Widgets.IconToolButton {
                 text: VLCIcons.next_frame
                 description: qsTr("Next frame")
@@ -91,11 +91,10 @@ Item {
                         PaintbrushCtx.playerSeek(seekSlider.value)
                     }
                 }
-                onMoved: {
-                    /* (B) moved-value probe — slider is delivering a value */
-                    console.slog("pb seek B: slider moved to " + seekSlider.value)
-                    seekThrottle.restart()
-                }
+onMoved: {
+        /* (B) slider is delivering a value — throttled precise seek below */
+        seekThrottle.restart()
+    }
 
                 Timer {
                     id: seekThrottle

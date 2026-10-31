@@ -588,6 +588,7 @@ qt_plugin_sources = files(
     'paintbrush/art/surface/paper_renderer.cpp',
     'paintbrush/art/stroke/bristle_brush.cpp',
     'paintbrush/art/materials/glitter/glitter_material.cpp',
+    'paintbrush/art/materials/glitter/glitter_powder.cpp',
     'paintbrush/art/finish/effects.cpp',
     'paintbrush/art/style/mood.cpp',
     'paintbrush/art/style/typography_style.cpp',
@@ -1032,6 +1033,8 @@ qml_modules += {
         'paintbrush/qml/PaintbrushMoodPicker.qml',
         'paintbrush/qml/PaintbrushTextEditorBar.qml',
         'paintbrush/qml/PaintbrushSettingsDialog.qml',
+        'paintbrush/qml/PaintbrushToolbar.qml',
+        'paintbrush/qml/PaintbrushToolOptionsBar.qml',
     ),
 }
 

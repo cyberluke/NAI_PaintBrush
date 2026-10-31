@@ -20,6 +20,7 @@
 #include <vlc_fourcc.h>
 
 #include <QDeadlineTimer>
+#include <QPointer>
 
 #include <cstring>
 #include <cstdio>
@@ -134,34 +135,77 @@ inline int yuvToRgb(int c, int d, int e)
 
 struct EditFrameSource::RequestCtx
 {
+    bool async = false;      /* true = emit Qt signal on completion        */
     bool done = false;
     int status = VLC_EGENERIC;
     picture_t *pic = nullptr;
+    QString token;           /* async token to emit back (async only)      */
+    qint64 requestedMs = 0;  /* requested PTS (for tolerance + signal)     */
+    vlc_object_t *logObj = nullptr;   /* logging context (async)           */
+    qint64 toleranceMs = 0;  /* PTS tolerance (async)                      */
+    EditFrameSource *self = nullptr;  /* owning source                     */
 };
 
-/* Callback invoked on the preparser thumbnailer thread with the raw
- * decoded picture (owned by the thumbnailer; hold to use past the
- * callback). Locks the source mutex so the waiting request() thread
- * observes `done` without a data race, then wakes it. `data` points at a
- * stack {EditFrameSource*, RequestCtx} pair owned by the waiting request().
- * Requests are serialized by the source mutex, so the pair outlives the
- * callback. */
+/* Callback invoked on the preparser thumbnailer thread with the raw decoded
+ * picture (owned by the thumbnailer; hold to use past the callback). For a
+ * synchronous request (async=false) it locks the source mutex, publishes the
+ * wait state and wakes the blocked request() thread. For an async request it
+ * converts the picture to a DecodedFrame and posts it back to the Qt thread
+ * via a queued metacall, then deletes the heap-owned context. */
 void EditFrameSource::onThumbnailEnded(vlc_preparser_req *req, int status,
                                        picture_t *thumbnail, void *data)
 {
     Q_UNUSED(req);
-    struct CallbackData
+    auto *ctx = static_cast<RequestCtx *>(data);
+    EditFrameSource *self = ctx->self;
+
+    if (ctx->async)
     {
-        const EditFrameSource *self;
-        RequestCtx *ctx;
-    };
-    auto *cb = static_cast<CallbackData *>(data);
-    QMutexLocker lock(&cb->self->m_mutex);
-    if (thumbnail)
-        cb->ctx->pic = picture_Hold(thumbnail);
-    cb->ctx->status = status;
-    cb->ctx->done = true;
-    cb->self->m_cond.wakeAll();
+        /* Async path: run on the preparser thumbnailer thread. Convert the
+         * thumbnailer-owned picture to a DecodedFrame (isolated; no mutex
+         * needed across the emit), then post the result back to the Qt
+         * thread. The heap-owned ctx is deleted here. */
+        DecodedFrame out;
+        out.requestedMs = ctx->requestedMs;
+        if (status == VLC_SUCCESS && thumbnail)
+        {
+            out.ptsMs = thumbnail->date / 1000;
+            out.image = pictureToQImage(thumbnail, ctx->logObj);
+            out.ptsVerified = ptsWithinTolerance(ctx->requestedMs, out.ptsMs,
+                                                 ctx->toleranceMs);
+        }
+        const QString token = ctx->token;
+        const bool ok = out.ok();
+        const qint64 reqMs = ctx->requestedMs;
+        delete ctx;
+        /* Post the result back to the Qt thread. A QPointer guards `self`
+         * against a caller that was destroyed while the decode was in flight
+         * (queued lambdas are tied to the thread event loop, not the QObject
+         * lifetime, so without the guard the emission would touch a freed
+         * object). */
+        QPointer<EditFrameSource> selfGuard = self;
+        QMetaObject::invokeMethod(self, [selfGuard, token, out, ok, reqMs]() {
+            if (!selfGuard)
+                return; /* source destroyed before the frame came back */
+            if (ok)
+                emit selfGuard->frameDecoded(token, out);
+            else
+                emit selfGuard->frameDecodeFailed(
+                    token, QStringLiteral("Exact frame decode failed at %1 ms")
+                               .arg(qint64(reqMs)));
+        }, Qt::QueuedConnection);
+        return;
+    }
+
+    /* Synchronous path: publish result under the mutex and wake the waiter. */
+    {
+        QMutexLocker lock(&self->m_mutex);
+        if (thumbnail)
+            ctx->pic = picture_Hold(thumbnail);
+        ctx->status = status;
+        ctx->done = true;
+        self->m_cond.wakeAll();
+    }
 }
 
 EditFrameSource::EditFrameSource(QObject *parent)
@@ -260,12 +304,8 @@ DecodedFrame EditFrameSource::request(const FrameRef &ref) const
         return out;
 
     RequestCtx ctx;
-    struct CallbackData
-    {
-        EditFrameSource *self;
-        RequestCtx *ctx;
-    };
-    CallbackData cbData{const_cast<EditFrameSource *>(this), &ctx};
+    ctx.requestedMs = ref.ptsMs;
+    ctx.self = const_cast<EditFrameSource *>(this);
 
     input_item_t *item = input_item_New(qUtf8Printable(ref.mrl),
                                         qUtf8Printable(ref.title));
@@ -294,7 +334,7 @@ DecodedFrame EditFrameSource::request(const FrameRef &ref) const
     };
 
     vlc_preparser_req *req =
-        vlc_preparser_req_NewThumbnail(m_preparser, item, &arg, &cbs, &cbData);
+        vlc_preparser_req_NewThumbnail(m_preparser, item, &arg, &cbs, &ctx);
     input_item_Release(item);
     if (!req)
         return out;
@@ -352,8 +392,80 @@ DecodedFrame EditFrameSource::request(const FrameRef &ref) const
     return out;
 }
 
-QImage EditFrameSource::pictureToQImage(const picture_t *pic,
-                                        vlc_object_t *logObj)
+bool EditFrameSource::requestAsync(const FrameRef &ref, const QString &token)
+{
+    if (!ref.isValid() || token.isEmpty())
+        return false;
+
+    /* The decode itself runs on the preparser thumbnailer thread; no
+     * long work happens here. Guard the preparser handle only. */
+    {
+        QMutexLocker lock(&m_mutex);
+        if (!m_preparser)
+            return false;
+    }
+
+    /* Heap-own the context; the callback deletes it after posting the
+     * frame back to the Qt thread (async path in onThumbnailEnded). */
+    auto *ctx = new RequestCtx;
+    ctx->async = true;
+    ctx->token = token;
+    ctx->requestedMs = ref.ptsMs;
+    ctx->logObj = m_obj;
+    ctx->toleranceMs = m_ptsToleranceMs;
+    ctx->self = this;
+
+    input_item_t *item = input_item_New(qUtf8Printable(ref.mrl),
+                                        qUtf8Printable(ref.title));
+    if (!item)
+    {
+        delete ctx;
+        return false;
+    }
+    {
+        char opt[32];
+        snprintf(opt, sizeof(opt), ":avcodec-hwdec=%d", m_hwdecPolicy);
+        input_item_AddOption(item, opt, VLC_INPUT_OPTION_TRUSTED);
+    }
+
+    struct vlc_thumbnailer_arg arg;
+    memset(&arg, 0, sizeof(arg));
+    arg.seek.type = vlc_thumbnailer_arg::seek::VLC_THUMBNAILER_SEEK_TIME;
+    arg.seek.time = VLC_TICK_FROM_MS(qMax<qint64>(0, ref.ptsMs));
+    arg.seek.speed = vlc_thumbnailer_arg::seek::VLC_THUMBNAILER_SEEK_PRECISE;
+    arg.hw_dec = (m_hwdecPolicy != 1);
+
+    static const struct vlc_thumbnailer_cbs cbs = {
+        .on_ended = EditFrameSource::onThumbnailEnded,
+    };
+
+    vlc_preparser_req *req = nullptr;
+    {
+        QMutexLocker lock(&m_mutex);
+        req = vlc_preparser_req_NewThumbnail(m_preparser, item, &arg, &cbs, ctx);
+    }
+    input_item_Release(item);
+    if (!req)
+    {
+        delete ctx;
+        return false;
+    }
+
+    if (vlc_preparser_Submit(m_preparser, req) != VLC_SUCCESS)
+    {
+        vlc_preparser_req_Release(req);
+        delete ctx;
+        return false;
+    }
+    /* The request is now owned by the preparser; ctx is owned by the
+     * callback path (async branch deletes it). Nothing more to do. */
+    return true;
+}
+
+/* Decode the raw visible pixels into a QImage WITHOUT applying the sample
+ * aspect ratio; the public pictureToQImage resamples to display aspect.
+ * Kept readable for the chroma switch. */
+static QImage decodeVisible(const picture_t *pic, vlc_object_t *logObj)
 {
     if (!pic)
         return {};
@@ -485,6 +597,42 @@ QImage EditFrameSource::pictureToQImage(const picture_t *pic,
         }
         return {};
     }
+}
+
+/* Public converter (P2#13): decode the raw visible pixels and resample to the
+ * DISPLAYED geometry, honoring the sample aspect ratio (SAR). The frame that
+ * SAM segments, the frame<->viewport transform and the mask overlay must all
+ * share ONE geometry source — and that geometry must be what VLC actually
+ * displays (SAR-corrected), not blindly the coded visible width. Non-square
+ * pixel / anamorphic content therefore comes out at its true display AR; when
+ * SAR is 1:1 (square pixels, the common case) this is a no-op. */
+QImage EditFrameSource::pictureToQImage(const picture_t *pic,
+                                        vlc_object_t *logObj)
+{
+    QImage visible = decodeVisible(pic, logObj);
+    if (visible.isNull() || !pic)
+        return visible;
+
+    const video_format_t &fmt = pic->format;
+    const unsigned sar_num = fmt.i_sar_num ? fmt.i_sar_num : 1;
+    const unsigned sar_den = fmt.i_sar_den ? fmt.i_sar_den : 1;
+    if (sar_num == sar_den)
+        return visible; /* square pixels — nothing to correct */
+
+    /* Display width = visible width * sar_num / sar_den (keep integer ≥ 1). */
+    qint64 dw = qint64(visible.width()) * sar_num / sar_den;
+    dw = qBound<qint64>(1, dw, qint64(visible.width() * 8));
+    if (dw == visible.width())
+        return visible;
+
+    QImage corrected = visible.scaled(int(dw), visible.height(),
+                                      Qt::IgnoreAspectRatio,
+                                      Qt::SmoothTransformation);
+    if (!corrected.isNull() && logObj)
+        pbLogInfo(logObj, "media", "frame %dx%d SAR-corrected to %dx%d",
+                  visible.width(), visible.height(), corrected.width(),
+                  corrected.height());
+    return corrected;
 }
 
 } // namespace paintbrush

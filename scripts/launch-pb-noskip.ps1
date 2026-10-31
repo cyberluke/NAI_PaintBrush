@@ -16,7 +16,7 @@ $env:PATH = "$bin;C:\msys64\mingw64\bin;$(Join-Path $root 'win64-meson\lib');$(J
 
 & $vlc `
   "--paintbrush" "--no-media-library" "--no-qt-privacy-ask" "--no-qt-updates-notif" `
-  "--no-qt-name-in-title" `
+  "--no-qt-name-in-title" "--no-one-instance" `
   "--paintbrush-sam-model=D:\_SATIN_AI\models\sam3-q4_0.ggml" "--paintbrush-sam-device=cpu" `
   "--no-avcodec-hurry-up" `
   "--avcodec-skip-frame=-1" `

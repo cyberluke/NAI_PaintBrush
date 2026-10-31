@@ -48,19 +48,23 @@ void PaintbrushController::keepSelection()
         setStatus(QStringLiteral("Select the moment first (Object Select), then Keep."));
         return;
     }
-    /* The exact frame this selection was made on: prefer the ephemeral live
-     * harvest context (current PTS + frame-space mask) over the document's
-     * mutable sourceFrame. */
+    /* The exact frame this selection was made on comes from the ONE
+     * authoritative ObjectSelectionContext (P0#6): for a live video the
+     * context holds the native decoded frame + native mask + exact ref. */
     FrameRef ref;
     QImage frame;
     QImage mask = m_objectMask;
-    if (m_liveCtx.valid() && !m_liveCtx.frame.isNull())
+    if (m_selection.sourceKind == ObjectSelectionContext::SourceLiveVideo
+        && !m_selection.frame.isNull())
     {
-        ref = m_liveCtx.ref;
-        frame = m_liveCtx.frame;
-        /* the mask was produced in frame space by the live SAM path — no
-         * rescale, the mask's pixels already align with the decoded frame. */
-        if (mask.size() != frame.size())
+        ref = m_selection.ref;
+        frame = m_selection.frame;
+        /* The mask is ALREADY in native frame space; use it byte-identical —
+         * never rescale the authoritative mask for Keep (P0#3). */
+        if (!m_selection.mask.isNull()
+            && m_selection.mask.size() == frame.size())
+            mask = m_selection.mask;
+        else if (mask.size() != frame.size())
             mask = mask.scaled(frame.size(), Qt::IgnoreAspectRatio,
                                Qt::SmoothTransformation);
     }

@@ -93,6 +93,13 @@ else
   nsi_script_dir = 'vlc-' + winstaller_suffix
 endif
 
+ns_process_dep = []
+if has_nsprocess_src
+    # vlc.win32.nsi does !addplugindir NSIS and includes nsProcess.nsh, so the
+    # installer must be ordered after the nsProcess.dll plugin target is built.
+    ns_process_dep = nsProcess
+endif
+
 if makensis.found()
     spad_nsis = custom_target(
         command: [makensis, nsi_script_dir / 'spad.nsi'],
@@ -107,7 +114,7 @@ if makensis.found()
         output: 'vlc-' + vlc_version + '-' + winstaller_suffix + '.exe', # real name but root build folder
         build_by_default: false,
         console: true,
-        depends: nsProcess)
+        depends: ns_process_dep)
 
     alias_target('package-win32-exe', spad_nsis, vlc_nsis)
 endif

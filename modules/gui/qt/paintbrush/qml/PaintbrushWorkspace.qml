@@ -354,13 +354,41 @@ Item {
         }
     }
 
+    /* palette bar — declared BEFORE mainRow so the row's anchors.bottom
+     * binding sees it (forward-reference layout collapse avoidance) */
+    PaintbrushPaletteBar {
+        id: paletteBar
+
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: VLCStyle.dp(64, VLCStyle.scale)
+        canvas: paintbrushCanvas
+    }
+
+    /* the unified horizontal per-tool option toolbar (SOLID): the same
+     * PaintbrushToolbar component that renders the vertical rail, shown as a
+     * second bar between the canvas row and the palette. It carries the
+     * precision toggles plus the active tool's option sliders, and sits ABOVE
+     * the palette so it can never be painted over. */
+    PaintbrushToolOptionsBar {
+        id: toolOptionsBar
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.leftMargin: VLCStyle.margin_small
+        anchors.rightMargin: VLCStyle.margin_small
+        anchors.bottom: paletteBar.top
+        canvas: paintbrushCanvas
+        z: 7
+    }
+
     /* center: canvas with tool rail; the inspector drawer and the companion
      * pill float above the canvas and never steal layout width when closed */
     RowLayout {
         id: mainRow
 
         anchors.top: topBar.bottom
-        anchors.bottom: harvestTray.visible ? harvestTray.top : paletteBar.top
+        anchors.bottom: toolOptionsBar.top
         anchors.left: parent.left
         anchors.right: parent.right
         spacing: 0
@@ -376,6 +404,9 @@ Item {
         Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
+            /* clip so panned/zoomed canvas content can never spill over the
+             * tool rail or the top bar (presentation split / z-order fix) */
+            clip: true
 
             PaintbrushCanvasView {
                 id: canvasView
@@ -415,13 +446,13 @@ Item {
         }
     }
 
-    /* the Harvest Tray sits between the canvas row and the palette bar; it
+    /* Harvest Tray sits between the canvas row and the palette bar; it
      * collapses to nothing while empty (spec §5.4) */
     PaintbrushHarvestTray {
         id: harvestTray
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.bottom: textEditorBar.visible ? textEditorBar.top : paletteBar.top
+        anchors.bottom: textEditorBar.visible ? textEditorBar.top : toolOptionsBar.top
         height: implicitHeight
         canvas: paintbrushCanvas
         dropTarget: canvasView
@@ -437,7 +468,7 @@ Item {
 
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.bottom: paletteBar.top
+        anchors.bottom: toolOptionsBar.top
         canvas: paintbrushCanvas
         z: 4
 
@@ -474,17 +505,6 @@ Item {
         anchors.rightMargin: VLCStyle.margin_normal
         anchors.bottomMargin: VLCStyle.margin_normal
         z: 5
-    }
-
-    /* palette bar */
-    PaintbrushPaletteBar {
-        id: paletteBar
-
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: mediaDrawer.visible ? mediaDrawer.top : parent.bottom
-        height: VLCStyle.dp(64, VLCStyle.scale)
-        canvas: paintbrushCanvas
     }
 
     /* media drawer */

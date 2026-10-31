@@ -13,6 +13,7 @@
 #define PB_CONTROLLER_HPP
 
 #include "pb_common.hpp"
+#include "pb_selection.hpp"
 #include "pb_document.hpp"
 #include "pb_layer_model.hpp"
 #include "pb_history.hpp"
@@ -52,42 +53,27 @@ namespace paintbrush {
 
 class PaintbrushCanvasItem;
 
-/* Ephemeral context for a LIVE harvest frame: the exact decoded frame at a
- * given player PTS plus the transforms that map between the on-canvas video
- * viewport and the decoded pixels. Unlike the document's mutable
- * `sourceFrame` (a captured reference/composition provenance), this is the
- * player cursor — re-captured fresh on every SAM seed click so a later PTS
- * can never reuse a stale earlier frame.
+/* The presentation mode of the central canvas area.
  *
- * Mapping is standard letterbox aspect-fit (the same geometry the VideoSurface
- * displays): the full viewport is cleared to transparent and the frame is
- * drawn scaled into its content rect leaving letterbox margins. */
-struct LiveFrameContext
-{
-    FrameRef ref;            /* current MRL + verified PTS               */
-    QImage frame;            /* decoded video pixels (native size)       */
-    QSize viewportSize;      /* the QML canvas-area size the video fills  */
-    QRectF contentRect;      /* aspect-fit rect inside the viewport      */
-    QTransform itemToFrame;  /* viewport QML point -> frame pixel         */
-    QTransform frameToItem;  /* frame pixel -> viewport QML point         */
-
-    bool valid() const { return !frame.isNull() && !contentRect.isEmpty(); }
-
-    /* Remap a viewport-space point into frame-pixel space (returns NaN on
-     * failure so callers can reject outside-the-video clicks). */
-    QPointF itemToFramePoint(const QPointF &p) const
-    {
-        if (!valid())
-            return { qQNaN(), qQNaN() };
-        return itemToFrame.map(p);
-    }
-    /* Remap a frame-pixel point into viewport space. */
-    QPointF frameToItemPoint(const QPointF &p) const
-    {
-        if (!valid())
-            return { qQNaN(), qQNaN() };
-        return frameToItem.map(p);
-    }
+ * HarvestVideo  — Harvest composition: the LIVE VLC video is the visual
+ *                 source ("the frame source"). The document canvas / paper is
+ *                 NOT rendered on top of the video; only a transparent
+ *                 interaction/mask overlay sits above the video so Object
+ *                 Select and mask refinement land exactly on the pixels the
+ *                 user sees.
+ *
+ * ComposeCanvas — canonical Paintbrush document composition: the VLC video is
+ *                 hidden and the normal document canvas (document renderer /
+ *                 paper / tiles) is the visual source, exactly as before this
+ *                 split existed.
+ *
+ * This drives the presentation split described in the product spec: the two
+ * modes are NOT negotiated via `VideoSurface.renderingEnabled` (that is not a
+ * playback enable switch) but by the controller switching its own
+ * presentation state. */
+enum class PresentationMode {
+    HarvestVideo = 0, /* live VLC video is the visual source                */
+    ComposeCanvas = 1 /* canonical paintbrush document canvas is visual     */
 };
 
 /* Owns the Paintbrush document, services and the player bridge. Exposed to
@@ -105,7 +91,16 @@ class PaintbrushController : public QObject
     Q_PROPERTY(QString visionStatusText READ visionStatusText NOTIFY serviceAvailabilityChanged FINAL)
     Q_PROPERTY(QString segmentationStatusText READ segmentationStatusText NOTIFY serviceAvailabilityChanged FINAL)
     Q_PROPERTY(bool paintbrushEnabled READ paintbrushEnabled CONSTANT FINAL)
+    /* The presentation split: `HarvestVideo` (0) shows the live VLC video as
+     * the visual source; `ComposeCanvas` (1) shows the canonical document
+     * canvas. QML binds the canvas acrylic/paper visibility + video surface
+     * visibility to this property rather than guessing from playerTimeMs. */
+    Q_PROPERTY(int presentationMode READ presentationMode WRITE setPresentationMode NOTIFY presentationModeChanged FINAL)
     Q_PROPERTY(bool welcomeVisible READ welcomeVisible NOTIFY welcomeChanged FINAL)
+    /* Real player play/pause state (from the player controller, never
+     * `playerTimeMs > 0`). Frame-step, play/pause and seek UI all derive
+     * from this. */
+    Q_PROPERTY(bool playerIsPlaying READ playerIsPlaying NOTIFY mediaStateChanged FINAL)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY canUndoChanged FINAL)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY canRedoChanged FINAL)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusMessageChanged FINAL)
@@ -395,6 +390,22 @@ public:
     Q_INVOKABLE void askAboutObject(const QString &question);
     Q_INVOKABLE void askAboutSelection(const QString &question);
     Q_INVOKABLE void askAboutObjectFollowUp(const QString &question);
+    /* Ask-anything interaction (P1#11): clicking with the Ask tool establishes
+     * visual context (object / selection / whole frame) and shows a compact
+     * Ask input; the user types a question and Submit sends the VLM request.
+     * This never auto-sends a fixed prompt. `askInputVisible` drives the QML
+     * input; Submit/Cancel clear it. Follow-ups stay scoped to the same
+     * selection/frame until the FrameRef/selection changes. */
+    Q_PROPERTY(bool askInputVisible READ askInputVisible NOTIFY askInputChanged FINAL)
+    bool askInputVisible() const { return m_askInputVisible; }
+    Q_PROPERTY(QString askInputPlaceholder READ askInputPlaceholder NOTIFY askInputChanged FINAL)
+    QString askInputPlaceholder() const { return m_askInputPlaceholder; }
+    Q_INVOKABLE void submitAsk(const QString &question);
+    Q_INVOKABLE void cancelAsk();
+    /* Show the compact Ask input for the current selection context (used by
+     * the selection toolbar "Ask about this…" button — same interaction as a
+     * click with the Ask tool, no auto-sent prompt). */
+    Q_INVOKABLE void beginAsk();
     Q_INVOKABLE void findProduct();
     Q_INVOKABLE void copyVisionAnswer();
     Q_INVOKABLE void addVisionAnswerAsText();
@@ -558,7 +569,56 @@ public:
     qint64 playerTimeMs() const;
     qint64 playerLengthMs() const;
     bool playerHasVideo() const;
+    bool playerIsPlaying() const;
     QString diagnosticsText() const;
+
+    /* -- NAI Settings (P1#12) ------------------------------------------ */
+    /* Current (configured) settings values — the source of truth is the
+     * Paintbrush/VLC configuration layer, not a second settings store. */
+    Q_PROPERTY(QString settingsSamModel READ settingsSamModel NOTIFY settingsChanged FINAL)
+    Q_PROPERTY(QString settingsSamDevice READ settingsSamDevice NOTIFY settingsChanged FINAL)
+    Q_PROPERTY(QString settingsVlmUrl READ settingsVlmUrl NOTIFY settingsChanged FINAL)
+    Q_PROPERTY(QString settingsVlmModel READ settingsVlmModel NOTIFY settingsChanged FINAL)
+    Q_PROPERTY(QString settingsAssistantUrl READ settingsAssistantUrl NOTIFY settingsChanged FINAL)
+    Q_PROPERTY(QString settingsAssistantModel READ settingsAssistantModel NOTIFY settingsChanged FINAL)
+    Q_PROPERTY(int settingsPtsToleranceMs READ settingsPtsToleranceMs NOTIFY settingsChanged FINAL)
+    Q_PROPERTY(bool settingsSecretsPresent READ settingsSecretsPresent CONSTANT FINAL)
+    Q_PROPERTY(bool settingsRestartRequired READ settingsRestartRequired NOTIFY settingsChanged FINAL)
+    QString settingsSamModel() const;
+    QString settingsSamDevice() const;
+    QString settingsVlmUrl() const;
+    QString settingsVlmModel() const;
+    QString settingsAssistantUrl() const;
+    QString settingsAssistantModel() const;
+    int settingsPtsToleranceMs() const;
+    /* True when any secret (API key) is configured; the UI then shows a
+     * "configured" placeholder instead of ever displaying the value. */
+    bool settingsSecretsPresent() const { return m_settingsSecretsPresent; }
+    bool settingsRestartRequired() const { return m_settingsRestartRequired; }
+    /* Apply NAI settings. Persists into the Paintbrush/VLC config layer;
+     * hot-reconfigures what is safe and reports restart-required for the
+     * rest. Never displays stored secrets in clear text. Returns a status
+     * string (empty = applied cleanly). */
+    Q_INVOKABLE QString applyNaiSettings(const QString &samModel,
+                                         const QString &samDevice,
+                                         const QString &vlmUrl,
+                                         const QString &vlmModel,
+                                         const QString &assistantUrl,
+                                         const QString &assistantModel,
+                                         int ptsToleranceMs);
+    Q_INVOKABLE void clearRestartRequired();
+    /* Current capability status text for the NAI Settings status rows; used
+     * to show POSITIVE text when a capability is green (P1#12). */
+    QString trackingStatusText() const;
+
+    /* -- presentation split ----------------------------------------- */
+    int presentationMode() const { return static_cast<int>(m_presentationMode); }
+    void setPresentationMode(int mode);
+    PresentationMode presentation() const { return m_presentationMode; }
+    /* Auto-enter Harvest mode when a live video becomes the active visual
+     * source (used by QML on open and by the controller on media change). */
+    void enterHarvestPresentation();
+    void enterComposePresentation();
 
 signals:
     void canUndoChanged();
@@ -582,6 +642,9 @@ signals:
     void assistantMessageAppended(const QString &role, const QString &text);
     void welcomeChanged();
     void selectedTrackChanged();
+    void presentationModeChanged();
+    void askInputChanged();
+    void settingsChanged();
 
 private slots:
     void onCanvasObjectClick(QPointF canvasPos, bool positive, QPointF itemPos);
@@ -606,6 +669,18 @@ private slots:
     void onCanvasModified();
     void onLayerDrop(const QUrl &url, const QPointF &pos);
     void onMediaTimer();
+    /* Async exact-frame decode completed for an interactive Object Select
+     * seed click (P0#4). The identity is validated against the live session;
+     * a stale result is discarded. */
+    void onAsyncObjectFrameDecoded(const QString &token,
+                                   const paintbrush::DecodedFrame &frame);
+    void onAsyncObjectFrameDecodeFailed(const QString &token,
+                                        const QString &message);
+    /* The canvas viewport was resized while a live Object Select is active:
+     * recompute the selection's letterbox frame<->viewport transforms against
+     * the new size and refresh the display overlay, so a later refine stroke
+     * maps into the correct native pixel (P0#2/#3). */
+    void onCanvasResized();
 
 private:
     void configureServices();
@@ -642,15 +717,52 @@ private:
     QImage selectionCrop() const;
     QImage currentAiSource() const;
     QImage pristineSourceFrame() const;
-    /* Non-const: decode the CURRENT player PTS into an ephemeral
-     * LiveFrameContext (fresh every SAM seed click) complete with the
-     * viewport<->frame letterbox transforms. `viewportSize` is the on-canvas
-     * video area the click came from. Never mutates the document's
-     * sourceFrame — that is composition provenance, not the player cursor. */
-    LiveFrameContext captureLiveFrameContext(const QSize &viewportSize);
+    /* The authoritative source FrameRef for the CURRENT selection
+     * (P0#6): the ObjectSelectionContext's exact ref when media-backed,
+     * else the document's mutable source ref. Used by every object action
+     * (Keep / cutout / export / track / sticker) so they all agree on which
+     * frame the current mask belongs to. */
+    FrameRef selectionFrameRef() const;
+    /* Capture the live video frame context at the CURRENT player PTS into an
+     * ObjectSelectionContext (fresh every SAM seed click) complete with the
+     * frame<->viewport letterbox transforms. `viewportSize` is the actual
+     * displayed video viewport (the QML item size). Never mutates the
+     * document's sourceFrame. Callers must gate on ctx.validFrame().
+     *
+     * NOTE: the click coordinate a caller wants to map MUST be a VIEWPORT
+     * (item) point, never a document/content point — `captureLiveFrameContext`
+     * builds the transforms against the viewport, so the pointer position in
+     * the actual QML/video viewport is the correct input domain (P0#2). */
+    ObjectSelectionContext captureLiveFrameContext(const QSize &viewportSize);
     /* Map the document/source frame used for a compose-mode SAM/Keep onto
      * the given viewport size (1:1 when the canvas matches the frame). */
-    LiveFrameContext composeFrameContext(const QSize &viewportSize) const;
+    ObjectSelectionContext composeFrameContext(const QSize &viewportSize) const;
+    /* Kick off an ASYNC exact-frame decode for an interactive Object Select
+     * seed click (P0#4). Returns immediately; onArrayFrameRequested fires
+     * once the decoded frame is ready (or the request is known stale). The
+     * request is tagged with `sessionId` so a stale async result (media/PTS
+     * changed) is discarded. Never blocks the GUI. */
+    void requestAsyncObjectFrame(const FrameRef &requested, const QString &sessionId);
+    /* Reset the whole live selection session (P0#7). Called on close video,
+     * opening a different video, media replacement, seeking to another PTS
+     * beyond the same-frame tolerance, playback resume when the selected
+     * frame is no longer frozen, explicit selection cancel and
+     * Object Select session replacement. Clears the live frame context, the
+     * session FrameRef, pos/neg prompts, object mask, mask score, busy state,
+     * stale VLM result tied to that frame, and invalidates in-flight
+     * decode/SAM/VLM requests. Harvest tray items stay untouched. */
+    void resetLiveSelectionSession();
+    /* Merge an async-decoded frame into the live selection context, computing
+     * the frame<->viewport transforms. Returns true on success. */
+    bool adoptAsyncFrameIntoSelection(const FrameRef &ref, const QImage &frame);
+    /* Map any pending viewport click points (m_posItemPoints/m_negItemPoints)
+     * into frame space using the current selection transforms and append them
+     * to the frame-space prompt sets. Clears the pending item lists. */
+    void drainPendingItemPoints();
+    /* Run SAM over the current selection context using the stored prompt
+     * points (frame space). Used when the exact frame for a live PTS is
+     * already held (no async wait needed) so the session stays responsive. */
+    void runSegmentationForPendingPoints(const FrameRef &shot);
     QVector<QPointF> positivePointsForTracking() const;
     /* Exact-frame decode helpers (EditDecodeSource): all edit-pipeline
      * frame acquisition goes through these, never the playback player. */
@@ -695,6 +807,7 @@ private:
     double m_objectMaskScore = 0.0; /* confidence of the current object mask */
     QImage m_maskUndoBefore;   /* mask captured when a refine stroke arms */
     bool m_objectMaskSoftEdge = false;
+    PresentationMode m_presentationMode = PresentationMode::ComposeCanvas;
 
     QString m_visionConversationId;
     QString m_visionAnswer;
@@ -702,6 +815,14 @@ private:
     QString m_visionUncertainty;
     bool m_visionHasResult = false;
     QString m_generationRequestId;
+    /* Ask tool input state (P1#11) */
+    bool m_askInputVisible = false;
+    QString m_askInputPlaceholder;
+    /* what the pending Ask targets: 0 frame, 1 selection, 2 object */
+    int m_askTarget = 0;
+    /* NAI Settings state (P1#12) */
+    bool m_settingsRestartRequired = false;
+    bool m_settingsSecretsPresent = false;
 
     QVector<ObjectTrack> m_pendingTrack;
     int m_trackIdCounter = 1;
@@ -711,14 +832,56 @@ private:
     mutable StickerFrameCache m_stickerFrames;
 
     /* object selection click session */
-    QVector<QPointF> m_posPoints;
-    QVector<QPointF> m_negPoints;
-    /* Live harvest frame for the CURRENT SAM prompt session (points are held
-     * in FRAME space; reused only while MRL+PTS are unchanged). A change of
-     * MRL or PTS starts a fresh session so a 9s click is never combined with
-     * a 15s click. */
-    LiveFrameContext m_liveCtx;
-    FrameRef m_liveSessionRef;   /* the FrameRef the m_posPoints belong to */
+    QVector<QPointF> m_posPoints;       /* frame-space positive points */
+    QVector<QPointF> m_negPoints;       /* frame-space negative points */
+    /* Viewport-space pending click points for a LIVE async seed: the click
+     * arrives before the exact frame is decoded (decode is async — P0#4), so
+     * the pointer stays in viewport coordinates until the frame arrives and
+     * the item->frame transform is known. Only used while a live async decode
+     * is outstanding. */
+    QVector<QPointF> m_posItemPoints;
+    QVector<QPointF> m_negItemPoints;
+    /* The ONE authoritative selection context shared by every object action
+     * (P0#6). For a live-video selection it holds the native frame, native
+     * mask and the frame<->viewport transforms plus a session id; keep / cut
+     * out / export / ask / track / sticker / generation all consume this
+     * rather than redistributing `currentAiSource()` and the canvas mask. */
+    ObjectSelectionContext m_selection;
+    /* Session identity for the CURRENT object-select session. A change of
+     * media or PTS (beyond the same-frame tolerance) starts a fresh session,
+     * so a stale async decode/SAM/VLM result from an earlier frame can never
+     * land on the new one. */
+    QString m_objectSessionId;
+    /* MRL/PTS the current m_posPoints belong to (session scoping). */
+    FrameRef m_liveSessionRef;
+    /* True while Object Select froze/shipped the exact frame and the live
+     * video is not to move underneath the pending/result mask. */
+    bool m_selectionFrozen = false;
+    /* PTS the Object Select frame was frozen at (to invalidate on resume/seek) */
+    qint64 m_frozenPtsMs = -1;
+    /* Async exact-frame acquisition in flight for an interactive seed click.
+     * The requested identity is validated against the current live session
+     * when the result arrives so a stale decode is discarded.
+     *
+     * `m_asyncViewportSize` records the canvas viewport the seed click was
+     * made on. It flows into `adoptAsyncFrameIntoSelection` so the frame<->
+     * viewport letterbox transform is built against the REAL displayed
+     * viewport — otherwise `buildSelectionTransforms` falls back to its
+     * empty-viewport 1:1 default, which would map every seed click to the
+     * wrong native pixel (P0#2/#3). Cleared by resetLiveSelectionSession. */
+    FrameRef m_asyncRequestRef;
+    QString m_asyncRequestSessionId;
+    bool m_asyncInFlight = false;
+    QSize m_asyncViewportSize;
+    /* SAM request targeting: the FrameRef the in-flight segmentation request
+     * was launched for, so a stale `maskReady` (from a superseded PTS) is
+     * discarded (P0#4 stale result handling). */
+    FrameRef m_segmentTargetRef;
+    bool m_segmentInFlight = false;
+    /* async seek E-probe bookkeeping (P1#8): the seek target and whether a
+     * post-seek player-time notification is still awaited */
+    qint64 m_seekProbeTargetMs = -1;
+    bool m_seekProbeArmed = false;
 
     QVariantList m_assistantMessages;
     QVariantList m_lookupMatches;

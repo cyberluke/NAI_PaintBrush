@@ -1,0 +1,150 @@
+/*****************************************************************************
+ * PaintbrushToolOptionsBar.qml : NAI Paintbrush — per-tool horizontal options
+ *****************************************************************************
+ * Copyright (C) 2026 NAI Paintbrush authors
+ *****************************************************************************/
+
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Controls
+
+import VLC.MainInterface
+import VLC.Widgets as Widgets
+import VLC.Style
+import VLC.Paintbrush
+
+/* The real second toolbar: a HORIZONTAL per-tool context bar rendered by the
+ * SAME unified PaintbrushToolbar component that draws the vertical tool rail.
+ * It floats above the bottom of the canvas and shows, for the active tool,
+ * its option sliders (Size / Amount / Flake / Glue / Loose / Shimmer etc.) plus
+ * the precision toggles (Grid / Rulers / Snap / Pen) as iconic cells.
+ *
+ * Because it is a distinct bar the option sliders are NEVER crowded out by the
+ * grid/ruler controls — the palette bar below keeps only colour swatches.
+ * Only the four precision cells are always present; slider cells appear
+ * on-demand (their `visible` is bound to the active tool), so the bar grows
+ * and shrinks with the tool. Cells are rebuilt when the tool changes so the
+ * grid/snap active states and the slider positions always mirror the canvas. */
+Rectangle {
+    id: root
+
+    required property PaintbrushCanvas canvas
+
+    ColorContext {
+        id: theme
+        colorSet: ColorContext.View
+    }
+
+    /* two rows deep so a tight window wraps the sliders instead of clipping */
+    height: VLCStyle.dp(64, VLCStyle.scale) + VLCStyle.dp(30, VLCStyle.scale)
+    color: theme.bg.primary
+    border.width: 1
+    border.color: theme.border
+    radius: VLCStyle.margin_xsmall
+
+    PaintbrushToolbar {
+        id: optionBar
+        orientation: Qt.Horizontal
+        anchors.fill: parent
+        anchors.margins: VLCStyle.margin_xsmall
+        cell: VLCStyle.dp(32, VLCStyle.scale)
+        spacing: VLCStyle.margin_xsmall
+    }
+
+    function rebuild()
+    {
+        const out = []
+
+        /* -------- precision toggles (always available) ----------------- */
+        out.push({ kind: "icon", iconGlyph: VLCIcons.grid, tip: qsTr("Grid"),
+                   checkable: true, checked: canvas.gridVisible,
+                   onTriggered: () => canvas.gridVisible = !canvas.gridVisible })
+        out.push({ kind: "icon", iconGlyph: VLCIcons.aspect_ratio, tip: qsTr("Rulers"),
+                   checkable: true, checked: canvas.rulersVisible,
+                   onTriggered: () => canvas.rulersVisible = !canvas.rulersVisible })
+        out.push({ kind: "icon", iconGlyph: VLCIcons.grid, tip: qsTr("Snap to grid"),
+                   checkable: true, checked: canvas.snapToGrid,
+                   onTriggered: () => canvas.snapToGrid = !canvas.snapToGrid })
+        out.push({ kind: "icon", iconGlyph: VLCIcons.active_indicator, tip: qsTr("Pen pressure"),
+                   checkable: true, checked: canvas.pressureEnabled,
+                   onTriggered: () => canvas.pressureEnabled = !canvas.pressureEnabled })
+
+        /* -------- shape/draw tools: shared Size ------------------------ */
+        if (canvas.tool >= 4 && canvas.tool <= 6
+                || canvas.tool >= 10 && canvas.tool <= 13)
+            out.push({ kind: "slider", label: qsTr("Size"), from: 1, to: 64, stepSize: 1,
+                       value: canvas.brushSize,
+                       onChange: (v) => canvas.brushSize = v })
+
+        /* -------- Spray (9): flow -------------------------------------- */
+        if (canvas.tool === 9)
+            out.push({ kind: "slider", label: qsTr("Flow"), from: 0.1, to: 4, stepSize: 0.1,
+                       value: canvas.sprayFlow,
+                       onChange: (v) => canvas.sprayFlow = v })
+
+        /* -------- Bristle (16): size + flow + pigment ------------------- */
+        if (canvas.tool === 16)
+        {
+            out.push({ kind: "slider", label: qsTr("Size"), from: 1, to: 160, stepSize: 1,
+                       value: canvas.brushSize, onChange: (v) => canvas.brushSize = v })
+            out.push({ kind: "slider", label: qsTr("Flow"), from: 0.05, to: 1, stepSize: 0.05,
+                       value: canvas.brushFlow, onChange: (v) => canvas.brushFlow = v })
+            out.push({ kind: "slider", label: qsTr("Pigment"), from: 0.0, to: 1, stepSize: 0.05,
+                       value: canvas.brushColorVariation,
+                       onChange: (v) => canvas.brushColorVariation = v })
+        }
+
+        /* -------- Glitter (17): size amount flake shimmer glue ----------- */
+        if (canvas.tool === 17)
+        {
+            out.push({ kind: "slider", label: qsTr("Size"), from: 1, to: 160, stepSize: 1,
+                       value: canvas.brushSize, onChange: (v) => canvas.brushSize = v })
+            out.push({ kind: "slider", label: qsTr("Amount"), from: 0.1, to: 2, stepSize: 0.05,
+                       value: canvas.glitterAmount, onChange: (v) => canvas.glitterAmount = v })
+            out.push({ kind: "slider", label: qsTr("Flake"), from: 0.2, to: 2.5, stepSize: 0.05,
+                       value: canvas.glitterFlakeSize, onChange: (v) => canvas.glitterFlakeSize = v })
+            out.push({ kind: "slider", label: qsTr("Shimmer"), from: 0.0, to: 1, stepSize: 0.05,
+                       value: canvas.glitterShimmer, onChange: (v) => canvas.glitterShimmer = v })
+            out.push({ kind: "slider", label: qsTr("Glue"), from: 0.0, to: 1, stepSize: 0.05,
+                       value: canvas.glitterAdhesion, onChange: (v) => canvas.glitterAdhesion = v })
+        }
+
+        /* -------- Glitter Powder (18): full option set -------------------- */
+        if (canvas.tool === 18)
+        {
+            out.push({ kind: "slider", label: qsTr("Size"), from: 1, to: 160, stepSize: 1,
+                       value: canvas.brushSize, onChange: (v) => canvas.brushSize = v })
+            out.push({ kind: "slider", label: qsTr("Amount"), from: 0.1, to: 2, stepSize: 0.05,
+                       value: canvas.glitterAmount, onChange: (v) => canvas.glitterAmount = v })
+            out.push({ kind: "slider", label: qsTr("Flake"), from: 0.2, to: 2.5, stepSize: 0.05,
+                       value: canvas.glitterFlakeSize, onChange: (v) => canvas.glitterFlakeSize = v })
+            out.push({ kind: "slider", label: qsTr("Glue"), from: 0.0, to: 1, stepSize: 0.05,
+                       value: canvas.glitterAdhesion, onChange: (v) => canvas.glitterAdhesion = v })
+            out.push({ kind: "slider", label: qsTr("Loose"), from: 0.0, to: 1, stepSize: 0.05,
+                       value: canvas.powderLoose, onChange: (v) => canvas.powderLoose = v })
+            out.push({ kind: "slider", label: qsTr("Shimmer"), from: 0.0, to: 1, stepSize: 0.05,
+                       value: canvas.glitterShimmer, onChange: (v) => canvas.glitterShimmer = v })
+        }
+
+        /* -------- Smear (19): size only ----------------------------------- */
+        if (canvas.tool === 19)
+            out.push({ kind: "slider", label: qsTr("Size"), from: 1, to: 160, stepSize: 1,
+                       value: canvas.brushSize, onChange: (v) => canvas.brushSize = v })
+
+        optionBar.items = out
+    }
+
+    Component.onCompleted: rebuild()
+
+    /* precision toggles + sliders mirror the canvas, so any of these state
+     * changes repaints the cells (the unified toolbar renders plain cells,
+     * rebuilt here rather than bound, to keep one source of truth) */
+    Connections {
+        target: canvas
+        function onToolChanged(t) { rebuild() }
+        function onGridVisibleChanged() { rebuild() }
+        function onRulersVisibleChanged() { rebuild() }
+        function onSnapToGridChanged() { rebuild() }
+        function onPressureEnabledChanged() { rebuild() }
+    }
+}

@@ -7,22 +7,23 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
-import QtQuick.Controls.Basic as Basic
 
 import VLC.MainInterface
 import VLC.Widgets as Widgets
 import VLC.Style
 import VLC.Paintbrush
 
-/* The Paintbrush tool rail (A36): a 2-column grid of large, SQUARE iconic
- * targets, tooltips secondary. Replaces the 15 text-only 34dp buttons.
- * The tool -> canvas.tool integer mapping is unchanged (pb_common.hpp
- * ToolId). The three zoom controls stay pinned at the bottom.
+/* The Paintbrush tool rail (A36): a single-column strip of SQUARE iconic
+ * targets rendered by the unified PaintbrushToolbar component (orientation =
+ * Vertical), so the vertical rail and the horizontal per-tool option bar share
+ * the exact same cell / hover / active logic (SOLID: one toolbar component,
+ * two orientations). Tooltips are secondary; the three zoom controls stay
+ * pinned at the bottom.
  *
  * Icon style: TDesign (Tencent) MIT SVG glyphs, pre-coloured into two
  * variants (idle = white #fff, active/hover = VLC orange #FF8800) and swapped
- * by state — no runtime tinting shader required. Cells are perfect squares so
- * the icons keep a 1:1 aspect ratio. */
+ * by state. Items are plain JS cells, rebuilt when canvas.tool changes so the
+ * active cell always reflects the real tool. */
 Item {
     id: root
 
@@ -33,13 +34,51 @@ Item {
         colorSet: ColorContext.View
     }
 
-    readonly property string tdesignPath: "qrc:///icons/tdesign/"
+    readonly property var toolCells: [
+        { toolId: 1,  iconSource: "rect_select",     tip: qsTr("Rect Select") },
+        { toolId: 2,  iconSource: "freeform_select", tip: qsTr("Freeform Select") },
+        { toolId: 3,  iconSource: "scan",            tip: qsTr("Object Select (AI)") },
+        { toolId: 4,  iconSource: "pencil",          tip: qsTr("Pencil") },
+        { toolId: 5,  iconSource: "brush",           tip: qsTr("Brush") },
+        { toolId: 6,  iconSource: "eraser",          tip: qsTr("Eraser") },
+        { toolId: 7,  iconSource: "fill",            tip: qsTr("Fill") },
+        { toolId: 8,  iconSource: "eyedropper",      tip: qsTr("Eyedropper") },
+        { toolId: 9,  iconSource: "spray",           tip: qsTr("Spray") },
+        { toolId: 16, iconSource: "bristle",         tip: qsTr("Bristle Paint") },
+        { toolId: 17, iconSource: "glitter",         tip: qsTr("Glitter") },
+        { toolId: 18, iconSource: "glitter",         tip: qsTr("Glitter Powder") },
+        { toolId: 19, iconSource: "brush",           tip: qsTr("Smear") },
+        { toolId: 10, iconSource: "line",            tip: qsTr("Line") },
+        { toolId: 11, iconSource: "rect",            tip: qsTr("Rectangle") },
+        { toolId: 12, iconSource: "rounded_rect",    tip: qsTr("Rounded Rectangle") },
+        { toolId: 13, iconSource: "ellipse",         tip: qsTr("Ellipse") },
+        { toolId: 14, iconSource: "text",            tip: qsTr("Text") },
+        { toolId: 15, iconSource: "move",            tip: qsTr("Move canvas") },
+        { toolId: 20, iconSource: "image_search",    tip: qsTr("Ask") }
+    ]
 
-    /* Square cell geometry: derive from the rail width so columns never
-     * overflow and cells stay perfectly square (1:1 aspect). */
-    readonly property real _spacing: VLCStyle.margin_xxxsmall
-    readonly property real _margin: VLCStyle.margin_xxxsmall
-    readonly property real cellSize: (width - 2 * _margin - _spacing) / 2
+    function rebuildItems()
+    {
+        const out = []
+        /* NOTE: avoid Object.assign / object spread — Qt's QML JS engine
+         * (Qv4) does not implement them, and a thrown ReferenceError here
+         * would silently leave the tool rail empty */
+        for (let i = 0; i < toolCells.length; ++i)
+        {
+            const src = toolCells[i]
+            const cell = {
+                kind: "tool",
+                checkable: true,
+                toolId: src.toolId,
+                iconSource: src.iconSource,
+                tip: src.tip,
+                checked: (canvas.tool === src.toolId),
+                onTriggered: () => { canvas.tool = src.toolId }
+            }
+            out.push(cell)
+        }
+        toolBar.items = out
+    }
 
     Rectangle {
         anchors.fill: parent
@@ -50,112 +89,34 @@ Item {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: _margin
-        spacing: _spacing
+        anchors.margins: VLCStyle.margin_xxxsmall
+        spacing: VLCStyle.margin_xxxsmall
 
-        /* Tool grid: square cells, centered in the available space. */
         Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
 
-            Grid {
-                id: toolGrid
-                anchors.centerIn: parent
-                columns: 2
-                columnSpacing: _spacing
-                rowSpacing: _spacing
+            ScrollView {
+                id: scroll
+                anchors.fill: parent
+                clip: true
+                ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
-                Repeater {
-                    model: [
-                        /* selection tools */
-                        { toolId: 1, iconBase: "rect_select", tip: qsTr("Rect Select"), sparkle: false },
-                        { toolId: 2, iconBase: "freeform_select", tip: qsTr("Freeform Select"), sparkle: false },
-                        { toolId: 3, iconBase: "scan", tip: qsTr("Object Select (AI)"), sparkle: true },
-                        { toolId: 4, iconBase: "pencil", tip: qsTr("Pencil"), sparkle: false },
-                        /* paint tools */
-                        { toolId: 5, iconBase: "brush", tip: qsTr("Brush"), sparkle: false },
-                        { toolId: 6, iconBase: "eraser", tip: qsTr("Eraser"), sparkle: false },
-                        { toolId: 7, iconBase: "fill", tip: qsTr("Fill"), sparkle: false },
-                        { toolId: 8, iconBase: "eyedropper", tip: qsTr("Eyedropper"), sparkle: false },
-                        { toolId: 9, iconBase: "spray", tip: qsTr("Spray"), sparkle: false },
-                        /* Paintbrush 2.0 art materials (pb_common.hpp ToolId 16/17) */
-                        { toolId: 16, iconBase: "bristle", tip: qsTr("Bristle Paint"), sparkle: false },
-                        { toolId: 17, iconBase: "glitter", tip: qsTr("Glitter"), sparkle: false },
-                        /* shape tools */
-                        { toolId: 10, iconBase: "line", tip: qsTr("Line"), sparkle: false },
-                        { toolId: 11, iconBase: "rect", tip: qsTr("Rectangle"), sparkle: false },
-                        { toolId: 12, iconBase: "rounded_rect", tip: qsTr("Rounded Rectangle"), sparkle: false },
-                        { toolId: 13, iconBase: "ellipse", tip: qsTr("Ellipse"), sparkle: false },
-                        { toolId: 14, iconBase: "text", tip: qsTr("Text"), sparkle: false },
-                        /* navigation */
-                        { toolId: 15, iconBase: "move", tip: qsTr("Move canvas"), sparkle: false },
-                        /* NAI AI: Ask-Anything — different interaction mode
-                         * (click a frame/region, VLM answers) */
-                        { toolId: 18, iconBase: "image_search", tip: qsTr("Ask"), sparkle: true }
-                    ]
-
-                    delegate: Basic.Button {
-                        id: toolBtn
-
-                        required property int toolId
-                        required property string iconBase
-                        required property string tip
-                        required property bool sparkle
-
-                        /* Fixed square cell (1:1) — no vertical stretching. */
-                        width: root.cellSize
-                        height: root.cellSize
-
-                        checkable: true
-                        autoExclusive: true
-                        checked: canvas.tool === toolId
-                        onClicked: canvas.tool = toolId
-
-                        /* TDesign vector icon: white idle, VLC orange active/hover.
-                         * The two SVGs are pre-coloured (idle = #fff, active = #FF8800)
-                         * so no runtime tinting shader is needed. */
-                        contentItem: Image {
-                            source: root.tdesignPath + (toolBtn.checked || toolBtn.hovered
-                                                        ? toolBtn.iconBase + "_active.svg"
-                                                        : toolBtn.iconBase + ".svg")
-                            sourceSize: Qt.size(root.cellSize * 2, root.cellSize * 2)
-                            fillMode: Image.PreserveAspectFit
-                            smooth: true
-                            anchors.centerIn: toolBtn
-                            width: root.cellSize * 0.66
-                            height: root.cellSize * 0.66
-                        }
-
-                        background: Rectangle {
-                            color: toolBtn.checked
-                                   ? Qt.rgba(1.0, 0.533, 0.0, 0.18)   /* orange wash */
-                                   : (toolBtn.hovered
-                                      ? Qt.rgba(1.0, 1.0, 1.0, 0.10)
-                                      : "transparent")
-                            radius: VLCStyle.margin_xsmall
-                            border.width: toolBtn.hovered && !toolBtn.checked ? 1 : 0
-                            border.color: Qt.rgba(1.0, 1.0, 1.0, 0.25)
-                        }
-
-                        /* capability dot: shows the relevant AI backend is configured.
-                         * Object Select = SAM3 (segmentation); Ask = VLM. */
-                        Rectangle {
-                            visible: sparkle && (toolBtn.toolId === 18
-                                                 ? PaintbrushCtx.visionConfigured
-                                                 : PaintbrushCtx.segmentationAvailable)
-                            width: 6
-                            height: 6
-                            radius: 3
-                            color: "#FF8800"
-                            anchors.top: parent.top
-                            anchors.right: parent.right
-                            anchors.margins: 2
-                        }
-
-                        ToolTip.visible: toolBtn.hovered
-                        ToolTip.text: toolBtn.tip
-                        ToolTip.delay: 600
-                    }
+                PaintbrushToolbar {
+                    id: toolBar
+                    orientation: Qt.Vertical
+                    /* the ScrollView has no `availableWidth`; size content to
+                     * the viewport so the two-column Grid lays out (the rail
+                     * would otherwise collapse to 0 width and hide every cell) */
+                    width: scroll.width
+                    cell: Math.min(VLCStyle.dp(40, VLCStyle.scale),
+                                   (root.width - 2 * VLCStyle.margin_xxxsmall) * 0.55)
+                    /* explicit height for the ScrollView content so the
+                     * two-column Grid lays out its rows reliably */
+                    height: (Math.ceil(items.length / columns)) * cell
+                            + (Math.ceil(items.length / columns) - 1) * spacing
+                    Component.onCompleted: rebuildItems()
                 }
             }
         }
@@ -182,5 +143,10 @@ Item {
             description: qsTr("Fit to view")
             onClicked: canvas.fitToView()
         }
+    }
+
+    Connections {
+        target: canvas
+        function onToolChanged(t) { rebuildItems() }
     }
 }
