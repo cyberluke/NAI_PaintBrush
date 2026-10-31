@@ -14,10 +14,17 @@ import VLC.Style
 import VLC.Paintbrush
 
 /* The real second toolbar: a HORIZONTAL per-tool context bar rendered by the
- * SAME unified PaintbrushToolbar component that draws the vertical tool rail.
+ * SAME unified PaintbrushToolbar cell delegate as the vertical tool rail.
  * It floats above the bottom of the canvas and shows, for the active tool,
  * its option sliders (Size / Amount / Flake / Glue / Loose / Shimmer etc.) plus
  * the precision toggles (Grid / Rulers / Snap / Pen) as iconic cells.
+ *
+ * The horizontal bar is a ONE-ROW Flickable (P1, reviewer #2): fixed one-cell
+ * height, clip:true, horizontal scroll when controls exceed the width — it
+ * NEVER wraps vertically, so no option control can leak outside this bar's own
+ * rectangle. The host height is a single fixed row (one cell + margins),
+ * decoupled from any wrapped-row assumption. The palette below is a completely
+ * separate 64dp colour surface (this bar holds no colour swatches).
  *
  * Because it is a distinct bar the option sliders are NEVER crowded out by the
  * grid/ruler controls — the palette bar below keeps only colour swatches.
@@ -35,9 +42,11 @@ Rectangle {
         colorSet: ColorContext.View
     }
 
-    /* height grows to the toolbar's ACTUAL wrapped content so a narrow window
-     * wraps sliders to more rows instead of clipping them (P1 layout) */
-    height: optionBar.contentHeight + VLCStyle.margin_medium * 2
+    /* fixed ONE-ROW height: one cell + the surrounding margins. Decoupled from
+     * any wrapped-contentHeight so the bar can never grow into the palette. */
+    readonly property real _oneRow: VLCStyle.dp(32, VLCStyle.scale)
+                                   + VLCStyle.margin_xsmall
+    height: _oneRow + VLCStyle.margin_medium * 2
     color: theme.bg.primary
     border.width: 1
     border.color: theme.border

@@ -7,10 +7,14 @@
 // gloss, a soft contact shadow and additive bloom.
 //
 // Coordinate model: the fragment position `vPin` is device px (top-left
-// origin, y down). Every world position is derived ONCE as
+// origin, y down). Every local quantity is derived ONCE as
 //     world = uWorldOrigin + px * uWorldPerPx
-// so grain/flake lookups use the same absolute world space as the CPU physics
-// and stay spatially stable across output size, crop origin and DPR.
+// and the grain + holographic-flake FIELDS are anchored to ABSOLUTE world
+// coordinates at fixed WORLD pitches (uWorldCell for grains, uFlakeWorld for
+// flakes). The render crop's origin/size never enter grain/flake identity,
+// jitter, seed or holo phase — they only decide which pixels are emitted — so
+// preview / commit / export / left-crop / right-crop all agree on the same
+// world pixels (crop invariance).
 //
 // Lighting: uLightDir is the normalized direction to the key light (from the
 // shared ArtLightRig, in the same coordinate unit as the surface) — no
@@ -36,7 +40,10 @@ layout(std140, binding = 2) uniform ubuf {
     float uTime;           // seconds, drives the holographic shimmer
     vec2 uGrid;            // sim grid size (cells)
     float uHolo;           // 0 metallic ... 1 rainbow (shimmer)
-    float uFlakePx;        // holographic flake spacing (device px)
+    float uFlakePx;        // holographic flake spacing control (device px)
+    float uFlakeWorld;     // world-space flake pitch (world units per candidate):
+                           // anchors flake identity + centres to ABSOLUTE world so
+                           // crop/zoom never change which flake a pixel sees.
     float uTooth;          // 0..1 paper tooth (subtle base noise)
     float uMaterialMode;   // 0 = REFERENCE_SURFACE (opaque paper+powder)
                            // 1 = MATERIAL_LAYER (transparent material only)
@@ -125,8 +132,10 @@ vec3 flakeLight(vec2 sidSeed, float chance, float flatness,
     vec3 gh3 = hash32(sidSeed * 0.73 + 19.0);
     float tilt = (0.05 + 0.85 * gh3.z) * (1.0 - 0.55 * flatness);
     float rate = exp2(mix(-2.5, 0.8, gh2.z));
+    /* reference phase: the random `gh3.y * 6.28` is INSIDE the sine modulation,
+     * so each flake's shimmer rests on its own static phase, not added outside. */
     float a = gh2.y * 6.2832 + (gh.x > 0.5 ? 1.0 : -1.0) * uTime * rate
-            + 0.6 * sin(uTime * rate * (0.6 + 1.6 * gh3.x)) + gh3.y * 6.28;
+            + 0.6 * sin(uTime * rate * (0.6 + 1.6 * gh3.x) + gh3.y * 6.28);
     vec3 Nf = normalize(N + vec3(cos(a), sin(a), 0.0) * tilt);
     float fd = max(dot(Nf, H), 0.0);
     float sharp = mix(14.0, 140.0, gh3.x * gh3.x);
@@ -140,10 +149,7 @@ vec3 flakeLight(vec2 sidSeed, float chance, float flatness,
 
 void main()
 {
-    float unit = min(uViewSize.x, uViewSize.y);
-    vec2 p = (vPin - 0.5 * uViewSize) / unit;
-
-    // the one world mapping used everywhere below
+    // the one world mapping used everywhere below (crop/zoom invariant)
     vec2 world = uWorldOrigin + vPin * uWorldPerPx;
 
     // ---- surface from the float heightfield -------------------------
@@ -177,8 +183,12 @@ void main()
     vec3 bg = uPaper - shadow * vec3(1.0, 1.0, 0.97);
 
     // ---- grain field (packed glass beads via Voronoi) ---------------
-    float scale = unit / max(1.0, uDpr);           // ~1 px per grain
-    vec2 g = p * scale;
+    // ABSOLUTE world-anchored Voronoi at a fixed grain pitch = uWorldCell (one
+    // sim cell per grain, matching the CPU renderer's grainPitch). The crop's
+    // origin/size never enter this: the same world pixel always maps to the
+    // same integer grain id, jitter, seed and holo phase. The render crop only
+    // decides WHICH pixels are emitted (crop invariance, P1 reviewer #4).
+    vec2 g = world / uWorldCell;
     vec2 gi = floor(g), gf = fract(g);
     float b1 = 8.0, b2 = 8.0;
     vec2 bR = vec2(0.0), bId = vec2(0.0), bPt = vec2(0.0);
@@ -195,9 +205,8 @@ void main()
     float dist = sqrt(b1);
     float edge = sqrt(b2) - dist;
 
-    // grain centre: Voronoi id -> viewport px -> world (single mapping)
-    vec2 grainPx = (bPt / scale) * unit + 0.5 * uViewSize;
-    vec2 gcWorld = uWorldOrigin + grainPx * uWorldPerPx;
+    // grain centre in ABSOLUTE WORLD (bPt is in grain-pitch == cell units)
+    vec2 gcWorld = bPt * uWorldCell;
     ivec2 scC = ivec2(clamp(ivec2(floor(gcWorld / uWorldCell)), ivec2(0), ivec2(uGrid) - ivec2(1)));
     float s = seedAt(gcWorld);
     vec2 sid = bId + s * 13.17;
@@ -253,8 +262,12 @@ void main()
     }
 
     // ---- larger holographic flakes + bloom --------------------------
-    float fscale = unit / max(1.0, uFlakePx);
-    vec2 fg = p * fscale;
+    // ABSOLUTE world-anchored flake candidates at a fixed world pitch
+    // (uFlakeWorld). `id`/`c` are in flake-pitch units; the flake centre in
+    // WORLD is c * uFlakeWorld, so crop/zoom never change which flake a pixel
+    // sees or where its mirror sits. Only `d2`/`radius` stay in pitch units to
+    // measure coverage of this pixel relative to the flake.
+    vec2 fg = world / uFlakeWorld;
     vec2 fi = floor(fg);
     vec3 bloom = vec3(0.0);
     for (int y = -1; y <= 1; y++)
@@ -263,9 +276,8 @@ void main()
         vec2 id = fi + vec2(float(x), float(y));
         vec3 r1 = hash32(id * 1.91 + 2.7);
         vec2 c = id + 0.2 + 0.6 * r1.yz;
-        // flake centre: Voronoi id -> viewport px -> world
-        vec2 cPx = (c / fscale) * unit + 0.5 * uViewSize;
-        vec2 cWorld = uWorldOrigin + cPx * uWorldPerPx;
+        // flake centre in ABSOLUTE WORLD
+        vec2 cWorld = c * uFlakeWorld;
         ivec2 ct = ivec2(clamp(ivec2(floor(cWorld / uWorldCell)), ivec2(0), ivec2(uGrid) - ivec2(1)));
         vec4 cs = texelFetch(uSim, ct, 0);
         float glueF = cs.a * smoothstep(0.02, 0.25, cs.b);

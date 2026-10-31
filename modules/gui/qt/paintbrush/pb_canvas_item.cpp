@@ -318,41 +318,17 @@ void PaintbrushCanvasItem::pourPowderNow()
         m_powderMaterialCaptured = true;
     }
 
-    const float radius = float(powderSubRadius());   /* Glitter reference radius (P0.5) */
-
-    /* P0.9: pour over the authoritative glue/material bounds when present. */
-    float gx0 = 0, gy0 = 0, gx1 = 0, gy1 = 0;
-    const bool hasMat = m_powder.materialBoundsWorld(gx0, gy0, gx1, gy1);
-    QVector<QPointF> targets;
-    if (hasMat)
-    {
-        /* a few pours across the material bounds so the current colour lands on
-         * every glued/bonded region that should catch it */
-        const int cols = qMax(1, int((gx1 - gx0) / qMax(16.0f, radius * 1.5f)) + 1);
-        const int rows = qMax(1, int((gy1 - gy0) / qMax(16.0f, radius * 1.5f)) + 1);
-        for (int r = 0; r < rows; ++r)
-            for (int c = 0; c < cols; ++c)
-            {
-                const float px = gx0 + (gx1 - gx0) * (cols == 1 ? 0.5f : float(c) / (cols - 1));
-                const float py = gy0 + (gy1 - gy0) * (rows == 1 ? 0.5f : float(r) / (rows - 1));
-                targets.append(QPointF(px, py));
-            }
-    }
-    else
-    {
-        /* no glue/material: fall back to the explicit current pointer target. */
-        const QPointF local = localFromCanvas(m_lastCanvasPos);
-        if (local.x() < -radius || local.y() < -radius
-            || local.x() > layer->raster.width() + radius
-            || local.y() > layer->raster.height() + radius)
-            return;   /* pointer never meaningfully entered the canvas */
-        targets.append(local);
-    }
-
+    /* P0.9/P1: pour over the authoritative glue/material (reference pourMain).
+     * ONE fitted anisotropic heap over the BARE glue (or the material bounds/
+     * field centre when no bare glue exists): the engine picks the target, so
+     * this is never a regular grid of repeated stamp centres. Existing glitter
+     * and colour slots are preserved. */
+    /* Capture the material bounds BEFORE the pour so the dirty rect covers old
+     * ∪ new material (P0.6). */
     float obx = 0, oby = 0, ox2 = 0, oy2 = 0;
     const bool hasOld = m_powder.materialBoundsWorld(obx, oby, ox2, oy2);
-    for (const QPointF &t : targets)
-        m_powder.pourGlitter(float(t.x()), float(t.y()), radius, m_powderParams);
+
+    m_powder.pourGlitterMain(true, m_powderParams);
     m_powder.relax();
     m_powder.decayFlow();
     m_powder.endBlow();

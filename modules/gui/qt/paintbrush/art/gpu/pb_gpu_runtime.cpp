@@ -959,8 +959,9 @@ QImage GpuRuntime::renderPowder(const QSize &outSize,
     wv2(96, float(W), float(H));                                        /* uGrid */
     wf(104, pal.holographic);                                           /* uHolo */
     wf(108, float(dpr * 5));                                            /* uFlakePx */
-    wf(112, paper ? paper->tooth : 0.4f);                               /* uTooth */
-    wf(116, output == PowderOutput::MaterialLayer ? 1.0f : 0.0f);       /* uMaterialMode */
+    wf(112, powder.worldCellSize() * 5.0f);                             /* uFlakeWorld: world flake pitch */
+    wf(116, paper ? paper->tooth : 0.4f);                               /* uTooth */
+    wf(120, output == PowderOutput::MaterialLayer ? 1.0f : 0.0f);       /* uMaterialMode */
     wv3(128, L.x(), L.y(), L.z());                                      /* uLightDir */
     wv3(144, pal.paper.redF(), pal.paper.greenF(), pal.paper.blueF());  /* uPaper */
     for (int i = 0; i < 16; ++i)                            /* uPal[16] */

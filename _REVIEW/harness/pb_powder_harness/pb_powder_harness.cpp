@@ -81,6 +81,66 @@ static GlitterPowder makeHeap(const PowderPalette &pal, int grid = 256, float se
     return g;
 }
 
+/* ---- spatial-periodicity (lattice) probe ----------------------------------
+ * Mirrors the reviewer's pb_powder_periodicity.py decision on the rendered
+ * material: measure the mean |diff| for a 1px shift along rows (h) and columns
+ * (v) of the alpha (material coverage). A regular pour GRID shows local MINIMA
+ * (low diff = repeat) at every multiple of the base period on BOTH axes at the
+ * same period; an organic single fitted heap shows no dominant same-period
+ * lattice. FAIL if a candidate period 2..48 has same-period contrast above the
+ * threshold on both axes (a real grid), or an extreme single-axis stripe. */
+static int latticePeriodContrast(const QImage &img, int axis, float &contrast)
+{
+    const int w = img.width(), h = img.height();
+    const int dmax = std::min(axis == 0 ? w / 2 : h / 2, 64);
+    std::vector<double> prof(dmax, 0.0);
+    for (int s = 1; s <= dmax; ++s)
+    {
+        double sum = 0.0; long n = 0;
+        if (axis == 0)
+        {
+            for (int y = 0; y < h; ++y)
+                for (int x = s; x < w; ++x)
+                { sum += std::abs(qAlpha(img.pixel(x, y)) - qAlpha(img.pixel(x - s, y))); ++n; }
+        }
+        else
+        {
+            for (int y = s; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                { sum += std::abs(qAlpha(img.pixel(x, y)) - qAlpha(img.pixel(x, y - s))); ++n; }
+        }
+        prof[s - 1] = n ? sum / n : 1.0;
+    }
+    int bestP = 0; double bestC = 0.0;
+    for (int p = 2; p <= std::min(dmax, 48); ++p)
+    {
+        int nMult = 0; double vMult = 0.0;
+        for (int k = 1; p * k <= dmax; ++k) { vMult += prof[p * k - 1]; ++nMult; }
+        if (nMult < 2) continue;
+        vMult /= nMult;
+        int nMid = 0; double vMid = 0.0;
+        for (int k = 1; p * k <= dmax; ++k)
+        {
+            int m = std::max(1, p * k - p / 2);
+            if (m <= dmax) { vMid += prof[m - 1]; ++nMid; }
+        }
+        vMid = nMid ? vMid / nMid : 1.0;
+        const double cc = (vMid - vMult) / (vMid + vMult + 1e-6);
+        if (cc > bestC) { bestC = cc; bestP = p; }
+    }
+    contrast = float(bestC);
+    return bestP;
+}
+static bool noLatticeGrid(const QImage &img, float thresh)
+{
+    float hc = 0.0f, vc = 0.0f;
+    int hp = latticePeriodContrast(img, 0, hc);
+    int vp = latticePeriodContrast(img, 1, vc);
+    const bool same = (hp > 0 && hp == vp && hc > thresh && vc > thresh);
+    const bool stripe = (hc > 0.30f || vc > 0.30f);
+    return !same && !stripe;
+}
+
 int main(int argc, char **argv)
 {
     Q_UNUSED(argc); Q_UNUSED(argv);
@@ -635,6 +695,268 @@ int main(int argc, char **argv)
             }
             return true;
         }());
+    }
+
+    /* ---- POUR GOLDEN (reviewer gate #8) ---------------------------------
+     * The actual reference workflow with the fitted pourMain(fit=true):
+     *   glue ring -> Pour pink -> Blow -> second glue ring -> Pour blue -> Blow
+     *   -> yellow+green crossing glitter -> Push -> Blow
+     * Then render and demand NO regular rows/columns/checker (the old grid
+     * algorithm's hard failure), no same-period lattice on both axes, and that
+     * existing glitter is PRESERVED (pouring over keeps earlier colours). */
+    {
+        GlitterPowder gold;
+        gold.reset(QSize(192, 192), 4.0f, 2026u);
+        const float wc = (192 / 2.0f) * 4.0f;        /* world centre */
+        const float ringR = 44.0f;                    /* ring radius (world) */
+        const float ringW = 10.0f;                    /* glue line width */
+
+        auto paintGlueRing = [&](float wx, float wy, float r, float wdt)
+        {
+            /* a ring of wet glue by stamping many small discs on the circle */
+            const int steps = 140;
+            for (int s = 0; s < steps; ++s)
+            {
+                const float a = 6.28318f * float(s) / float(steps);
+                const float gx = wx + r * std::cos(a);
+                const float gy = wy + r * std::sin(a);
+                gold.paintGlue(gx, gy, wdt, 1.0f);
+            }
+        };
+
+        GlitterParams pink; pink.amount = 1.2f; pink.flakeSize = 0.8f;
+        pink.color = QColor("#f2a7c8");              /* reference signature pink */
+        GlitterParams blue; blue.amount = 1.2f; blue.flakeSize = 0.8f;
+        blue.color = QColor("#2f6fd6");
+        GlitterParams yellow; yellow.amount = 1.2f; yellow.flakeSize = 0.8f;
+        yellow.color = QColor("#ffc900");
+        GlitterParams green; green.amount = 1.2f; green.flakeSize = 0.8f;
+        green.color = QColor("#3ab05a");
+
+        /* 1. outer glue ring */
+        paintGlueRing(wc, wc, ringR, ringW);
+        /* 2. Pour pink over the bare glue (fitted pourMain) */
+        gold.pourGlitterMain(true, pink);
+        gold.relax(); gold.decayFlow();
+        /* 3. Blow: loose pink over the ring either bonds or drifts off */
+        gold.beginBlow();
+        for (int i = 0; i < 220; ++i) gold.blowStep(1.0f / 60.0f);
+        gold.endBlow();
+        /* 4. second (inner) glue ring */
+        paintGlueRing(wc, wc, ringR * 0.5f, ringW);
+        /* 5. Pour blue over the inner bare glue (earlier pink is left alone) */
+        gold.pourGlitterMain(true, blue);
+        gold.relax(); gold.decayFlow();
+        /* 6. Blow again */
+        gold.beginBlow();
+        for (int i = 0; i < 220; ++i) gold.blowStep(1.0f / 60.0f);
+        gold.endBlow();
+        /* 7. yellow + green crossing glitter (brush sprinkles, not pour) */
+        gold.pourGlitter(wc + ringR * 0.5f, wc - 6.0f, 12.0f, yellow);
+        gold.pourGlitter(wc - 2.0f, wc + ringR * 0.2f, 12.0f, green);
+        gold.relax(); gold.decayFlow();
+        /* 8. Push: smear the crossing glitter a little */
+        gold.smear(wc, wc, 0.4f, -0.3f, 18.0f, 0.25f);
+        gold.absorb();
+        gold.relax(); gold.decayFlow();
+        /* 9. final Blow */
+        gold.beginBlow();
+        for (int i = 0; i < 180; ++i) gold.blowStep(1.0f / 60.0f);
+        gold.endBlow();
+
+        CHECK("pour golden: material covers meaningful area (both rings+pours)",
+              gold.looseMass() + gold.bondedCount() * 0.1f > 0.0f
+              && gold.bondedCount() > 100);
+        /* pouring over KEEPS earlier colours: pink slot stays, blue added */
+        QVector<QColor> palC = gold.palette();
+        const bool keptPink = palC.contains(QColor("#f2a7c8"));
+        const bool keptBlue = palC.contains(QColor("#2f6fd6"));
+        CHECK("pour golden: pink is PRESERVED after pouring blue over it",
+              keptPink);
+        CHECK("pour golden: blue slot added by the second pour", keptBlue);
+
+        /* render the finished piece and probe for a lattice */
+        QImage goldImg = gold.render(QSize(288, 288), wc - 144, wc - 144, 1.0f,
+                                     ArtLightRig(), pal, nullptr, ArtScale(), 0);
+        goldImg.save("pb_powder_pour_golden.png");
+        float hc = 0.0f, vc = 0.0f;
+        int hp = latticePeriodContrast(goldImg, 0, hc);
+        int vp = latticePeriodContrast(goldImg, 1, vc);
+        std::printf("    [golden] h period=%d c=%.3f  v period=%d c=%.3f\n",
+                    hp, (double)hc, vp, (double)vc);
+        /* the fitted single pour must NOT produce a same-period grid */
+        CHECK("pour golden: no regular lattice (pourMain fit, not grid)",
+              noLatticeGrid(goldImg, 0.10f));
+        CHECK("pour golden: renders non-empty non-transparent material",
+              goldImg.width() > 0 && !goldImg.isNull()
+              && imageMeanAlpha(goldImg, QRect(0, 0, goldImg.width(), goldImg.height())) > 2.0);
+    }
+
+    /* ---- DARK-COLOUR GOLDENS (reviewer gate #7) -------------------------
+     * One fixed serialized powder state rendered with #000000 / #202020 /
+     * #FFC900 / #F2A7C8 / #FFFFFF through the SAME geometry. Acceptance:
+     *   - silhouette + pile geometry IDENTICAL across colours (the slot tint
+     *     change must NOT move geometry),
+     *   - black keeps a black albedo yet still shows specular/holographic
+     *     structure (bright pixels + colour, from the albedo-free flakeLight),
+     *   - Shimmer 0 has no rainbow but retains metallic reflection,
+     *   - Shimmer 1 adds thin-film colour without washing the whole body,
+     *   - moving the light moves highlights, moving time moves facets. */
+    {
+        /* fixed powder state: a substantial pink heap, serialized once */
+        GlitterPowder src = makeHeap(pal, 256, 555.0f);
+        const QByteArray stateBytes = src.serialize();
+        std::vector<QColor> colours = { QColor("#000000"), QColor("#202020"),
+                                        QColor("#FFC900"), QColor("#F2A7C8"),
+                                        QColor("#FFFFFF") };
+        const float wc = (256 / 2.0f) * 4.0f;
+        /* a state has up to kMaxSlots slots; replicate the colour across all of
+         * them so EVERY referenced slot tints to that one colour (same state,
+         * only the material colour changes). */
+        const int nSlots = src.palette().size() > 0 ? src.palette().size() : 1;
+
+        /* reference alpha silhouette (from the first colour) */
+        QImage firstA;
+        std::vector<QImage> imgsByColour;
+        for (const QColor &c : colours)
+        {
+            PowderPalette cp;
+            cp.holographic = 0.55f;
+            for (int i = 0; i < nSlots; ++i)
+                cp.colors << c;
+            GlitterPowder g; g.deserialize(stateBytes);
+            QImage img = g.render(QSize(192, 192), wc - 96, wc - 96, 1.0f,
+                                  ArtLightRig(), cp, nullptr, ArtScale(), 0);
+            imgsByColour.push_back(img);
+            if (firstA.isNull())
+                firstA = img;
+        }
+
+        /* 1. geometry identical across colours: alpha (coverage) is tint-free */
+        bool geoSame = true;
+        for (const QImage &img : imgsByColour)
+            if (img.size() != firstA.size()
+                || std::abs((double)imageMeanAlpha(img) - imageMeanAlpha(firstA)) > 4.0)
+                geoSame = false;
+        CHECK("dark goldens: silhouette identical across black..white (geometry)", geoSame);
+
+        /* 2. black has visible specular/holographic structure: pixels clearly
+         * brighter than the near-black metallic body (which itself stays
+         * black) — these are the moving speculars / white mirror core /
+         * thin-film flashes. The shimmer is ANIMATED (flakes drift in and out
+         * of facet alignment over time), so sample several time instants and
+         * union the sparkle pixels: black must show structure somewhere across
+         * the motion, not just the one instant a flake happens to be aligned. */
+        {
+            PowderPalette bp; bp.holographic = 0.55f;
+            for (int i = 0; i < nSlots; ++i) bp.colors << QColor("#000000");
+            int opaque = 0, structure = 0, strong = 0, maxC = 0;
+            long bodySamples = 0, bodySum = 0;
+            const qint64 times[4] = { 1234, 2321, 3105, 4488 };
+            for (int ti = 0; ti < 4; ++ti)
+            {
+                GlitterPowder g; g.deserialize(stateBytes);
+                QImage bimg = g.render(QSize(192, 192), wc - 96, wc - 96, 1.0f,
+                                       ArtLightRig(), bp, nullptr, ArtScale(),
+                                       times[ti]);
+                for (int y = 0; y < bimg.height(); ++y)
+                    for (int x = 0; x < bimg.width(); ++x)
+                    {
+                        const int a = qAlpha(bimg.pixel(x, y));
+                        if (a <= 8) continue;
+                        opaque += (ti == 0);            /* count once */
+                        const int cmx = qMax(qRed(bimg.pixel(x, y)),
+                                             qMax(qGreen(bimg.pixel(x, y)), qBlue(bimg.pixel(x, y))));
+                        maxC = qMax(maxC, cmx);
+                        if (cmx > 70) ++structure;       /* clearly above the dark body */
+                        if (cmx > 130) ++strong;         /* a real mirror core / flash */
+                        if (cmx < 45) { bodySamples++; bodySum += cmx; } /* the bulk of the black body */
+                    }
+            }
+            const double bodyMean = bodySamples ? (double)bodySum / bodySamples : 255.0;
+            std::printf("    [dark] black(opaque=%d) structure(>70)=%d strong(>130)=%d maxC=%d bodyMean=%d (summed over 4 t)\n",
+                        opaque, structure, strong, maxC, (int)bodyMean);
+            /* the black material body stays BLACK (mean near-dark): only the
+             * specular/mirror-core sparkles rise above it. The mirror core
+             * reaching near-white (maxC high) is exactly right — it must NOT be
+             * capped, that is the black-metal shimmer the reviewer wants. */
+            CHECK("dark goldens: black body stays black (not lifted to gray)",
+                  bodyMean < 45.0 && bodySamples > opaque * 3);
+            /* black keeps visible specular/holographic structure: some pixels
+             * clearly above the near-black body, and at least a few reaching
+             * the bright mirror-core range (moving facets make them appear at
+             * different instants). Spare but present = faithful reference
+             * black metal, not a matte mass. */
+            CHECK("dark goldens: black has visible specular/holographic structure",
+                  structure > 20 && strong > 10 && maxC > 200);
+        }
+
+        /* 3+4. Shimmer 0 vs 1: no rainbow at 0, thin-film colour at 1 */
+        {
+            PowderPalette p0; p0.holographic = 0.0f;
+            PowderPalette p1; p1.holographic = 1.0f;
+            for (int i = 0; i < nSlots; ++i) { p0.colors << QColor("#ffffff"); p1.colors << QColor("#ffffff"); }
+            GlitterPowder g0; g0.deserialize(stateBytes);
+            GlitterPowder g1; g1.deserialize(stateBytes);
+            QImage i0 = g0.render(QSize(128, 128), wc - 64, wc - 64, 1.0f, ArtLightRig(), p0, nullptr, ArtScale(), 1234);
+            QImage i1 = g1.render(QSize(128, 128), wc - 64, wc - 64, 1.0f, ArtLightRig(), p1, nullptr, ArtScale(), 1234);
+            /* shimmer0 must be achromatic metallic (no rainbow); shimmer1 must
+             * ADD thin-film colour ON its sparkles. Count BRIGHT sparkle pixels
+             * (lum>90) whose RGB channel spread is clearly a hue (>25): shimmer1
+             * must show more such rainbow pixels than shimmer0, and shimmer0
+             * must stay essentially achromatic white. A body drenched in one
+             * hue would not register here (spread small), and a full rainbow
+             * wash is prevented by the "many hued" bound below. */
+            long hue0 = 0, hue1 = 0, bright0 = 0, bright1 = 0;
+            double s0 = 0, s1 = 0; int n0 = 0, n1 = 0, mx1 = 0;
+            for (int y = 0; y < i0.height(); y += 1)
+                for (int x = 0; x < i0.width(); x += 1)
+                {
+                    if (qAlpha(i0.pixel(x, y)) <= 4 || qAlpha(i1.pixel(x, y)) <= 4) continue;
+                    const QRgb a = i0.pixel(x, y), b = i1.pixel(x, y);
+                    const double lum0 = 0.299 * qRed(a) + 0.587 * qGreen(a) + 0.114 * qBlue(a);
+                    const double lum1 = 0.299 * qRed(b) + 0.587 * qGreen(b) + 0.114 * qBlue(b);
+                    const int m0 = qMax(qRed(a), qMax(qGreen(a), qBlue(a))) - qMin(qRed(a), qMin(qGreen(a), qBlue(a)));
+                    const int m1 = qMax(qRed(b), qMax(qGreen(b), qBlue(b))) - qMin(qRed(b), qMin(qGreen(b), qBlue(b)));
+                    if (lum0 > 90.0) { bright0++; if (m0 > 25) hue0++; s0 += m0; ++n0; }
+                    if (lum1 > 90.0) { bright1++; if (m1 > 25) hue1++; s1 += m1; ++n1; mx1 = qMax(mx1, m1); }
+                }
+            s0 = n0 ? s0 / n0 : 0; s1 = n1 ? s1 / n1 : 0;
+            std::printf("    [dark] shimmer0 bright=%ld hue>25=%ld avgSpread=%.2f | shimmer1 bright=%ld hue>25=%ld avgSpread=%.2f maxHue=%d\n",
+                        bright0, hue0, s0, bright1, hue1, s1, mx1);
+            CHECK("dark goldens: shimmer0 is achromatic metallic (rainbow-free)",
+                  hue0 < 50);
+            CHECK("dark goldens: shimmer1 adds thin-film colour (hued sparkles)",
+                  hue1 > 0 && mx1 > 50);
+            CHECK("dark goldens: shimmer1 does not wash the whole body to one hue",
+                  hue1 < 4000 && s1 < 250.0);
+        }
+
+        /* 5. moving the light moves highlights (geometry fixed) */
+        {
+            PowderPalette rs; rs.holographic = 0.55f;
+            for (int i = 0; i < nSlots; ++i) rs.colors << QColor("#f2a7c8");
+            ArtLightRig rl, rr;
+            rl.direction = QVector3D(0.9f, 0.05f, 0.6f);
+            rr.direction = QVector3D(-0.9f, 0.05f, 0.6f);
+            GlitterPowder gl; gl.deserialize(stateBytes);
+            GlitterPowder gr; gr.deserialize(stateBytes);
+            QImage a = gl.render(QSize(128, 128), wc - 64, wc - 64, 1.0f, rl, rs, nullptr, ArtScale(), 0);
+            QImage b = gr.render(QSize(128, 128), wc - 64, wc - 64, 1.0f, rr, rs, nullptr, ArtScale(), 0);
+            CHECK("dark goldens: changing light moves highlights", !imgEqual(a, b, 0));
+        }
+
+        /* 6. changing time moves facets asynchronously (geometry + t fixed) */
+        {
+            PowderPalette rs; rs.holographic = 0.55f;
+            for (int i = 0; i < nSlots; ++i) rs.colors << QColor("#f2a7c8");
+            GlitterPowder gt0; gt0.deserialize(stateBytes);
+            GlitterPowder gt1; gt1.deserialize(stateBytes);
+            QImage a = gt0.render(QSize(128, 128), wc - 64, wc - 64, 1.0f, ArtLightRig(), rs, nullptr, ArtScale(), 0);
+            QImage b = gt1.render(QSize(128, 128), wc - 64, wc - 64, 1.0f, ArtLightRig(), rs, nullptr, ArtScale(), 2026);
+            CHECK("dark goldens: changing time moves facets (not an idle frame)",
+                  !imgEqual(a, b, 0));
+        }
     }
 
     /* ---- reference sheets for the visual audit ----------------------- */

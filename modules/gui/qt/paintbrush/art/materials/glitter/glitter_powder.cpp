@@ -558,8 +558,6 @@ void GlitterPowder::pourGlitter(float wx, float wy, float radiusWorld,
                                 const GlitterParams &p)
 {
     const float cell = m_worldCellSize;
-    const float cx = wx / cell, cy = wy / cell;
-    const float r = qMax(0.5f, radiusWorld / cell);
     /* Seed the bounded material palette on first use: prefer the params'
      * named palette, else start from the current foreground colour. */
     if (m_palette.isEmpty())
@@ -570,14 +568,28 @@ void GlitterPowder::pourGlitter(float wx, float wy, float radiusWorld,
         if (!srcSlotsQ.isEmpty())
             m_palette = QVector<QColor>(srcSlotsQ.begin(), srcSlotsQ.end());
     }
-    /* Deposit the CURRENT UI colour into a bounded palette slot (reuse /
-     * append / nearest when full). Existing grains retain their original slot
-     * ids, so a foreground colour change creates NEW coloured glitter instead
-     * of rewriting what is already on the page. */
+    /* Deposit the CURRENT UI colour into a bounded palette slot so existing
+     * grains retain their slot ids (a foreground change adds NEW glitter). */
     const int slot = ensurePowderPaletteSlot(p.color);
+    /* reference pour(): a disc heap with the DEFAULT_POUR profile (shape 0.1
+     * flat-ish, stretch 0 round, rag 0.22, lumps 0.5, dust 0.5) */
+    const float peak = std::max(0.2f, p.amount * 1.5f);
+    pourHeap(slot, wx / cell, wy / cell, qMax(0.5f, radiusWorld / cell), peak,
+             /*shape*/ 0.1f, /*stretch*/ 0.0f, /*rag*/ 0.22f,
+             /*lumps*/ 0.5f, /*dust*/ 0.5f);
+}
 
+/* Reference pour() (cray4pasta/glitter-powder): deposit one irregular fbm-rim
+ * heap into a single palette slot. `cx,cy` are cell coords, `rCells` the heap
+ * base radius in cells, the profile parameters map 1:1 to the reference
+ * options. One call is ONE rounded, organically ragged heap with no regular
+ * repeated stamp centres. */
+void GlitterPowder::pourHeap(int slot, float cx, float cy, float rCells,
+                             float peak, float shape, float stretch,
+                             float rag, float lumps, float dust)
+{
+    const float r = qMax(0.5f, rCells);
     const float seedOff = m_rng.generateDouble() * 100.0f;
-    const float stretch = 0.0f;
     const float sx = 1.08f * std::pow(2.0f, stretch * 0.8f);
     const float sy = 0.85f * std::pow(2.0f, -stretch * 0.8f);
     const float ext = r * 2.4f * std::max(sx, sy);
@@ -587,9 +599,8 @@ void GlitterPowder::pourGlitter(float wx, float wy, float radiusWorld,
     const int y1 = std::min(m_cells.height() - 2, int(std::ceil(cy + ext)));
     const QRect pourRect(x0, y0, x1 - x0 + 1, y1 - y0 + 1);
     m_activeCells = m_activeCells.isNull() ? pourRect : m_activeCells.united(pourRect);
-    const float expo = 0.35f + 1.65f * 0.1f;   /* shape ~ flat-ish heap */
-    const float ragAmp = 0.4f * 0.22f;
-    const float peak = std::max(0.2f, p.amount * 1.5f);
+    const float expo = 0.35f + 1.65f * shape;
+    const float ragAmp = 0.4f * rag;
 
     for (int y = y0; y <= y1; ++y)
         for (int x = x0; x <= x1; ++x)
@@ -602,7 +613,6 @@ void GlitterPowder::pourGlitter(float wx, float wy, float radiusWorld,
             if (d >= 1)
             {
                 /* fine dust spills around the heap (reference dust) */
-                const float dust = 0.5f;
                 if (dust <= 0 || d >= 1 + 0.9f * (0.4f + dust))
                     continue;
                 const float patch = fbm(m_rng, x * 0.06f + seedOff * 2, y * 0.06f);
@@ -611,7 +621,7 @@ void GlitterPowder::pourGlitter(float wx, float wy, float radiusWorld,
                     addLoose(idx(x, y), mm, slot, -1, 0.0f);
                 continue;
             }
-            const float lump = (fbm(m_rng, x * 0.09f + seedOff, y * 0.09f) - 0.5f) * 0.6f * 0.5f * peak * (1 - d);
+            const float lump = (fbm(m_rng, x * 0.09f + seedOff, y * 0.09f) - 0.5f) * 0.6f * lumps * peak * (1 - d);
             const float mm = std::max(0.0f, peak * std::pow(1 - d, expo) * (1 - 0.3f * d * d) + lump);
             if (mm > 0)
                 addLoose(idx(x, y), mm, slot, -1, 0.0f);
@@ -623,6 +633,109 @@ void GlitterPowder::pourGlitter(float wx, float wy, float radiusWorld,
      * a 2 MP heightfield interactive instead of 40 full-grid sweeps per dab. */
     for (int k = 0; k < 40; ++k)
         relax(pourRect);
+}
+
+/* Reference pourMain(): ONE heap fitted to the bare glue (reference fit=true
+ * pour action). No regular grid; an anisotropic heap stretched to the bounds
+ * of the still-bare glue so it organically covers it. */
+void GlitterPowder::pourGlitterMain(bool fit, const GlitterParams &p)
+{
+    if (m_cells.width() <= 0 || m_cells.height() <= 0)
+        return;
+    const float cell = m_worldCellSize;
+    const float kGlueDepth = 1.2f;
+
+    /* Motor the current colour into the palette so the heap slot is resolved
+     * consistently with the brush pour (existing grains keep their slots). */
+    if (m_palette.isEmpty())
+    {
+        QVector<QColor> srcSlotsQ = p.palette;
+        if (srcSlotsQ.isEmpty() && p.color.isValid())
+            srcSlotsQ << p.color;
+        if (!srcSlotsQ.isEmpty())
+            m_palette = QVector<QColor>(srcSlotsQ.begin(), srcSlotsQ.end());
+    }
+    const int slot = ensurePowderPaletteSlot(p.color);
+
+    /* Bounding box of the BARE glue in world px: wet glue (glue>=0.15) that has
+     * not yet built up its bonded glitter (stuck <= ~half the glue's holding
+     * capacity). Poured-over colours are left alone; with none bare, the whole
+     * glue art; with no glue, the material bounds (or middle of the field). */
+    float bx0 = std::numeric_limits<float>::infinity(),
+          by0 = std::numeric_limits<float>::infinity(),
+          bx1 = -std::numeric_limits<float>::infinity(),
+          by1 = -std::numeric_limits<float>::infinity();
+    bool found = false;
+    for (int y = 0; y < m_cells.height(); ++y)
+        for (int x = 0; x < m_cells.width(); ++x)
+        {
+            const PowderCell &c = cellAt(idx(x, y));
+            if (c.glue < 0.15f || c.stuck > 0.5f * kGlueDepth * c.glue)
+                continue;
+            const float px = (x + 0.5f) * cell, py = (y + 0.5f) * cell;
+            if (px < bx0) bx0 = px; if (px > bx1) bx1 = px;
+            if (py < by0) by0 = py; if (py > by1) by1 = py;
+            found = true;
+        }
+    /* `found` distinguishes "found bare glue" from "found nothing at all" only
+     * through the box extents below; it is kept for the reader, not read. */
+    (void)found;
+    if (bx1 > bx0)
+    {
+        /* pad the box by one cell like the reference */
+        bx0 -= cell; bx1 += cell; by0 -= cell; by1 += cell;
+    }
+    else
+    {
+        /* no bare glue: fall back to material (glue+powder) bounds, else the
+         * whole-grid centre */
+        float gx0 = 0, gy0 = 0, gx1 = 0, gy1 = 0;
+        const bool hasMat = materialBoundsWorld(gx0, gy0, gx1, gy1);
+        if (hasMat)
+        {
+            bx0 = gx0; by0 = gy0; bx1 = gx1; by1 = gy1;
+            found = true;
+        }
+        else
+        {
+            bx0 = 0; by0 = 0;
+            bx1 = m_cells.width() * cell; by1 = m_cells.height() * cell;
+        }
+    }
+    const bool has = bx1 > bx0;
+    const float bw = has ? bx1 - bx0 : std::min(m_cells.width(), m_cells.height()) * cell * 0.55f;
+    const float bh = has ? by1 - by0 : std::min(m_cells.width(), m_cells.height()) * cell * 0.3f;
+    const float mx = has ? (bx0 + bx1) * 0.5f : m_cells.width() * cell * 0.5f;
+    const float my = has ? (by0 + by1) * 0.5f : m_cells.height() * cell * 0.5f;
+
+    /* reference DEFAULT_POUR profile */
+    const float spread = 0.8f, depth = 0.37f, shape = 0.76f, stretchDef = 0.59f,
+                rag = 0.48f, lumps = 0.95f, dust = 0.0f;
+    /* Peak per reference: 1.5 + 38*depth^2 (so the fit/port keeps the pile
+     * prominent enough to mass-yield; amount scales with coverage). */
+    const float refPeak = 1.5f + 38.0f * depth * depth;
+
+    if (fit && has)
+    {
+        /* an oval a bit bigger than the box (the rim is ragged and thin),
+         * stretched to its shape (reference fit branch) */
+        const float rx = bw * 0.5f + 24.0f, ry = bh * 0.5f + 24.0f;
+        const float stretch = std::max(-1.2f, std::min(1.2f,
+                                   std::log2(rx / ry / 1.27f) / 1.6f));
+        const float sx = 1.08f * std::pow(2.0f, stretch * 0.8f);
+        /* heap radius scaled so its X extent matches rx: r = 1.5*rx/sx/cell */
+        const float heapR = 1.5f * rx / sx / cell;
+        pourHeap(slot, mx / cell, my / cell, heapR, refPeak, shape, stretch, rag,
+                 lumps, dust);
+        return;
+    }
+
+    /* generous first pour (no fit): spread relative to what it covers so it
+     * keeps covering it at any size (reference) */
+    const float rr = spread * 3.0f * std::max(bw * 0.5f, bh * 0.9f)
+                     * (has ? 1.0f : 0.6f) / cell;
+    pourHeap(slot, mx / cell, my / cell, rr, refPeak, shape, stretchDef, rag,
+             lumps, dust);
 }
 
 void GlitterPowder::smear(float wx, float wy, float fx, float fy,
@@ -1395,6 +1508,87 @@ static float gSmoothstep(float e0, float e1, float x)
 }
 static float gMix(float a, float b, float t) { return a + (b - a) * t; }
 
+/* Reference thinFilm (glitter-powder GPU shader, exact equations): light
+ * reflecting off the top/bottom of a coating of thickness d (nm) interferes,
+ * so the reflected colour depends on film thickness and viewing angle. This is
+ * the holographic iridescence — shared by the CPU fallback so dark/black
+ * glitter gets the SAME thin-film flashes as the GPU (P1 reviewer #5/#6). */
+static void cThinFilm(float cosI, float d, float &or0, float &og, float &ob)
+{
+    const float n = 1.5f;
+    const float ci = qBound(0.0f, cosI, 1.0f);
+    const float cosT = std::sqrt(std::max(1.0f - (1.0f - ci * ci) / (n * n), 0.0f));
+    const float opd = 2.0f * n * d * cosT;           /* optical path difference */
+    const float cr = std::pow(0.5f + 0.5f * std::cos(6.28318f * opd / 650.0f + 3.14159f), 1.6f);
+    const float cg = std::pow(0.5f + 0.5f * std::cos(6.28318f * opd / 530.0f + 3.14159f), 1.6f);
+    const float cb = std::pow(0.5f + 0.5f * std::cos(6.28318f * opd / 450.0f + 3.14159f), 1.6f);
+    const float l = (cr + cg + cb) * 0.3333f;        /* luminance */
+    or0 = qBound(0.0f, gMix(l, cr, 2.4f), 1.0f);
+    og  = qBound(0.0f, gMix(l, cg, 2.4f), 1.0f);
+    ob  = qBound(0.0f, gMix(l, cb, 2.4f), 1.0f);
+}
+
+/* Reference flakeLight (glitter-powder GPU shader, exact equations): a tiny
+ * flat mirror on the grain that only sparkles when its facet lines up with the
+ * light. `sidX/sidY` is the grain's 2D absolute world id; `chance` the flake
+ * density; `flatness` 0..1 (flakes pressed into glue lie flatter); N/L/H the
+ * pile/facet/light/half vectors. Outputs the flake colour (or0/og/ob) and
+ * whether this grain carries a flake (`isFlake`).
+ *
+ * KEY for dark/black metal (P1 #6): the flake's LIGHT is mostly albedo-free —
+ * it returns `rainbow * (pow(fd,12)*0.15 + spec*1.6) + whiteCore*pow(spec,3)*0.08`,
+ * where `rainbow` is tintSpec(tint) at uHolo 0 and thin-film colour at uHolo 1.
+ * For a black tint, tintSpec -> ~0 at uHolo 0, so the coloured part dims, but
+ * the WHITE near-perfect mirror core `pow(spec,3)*0.08` still lights up — a
+ * bright specular on black — and at uHolo>0 the thin-film flashes appear
+ * regardless of the black albedo. So black reads as a dark metallic pile with
+ * moving speculars and holographic flashes, not a matte black mass. */
+static void cFlakeLight(float sidX, float sidY, float chance, float flatness,
+                        const QVector3D &N, const QVector3D &L, const QVector3D &H,
+                        float tintR, float tintG, float tintB,
+                        float holo, float timeSec,
+                        float &or0, float &og, float &ob, float &isFlake)
+{
+    const QVector3D gh2 = refHash32(sidX * 1.37f + 5.1f, sidY * 1.37f + 5.1f);
+    isFlake = gh2.x() < chance ? 1.0f : 0.0f;
+    or0 = 1.0f; og = 1.0f; ob = 1.0f;
+    if (isFlake <= 0.5f)
+        return;
+    const QVector3D gh  = refHash32(sidX + 71.3f,         sidY + 71.3f);
+    const QVector3D gh3 = refHash32(sidX * 0.73f + 19.0f, sidY * 0.73f + 19.0f);
+    /* Facet tilt: most lie flat, a few steep; pressed-into-glue lie flatter. */
+    const float tilt = (0.05f + 0.85f * gh3.z()) * (1.0f - 0.55f * flatness);
+    /* each flake shimmers at its own pace (reference rate) */
+    const float rate = std::exp2(gMix(-2.5f, 0.8f, gh2.z()));
+    const float a = gh2.y() * 6.2832f
+                  + (gh.x() > 0.5f ? 1.0f : -1.0f) * timeSec * rate
+                  + 0.6f * std::sin(timeSec * rate * (0.6f + 1.6f * gh3.x())
+                                    + gh3.y() * 6.28f);
+    const QVector3D Nf = (N + QVector3D(std::cos(a), std::sin(a), 0.0f) * tilt).normalized();
+    const float fd = qMax(0.0f, QVector3D::dotProduct(Nf, H));
+    const float sharp = gMix(14.0f, 140.0f, gh3.x() * gh3.x());
+    const float amp = 1.0f + 4.0f * std::pow(gh3.y(), 3.0f);
+    /* thin-film coating thickness per flake */
+    const float filmX = 250.0f, filmY = 600.0f;
+    const QVector3D filmh = refHash32(sidX * 2.7f + 1.3f, sidY * 2.7f + 1.3f);
+    const float film = gMix(filmX, filmY, filmh.x());
+    /* rainbow: tintSpec(tint) at holo 0 (metallic), thin-film at holo 1 */
+    const float tmax = qMax(qMax(tintR, tintG), qMax(tintB, 0.04f));
+    const float tsR = tintR / tmax, tsG = tintG / tmax, tsB = tintB / tmax;
+    float tfR, tfG, tfB;
+    cThinFilm(qMax(0.0f, QVector3D::dotProduct(Nf, L)), film, tfR, tfG, tfB);
+    const float rbowR = gMix(tsR, tfR, holo);
+    const float rbowG = gMix(tsG, tfG, holo);
+    const float rbowB = gMix(tsB, tfB, holo);
+    const float spec = std::pow(fd, sharp) * amp;
+    const float reflect = std::pow(fd, 12.0f) * 0.15f + spec * 1.6f;
+    /* white near-perfect mirror core: only at near-exact facet/light alignment */
+    const float whiteCore = std::pow(spec, 3.0f) * 0.08f;
+    or0 = rbowR * reflect + whiteCore;
+    og  = rbowG * reflect + whiteCore;
+    ob  = rbowB * reflect + whiteCore;
+}
+
 QImage GlitterPowder::render(const QSize &outSize, float outOriginWorldX,
                              float outOriginWorldY, float worldPerPx,
                              const ArtLightRig &rig, const PowderPalette &pal,
@@ -1589,7 +1783,6 @@ QImage GlitterPowder::render(const QSize &outSize, float outOriginWorldX,
                 const float sidx = bIx + s * 13.17f;
                 const float sidy = bIy + s * 13.17f;
                 const QVector3D gh  = refHash32(sidx + 71.3f,         sidy + 71.3f);
-                const QVector3D gh2 = refHash32(sidx * 1.37f + 5.1f,  sidy * 1.37f + 5.1f);
                 const QVector3D gh3 = refHash32(sidx * 0.73f + 19.0f, sidy * 0.73f + 19.0f);
                 const QVector3D gj  = refHash32(sidx * 2.31f + 9.7f,  sidy * 2.31f + 9.7f);
 
@@ -1665,6 +1858,23 @@ QImage GlitterPowder::render(const QSize &outSize, float outOriginWorldX,
                 cr += gMix(1.0f, sr, 0.5f) * specPow * 0.35f;
                 cg2 += gMix(1.0f, sg, 0.5f) * specPow * 0.35f;
                 cb += gMix(1.0f, sb, 0.5f) * specPow * 0.35f;
+
+                /* --- reference flakeLight (tiny mirror on the grain) -------
+                 * Adds the albedo-free specular/holographic energy to the bead:
+                 * moving facets, metallic reflections and thin-film flashes.
+                 * For a BLACK tint the albedo stays black but THIS term still
+                 * supplies the white near-perfect mirror core and (at uHolo>0)
+                 * the holographic flashes, so black reads as a dark metallic
+                 * pile with depth and glints, not a matte mass (P1 #6). */
+                const float timeSec = (timeMs > 0) ? (float(timeMs) / 1000.0f) : 0.0f;
+                const float holo = qBound(0.0f, pal.holographic, 1.0f);
+                {
+                    float flR, flG, flB, isF;
+                    cFlakeLight(sidx, sidy, 0.06f, exposedGlue, N, Ln, H,
+                                tr, tg, tb, holo, timeSec, flR, flG, flB, isF);
+                    const float fw = isF * inBead * 0.7f;
+                    cr += flR * fw; cg2 += flG * fw; cb += flB * fw;
+                }
 
                 /* paper + soft contact shadow behind the bead */
                 const float ax = -Ln.x(), ay = -Ln.y();
@@ -1748,31 +1958,142 @@ QImage GlitterPowder::render(const QSize &outSize, float outOriginWorldX,
                                   int(qBound(0.0f, cb, 1.0f) * 255.0f),
                                   aOut8));
                 p.drawEllipse(QPointF(gcxPx, gcyPx), radPx, radPx);
+                /* --- shimmer is carried by the reference flakeLight above ---
+                 * (moving facet angle a(timeSec), white mirror core, thin-film
+                 * rainbow at holo>0). No separate hardcoded magenta/cyan glint:
+                 * that was the simplified approximation the reviewer flagged —
+                 * black had no structure and the coloured flash was not the
+                 * real thinFilm+flakeLight model. The bead drawn above already
+                 * includes the time-driven specular/flash contribution. */
+            }
+    }
 
-                /* --- time-driven shimmer: a per-grain glint in the bright
-                 * specular core, keyed to the 2D grain id so a change in
-                 * timeMs always moves a few pixels (reference uTime). The
-                 * holographic amount (pal.holographic == the ONE UI shimmer
-                 * control) scales the iridescent intensity: 0 = muted metallic
-                 * white glint, 1 = strong magenta/rainbow flash (P0.12). ---- */
-                const float t = (timeMs > 0) ? float((timeMs % 4000) / 1000.0) : 0.0f;
-                const float rate = 0.6f + 1.4f * gh.y();
-                const float phase = gh2.y() * 6.2832f + t * rate;
-                const float amp = 0.5f + 0.5f * std::sin(phase);
-                const float holo = qBound(0.0f, pal.holographic, 1.0f);
-                if (specPow > 0.02f && amp > 0.30f && holo > 0.02f)
+    /* ---- larger holographic flakes + bloom (reference flake pass) --------
+     * The reference's separate, LARGER flake pass: coarser world pitch, every
+     * candidate IS a flake (chance 1.0) whose facet can flash, drawn as a soft
+     * disc + additive bokeh bloom. This is the source of the BIG visible
+     * holographic flashes (and black's mirror core / rainbow) — the fine-grain
+     * flakeLight above is only subtle per-bead glints. World-anchored at a
+     * fixed pitch so crop/zoom never change which flake a pixel sees (crop
+     * invariance, same contract as the GPU uFlakeWorld pass). */
+    {
+        const float flakePitch = cell * 5.0f;         /* two cells -> ~uFlakeWorld */
+        const int fpBegX = int(std::floor((outOriginWorldX - flakePitch) / flakePitch));
+        const int fpEndX = int(std::floor((outOriginWorldX + outSize.width() * worldPerPx + flakePitch) / flakePitch));
+        const int fpBegY = int(std::floor((outOriginWorldY - flakePitch) / flakePitch));
+        const int fpEndY = int(std::floor((outOriginWorldY + outSize.height() * worldPerPx + flakePitch) / flakePitch));
+        for (int iy = fpBegY; iy <= fpEndY; ++iy)
+            for (int ix = fpBegX; ix <= fpEndX; ++ix)
+            {
+                /* flake candidate in flake-pitch units; id is the absolute
+                 * world-locked cell (stable vs the render crop) */
+                const float fx = float(ix), fy = float(iy);
+                const QVector3D r1 = refHash32(fx * 1.91f + 2.7f, fy * 1.91f + 2.7f);
+                const float cx = fx + 0.2f + 0.6f * r1.y();
+                const float cy = fy + 0.2f + 0.6f * r1.z();
+                /* flake centre in ABSOLUTE WORLD */
+                const float cw = cx * flakePitch, chw = cy * flakePitch;
+                /* pile macro-normal at the flake centre (same multi-scale slope
+                 * the grain beads use), so flakes sit on the real surface shape */
+                auto hAtF = [&](float wx, float wy) -> float
                 {
-                    const float sw = qMax(0.35f, radPx * 0.34f);
-                    const float alpha = qMin(255.0f, (30.0f + 150.0f * amp) * holo);
-                    /* metallic white at holo 0, magenta/cyan flash toward 1 */
-                    const float iride = 0.15f + 0.85f * holo * amp;
-                    QColor glintc(255,
-                                  int(qBound(0.0f, 0.92f - 0.35f * iride, 1.0f) * 255.0f),
-                                  int(qBound(0.0f, 0.92f - 0.18f * holo, 1.0f) * 255.0f),
-                                  int(alpha));
-                    p.setBrush(glintc);
-                    p.drawEllipse(QPointF(gcxPx + (gh.x() - 0.5f) * radPx * 0.8f,
-                                          gcyPx + (gh.z() - 0.5f) * radPx * 0.8f), sw, sw);
+                    int x = int(std::floor(wx / cell));
+                    int y = int(std::floor(wy / cell));
+                    x = std::clamp(x, 0, m_cells.width() - 1);
+                    y = std::clamp(y, 0, m_cells.height() - 1);
+                    return cellAt(idx(x, y)).height;
+                };
+                float fgx = 0.0f, fgy = 0.0f;
+                for (int k = 0; k < 3; ++k)
+                {
+                    const float o = cell * (1.5f + 3.0f * float(k));
+                    const float ww = 2.0f * o;
+                    fgx += (hAtF(cw + o, chw) - hAtF(cw - o, chw)) / ww;
+                    fgy += (hAtF(cw, chw + o) - hAtF(cw, chw - o)) / ww;
+                }
+                const QVector3D N = QVector3D(-fgx * (cell / worldPerPx),
+                                              -fgy * (cell / worldPerPx),
+                                              1.0f).normalized();
+                int ctX = int(std::floor(cw / cell));
+                int ctY = int(std::floor(chw / cell));
+                ctX = std::clamp(ctX, 0, gridW - 1);
+                ctY = std::clamp(ctY, 0, gridH - 1);
+                const PowderCell &fc = cellAt(idx(ctX, ctY));
+                const float glueF = fc.glue * gSmoothstep(0.02f, 0.25f, fc.stuck);
+                const float looseF = qMax(fc.height - fc.stuck, 0.0f);
+                const float onGlue = glueF * (1.0f - gSmoothstep(0.25f, 1.1f, looseF));
+                if (r1.x() > gMix(0.45f, 0.8f, onGlue) * (/*uFlakePx/5*/ 1.0f))
+                    continue;
+                const float fsidx = fx * 3.1f + fc.seed * 13.17f;
+                const float fsidy = fy * 3.1f + fc.seed * 13.17f;
+                const QVector3D r2 = refHash32(fsidx + 40.0f, fsidy + 40.0f);
+                if (r2.y() >= qMax(qBound(0.0f, looseF / 1.2f, 1.0f), glueF))
+                    continue;
+                const float size = r2.x() * r2.x() * r2.x();
+                /* coverage disc; everything rasterized at output px */
+                const float radius = gMix(0.12f, 0.45f, size);
+                const float flakeRPx = radius * flakePitch / worldPerPx;
+                const float flakePx = (cw - outOriginWorldX) / worldPerPx;
+                const float flakePy = (chw - outOriginWorldY) / worldPerPx;
+                if (flakePx < -flakeRPx * 2 || flakePy < -flakeRPx * 2
+                    || flakePx > outSize.width() + flakeRPx * 2
+                    || flakePy > outSize.height() + flakeRPx * 2)
+                    continue;
+
+                /* colour of the flake (loose vs bonded by the r2 gate) */
+                const QVector3D fc3 = refHash32(fsidx * 1.7f + 3.3f, fsidy * 1.7f + 3.3f);
+                const float pick = fc3.x();
+                int fslotA = (r2.y() < qBound(0.0f, looseF / 1.2f, 1.0f)) ? fc.lA : fc.sA;
+                int fslotB = (r2.y() < qBound(0.0f, looseF / 1.2f, 1.0f)) ? fc.lB : fc.sB;
+                const float fshare = (r2.y() < qBound(0.0f, looseF / 1.2f, 1.0f)) ? fc.lF : fc.sF;
+                const int fslot = (pick < fshare) ? fslotB : fslotA;
+                float fr = 1, fg = 1, fb = 1;
+                if (fslot >= 0 && fslot < slotsList.size())
+                { fr = slotsList[fslot].color.redF(); fg = slotsList[fslot].color.greenF(); fb = slotsList[fslot].color.blueF(); }
+
+                /* the flake itself: chance 1.0 so every candidate can flash */
+                const float holo = qBound(0.0f, pal.holographic, 1.0f);
+                const float timeSec = (timeMs > 0) ? (float(timeMs) / 1000.0f) : 0.0f;
+                float flR = 1, flG = 1, flB = 1, isF = 0;
+                cFlakeLight(fsidx, fsidy, 1.0f, onGlue, N, Ln, H,
+                            fr, fg, fb, holo, timeSec, flR, flG, flB, isF);
+                const float peak = qMax(flR, qMax(flG, flB));
+                const float soft = radius * (0.18f
+                        + 0.7f * qBound(0.0f, peak - 0.8f, 1.0f) * (0.3f + size));
+                const float softPx = soft * flakePitch / worldPerPx;
+                const float Rpx = qMax(0.6f, radius * flakePitch / worldPerPx);
+
+                /* silver unlit base: the flake reads as a flat metallic speck */
+                const float macroD2 = qBound(0.0f, QVector3D::dotProduct(N, Ln), 1.0f);
+                const QColor silver(int(qBound(0.0f, fr * 0.945f * (0.80f + 0.24f * macroD2) * (0.92f + 0.14f * r2.z()), 1.0f) * 255.0f),
+                                    int(qBound(0.0f, fg * 0.945f * (0.80f + 0.24f * macroD2) * (0.92f + 0.14f * r2.z()), 1.0f) * 255.0f),
+                                    int(qBound(0.0f, fb * 0.945f * (0.80f + 0.24f * macroD2) * (0.92f + 0.14f * r2.z()), 1.0f) * 255.0f),
+                                    255);
+                /* lit flake: the silver base brightened by the flakeLight term */
+                const float lift = qBound(0.0f, peak, 1.0f);
+                const float mw = qBound(0.0f, gMix(0.45f, 1.0f, lift), 1.0f);
+                const QColor litc(int(qBound(0.0f, fr * 0.945f * (0.80f + 0.24f * macroD2) * (0.92f + 0.14f * r2.z())
+                                              + flR * (1.0f + size), 1.0f) * 255.0f),
+                                  int(qBound(0.0f, fg * 0.945f * (0.80f + 0.24f * macroD2) * (0.92f + 0.14f * r2.z())
+                                              + flG * (1.0f + size), 1.0f) * 255.0f),
+                                  int(qBound(0.0f, fb * 0.945f * (0.80f + 0.24f * macroD2) * (0.92f + 0.14f * r2.z())
+                                              + flB * (1.0f + size), 1.0f) * 255.0f),
+                                  int(qBound(0.0f, mw, 1.0f) * 255.0f));
+                /* draw the coverage disc (silver base blended toward lit) */
+                p.setBrush(litc);
+                p.drawEllipse(QPointF(flakePx, flakePy), Rpx + softPx, Rpx + softPx);
+                /* additive bloom for the brightest flakes (holographic bokeh) */
+                if (peak > 1.0f)
+                {
+                    p.setCompositionMode(QPainter::CompositionMode_Plus);
+                    const float over = qMax(peak - 1.0f, 0.0f);
+                    const float bA = qBound(0.0f, over * 0.5f, 1.0f);
+                    p.setBrush(QColor(int(qBound(0.0f, flR + 1e-4f, 1.0f) * 255.0f),
+                                      int(qBound(0.0f, flG + 1e-4f, 1.0f) * 255.0f),
+                                      int(qBound(0.0f, flB + 1e-4f, 1.0f) * 255.0f),
+                                      int(bA * 255.0f)));
+                    p.drawEllipse(QPointF(flakePx, flakePy), Rpx * 1.5f, Rpx * 1.5f);
+                    p.setCompositionMode(QPainter::CompositionMode_SourceOver);
                 }
             }
     }

@@ -113,6 +113,17 @@ public:
     void pourGlitter(float wx, float wy, float radiusWorld,
                      const GlitterParams &p);
 
+    /* POUR MAIN (reference pourMain): ONE physical heap of the current colour
+     * fitted to the material. `fit=true` (the momentary Pour action) shapes the
+     * heap to just cover the BARE glue — cells with wet glue but not yet enough
+     * bonded glitter — so pouring again over a piece in progress keeps the
+     * earlier colours; with no bare glue left it fits the whole glue art, and
+     * with no glue it drops a heap at the material centre (or the middle of the
+     * field). A single anisotropic heap replaces any regular grid of repeated
+     * stamp centres (no rows/columns/checker/harmonics), and it PRESERVES all
+     * existing glitter and colour slots. One call = one heap event. */
+    void pourGlitterMain(bool fit, const GlitterParams &p);
+
     /* SMEAR / plow: push loose grains outward biased by (fx,fy); bonded
      * (stuck) stay. Some clings to the finger and is shed behind. */
     void smear(float wx, float wy, float fx, float fy, float radiusWorld,
@@ -253,6 +264,13 @@ private:
     int clampCell(float cx, float cy) const;
     PowderCell &cellAt(int i) { return m_cellsData[i]; }
     const PowderCell &cellAt(int i) const { return m_cellsData[i]; }
+    /* Core heap deposition (reference pour()): deposits one irregular fbm-rim
+     * heap into `slot` at cell centre (cx,cy) with the reference profile
+     * (shape/stretch/rag/lumps/dust/peak) and relaxes it. Shared by the brush
+     * sprinkle (pourGlitter) and the fitted pourMain. */
+    void pourHeap(int slot, float cx, float cy, float rCells, float peak,
+                  float shape, float stretch, float rag, float lumps,
+                  float dust);
 
     QSize m_cells;
     float m_worldCellSize = 1.0f;
