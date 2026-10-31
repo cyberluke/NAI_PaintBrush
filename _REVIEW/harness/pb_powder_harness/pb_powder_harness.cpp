@@ -18,6 +18,7 @@
 #include <cmath>
 #include <cstdint>
 #include <algorithm>
+#include <chrono>
 
 // Reach the engine's internals for targeted material-state tests (test-only).
 #define private public
@@ -37,26 +38,20 @@ static int s_pass = 0;
          if (ok) ++s_pass; \
          std::printf("  [%s] %s\n", ok ? "PASS" : "FAIL", name); } while (0)
 
-/* Run a Blow using the EXACT GUI controller lifecycle (P0 #3): the real
- * PaintbrushCanvasItem::stepPowderBlow finish predicate, not a hand-picked
- * blowStep() count. Steps at ~60 Hz and stops when the loose bed has settled
- * AND no airborne flake is still in flight (flakes keep landing/off-paging),
- * or after a generous safety cap. Mirrors the controller so the harness proves
- * the same operation the GUI runs. */
+/* Run a Blow using the EXACT shared GUI lifecycle (P0 #3 / P0.4 / P0.5): the
+ * engine's BlowPhase machine (Wind -> Settle -> Done), advanced at a FIXED
+ * 60 Hz reference tick — the same helper the GUI controller uses. No finish
+ * predicate is duplicated here; advanceBlow() owns it. The only local loop is
+ * the accumulator that steps 1/60 s ticks until Done. */
 static void runBlowLifecycle(GlitterPowder &g)
 {
     g.beginBlow();
-    float age = 0.0f;
-    const float dt = 1.0f / 60.0f;
-    while (age <= 12.0f)
-    {
-        const int moved = g.blowStep(dt);
-        age += dt;
-        const bool bedSettled = age > 3.5f || (moved == 0 && age > 0.8f);
-        const bool airborne = g.hasActiveParticles();
-        if ((bedSettled && !airborne) || age > 12.0f)
-            break;
-    }
+    const float dt = 1.0f / 60.0f;   /* fixed reference tick (never 1/120) */
+    QRect changed;
+    /* advanceBlow() owns the whole Wind->Settle->Done phase machine + the
+     * 12 s safety cap, so a plain loop to Done is exactly what the GUI runs. */
+    int guard = 0;
+    while (guard++ < 3600 && g.advanceBlow(dt, /*changedOut=*/changed)) {}
     g.endBlow();
 }
 
@@ -1240,5 +1235,32 @@ int main(int argc, char **argv)
     }
 
     std::printf("\n%d/%d harness checks passed.\n", s_pass, s_checks);
+
+    /* ---- P0.2 RNG microbenchmark --------------------------------------- */
+    /* Compare the SplitMix64 counter draw (new, allocation-free) against the
+     * old per-draw QRandomGenerator object construction. Not a counted check —
+     * guidance telemetry only, so no golden value depends on machine speed. */
+    {
+        constexpr int kN = 10000000;   /* 10,000,000 draws */
+        GlitterPowder rgBench; rgBench.setSeed(12345u);
+        const auto t0 = std::chrono::high_resolution_clock::now();
+        double sink = 0.0;
+        for (int i = 0; i < kN; ++i)
+            sink += rgBench.nextFloat();
+        const auto t1 = std::chrono::high_resolution_clock::now();
+        const double newNs = double(std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count());
+
+        /* old approach: one QRandomGenerator constructed + seeded per draw */
+        const auto u0 = std::chrono::high_resolution_clock::now();
+        for (int i = 0; i < kN; ++i)
+        {
+            QRandomGenerator g(0x12345678u);
+            sink += g.generateDouble();
+        }
+        const auto u1 = std::chrono::high_resolution_clock::now();
+        const double oldNs = double(std::chrono::duration_cast<std::chrono::nanoseconds>(u1 - u0).count());
+        std::printf("    [rng-bench] %d draws: SplitMix64=%.1f ns/draw  per-draw-QRandomGenerator=%.1f ns/draw  x%.0f faster (sink=%.6f)\n",
+                    kN, newNs / kN, oldNs / kN, oldNs / std::max(1.0, newNs), sink);
+    }
     return s_pass == s_checks ? 0 : 1;
 }

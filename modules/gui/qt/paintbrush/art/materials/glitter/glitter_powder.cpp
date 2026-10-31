@@ -57,16 +57,93 @@ void GlitterPowder::reset(const QSize &cells, float worldCellSize, std::uint32_t
     m_palette.clear();
     m_powderMask.clear();
     m_activeCells = QRect();
+    boundsEmpty();   /* P0.3: nothing has material yet */
     /* full-resolution glue field: sub-res per cell, zeroed (P0.2) */
     const int gw = cells.width() * kGlueSubRes, gh = cells.height() * kGlueSubRes;
     m_glueField.fill(0, gw * gh);
     m_particlesActive = false;
+    m_blowPhase = BlowPhase::Done;
+    m_blowPhaseAge = 0.0f;
     m_flakes.clear();
     m_flakeCount = 0;
     m_maxFlakes = 0;
     m_carried = 0.0f;
     m_carriedSlot = -1;
+    ensureBlocks();   /* P0.6: block set sized to the fresh grid */
     setSeed(seed);
+}
+
+void GlitterPowder::ensureBlocks()
+{
+    if (m_cells.isEmpty())
+        return;
+    m_blocksX = (m_cells.width() + kPowderBlock - 1) / kPowderBlock;
+    m_blocksY = (m_cells.height() + kPowderBlock - 1) / kPowderBlock;
+    if (m_blockHeld.size() != m_blocksX * m_blocksY)
+        m_blockHeld.fill(0, m_blocksX * m_blocksY);
+}
+
+void GlitterPowder::markBlock(int cx, int cy)
+{
+    if (cx < 0 || cy < 0 || cx >= m_cells.width() || cy >= m_cells.height())
+        return;
+    if (m_blockHeld.isEmpty())
+        return;
+    const int b = blockIndex(cx, cy);
+    m_blockHeld[b] = 1;
+}
+
+void GlitterPowder::syncBlockHeld(int cx, int cy)
+{
+    /* called when a cell may have lost its material; cheapest is we never clear
+     * here (a block holding nothing keeps sweeping a small region). The compact
+     * recompute handles clearing. Kept as a no-op hook for future use. */
+}
+
+QRect GlitterPowder::activeRegionFromBlocks() const
+{
+    int minX = m_cells.width(), minY = m_cells.height(), maxX = -1, maxY = -1;
+    for (int by = 0; by < m_blocksY; ++by)
+        for (int bx = 0; bx < m_blocksX; ++bx)
+        {
+            if (m_blockHeld[by * m_blocksX + bx] == 0)
+                continue;
+            int x0 = bx * kPowderBlock, y0 = by * kPowderBlock;
+            int x1 = std::min(m_cells.width() - 1, (bx + 1) * kPowderBlock - 1);
+            int y1 = std::min(m_cells.height() - 1, (by + 1) * kPowderBlock - 1);
+            if (x0 < minX) minX = x0; if (y0 < minY) minY = y0;
+            if (x1 > maxX) maxX = x1; if (y1 > maxY) maxY = y1;
+        }
+    if (maxX < minX || maxY < minY)
+        return QRect();
+    return QRect(minX, minY, maxX - minX + 1, maxY - minY + 1);
+}
+
+/* Squash the block set to the cells that ACTUALLY hold loose/bonded/glue in a
+ * given region (clears stale all-touched blocks). Called periodically during a
+ * long blow so the sweep stays proportional to live material, never the area
+ * of every cell ever touched (P0.6 "simpler temporary implementation"). */
+void GlitterPowder::rebuildBlocksInRegion(const QRect &cellsRect)
+{
+    if (m_blockHeld.isEmpty() || cellsRect.isEmpty())
+        return;
+    const QRect r = cellsRect.intersected(QRect(0, 0, m_cells.width() - 1, m_cells.height() - 1));
+    if (r.isEmpty())
+        return;
+    /* clear the blocks overlapped by r, then re-mark only cells with material */
+    const int b0x = r.left() / kPowderBlock, b1x = r.right() / kPowderBlock;
+    const int b0y = r.top() / kPowderBlock, b1y = r.bottom() / kPowderBlock;
+    for (int by = b0y; by <= b1y; ++by)
+        for (int bx = b0x; bx <= b1x; ++bx)
+            if (bx >= 0 && bx < m_blocksX && by >= 0 && by < m_blocksY)
+                m_blockHeld[by * m_blocksX + bx] = 0;
+    for (int y = r.top(); y <= r.bottom(); ++y)
+        for (int x = r.left(); x <= r.right(); ++x)
+        {
+            const PowderCell &c = cellAt(idx(x, y));
+            if (c.height - c.stuck > 0.002f || c.stuck > 0.002f || c.glue > 0.02f)
+                markBlock(x, y);
+        }
 }
 
 void GlitterPowder::setSeed(std::uint32_t seed)
@@ -76,30 +153,38 @@ void GlitterPowder::setSeed(std::uint32_t seed)
     m_rng.seed(m_baseSeed);
 }
 
-/* Deterministic stochastic draws (reviewer P2 #8). The RNG stream is keyed by
- * {baseSeed, counter}, and the counter is persisted in serialize(), so a
- * deserialized document continues the EXACT same random sequence as the
- * pre-reload document — no fresh-arbitrary-seed break in reproducibility. The
- * draws are chained through a fresh split of QRandomGenerator seeded from a
- * hand-mixed hash so counter == n always yields the same value regardless of
- * how many draws happened before in some earlier run. */
-namespace {
-std::uint32_t rngHash(std::uint32_t seed, std::uint64_t counter)
+/* Deterministic stochastic draws (reviewer P2 #8, P0.2). The RNG stream is
+ * keyed by {baseSeed, counter}, and the counter is persisted in serialize(), so
+ * a deserialized document continues the EXACT same random sequence as the
+ * pre-reload document. P0.2: the draw is a single SplitMix64 hash (well-mixed
+ * 64-bit counter), NOT a fresh QRandomGenerator constructed per call — the old
+ * nextFloat() allocated and re-seeded a QRandomGenerator (plus its internal
+ * state) for EVERY stochastic draw, which is far too heavy for the inner
+ * physics loop. This is O(1), allocation-free, platform-deterministic, and
+ * counter == n always yields the same value regardless of prior draws.
+ *
+ * The algorithm is versioned: serialize() writes algorithm id 1 (SplitMix64)
+ * and a v4 header, so a future change to the generator is an explicit format
+ * bump, never an implicit reinterpretation (see kPowderRngAlg). */
+static std::uint64_t powderSplitMix64(std::uint64_t z)
 {
-    std::uint64_t x = std::uint64_t(seed) ^ (counter * 0x9E3779B97F4A7C15ull);
-    x ^= x >> 30;
-    x *= 0xBF58476D1CE4E5B9ull;
-    x ^= x >> 27;
-    x *= 0x94D049BB133111EBull;
-    x ^= x >> 31;
-    return std::uint32_t(x);
+    z += 0x9E3779B97F4A7C15ull;
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+    return z ^ (z >> 31);
 }
-} // namespace
+
+/* RNG algorithm id persisted in the material state so the continuation
+ * semantics are explicit, never implicit. 1 == SplitMix64 (current). */
+static constexpr std::uint32_t kPowderRngAlg = 1u;
 
 float GlitterPowder::nextFloat()
 {
-    QRandomGenerator g(rngHash(m_baseSeed, m_rngCounter++));
-    return g.generateDouble();
+    /* top 24 bits of the SplitMix64 output / 2^24 -> [0,1) */
+    const std::uint64_t state = (std::uint64_t(m_baseSeed) << 32)
+                                ^ std::uint64_t(m_rngCounter++);
+    const std::uint64_t r = powderSplitMix64(state);
+    return float((r >> 40) & 0xFFFFFFu) / float(1u << 24);
 }
 
 float GlitterPowder::nextFloatUnit(float hi)
@@ -109,6 +194,8 @@ float GlitterPowder::nextFloatUnit(float hi)
 
 int GlitterPowder::nextBounded(int n)
 {
+    if (n <= 1)
+        return 0;
     return int(nextFloat() * double(n));
 }
 
@@ -121,6 +208,8 @@ void GlitterPowder::endBlow()
      * persisting `materialState` while transient particle mass exists would
      * bake a raster whose particles are not in the state. */
     m_blowTime = 0.0f;
+    m_blowPhase = BlowPhase::Done;
+    m_blowPhaseAge = 0.0f;
     if (!m_outM.isEmpty()) {
         for (int i = 0; i < m_outM.size(); ++i)
             m_outM[i] = 0.0f;
@@ -210,6 +299,9 @@ void GlitterPowder::erase(float wx, float wy, float radiusWorld, float amount)
     }
     if (m_activeCells.isValid())
         m_activeCells = m_activeCells.intersected(QRect(0, 0, m_cells.width() - 1, m_cells.height() - 1));
+    /* P0.3: the eraser may have deleted powder/glue on the cached-boundary edge;
+     * defer the recompute to finalizeBounds() at commit, never a per-dab scan. */
+    invalidateBoundsAfterRemoval();
 }
 
 /* ------------------------------------------------------------ persistence
@@ -230,19 +322,19 @@ QByteArray GlitterPowder::serialize() const
     QDataStream ds(&out, QIODevice::WriteOnly);
     ds.setVersion(QDataStream::Qt_6_0);
     ds << quint32(0x474C5450u)   /* "GLTP" */
-       << quint32(3u)            /* version 3 = persists deterministic RNG state
-                                    (baseSeed + counter) — reviewer P2 #8 */
+       << quint32(4u)            /* version 4 = SplitMix64 deterministic RNG
+                                    (P0.2) + explicit RNG algorithm id */
        << quint32(m_cells.width()) << quint32(m_cells.height())
        << float(m_worldCellSize)
        << quint32(m_palette.size());
     for (const QColor &c : m_palette)
         ds << float(c.redF()) << float(c.greenF()) << float(c.blueF());
-    /* persist the deterministic PRNG stream: {baseSeed, counter}. On reload the
-     * engine reseeds from {baseSeed, counter} so a reloaded document continues
-     * the EXACT same stochastic sequence as the pre-reload one — reloading does
-     * not change the random sequence a later Pour/Push/Blow produces (the
-     * deterministic persisted-material model; reviewer P2 #8). */
-    ds << quint32(m_baseSeed) << quint64(m_rngCounter)
+    /* persist the deterministic RNG stream: {algorithm id, baseSeed, counter}.
+     * On reload the engine reseeds from these so a reloaded document continues
+     * the EXACT same stochastic sequence as the pre-reload one. The algorithm
+     * id is persisted so a future RNG change is an explicit format bump, never
+     * an implicit reinterpretation of the counter stream (P0.2). */
+    ds << quint32(kPowderRngAlg) << quint32(m_baseSeed) << quint64(m_rngCounter)
        << (m_activeCells.isValid() ? quint32(1u) : quint32(0u));
     if (m_activeCells.isValid())
         ds << qint32(m_activeCells.x()) << qint32(m_activeCells.y())
@@ -280,7 +372,7 @@ bool GlitterPowder::deserialize(const QByteArray &bytes)
     quint32 palN;
     ds >> magic >> ver >> w >> h >> worldCell >> palN;
     if (ds.status() != QDataStream::Ok || magic != 0x474C5450u
-        || (ver != 1u && ver != 2u && ver != 3u))
+        || (ver != 1u && ver != 2u && ver != 3u && ver != 4u))
         return false;
     if (w == 0 || h == 0 || w > 65536u || h > 65536u)
         return false;
@@ -298,18 +390,30 @@ bool GlitterPowder::deserialize(const QByteArray &bytes)
     }
     quint32 seed, hasActive;
     quint64 rngCounter = 0u;
-    if (ver >= 3u)
+    if (ver >= 4u)
     {
-        /* v3: {baseSeed, counter} so the reload continues the exact attached
-         * RNG stream (reviewer P2 #8). */
+        /* v4: {algorithm id, baseSeed, counter} — the algorithm id makes the
+         * RNG continuation semantics explicit (P0.2). Only alg 1 (SplitMix64)
+         * is accepted; a foreign algorithm id is rejected so a state is never
+         * silently interpreted with the wrong generator. */
+        quint32 alg;
+        ds >> alg >> seed >> rngCounter >> hasActive;
+        if (alg != kPowderRngAlg)
+            return false;
+        if (seed == 0u) seed = 1u;
+    }
+    else if (ver == 3u)
+    {
+        /* v3: {baseSeed, counter} with the (now replaced) hand-mixed
+         * counter-hash; treated as SplitMix64 baseSeed+0 on migration so old
+         * state plays deterministically from {baseSeed, counter}. */
         ds >> seed >> rngCounter >> hasActive;
         if (seed == 0u) seed = 1u;
     }
     else
     {
-        /* v1/v2: a single legacy seed (derived from the grid); the old loader
-         * started a fresh deterministic stream from it. Map it to baseSeed so
-         * legacy state continues to play deterministically from {seed, 0}.*/
+        /* v1/v2: a single legacy seed (derived from the grid). Map to
+         * baseSeed so legacy state continues deterministically from {seed, 0}. */
         ds >> seed >> hasActive;
         rngCounter = 0u;
     }
@@ -379,11 +483,16 @@ bool GlitterPowder::deserialize(const QByteArray &bytes)
      * materialState holds only the settled field) — clear the fleet + count so
      * a reload starts with nothing in the air */
     m_particlesActive = false;
+    m_blowPhase = BlowPhase::Done;
+    m_blowPhaseAge = 0.0f;
     m_flakes.clear();
     m_flakeCount = 0;
     m_maxFlakes = 0;
     m_carried = 0.0f;
     m_carriedSlot = -1;
+    /* P0.3: rebuild the cached bounds once at load (a single full scan is
+     * acceptable here; it's not a per-frame path). */
+    finalizeBounds();
     return true;
 }
 
@@ -559,6 +668,7 @@ void GlitterPowder::paintGlue(float wx, float wy, float radiusWorld, float cover
     if (coverage > 0)
     {
         m_activeCells = m_activeCells.isNull() ? coarseRect : m_activeCells.united(coarseRect);
+        growMaterialBoundsTo(coarseRect);   /* P0.3: glue is material, but NOT powder */
         /* P0: painting POSITIVE glue must have physical impact IMMEDIATELY. Glue
          * drawn beneath existing loose glitter bonds it right away, so a user
          * who glues over already-deposited powder catches it without waiting for
@@ -634,6 +744,8 @@ void GlitterPowder::addLoose(int i, float m, int a, int b, float f)
     const float loose = std::max(0.0f, c.height - c.stuck);
     mixInto(i, loose, a, b, f, m, false);
     c.height += m;
+    if (m > 0.0f)
+        markBlock(i % m_cells.width(), i / m_cells.width());   /* P0.6 */
 }
 
 void GlitterPowder::setStuck(int i, float ns)
@@ -642,6 +754,8 @@ void GlitterPowder::setStuck(int i, float ns)
     if (ns > c.stuck)
         mixInto(i, c.stuck, c.lA, c.lB, c.lF, ns - c.stuck, true);
     c.stuck = ns;
+    if (ns > 0.0f)
+        markBlock(i % m_cells.width(), i / m_cells.width());   /* P0.6 */
 }
 
 /* Resolve the current foreground colour to a bounded material-palette slot.
@@ -750,6 +864,7 @@ void GlitterPowder::pourHeap(int slot, float cx, float cy, float rCells,
     const int y1 = std::min(m_cells.height() - 2, int(std::ceil(cy + ext)));
     const QRect pourRect(x0, y0, x1 - x0 + 1, y1 - y0 + 1);
     m_activeCells = m_activeCells.isNull() ? pourRect : m_activeCells.united(pourRect);
+    growBoundsTo(pourRect);   /* P0.3: poured powder adds to cached bounds */
     const float expo = 0.35f + 1.65f * shape;
     const float ragAmp = 0.4f * rag;
 
@@ -920,6 +1035,7 @@ void GlitterPowder::smear(float wx, float wy, float fx, float fy,
                                 .intersected(QRect(1, 1, m_cells.width() - 2,
                                                    m_cells.height() - 2));
     m_activeCells = m_activeCells.isNull() ? smearRect : m_activeCells.united(smearRect);
+    growBoundsTo(smearRect);   /* P0.3: pushed powder adds to cached bounds */
 
     for (int y = y0; y <= y1; ++y)
         for (int x = x0; x <= x1; ++x)
@@ -1099,6 +1215,9 @@ void GlitterPowder::beginBlow()
 {
     m_blowTime = 0.0f;
     m_particlesActive = true;
+    m_blowPhase = BlowPhase::Wind;
+    m_blowPhaseAge = 0.0f;
+    m_blowStepIndex = 0;
     ensureParticlePool();
     ensureBlowBuffers();
     std::fill(m_dh.begin(), m_dh.end(), 0.0f);
@@ -1194,15 +1313,20 @@ void GlitterPowder::hydrateFromRaster(const QImage &layer, float worldPerPx)
     m_activeCells = (maxX >= minX && maxY >= minY)
                         ? QRect(minX, minY, maxX - minX + 1, maxY - minY + 1)
                         : QRect();
+    /* P0.3: set the cached bounds from the same observed powder extent */
+    if (m_activeCells.isValid())
+        growBoundsTo(m_activeCells);
+    else
+        boundsEmpty();
 }
 
 /* Wind field for the breath (port of the reference's updateBreath + windAt).
  * The mouth sits just off the page edge and pushes a cone of air across the
  * page; real breath isn't steady (a first puff, gusts, turbulence, sideways
  * wobble). Only loose (un-bonded) powder is moved; wet glue holds it back. */
-int GlitterPowder::blowStep(float dtSec)
+GlitterPowder::BlowStepResult GlitterPowder::blowStep(float dtSec)
 {
-    if (m_cellsData.isEmpty()) return 0;
+    if (m_cellsData.isEmpty()) return BlowStepResult{};
     ensureBlowBuffers();
 
     const int W = m_cells.width(), H = m_cells.height();
@@ -1236,33 +1360,33 @@ int GlitterPowder::blowStep(float dtSec)
     m_windMx = mx; m_windMy = my; m_windD0 = d0;
     m_windGust = gust; m_windAim = aim; m_windCA = ca; m_windSA = sa;
 
-    /* -- per-step buffers ------------------------------------------------ */
-    /* Sweep regions (cell coords), scoped to where powder actually lives:
-     *  - sourceSweep : cells whose loose powder can be advected this step
-     *                  (the active region + 1 cell neighbour margin)
-     *  - deltaSweep  : every cell a moving flake can WRITE this step. A step
-     *                  moves at most `sp * k` cells and the gust model caps
-     *                  sp near ~28 cells/s, so the margin is derived from the
-     *                  step scale (k = dt*60) rather than a guess; it keeps
-     *                  every target inside the zeroed region so no delta is
-     *                  ever applied twice or read stale. As mass blows
-     *                  outward the observed targets grow m_activeCells, so
-     *                  the sweeps follow the powder at near-zero extra cost
-     *                  until it actually spreads across the page. */
+/* -- per-step buffers ------------------------------------------------ */
+    /* P0.6: Sweep regions come from the SPARSE ACTIVE BLOCKS (blocks that
+     * currently hold loose/bonded/glue) + a one-block destination margin, NOT
+     * from one ever-growing rectangular active region. Blow complexity stays
+     * proportional to cells currently holding/receiving material. */
     const int travelMargin = std::max(8, int(std::ceil(29.0f * k)) + 8);
-    QRect sourceSweep = m_activeCells.isNull() ? QRect()
-                        : m_activeCells.adjusted(-1, -1, 1, 1)
+    const QRect blockSweep0 = activeRegionFromBlocks();
+    const QRect blockSweep = blockSweep0.isNull()
+                             ? m_activeCells      /* fallback: last known region */
+                             : blockSweep0;
+    QRect sourceSweep = blockSweep.isNull() ? QRect()
+                        : blockSweep.adjusted(-1, -1, 1, 1)
                               .intersected(QRect(1, 1, W - 2, H - 2));
-    QRect deltaSweep = m_activeCells.isNull() ? QRect()
-                       : m_activeCells.adjusted(-travelMargin, -travelMargin,
-                                                travelMargin, travelMargin)
+    QRect deltaSweep = blockSweep.isNull() ? QRect()
+                       : blockSweep.adjusted(-travelMargin, -travelMargin,
+                                             travelMargin, travelMargin)
                              .intersected(QRect(0, 0, W - 1, H - 1));
     if (sourceSweep.isEmpty())
     {
         /* nothing to blow, but in-flight flakes must still arc and land */
         if (m_particlesActive)
             stepParticles(dtSec);
-        return 0;
+        BlowStepResult r;
+        r.movedCells = 0;
+        r.bedActive = false;
+        r.airborneActive = hasActiveParticles();
+        return r;
     }
     /* zero only the delta region (it is a superset of every write below) */
     const int dL = deltaSweep.left(), dR = deltaSweep.right();
@@ -1423,18 +1547,129 @@ const float spd = 1.0f;
             m_dh[i] = 0.0f; m_mIn[i] = 0.0f; m_pX[i] = 0.0f; m_pY[i] = 0.0f; m_outM[i] = 0.0f;
         }
 
+    /* P0.6 periodic compaction: every ~15 steps squash the active-block set to
+     * what ACTUALLY holds material in the swept region, so a long blow that
+     * thins into sparse islands never keeps sweeping the area of every cell
+     * ever touched. (A sparse-block dirty set is the target; this is the
+     * accepted simpler periodic variant.) */
+    if ((++m_blowStepIndex & 15) == 0)
+        rebuildBlocksInRegion(deltaSweep);
+
     /* grow the active region to wherever powder actually landed this step, so
      * the next step's sweeps follow the blown powder (kept inside the grid) */
     if (tMaxX >= tMinX && tMaxY >= tMinY)
     {
         const QRect landed = QRect(tMinX, tMinY, tMaxX - tMinX + 1, tMaxY - tMinY + 1);
         m_activeCells = m_activeCells.isNull() ? landed : m_activeCells.united(landed);
+        growBoundsTo(landed);   /* P0.3: landed blow powder adds to cached bounds */
+        for (int y = landed.top(); y <= landed.bottom(); ++y)
+            for (int x = landed.left(); x <= landed.right(); ++x)
+                markBlock(x, y);   /* P0.6: keep the sparse active block set live */
     }
 
     if (m_particlesActive)
         stepParticles(dtSec);
 
-    return moving;
+    /* P0.3: blow removes boundary powder; defer the bounds recompute to the
+     * operation commit (finalizeBounds), never a per-step full scan. */
+    invalidateBoundsAfterRemoval();
+
+    /* P0.7: report exactly which bed region changed this tick + airborne state so
+     * the renderer invalidates only dirty sub-regions, not the whole historical
+     * union. `changedCells` = source sweep ∪ delta sweep ∪ observed landings. */
+    {
+        BlowStepResult r;
+        r.movedCells = moving;
+        r.changedCells = sourceSweep.isNull() ? deltaSweep : sourceSweep.united(deltaSweep);
+        if (tMaxX >= tMinX && tMaxY >= tMinY)
+            r.changedCells = r.changedCells.united(QRect(tMinX, tMinY, tMaxX - tMinX + 1, tMaxY - tMinY + 1));
+        r.bedActive = moving > 0;
+        r.airborneActive = hasActiveParticles();
+        /* particle dirt: bounding box of all active flakes (a cheap sparse
+         * presentation hint — the renderer just needs to cover their trails) */
+        if (r.airborneActive && m_flakeCount > 0)
+        {
+            int px0 = W, py0 = m_cells.height(), px1 = -1, py1 = -1;
+            for (int i = 0; i < m_flakeCount; ++i)
+            {
+                const AirborneFlake &f = m_flakes[i];
+                if (!f.active) continue;
+                int ix = int(std::floor(f.x)), iy = int(std::floor(f.y));
+                if (ix < px0) px0 = ix; if (ix > px1) px1 = ix;
+                if (iy < py0) py0 = iy; if (iy > py1) py1 = iy;
+            }
+            if (px1 >= px0 && py1 >= py0)
+                r.particleDirtyCells = QRect(px0, py0, px1 - px0 + 3, py1 - py0 + 3);
+        }
+        return r;
+    }
+}
+
+bool GlitterPowder::advanceBlow(float dtSec, QRect &changedOut)
+{
+    /* P0.4/P0.5: the single finish predicate, shared by the GUI controller and
+     * the acceptance harness. Never call with dt != 1/60 (the controller uses a
+     * 60 Hz accumulator). */
+    if (m_blowPhase == BlowPhase::Done)
+        return false;
+    m_blowPhaseAge += dtSec;
+    if (m_blowPhase == BlowPhase::Wind)
+    {
+        const BlowStepResult r = blowStep(dtSec);
+        if (!r.changedCells.isNull() && !r.changedCells.isEmpty())
+            changedOut = changedOut.isNull() ? r.changedCells : changedOut.united(r.changedCells);
+        if (!r.particleDirtyCells.isNull() && !r.particleDirtyCells.isEmpty())
+            changedOut = changedOut.isNull() ? r.particleDirtyCells : changedOut.united(r.particleDirtyCells);
+        /* move to Settle once the bed is done: all loose moved or a capped
+         * breath ran; airborne flakes keep settling independently */
+        const bool bedSettled = m_blowPhaseAge > 3.5f
+                                || (r.movedCells == 0 && m_blowPhaseAge > 0.8f);
+        if (bedSettled)
+            m_blowPhase = BlowPhase::Settle;
+        return true;
+    }
+    /* Settle: ONLY airborne particles (no ground advection, no new spawns, no
+     * source/delta sweeps). This is the P0.5 fix that stops re-scanning the
+     * bed because one flake is still falling. */
+    if (m_blowPhaseAge > 12.0f)      /* safety cap only */
+    {
+        m_blowPhase = BlowPhase::Done;
+        m_particlesActive = false;
+        return false;
+    }
+    if (m_flakeCount > 0)
+    {
+        /* dirty region before/after the particle step (their bounded box) */
+        QRect before, after;
+        int px0 = m_cells.width(), py0 = m_cells.height(), px1 = -1, py1 = -1;
+        for (int i = 0; i < m_flakeCount; ++i)
+            if (m_flakes[i].active) {
+                int ix = int(std::floor(m_flakes[i].x)), iy = int(std::floor(m_flakes[i].y));
+                if (ix < px0) px0 = ix; if (ix > px1) px1 = ix;
+                if (iy < py0) py0 = iy; if (iy > py1) py1 = iy;
+            }
+        if (px1 >= px0 && py1 >= py0)
+            before = QRect(px0, py0, px1 - px0 + 3, py1 - py0 + 3);
+        stepParticles(dtSec);
+        px0 = m_cells.width(); py0 = m_cells.height(); px1 = -1; py1 = -1;
+        for (int i = 0; i < m_flakeCount; ++i)
+            if (m_flakes[i].active) {
+                int ix = int(std::floor(m_flakes[i].x)), iy = int(std::floor(m_flakes[i].y));
+                if (ix < px0) px0 = ix; if (ix > px1) px1 = ix;
+                if (iy < py0) py0 = iy; if (iy > py1) py1 = iy;
+            }
+        if (px1 >= px0 && py1 >= py0)
+            after = QRect(px0, py0, px1 - px0 + 3, py1 - py0 + 3);
+        changedOut = changedOut.isNull() ? before : changedOut.united(before);
+        if (!after.isNull())
+            changedOut = changedOut.united(after);
+    }
+    if (!hasActiveParticles())
+    {
+        m_blowPhase = BlowPhase::Done;
+        return false;
+    }
+    return true;
 }
 
 void GlitterPowder::ensureParticlePool()
@@ -1726,48 +1961,121 @@ bool GlitterPowder::hasPowder() const
     return looseMass() > 0.01f || bondedCount() > 0;
 }
 
-bool GlitterPowder::powderBoundsWorld(float &minx, float &miny,
-                                      float &maxx, float &maxy) const
+/* P0.3: cached-bounds maintenance. `growBoundsTo` unions a cell rect into the
+ * cached bounds (O(1)); it is called by every physical mutator that ADDS
+ * powder/glue. `invalidateBoundsAfterRemoval` is called by the eraser and blow
+ * (which may DELETE boundary material) — it leaves the cached (possibly too
+ * large) rect intact so per-frame O(1) reads stay cheap, and the next
+ * `finalizeBounds()` (operation commit) recomputes the true bounds. */
+void GlitterPowder::growMaterialBoundsTo(const QRect &cellsRect)
 {
-    const float cell = m_worldCellSize;
-    minx = 1e30f; miny = 1e30f; maxx = -1e30f; maxy = -1e30f;
-    bool any = false;
+    if (cellsRect.isEmpty())
+        return;
+    if (!m_boundsValid)
+    {
+        m_materialBoundsCells = cellsRect;
+        m_boundsValid = true;
+        return;
+    }
+    m_materialBoundsCells = m_materialBoundsCells.united(cellsRect);
+}
+
+void GlitterPowder::growPowderBoundsTo(const QRect &cellsRect)
+{
+    /* powder is material too, so grow both rects */
+    growMaterialBoundsTo(cellsRect);
+    if (cellsRect.isEmpty())
+        return;
+    if (m_powderBoundsCells.isEmpty())
+        m_powderBoundsCells = cellsRect;
+    else
+        m_powderBoundsCells = m_powderBoundsCells.united(cellsRect);
+}
+
+void GlitterPowder::growBoundsTo(const QRect &cellsRect)
+{
+    growPowderBoundsTo(cellsRect);   /* powder + material */
+}
+
+void GlitterPowder::markBoundsGrownMaterial()
+{
+    /* fallback for callers that don't know the exact cell rect but added
+     * material somewhere inside m_activeCells */
+    m_boundsValid = false;
+}
+
+void GlitterPowder::invalidateBoundsAfterRemoval()
+{
+    m_removalEdgeDirty = true;
+}
+
+void GlitterPowder::boundsEmpty()
+{
+    m_boundsValid = false;
+    m_materialBoundsCells = QRect();
+    m_powderBoundsCells = QRect();
+}
+
+/* One full-grid recompute of the cached bounds. Called ONLY at operation
+ * finalization (commit) when the cached rect may have shrunk — never in the
+ * per-frame/per-move path. Counted for the P0.3 "0 scans per frame" gate. */
+void GlitterPowder::finalizeBounds()
+{
+    ++m_boundsRescans;
+    int mminx = m_cells.width(), mminy = m_cells.height(), mmaxx = -1, mmaxy = -1;
+    int pminx = m_cells.width(), pminy = m_cells.height(), pmaxx = -1, pmaxy = -1;
+    bool matter = false, powder = false;
     for (int y = 0; y < m_cells.height(); ++y)
         for (int x = 0; x < m_cells.width(); ++x)
         {
             const PowderCell &c = cellAt(idx(x, y));
-            if (c.height <= 0.02f)
-                continue;
-            any = true;
-            const float wx0 = x * cell, wy0 = y * cell;
-            const float wx1 = (x + 1) * cell, wy1 = (y + 1) * cell;
-            if (wx0 < minx) minx = wx0; if (wy0 < miny) miny = wy0;
-            if (wx1 > maxx) maxx = wx1; if (wy1 > maxy) maxy = wy1;
+            const bool hasPow = c.height > 0.02f;
+            const bool hasMat = hasPow || c.glue > 0.02f;
+            if (hasPow) {
+                powder = true;
+                if (x < pminx) pminx = x; if (x > pmaxx) pmaxx = x;
+                if (y < pminy) pminy = y; if (y > pmaxy) pmaxy = y;
+            }
+            if (hasMat) {
+                matter = true;
+                if (x < mminx) mminx = x; if (x > mmaxx) mmaxx = x;
+                if (y < mminy) mminy = y; if (y > mmaxy) mmaxy = y;
+            }
         }
-    if (!any) return false;
+    if (matter)
+        m_materialBoundsCells = QRect(mminx, mminy, mmaxx - mminx + 1, mmaxy - mminy + 1);
+    if (powder)
+        m_powderBoundsCells = QRect(pminx, pminy, pmaxx - pminx + 1, pmaxy - pminy + 1);
+    m_boundsValid = true;
+    m_removalEdgeDirty = false;
+}
+
+bool GlitterPowder::powderBoundsWorld(float &minx, float &miny,
+                                      float &maxx, float &maxy) const
+{
+    /* O(1) cached read; the cached rect may be larger than the true powder
+     * after a removal until the next finalizeBounds() at commit. */
+    if (!m_boundsValid || m_powderBoundsCells.isEmpty())
+        return false;
+    const float cell = m_worldCellSize;
+    minx = m_powderBoundsCells.left() * cell;
+    miny = m_powderBoundsCells.top() * cell;
+    maxx = (m_powderBoundsCells.right() + 1) * cell;
+    maxy = (m_powderBoundsCells.bottom() + 1) * cell;
     return true;
 }
 
 bool GlitterPowder::materialBoundsWorld(float &minx, float &miny,
                                         float &maxx, float &maxy) const
 {
+    /* O(1) cached read; see powderBoundsWorld and finalizeBounds(). */
+    if (!m_boundsValid || m_materialBoundsCells.isEmpty())
+        return false;
     const float cell = m_worldCellSize;
-    minx = 1e30f; miny = 1e30f; maxx = -1e30f; maxy = -1e30f;
-    bool any = false;
-    for (int y = 0; y < m_cells.height(); ++y)
-        for (int x = 0; x < m_cells.width(); ++x)
-        {
-            const PowderCell &c = cellAt(idx(x, y));
-            /* powder OR meaningful wet glue counts as material */
-            if (c.height <= 0.02f && c.glue <= 0.02f)
-                continue;
-            any = true;
-            const float wx0 = x * cell, wy0 = y * cell;
-            const float wx1 = (x + 1) * cell, wy1 = (y + 1) * cell;
-            if (wx0 < minx) minx = wx0; if (wy0 < miny) miny = wy0;
-            if (wx1 > maxx) maxx = wx1; if (wy1 > maxy) maxy = wy1;
-        }
-    if (!any) return false;
+    minx = m_materialBoundsCells.left() * cell;
+    miny = m_materialBoundsCells.top() * cell;
+    maxx = (m_materialBoundsCells.right() + 1) * cell;
+    maxy = (m_materialBoundsCells.bottom() + 1) * cell;
     return true;
 }
 

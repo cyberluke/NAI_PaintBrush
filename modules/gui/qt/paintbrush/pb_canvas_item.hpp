@@ -567,7 +567,8 @@ private:
     bool m_powderBlowing = false;
     qreal m_powderBlowSince = 0.0;   /* seconds held still */
     qreal m_powderBlowAge = 0.0;     /* seconds the breath has run */
-    qreal m_powderRenderAcc = 0.0;   /* breath render accumulator (~30 Hz) */
+    qreal m_powderBlowAcc = 0.0;     /* 60 Hz physics accumulator (P0.4) */
+    qreal m_powderRenderAcc = 0.0;   /* breath render accumulator (~12 Hz, P0.8) */
     /* Standalone employ started by blowPowderNow() with NO active pointer
      * stroke: the breath must still commit its result atomically on finish
      * (P0.10). Cleared once the breath ends. */
@@ -578,6 +579,18 @@ private:
      * rect before vs after the erase dabs and commit when they differ. */
     quint64 m_eraseFingerprintBefore = 0;
     quint64 m_eraseFingerprintAfter = 0;
+    /* P0.11: cheap powder perf telemetry behind PB_POWDER_PERF=1 (one compact
+     * line/sec; never logged per frame). */
+    struct PowderPerf {
+        bool enabled = false;
+        double phyMs = 0.0, renderMs = 0.0, frameMs = 0.0;
+        int activeCells = 0, activeBlocks = 0, airborne = 0, dirtyPx = 0;
+        int nPhy = 0, nRender = 0, nFrame = 0;
+        double msSinceLine = 0.0;
+        unsigned resetTick = 0;   /* non-zero once the env gate has been probed */
+        void reset() { phyMs = renderMs = frameMs = 0.0; nPhy = nRender = nFrame = 0;
+                       activeCells = activeBlocks = airborne = dirtyPx = 0; msSinceLine = 0.0; }
+    } m_perf;
 QPointF m_powderHoldPos;         /* where the pointer is being held */
 bool m_powderHoldEver = false;   /* a real drag sampled (not a pure click) */
 /* Presentation-only shimmer clock: advances with wall time DURING a stroke so

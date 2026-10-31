@@ -162,12 +162,43 @@ public:
     void relax(const QRect &cellRect = QRect());
     void decayFlow(const QRect &cellRect = QRect());
 
-    /* BLOW: the reference's breath. One physics step advects loose powder with
-     * a wind cone (gusts/eddies/momentum), blowing it across and off the page;
-     * loose powder over glue gets caught and bonds. Run repeatedly (e.g. ~60
-     * steps/sec for ~2-3 s) for a full breath. Returns the number of cells that
-     * moved (0 = all loose powder gone or settled). */
-    int blowStep(float dtSec);
+    /* BLOW: the reference's breath, split into explicit phases (P0.5).
+     *   Wind    — a few seconds of ground advection + wind + particle spawn
+     *   Settle  — ground blow finished; ONLY airborne particles drift/flutter/
+     *             fall/splat/leave (no ground sweep, no new spawning)
+     *   Done    — activeParticles == 0; the operation may finalize
+     * The finish predicate lives in ONE place (advanceBlow) so the GUI and the
+     * acceptance harness drive the exact same lifecycle: a breath ends only
+     * once the loose bed is settled AND no airborne flake remains (the raster ==
+     * materialState invariant), with a 12 s safety cap. */
+    enum class BlowPhase { Wind, Settle, Done };
+    BlowPhase blowPhase() const { return m_blowPhase; }
+
+    /* Result of one 60 Hz blow tick (P0.7): how many cells moved and exactly
+     * which cell region changed (bed) + the particle-region dirt, so the
+     * renderer invalidates only dirty sub-regions instead of the whole
+     * historical union. */
+    struct BlowStepResult {
+        int   movedCells = 0;
+        QRect changedCells;
+        QRect particleDirtyCells;
+        bool  bedActive = false;
+        bool  airborneActive = false;
+    };
+
+    /* One fixed-reference 60 Hz blow tick (P0.4/P0.5). During Wind this runs
+     * ground advection + wind + particle spawn/sim; during Settle it runs ONLY
+     * stepAirborneParticles. Never call with dt != 1/60; the controller uses a
+     * 60 Hz accumulator. Returns the dirty result; `advanceBlow` below wraps it
+     * with the phase machine. */
+    BlowStepResult blowStep(float dtSec);
+
+    /* Advance the whole Blow phase machine by one fixed reference tick
+     * (Wind->Settle->Done). Returns false once Done (nothing left to do), and
+     * accumulates the changed cell region into `changedOut` so the controller
+     * invalidates only dirty sub-regions. Shared verbatim by the GUI controller
+     * and the acceptance harness so the finish predicate is never duplicated. */
+    bool advanceBlow(float dtSec, QRect &changedOut);
 
     /* Start a fresh breath: resets the blow-time/intensity ramp so the next
      * blowStep calls begin with a gentle puff that builds to full strength. */
@@ -264,6 +295,14 @@ public:
     /* The engine's working colour palette (the reference's per-cell slots),
      * recoverable after a deserialize so the render palette can be rebuilt. */
     QVector<QColor> palette() const { return m_palette; }
+
+    /* P0.3 cached-bounds telemetry: how many full-grid bounds rescans have run
+     * (a render/move frame must see 0; a commit may run 1). */
+    std::uint64_t boundsRescans() const { return m_boundsRescans; }
+    /* P0.3: recompute the cached material/powder bounds once at operation
+     * commit (a single full-grid scan is allowed there; per-frame reads are
+     * O(1)). Called by the controller after it persists the settled state. */
+    void finalizePowderBounds() { finalizeBounds(); }
 
     /* Resolve the CURRENT foreground colour to a bounded material-palette slot
      * (0..15), appending a colour when a free slot exists and reusing the
@@ -362,8 +401,56 @@ private:
      * margin) instead of the whole heightfield, so a 2 MP grid costs nothing
      * until powder actually spreads there. */
     QRect m_activeCells;
+    /* P0.6: sparse ACTIVE BLOCKS instead of one ever-growing rectangular
+     * `m_activeCells`. The grid is divided into kPowderBlock x kPowderBlock
+     * simulation-cell chunks; a byte per block flags that it contains loose or
+     * bonded powder or wet glue. The blow sweep iterates only the block-union
+     * of non-empty blocks + a 1-block destination margin (sourceBlocks ∪
+     * neighbour destination blocks), so Blow complexity stays proportional to
+     * cells currently holding/receiving material — never the area of every cell
+     * ever touched. A block is cleared when its material settles away. */
+    enum { kPowderBlock = 32 };
+    QVector<quint8> m_blockHeld;         /* 1 = block has loose/bonded/glue */
+    int m_blocksX = 0, m_blocksY = 0;
+    inline int blockIndex(int cx, int cy) const
+    { const int bx = cx / kPowderBlock, by = cy / kPowderBlock; return by * m_blocksX + bx; }
+    inline bool blockHeld(int bx, int by) const
+    {
+        if (bx < 0 || by < 0 || bx >= m_blocksX || by >= m_blocksY) return false;
+        return m_blockHeld[by * m_blocksX + bx] != 0;
+    }
+    void ensureBlocks();
+    void markBlock(int cx, int cy);
+    void syncBlockHeld(int cx, int cy);
+    void rebuildBlocksInRegion(const QRect &cellsRect);
+    int m_blowStepIndex = 0;   /* per-breath step counter for periodic compaction */
+    /* Periodic compact recompute of the active region from the block set. */
+    QRect activeRegionFromBlocks() const;
+    /* P0.3: authoritative cached material/powder bounds in CELL coords. Every
+     * physical mutator grows them when material appears; operations that may
+     * REMOVE boundary material (eraser, blow, clearGlue) mark an edge-dirty
+     * flag instead of scanning. The O(1) reads (materialBoundsWorld /
+     * powderBoundsWorld) return the cached rect (possibly too large after a
+     * removal); a full recompute happens once at operation finalization
+     * (finalizeBounds), never per render/move frame. */
+    QRect m_materialBoundsCells;   /* powder + wet glue */
+    QRect m_powderBoundsCells;     /* powder only */
+    bool m_boundsValid = false;    /* both cached rects valid */
+    bool m_removalEdgeDirty = false;
+    std::uint64_t m_boundsRescans = 0;
+    void growBoundsTo(const QRect &cellsRect);
+    void growPowderBoundsTo(const QRect &cellsRect);
+    void growMaterialBoundsTo(const QRect &cellsRect);
+    void markBoundsGrownMaterial();
+    void invalidateBoundsAfterRemoval();
+    void finalizeBounds();
+    void boundsEmpty();
     float m_blowTime = 0.0f;
     bool m_particlesActive = false;
+    /* P0.5: the current blow phase + its running age (seconds the bed has been
+     * actively swept / settled). */
+    BlowPhase m_blowPhase = BlowPhase::Wind;
+    float m_blowPhaseAge = 0.0f;
     /* Airborne-flake fleet (bounded pool). */
     void ensureParticlePool();
     void spawnFlake(float wx, float wy, float hx, float hy, float hSpeed,

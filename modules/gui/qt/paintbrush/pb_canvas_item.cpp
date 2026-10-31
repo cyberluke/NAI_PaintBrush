@@ -34,27 +34,67 @@
 #include <QCursor>
 #include <QPixmap>
 #include <cstdio>
+#include <atomic>
+#include <chrono>
 
 #include <QFile>
 #include <QMutex>
 
-/* Crash-path instrumentation: writes ordered markers to stdout and to a
- * persistent trace file under the project so we can see exactly how far the
- * post-stroke commit got before a crash, even when the GUI dies. */
+/* Crash-path instrumentation (P0.1): this is a DEBUG/diagnostic hook, NOT a
+ * realtime probe. By default it is a zero-work no-op so a pointer-move or
+ * render frame performs ZERO synchronous filesystem/stderr work. Only when
+ * PB_POWDER_TRACE=1 is set does it capture into a bounded lock-free-ish ring
+ * and flush the whole ring to the trace file in one batched append (never one
+ * open/write/close per event). The previous implementation opened the file,
+ * wrote stderr + fflush on EVERY event in renderPowderPreview — a hard hit in
+ * the hot preview path. */
 namespace {
-QMutex g_traceMutex;
+std::atomic<bool> g_traceEnabled{false};
+std::atomic<bool> g_traceProbed{false};
+// Bounded in-memory ring: latest N markers only (enough for a crash tail).
+constexpr int kTraceRing = 2048;
+char g_traceRing[kTraceRing][64];
+std::atomic<std::uint32_t> g_traceHead{0};
+std::atomic<bool> g_traceDirty{false};
+
 void pbCrashTrace(const char *msg)
 {
-    QMutexLocker lock(&g_traceMutex);
-    const QString line = QStringLiteral("[pbtrace] %1").arg(QLatin1String(msg));
-    fprintf(stderr, "%s\n", msg);
-    fflush(stderr);
-    QFile f(QStringLiteral("D:/_SATIN_AI/NAI-OS/vlc/pb_stroke_trace.log"));
-    if (f.open(QIODevice::Append | QIODevice::Text)) {
-        f.write(line.toUtf8());
-        f.write("\n");
-        f.close();
+    // One-time env probe; the fast path is just an atomic load.
+    if (!g_traceProbed.load(std::memory_order_relaxed)) {
+        if (g_traceProbed.exchange(true, std::memory_order_relaxed) == false) {
+            const QByteArray v = qgetenv("PB_POWDER_TRACE").trimmed();
+            g_traceEnabled.store(v == "1" || v == "true", std::memory_order_relaxed);
+        }
     }
+    if (!g_traceEnabled.load(std::memory_order_relaxed))
+        return;   // zero tracing work in the realtime path
+    const std::uint32_t slot = g_traceHead.fetch_add(1, std::memory_order_relaxed)
+                             & (kTraceRing - 1);
+    ::snprintf(g_traceRing[slot], 64, "%s", msg);
+    g_traceDirty.store(true, std::memory_order_release);
+}
+
+/* Flush the whole ring to the trace file in ONE buffered write. Called from the
+ * low-frequency commit/finalize paths (never from the preview/input hot path)
+ * so the accumulated tail survives a crash. */
+void pbCrashTraceFlush()
+{
+    if (!g_traceEnabled.load(std::memory_order_relaxed))
+        return;
+    if (!g_traceDirty.exchange(false, std::memory_order_acq_rel))
+        return;
+    QFile f(QStringLiteral("D:/_SATIN_AI/NAI-OS/vlc/pb_stroke_trace.log"));
+    if (!f.open(QIODevice::Append | QIODevice::Text))
+        return;
+    const std::uint32_t head = g_traceHead.load(std::memory_order_relaxed);
+    const std::uint32_t start = head >= kTraceRing ? head - kTraceRing : 0;
+    QByteArray out;
+    for (std::uint32_t i = start; i < head; ++i) {
+        const char *line = g_traceRing[i & (kTraceRing - 1)];
+        if (*line) { out += "[pbtrace] "; out += line; out += '\n'; }
+    }
+    f.write(out);
+    f.close();
 }
 } // namespace
 
@@ -1246,6 +1286,9 @@ if (m_strokeHadPaint)
     m_powderMaterialCaptured = false;
     m_powderInsertCmd.reset();
     pbCrashTrace("endArtStroke exit");
+    /* P0.1: flush the trace ring once per committed operation (low frequency),
+     * not per pointer-move/render frame. */
+    pbCrashTraceFlush();
 }
 
 void PaintbrushCanvasItem::ensurePowder(bool force)
@@ -1446,10 +1489,17 @@ void PaintbrushCanvasItem::renderPowderPreview()
     }
     if (!bakedGpu) {
         pbCrashTrace("CPU Voronoi fallback render");
+        const auto tr0 = std::chrono::steady_clock::now();   /* P0.11 */
         flakes = m_powder.render(u.size(), float(u.x()), float(u.y()), 1.0f,
                                  m_doc->lightRig(), m_powderPal,
                                  m_doc->paperStock(), m_doc->artScale(1.0f),
                                  0);
+        if (m_perf.enabled)
+        {
+            const auto tr1 = std::chrono::steady_clock::now();
+            m_perf.renderMs += std::chrono::duration<double, std::milli>(tr1 - tr0).count();
+            ++m_perf.nRender;
+        }
     }
 
     pbCrashTrace("QPainter composite");
@@ -1467,7 +1517,8 @@ void PaintbrushCanvasItem::renderPowderPreview()
     markTilesDirty(mappedRect(u));
     m_strokeHadPaint = true;
     pbCrashTrace("renderPowderPreview exit");
-    qDebug() << "pb_powder preview" << u.size() << "gpu=" << bakedGpu;
+    /* P0.1/P0.8: no per-preview qDebug in the realtime path. The preview is
+     * throttled separately and the committed output is full quality. */
 }
 
 /* Commit-bake path: render the union then persist the authoritative material
@@ -1480,6 +1531,10 @@ void PaintbrushCanvasItem::renderPowderUnion()
     CanvasLayer *layer = m_doc ? m_doc->currentLayer() : nullptr;
     if (layer && !m_powder.isEmpty())
         persistPowderStateToLayer(layer);
+    /* P0.3: one full-grid bounds recompute allowed at operation commit (the
+     * cached rect may have shrunk after an eraser/blow). Per-frame reads are
+     * O(1); this is the single accepted rescan per operation. */
+    m_powder.finalizePowderBounds();
 }
 
 /* Persist the authoritative GlitterPowder physical state onto the layer. The
@@ -1553,6 +1608,7 @@ void PaintbrushCanvasItem::startPowderBlow()
     m_powder.beginBlow();
     m_powderBlowing = true;
     m_powderBlowAge = 0.0f;
+    m_powderBlowAcc = 0.0f;
     m_powderRenderAcc = 0.0f;
     /* initial live preview of the yet-running field: render-only (never
      * persists or ends the breath — P0 side-effect-free preview). */
@@ -1563,35 +1619,81 @@ void PaintbrushCanvasItem::stepPowderBlow(float dtSec)
 {
     if (!m_powderBlowing)
         return;
+    /* P0.11: one-time PB_POWDER_PERF probe; when enabled print a compact
+     * aggregate once per ~60 physics ticks. */
+    if (m_perf.resetTick == 0u) {
+        const QByteArray pv = qgetenv("PB_POWDER_PERF").trimmed();
+        m_perf.enabled = (pv == "1" || pv == "true");
+        m_perf.resetTick = 3u;   /* don't re-probe */
+    }
+    /* P0.4: physics runs at a FIXED 60 Hz reference tick via an accumulator;
+     * the repaint tick (up to ~120 Hz) is only the pump. We NEVER call
+     * advanceBlow(1/120). This halves the expensive physics sweeps, makes the
+     * harness and GUI use the SAME timestep, and gives deterministic,
+     * reference-comparable physics. */
     m_powderBlowAge += dtSec;
-    const int moved = m_powder.blowStep(dtSec);
-    /* A breath runs a few seconds, or until the loose powder is all gone. The
-     * first fraction of a second is a gentle ramp where the wind hasn't built
-     * velocity yet, so `moved` may be 0 briefly — only end on `moved == 0`
-     * after the breath has visibly run (>= 0.8 s), never on the opening ramp.
-     * P0 #1: we MUST NOT finalize/commit while airborne flakes are still in
-     * flight — a canonical bake that serializes `materialState` would otherwise
-     * contain transient particle mass that `materialState` doesn't hold,
-     * breaking the raster == materialState invariant. So the breath finishes
-     * only once the loose bed is settled AND no flake is airborne (the flakes
-     * keep stepping until they land/off-page). A generous safety cap still
-     * force-ends a runaway (even then the transient fleet is dropped at the
-     * settled commit). */
-    const bool bedSettled = m_powderBlowAge > 3.5f
-                            || (moved == 0 && m_powderBlowAge > 0.8f);
-    const bool airborne = m_powder.hasActiveParticles();
-    const bool finished = (bedSettled && !airborne)
-                          || m_powderBlowAge > 12.0f;
-    /* Render the evolving field at ~30 Hz. This is a LIVE PREVIEW (render-only),
-     * so it must NOT persist material state or end the breath — the preview is
-     * side-effect free (P0): persistence/endBlow/undo belong to finalize. */
+    m_powderBlowAcc += float(dtSec);
+    bool done = false;
+    QRect changed;   /* dirty bed+particle region this pump (P0.7) */
+    const float kDt = 1.0f / 60.0f;
+    const auto tPhy0 = std::chrono::steady_clock::now();   /* P0.11 telemetry */
+    while (m_powderBlowAcc >= kDt)
+    {
+        m_powderBlowAcc -= kDt;
+        if (!m_powder.advanceBlow(kDt, /*changedOut=*/changed))
+        {
+            done = true;   /* BlowPhase::Done — finalize below */
+            break;
+        }
+    }
+    const auto tPhy1 = std::chrono::steady_clock::now();
+    if (m_perf.enabled)
+    {
+        m_perf.phyMs += std::chrono::duration<double, std::milli>(tPhy1 - tPhy0).count();
+        ++m_perf.nPhy;
+        m_perf.airborne = m_powder.hasActiveParticles() ? m_perf.airborne + 1 : m_perf.airborne;
+        m_perf.dirtyPx = qMax(m_perf.dirtyPx, changed.width() * changed.height());
+    }
+    /* Grow the preview union by only the cells that ACTUALLY changed this pump
+     * (bed + airborne trails), not the whole historical m_powderUnion (P0.7 —
+     * dirty-region invalidation, not full-frame erase/redraw). */
+    if (!changed.isNull() && !changed.isEmpty())
+    {
+        const float cell = m_powder.worldCellSize();
+        /* dirty bed+particle region -> world px -> a touch rect on the raster
+         * (P0.7: dirty-region invalidation, not whole-union erase/redraw) */
+        const QRect touch = QRect(qreal(changed.left()) * cell,
+                                  qreal(changed.top()) * cell,
+                                  qreal(changed.width()) * cell,
+                                  qreal(changed.height()) * cell)
+                                .adjusted(-3, -3, 3, 3)
+                                .intersected(m_powderUnion);
+        if (!touch.isEmpty())
+        {
+            m_powderUnion = m_powderUnion.isNull() ? touch : m_powderUnion.united(touch);
+            markTilesDirty(mappedRect(touch));
+        }
+    }
+    /* CPU preview throttled to ~12 Hz (P0.8): physics stays at a fixed 60 Hz,
+     * but the expensive full CPU material render is bounded to ~12 frames/s of
+     * dirty-only preview. Committed t=0 output remains full quality. The GPU
+     * scene node (P0.9) will replace this with persistent-texture presentation. */
     m_powderRenderAcc += dtSec;
-    if (m_powderRenderAcc >= 1.0 / 30.0)
+    if (m_powderRenderAcc >= 1.0 / 12.0)
     {
         m_powderRenderAcc = 0.0f;
         renderPowderPreview();
     }
-    if (finished)
+    /* P0.11: emit one compact POWDER PERF line per ~60 physics ticks (~1 s). */
+    if (m_perf.enabled && m_perf.nPhy >= 60)
+    {
+        fprintf(stderr, "POWDER PERF physics=%.2fms render=%.2fms airborne=%d dirty_px=%d\n",
+                m_perf.phyMs / qMax(1, m_perf.nPhy),
+                m_perf.renderMs / qMax(1, m_perf.nRender),
+                m_perf.airborne, m_perf.dirtyPx);
+        m_perf.reset();
+    }
+    if (done)
     {
         /* ---- FINALIZE the breath exactly once ----
          * 1) end the breath's transient state ONCE (drop per-step momentum),
@@ -1601,6 +1703,7 @@ void PaintbrushCanvasItem::stepPowderBlow(float dtSec)
         m_powderBlowing = false;
         m_powderBlowSince = 0.0f;
         m_powderBlowAge = 0.0f;
+        m_powderBlowAcc = 0.0f;
         m_powderRenderAcc = 0.0f;
         if (m_strokeActive)
         {
