@@ -76,6 +76,8 @@ public:
     int state() const { return m_state; }
     bool busy() const { return m_state == STATE_BUSY || m_state == STATE_INITIALIZING; }
     QString lastError() const { return m_lastError; }
+    /* Last SAM inference latency in ms (P0.12); -1 = no inference yet. */
+    qint64 lastInferenceLatencyMs() const { return m_lastInferenceLatencyMs; }
 
     /* Start the worker and load the model (async). */
     void initialize();
@@ -119,6 +121,7 @@ private:
     QString m_device;
     QString m_unavailableReason;
     QString m_lastError;
+    qint64 m_lastInferenceLatencyMs = -1;
     State m_state = STATE_UNAVAILABLE;
 
     std::thread m_worker;

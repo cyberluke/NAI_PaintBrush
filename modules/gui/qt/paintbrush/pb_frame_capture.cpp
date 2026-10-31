@@ -22,6 +22,8 @@
 #include <QDeadlineTimer>
 #include <QPointer>
 
+#include <chrono>
+
 #include <cstring>
 #include <cstdio>
 
@@ -123,6 +125,14 @@ namespace {
 constexpr qint64 REQUEST_TIMEOUT_MS = 8000; /* preparser per-request deadline */
 constexpr qint64 EDIT_CACHE_BUDGET_BYTES = 128LL * 1024 * 1024;
 
+/* Steady monotonic clock (ms) for decode-latency diagnostics (P0.12). */
+qint64 steadyNowMs()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
 /* YUV -> RGB (BT.601 limited range) used by the direct picture converter.
  * No PNG encode/decode anywhere on this path (A9). */
 inline int yuvToRgb(int c, int d, int e)
@@ -140,7 +150,10 @@ struct EditFrameSource::RequestCtx
     int status = VLC_EGENERIC;
     picture_t *pic = nullptr;
     QString token;           /* async token to emit back (async only)      */
+    QString mrl;             /* source MRL (diagnostics)                   */
+    vlc_preparser_req *req = nullptr; /* submitted request handle          */
     qint64 requestedMs = 0;  /* requested PTS (for tolerance + signal)     */
+    qint64 startMs = 0;      /* steady clock at submit (latency diag)      */
     vlc_object_t *logObj = nullptr;   /* logging context (async)           */
     qint64 toleranceMs = 0;  /* PTS tolerance (async)                      */
     EditFrameSource *self = nullptr;  /* owning source                     */
@@ -174,6 +187,21 @@ void EditFrameSource::onThumbnailEnded(vlc_preparser_req *req, int status,
             out.ptsVerified = ptsWithinTolerance(ctx->requestedMs, out.ptsMs,
                                                  ctx->toleranceMs);
         }
+        /* Record runtime diagnostics (P0.12) before ctx is freed. */
+        {
+            QMutexLocker lock(&self->m_mutex);
+            self->m_diagMRL = ctx->mrl;
+            self->m_diagRequestedMs = ctx->requestedMs;
+            self->m_diagDecodedMs = out.ptsMs;
+            self->m_diagPtsVerified = out.ptsVerified;
+            self->m_diagLatencyMs = steadyNowMs() - ctx->startMs;
+            self->m_diagLastError = out.ok()
+                                        ? QString()
+                                        : QStringLiteral("decode failed at %1 ms")
+                                              .arg(qint64(ctx->requestedMs));
+            if (self->m_activeReq == ctx->req)
+                self->m_activeReq = nullptr; /* this request has terminated */
+        }
         const QString token = ctx->token;
         const bool ok = out.ok();
         const qint64 reqMs = ctx->requestedMs;
@@ -204,6 +232,8 @@ void EditFrameSource::onThumbnailEnded(vlc_preparser_req *req, int status,
             ctx->pic = picture_Hold(thumbnail);
         ctx->status = status;
         ctx->done = true;
+        if (self->m_activeReq == ctx->req)
+            self->m_activeReq = nullptr; /* this request has terminated */
         self->m_cond.wakeAll();
     }
 }
@@ -247,6 +277,7 @@ void EditFrameSource::configure(vlc_object_t *obj)
 void EditFrameSource::shutdown()
 {
     QMutexLocker lock(&m_mutex);
+    m_activeReq = nullptr; /* in-flight handles die with the preparser */
     if (m_preparser)
     {
         vlc_preparser_Delete(m_preparser);
@@ -272,6 +303,27 @@ void EditFrameSource::clearCache()
 {
     QMutexLocker lock(&m_mutex);
     m_cache.clear();
+}
+
+void EditFrameSource::cancelInFlight()
+{
+    /* P0.15: cancel the in-flight request (if any) so a new interactive
+     * request wins the single thumbnailer thread. The canceled request's
+     * callback still fires and posts its (stale) signal — callers discard it
+     * by token. vlc_preparser_Cancel may run the callback synchronously on
+     * THIS thread, so the mutex must NOT be held across the call (the
+     * callback takes it). */
+    vlc_preparser_req *req = nullptr;
+    {
+        QMutexLocker lock(&m_mutex);
+        if (m_activeReq && m_preparser)
+        {
+            req = m_activeReq;
+            m_activeReq = nullptr;
+        }
+    }
+    if (req)
+        vlc_preparser_Cancel(m_preparser, req);
 }
 
 DecodedFrame EditFrameSource::request(const FrameRef &ref) const
@@ -305,6 +357,8 @@ DecodedFrame EditFrameSource::request(const FrameRef &ref) const
 
     RequestCtx ctx;
     ctx.requestedMs = ref.ptsMs;
+    ctx.mrl = ref.mrl;
+    ctx.startMs = steadyNowMs();
     ctx.self = const_cast<EditFrameSource *>(this);
 
     input_item_t *item = input_item_New(qUtf8Printable(ref.mrl),
@@ -338,9 +392,15 @@ DecodedFrame EditFrameSource::request(const FrameRef &ref) const
     input_item_Release(item);
     if (!req)
         return out;
+    ctx.req = req;
+
+    /* P0.15: publish the active request so a concurrent interactive request
+     * can supersede this (potentially thumbnail-batch) decode. */
+    m_activeReq = req;
 
     if (vlc_preparser_Submit(m_preparser, req) != VLC_SUCCESS)
     {
+        m_activeReq = nullptr;
         vlc_preparser_req_Release(req);
         return out;
     }
@@ -356,25 +416,59 @@ DecodedFrame EditFrameSource::request(const FrameRef &ref) const
 
     if (!ctx.done)
     {
-        /* timed out against all odds: cancel and let the callback land */
+        /* timed out against all odds: cancel and let the callback land.
+         * vlc_preparser_Cancel may run the callback synchronously on THIS
+         * thread when the request had not started — it must not hold the
+         * mutex the callback takes, or it deadlocks against itself. */
+        m_mutex.unlock();
         vlc_preparser_Cancel(m_preparser, req);
+        m_mutex.lock();
         while (!ctx.done)
             m_cond.wait(&m_mutex, QDeadlineTimer(1000));
     }
+    if (m_activeReq == req)
+        m_activeReq = nullptr;
     vlc_preparser_req_Release(req); /* safe: request terminated */
 
     if (ctx.status != VLC_SUCCESS || !ctx.pic)
+    {
+        /* record the failure for diagnostics (P0.12); the mutex is held */
+        m_diagMRL = ref.mrl;
+        m_diagRequestedMs = ref.ptsMs;
+        m_diagDecodedMs = -1;
+        m_diagPtsVerified = false;
+        m_diagLatencyMs = steadyNowMs() - ctx.startMs;
+        m_diagLastError = QStringLiteral("decode failed (status %1)").arg(ctx.status);
         return out;
+    }
 
     out.ptsMs = ctx.pic->date / 1000;
     out.image = pictureToQImage(ctx.pic, m_obj);
     picture_Release(ctx.pic);
 
     if (out.image.isNull())
+    {
+        m_diagMRL = ref.mrl;
+        m_diagRequestedMs = ref.ptsMs;
+        m_diagDecodedMs = out.ptsMs;
+        m_diagPtsVerified = false;
+        m_diagLatencyMs = steadyNowMs() - ctx.startMs;
+        m_diagLastError = QStringLiteral("unsupported chroma / null frame");
         return out;
+    }
 
     out.ptsVerified = ptsWithinTolerance(ref.ptsMs, out.ptsMs,
                                          m_ptsToleranceMs);
+    m_diagMRL = ref.mrl;
+    m_diagRequestedMs = ref.ptsMs;
+    m_diagDecodedMs = out.ptsMs;
+    m_diagPtsVerified = out.ptsVerified;
+    m_diagLatencyMs = steadyNowMs() - ctx.startMs;
+    m_diagLastError = out.ptsVerified
+                          ? QString()
+                          : QStringLiteral("PTS %1 ms outside tolerance %2 ms")
+                                .arg(out.ptsMs)
+                                .arg(m_ptsToleranceMs);
     if (out.ptsVerified)
     {
         m_last = FrameRef{ref.mrl, ref.title, out.ptsMs,
@@ -410,7 +504,9 @@ bool EditFrameSource::requestAsync(const FrameRef &ref, const QString &token)
     auto *ctx = new RequestCtx;
     ctx->async = true;
     ctx->token = token;
+    ctx->mrl = ref.mrl;
     ctx->requestedMs = ref.ptsMs;
+    ctx->startMs = steadyNowMs();
     ctx->logObj = m_obj;
     ctx->toleranceMs = m_ptsToleranceMs;
     ctx->self = this;
@@ -443,6 +539,11 @@ bool EditFrameSource::requestAsync(const FrameRef &ref, const QString &token)
     {
         QMutexLocker lock(&m_mutex);
         req = vlc_preparser_req_NewThumbnail(m_preparser, item, &arg, &cbs, ctx);
+        if (req)
+        {
+            ctx->req = req;
+            m_activeReq = req; /* P0.15: supersedeable while in flight */
+        }
     }
     input_item_Release(item);
     if (!req)
@@ -453,6 +554,11 @@ bool EditFrameSource::requestAsync(const FrameRef &ref, const QString &token)
 
     if (vlc_preparser_Submit(m_preparser, req) != VLC_SUCCESS)
     {
+        {
+            QMutexLocker lock(&m_mutex);
+            if (m_activeReq == req)
+                m_activeReq = nullptr;
+        }
         vlc_preparser_req_Release(req);
         delete ctx;
         return false;
@@ -633,6 +739,22 @@ QImage EditFrameSource::pictureToQImage(const picture_t *pic,
                   visible.width(), visible.height(), corrected.width(),
                   corrected.height());
     return corrected;
+}
+
+EditFrameSource::Diagnostics EditFrameSource::diagnostics() const
+{
+    QMutexLocker lock(&m_mutex);
+    Diagnostics d;
+    d.ready = m_preparser != nullptr;
+    d.hwdecPolicy = m_hwdecPolicy;
+    d.ptsToleranceMs = m_ptsToleranceMs;
+    d.currentMRL = m_diagMRL;
+    d.lastRequestedMs = m_diagRequestedMs;
+    d.lastDecodedMs = m_diagDecodedMs;
+    d.lastPtsVerified = m_diagPtsVerified;
+    d.lastLatencyMs = m_diagLatencyMs;
+    d.lastError = m_diagLastError;
+    return d;
 }
 
 } // namespace paintbrush

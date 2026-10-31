@@ -221,8 +221,54 @@ void PaintbrushController::configureServices()
             this, &PaintbrushController::onAsyncObjectFrameDecoded);
     connect(&m_editSource, &EditFrameSource::frameDecodeFailed,
             this, &PaintbrushController::onAsyncObjectFrameDecodeFailed);
+    /* async "Add frame to canvas" (P0.4) */
+    connect(&m_editSource, &EditFrameSource::frameDecoded,
+            this, &PaintbrushController::onAddFrameDecoded);
+    connect(&m_editSource, &EditFrameSource::frameDecodeFailed,
+            this, &PaintbrushController::onAddFrameDecodeFailed);
     m_thumbnails.setPtsToleranceMs(qMax<qint64>(
         20, pbConfigInt(VLC_OBJECT(m_intf), "paintbrush-edit-pts-tolerance-ms")));
+
+    /* P0.1 build identity: prove the running binary matches the source tree
+     * (Gate A). Printed once at startup so a stale DLL/qrc is immediately
+     * visible in the log. */
+    pbLogInfo(VLC_OBJECT(m_intf), "paintbrush",
+              "PB_BUILD_SHA=%s PB_QML_REV=%s compiled %s %s",
+              PB_BUILD_SHA, PB_QML_REV, __DATE__, __TIME__);
+
+    /* P0.14: assert/log the SAM CLI/config plumbing at startup — config key
+     * existence, effective model path, model file presence/size, requested
+     * device and backend result. If the option is not registered under the
+     * exact name, this surfaces immediately instead of silently falling
+     * back. */
+    {
+        const QString modelKey = QStringLiteral("paintbrush-sam-model");
+        const QString deviceKey = QStringLiteral("paintbrush-sam-device");
+        vlc_object_t *obj = VLC_OBJECT(m_intf);
+        const QString modelPath = pbConfigString(obj, modelKey.toUtf8().constData());
+        const QString device = pbConfigString(obj, deviceKey.toUtf8().constData());
+        const QFileInfo model(modelPath);
+        /* A registered option is a real config name (module add_string/…).
+         * var_Type() on the interface object only sees live runtime vars, so
+         * it would falsely report a config option as unregistered; use
+         * config_GetType() which answers the real question: is this an
+         * recognized option name VLC can resolve? */
+        const int modelOptType = config_GetType(modelKey.toUtf8().constData());
+        const int deviceOptType = config_GetType(deviceKey.toUtf8().constData());
+        pbLogInfo(obj, "paintbrush",
+                  "SAM config: key '%s' %s, device key '%s' %s, model='%s' %s "
+                  "(%lld bytes), device='%s', backend=%s (%s)",
+                  modelKey.toUtf8().constData(),
+                  modelOptType > 0 ? "registered" : "NOT REGISTERED",
+                  deviceKey.toUtf8().constData(),
+                  deviceOptType > 0 ? "registered" : "NOT REGISTERED",
+                  modelPath.toUtf8().constData(),
+                  model.exists() ? "EXISTS" : "MISSING",
+                  (long long)(model.exists() ? model.size() : 0),
+                  device.toUtf8().constData(),
+                  m_segmentation.isConfigured() ? "configured" : "unconfigured",
+                  m_segmentation.unavailableReason().toUtf8().constData());
+    }
 
     /* demo mode: preload a sample project if present; otherwise a blank
      * canvas is ready anyway */
@@ -503,6 +549,7 @@ void PaintbrushController::openVideoFile(const QUrl &url)
      * reset — no stale prompts/mask survive) and switches the central area to
      * Harvest presentation (live video as the visual source). */
     resetLiveSelectionSession();
+    cancelAddFrame();
     enterHarvestPresentation();
 
     /* A Paintbrush video session is the main VLC player (PlaybackSession):
@@ -570,46 +617,126 @@ void PaintbrushController::openImageData(const QImage &image, const QString &nam
 
 void PaintbrushController::captureVideoFrame()
 {
-    if (!playerHasVideo())
+    /* P0.3: the edit pipeline only needs the media session + video track —
+     * NOT the native vout. A broken video presentation must not block the
+     * exact-frame decode path. */
+    if (!liveMediaReady())
+    {
+        setStatus(QStringLiteral("No video frame is available to capture."));
+        return;
+    }
+    if (m_addFrameBusy)
+        return; /* one async decode at a time */
+
+    const QString mrl = currentMediaMRL();
+    const qint64 pts = playerTimeMs();
+    if (mrl.isEmpty())
     {
         setStatus(QStringLiteral("No video frame is available to capture."));
         return;
     }
 
-    const QString mrl = currentMediaMRL();
-    const qint64 pts = playerTimeMs();
+    /* P0.4: ASYNC exact-frame decode — the GUI event loop must never block
+     * on GOP/decoder work. The token is validated when the frame arrives so
+     * a stale result (media changed / superseded) is discarded. */
+    m_addFrameBusy = true;
+    emit addFrameBusyChanged();
+    m_addFrameToken = QStringLiteral("addframe-%1-%2")
+                          .arg(QDateTime::currentMSecsSinceEpoch())
+                          .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)
+                                   .left(8));
+    m_addFrameRequest = FrameRef{mrl, currentMediaTitle(), pts};
 
-    /* Exact-frame decode first: the edit source returns the DECODED frame
-     * with a verified PTS (no PNG round-trip). The viewer snapshot path is
-     * only a fallback when the edit source cannot decode (e.g. a stream
-     * the thumbnailing input cannot open). */
-    QImage frame;
-    qint64 actualPts = pts;
-    bool ptsVerified = false;
-    if (!mrl.isEmpty())
+    if (!m_editSource.canDecode())
     {
+        /* Exact decoder genuinely unavailable: synchronous fallback (the
+         * ONLY path that may block, and only on this degraded path). */
         const DecodedFrame f = requestFrame(mrl, pts);
-        if (f.ok())
-        {
-            frame = f.image;
-            actualPts = f.ptsMs;
-            ptsVerified = true;
-        }
-    }
-    if (frame.isNull())
-    {
-        /* generic viewer screenshot utility (kept out of the edit path) */
-        vlc_player_t *player = m_intf->p_mainPlayerController->getPlayer();
-        frame = FrameCaptureService::captureCurrentFrame(player);
-        const FrameRef ref = FrameCaptureService::currentMediaRef(player);
-        if (!mrl.isEmpty())
-            actualPts = ref.ptsMs;
-    }
-    if (frame.isNull())
-    {
-        setStatus(QStringLiteral("Could not capture the current video frame."));
+        onAddFrameDecoded(m_addFrameToken, f);
         return;
     }
+
+    /* Supersede any in-flight decoder work so this interactive request wins
+     * the single thumbnailer thread (P0.11/P0.15). */
+    m_editSource.cancelInFlight();
+    setStatus(QStringLiteral("Decoding frame…"));
+    if (!m_editSource.requestAsync(m_addFrameRequest, m_addFrameToken))
+    {
+        m_addFrameBusy = false;
+        emit addFrameBusyChanged();
+        m_addFrameToken.clear();
+        setStatus(QStringLiteral("Could not start the exact frame decode."));
+    }
+}
+
+void PaintbrushController::onAddFrameDecoded(const QString &token,
+                                             const DecodedFrame &frame)
+{
+    if (token != m_addFrameToken)
+        return; /* stale / superseded result; discard */
+    m_addFrameBusy = false;
+    emit addFrameBusyChanged();
+    m_addFrameToken.clear();
+    const FrameRef req = m_addFrameRequest;
+
+    if (!frame.ok() || frame.image.isNull())
+    {
+        onAddFrameDecodeFailed(token, QStringLiteral("exact frame decode failed"));
+        return;
+    }
+
+    /* P1 provenance: the VERIFIED decoder PTS is authoritative; a frame
+     * beyond the configured tolerance is a visually different frame and must
+     * be rejected, never silently added. */
+    if (!frame.ptsVerified)
+    {
+        setStatus(QStringLiteral("Could not decode frame: PTS mismatch "
+                                 "(%1 ms requested, %2 ms decoded).")
+                      .arg(req.ptsMs)
+                      .arg(frame.ptsMs));
+        return;
+    }
+
+    insertCapturedFrame(frame.image, frame.ptsMs, req.mrl, req.title,
+                        req.ptsMs, true);
+}
+
+void PaintbrushController::onAddFrameDecodeFailed(const QString &token,
+                                                  const QString &message)
+{
+    if (token != m_addFrameToken)
+        return;
+    m_addFrameBusy = false;
+    emit addFrameBusyChanged();
+    m_addFrameToken.clear();
+    const FrameRef req = m_addFrameRequest;
+
+    /* Last-resort viewer snapshot — ONLY when the exact decoder genuinely
+     * cannot service the source AND a vout is attached (P0.4). */
+    if (playerHasVideo())
+    {
+        vlc_player_t *player = m_intf->p_mainPlayerController->getPlayer();
+        QImage shot = FrameCaptureService::captureCurrentFrame(player);
+        if (!shot.isNull())
+        {
+            insertCapturedFrame(shot, req.ptsMs, req.mrl, req.title,
+                                req.ptsMs, false);
+            return;
+        }
+    }
+    setStatus(message.isEmpty()
+                  ? QStringLiteral("Could not decode frame.")
+                  : QStringLiteral("Could not decode frame: %1").arg(message));
+}
+
+void PaintbrushController::insertCapturedFrame(const QImage &frame,
+                                               qint64 actualPts,
+                                               const QString &mrl,
+                                               const QString &title,
+                                               qint64 requestedPts,
+                                               bool ptsVerified)
+{
+    Q_UNUSED(requestedPts);
 
     if (m_welcomeVisible)
     {
@@ -618,8 +745,8 @@ void PaintbrushController::captureVideoFrame()
     }
 
     /* store the exact frame identity (A19): AI/crop paths re-decode THIS
-     * frame through the FrameProvider instead of scanning layers */
-    const QString title = currentMediaTitle();
+     * frame through the FrameProvider instead of scanning layers; actualPts
+     * is the VERIFIED decoder PTS, never a guess */
     m_document.setSourceFrame(FrameRef{mrl, title, actualPts,
                                        frame.width(), frame.height()});
 
@@ -630,7 +757,7 @@ void PaintbrushController::captureVideoFrame()
     if (blank)
         m_document.resetDocument(frame.size());
 
-addImageLayer(frame, QPointF(0, 0),
+    addImageLayer(frame, QPointF(0, 0),
                   title.isEmpty() ? QStringLiteral("Video frame") : title,
                   LAYER_REFERENCE);
 
@@ -638,7 +765,9 @@ addImageLayer(frame, QPointF(0, 0),
      * native decoded size — the fit/center is done through the layer
      * transform (scale + centered pivot), never baked into the raster.
      * Aspect ratio is preserved. On a BLANK canvas the document adopts the
-     * frame's display size and the frame is inserted 1:1. */
+     * frame's display size and the frame is inserted 1:1. (P0.5: the layer
+     * transform functions accept LAYER_REFERENCE so this is live, not dead
+     * code.) */
     if (!blank && !frame.size().isEmpty())
     {
         const QSize canvas = m_document.canvasSize();
@@ -662,11 +791,25 @@ addImageLayer(frame, QPointF(0, 0),
         m_canvas->markCanvasDirty();
         m_canvas->fitToView();
     }
+    /* P0.6: "Add frame to canvas" is a transition from live harvesting to
+     * composition — the added frame becomes the visible composition. */
+    enterComposePresentation();
     emit mediaStateChanged();
-    setStatus(QStringLiteral("Captured video frame at %1 ms%2")
+    setStatus(QStringLiteral("Frame added at %1 ms%2")
                   .arg(actualPts)
                   .arg(ptsVerified ? QString() : QStringLiteral(" (unverified)")));
     triggerCompanionEvent(QStringLiteral("media-frame-captured"));
+}
+
+void PaintbrushController::cancelAddFrame()
+{
+    if (m_addFrameBusy || !m_addFrameToken.isEmpty())
+    {
+        m_addFrameBusy = false;
+        emit addFrameBusyChanged();
+        m_addFrameToken.clear();
+        m_addFrameRequest = FrameRef();
+    }
 }
 
 void PaintbrushController::pasteImageFromClipboard()
@@ -1237,8 +1380,13 @@ void PaintbrushController::transformLayer(int index, double scale, double rotati
     CanvasLayer *layer = m_document.layerAt(index);
     if (!layer)
         return;
+    /* P0.5: any raster-bearing layer carries transform semantics — the
+     * renderer composites LAYER_REFERENCE / LAYER_GENERATED exactly like
+     * LAYER_IMAGE / LAYER_STICKER (see compositeLayerRaw). Excluding them
+     * made the Add-frame fit/center path dead code. */
     if (layer->type != LAYER_IMAGE && layer->type != LAYER_TEXT &&
-        layer->type != LAYER_STICKER)
+        layer->type != LAYER_STICKER && layer->type != LAYER_REFERENCE &&
+        layer->type != LAYER_GENERATED)
         return;
     scale = qBound(0.01, scale, 64.0);
     rotation = qBound(-360.0, rotation, 360.0);
@@ -1265,8 +1413,11 @@ void PaintbrushController::moveImageLayer(int index, const QPointF &position)
     CanvasLayer *layer = m_document.layerAt(index);
     if (!layer)
         return;
+    /* P0.5: see transformLayer — raster-bearing reference/generated layers
+     * are moveable just like image/sticker layers. */
     if (layer->type != LAYER_IMAGE && layer->type != LAYER_TEXT &&
-        layer->type != LAYER_STICKER)
+        layer->type != LAYER_STICKER && layer->type != LAYER_REFERENCE &&
+        layer->type != LAYER_GENERATED)
         return;
     if (layer->position == position)
         return;
@@ -1357,7 +1508,9 @@ void PaintbrushController::onCanvasObjectClick(QPointF canvasPos, bool positive,
     if (viewport.isEmpty())
         return;
 
-    if (playerHasVideo())
+    /* P0.3: live Object Select decodes through EditFrameSource, which only
+     * needs the media session + video track — never the vout. */
+    if (liveMediaReady())
     {
         /* ---- LIVE video seed ---------------------------------------- */
         /* The viewport the seed click was made on. `adoptAsyncFrameIntoSelection`
@@ -1926,32 +2079,45 @@ QImage PaintbrushController::pristineSourceFrame() const
     return {};
 }
 
-QImage PaintbrushController::currentAiSource() const
+QImage PaintbrushController::nativeAiSourceFrame() const
 {
-    /* For a LIVE selection the authoritative source pixels are the exact
-     * decoded frame in the selection context (P0#6) — never guess. */
+    /* P1: the exact decoded live frame, never rescaled — SAM mask
+     * coordinates == native decoded frame coordinates. For stills, the
+     * pristine media frame. */
     if (m_selection.sourceKind == ObjectSelectionContext::SourceLiveVideo
         && !m_selection.frame.isNull())
+        return m_selection.frame;
+    return pristineSourceFrame();
+}
+
+QImage PaintbrushController::compositionAiSource() const
+{
+    /* P1: the AI source in DOCUMENT canvas space — for canvas-space masks
+     * (freehand canvas selection) and composition-boundary operations only. */
+    const QImage native = nativeAiSourceFrame();
+    if (native.isNull())
     {
-        const QImage &frame = m_selection.frame;
-        if (frame.size() != m_document.canvasSize())
-            return frame.scaled(m_document.canvasSize(), Qt::KeepAspectRatio,
-                                Qt::SmoothTransformation);
-        return frame;
+        if (m_canvas)
+            return m_canvas->grabCanvasRegion(QRectF(QPointF(0, 0),
+                                                     m_document.canvasSize()));
+        return m_document.aiSourceImage();
     }
-    /* the media frame reference layer is the true AI source when present */
-    const QImage frame = pristineSourceFrame();
-    if (!frame.isNull())
-    {
-        if (frame.size() != m_document.canvasSize())
-            return frame.scaled(m_document.canvasSize(), Qt::KeepAspectRatio,
-                                Qt::SmoothTransformation);
-        return frame;
-    }
-    if (m_canvas)
-        return m_canvas->grabCanvasRegion(QRectF(QPointF(0, 0),
-                                                 m_document.canvasSize()));
-    return m_document.aiSourceImage();
+    if (native.size() == m_document.canvasSize())
+        return native;
+    return native.scaled(m_document.canvasSize(), Qt::KeepAspectRatio,
+                         Qt::SmoothTransformation);
+}
+
+QImage PaintbrushController::currentAiSource() const
+{
+    /* P1: one function no longer overloads both semantics. For a LIVE
+     * selection the object mask is in native frame space, so the source must
+     * be the native frame (scaling would silently misalign the mask).
+     * Compose/stills masks are canvas-space, so composition source is used. */
+    if (m_selection.sourceKind == ObjectSelectionContext::SourceLiveVideo
+        && !m_selection.frame.isNull())
+        return nativeAiSourceFrame();
+    return compositionAiSource();
 }
 
 ObjectSelectionContext PaintbrushController::captureLiveFrameContext(const QSize &viewportSize)
@@ -1969,7 +2135,7 @@ ObjectSelectionContext PaintbrushController::captureLiveFrameContext(const QSize
      * document's mutable sourceFrame (that is captured-frame/composition
      * provenance, not the live player cursor). */
     const QString mrl = currentMediaMRL();
-    if (!mrl.isEmpty() && playerHasVideo())
+    if (liveMediaReady())
     {
         const DecodedFrame f = requestFrame(mrl, playerTimeMs());
         if (f.ok() && !f.image.isNull())
@@ -2032,24 +2198,22 @@ bool PaintbrushController::adoptAsyncFrameIntoSelection(const FrameRef &ref,
 
 void PaintbrushController::onCanvasResized()
 {
-    /* Only a live selection carries viewport-dependent letterbox transforms.
-     * If it is active and we have a native frame, recompute the frame<->
-     * viewport mapping against the current canvas size and refresh the
-     * display overlay so the selection stays glued to the video and a later
-     * refine/seed click maps to the correct native pixel (P0#2/#3). */
+    /* P0.8: the frame<->viewport letterbox transform belongs to
+     * frame + viewport — NOT frame + viewport + existing mask. Rebuild it on
+     * EVERY resize while a live selection holds a decoded frame (including
+     * while SAM is still running); the mask only decides whether the display
+     * overlay additionally redraws. */
     if (m_selection.sourceKind != ObjectSelectionContext::SourceLiveVideo
         || !m_selection.validFrame() || !m_canvas)
         return;
     const QSize viewport = m_canvas->size().toSize();
     if (viewport.isEmpty())
         return;
-    /* Reuse the same letterbox transform the seed-time adopt built. The frame
-     * is unchanged; only the viewport moved. */
-    if (m_selection.frame.size() == m_selection.mask.size()
-        && !m_selection.mask.isNull())
+    m_selection.viewportSize = viewport;
+    buildSelectionTransforms(m_selection);
+    if (!m_selection.mask.isNull()
+        && m_selection.mask.size() == m_selection.frame.size())
     {
-        m_selection.viewportSize = viewport;
-        buildSelectionTransforms(m_selection);
         m_canvas->setLiveHarvestOverlay(m_selection.mask,
                                         m_selection.contentRect,
                                         m_selection.frameToItem);
@@ -2069,14 +2233,46 @@ void PaintbrushController::drainPendingItemPoints()
     }
     QVector<QPointF> pos = m_posPoints, neg = m_negPoints;
     pos.detach(); neg.detach();
+    int dropped = 0;
+
+    /* P0.7: every pending live seed must be validated BEFORE it reaches SAM.
+     * Gate 1 — the viewport click must be inside the letterbox content rect
+     * (item space); a letterbox/pillarbox click is NOT a video point. Gate 2
+     * — the mapped frame pixel must be finite and inside the native frame.
+     * Clamped/negative/letterbox coordinates must never reach SAM. The gate
+     * lives in pb_selection.hpp so the harness tests it identically. */
+    const auto acceptPoint = [&](const QPointF &p, QVector<QPointF> &out) {
+        QPointF fp;
+        if (!selectionPointWithinContent(m_selection, p, &fp))
+        {
+            ++dropped;
+            return;
+        }
+        out.append(fp);
+    };
+
     for (const QPointF &p : m_posItemPoints)
-        pos.append(m_selection.itemToFramePoint(p));
+        acceptPoint(p, pos);
     for (const QPointF &p : m_negItemPoints)
-        neg.append(m_selection.itemToFramePoint(p));
+        acceptPoint(p, neg);
     m_posItemPoints.clear();
     m_negItemPoints.clear();
     m_posPoints = pos;
     m_negPoints = neg;
+
+    if (dropped > 0 && pos.isEmpty() && neg.isEmpty())
+    {
+        /* nothing valid remains: clear the busy state and say why */
+        m_objectSelectBusy = false;
+        if (m_canvas)
+            m_canvas->setObjectSelectBusy(false);
+        emit objectSelectionChanged();
+        setStatus(QStringLiteral("Object Select needs a point inside the video."));
+    }
+    else if (dropped > 0)
+    {
+        setStatus(QStringLiteral("Ignored %1 click(s) outside the video.").arg(dropped));
+    }
 }
 
 void PaintbrushController::requestAsyncObjectFrame(const FrameRef &requested,
@@ -2084,6 +2280,9 @@ void PaintbrushController::requestAsyncObjectFrame(const FrameRef &requested,
 {
     if (m_editSource.canDecode())
     {
+        /* P0.15/P0.11: an interactive request wins the single thumbnailer
+         * thread — supersede any in-flight (thumbnail-batch) decode first. */
+        m_editSource.cancelInFlight();
         m_asyncInFlight = true;
         m_asyncRequestRef = requested;
         m_asyncRequestSessionId = sessionId;
@@ -2214,6 +2413,9 @@ void PaintbrushController::runSegmentationForPendingPoints(const FrameRef &shot)
 
 void PaintbrushController::resetLiveSelectionSession()
 {
+    /* P0.15: supersede any in-flight decoder request (e.g. a thumbnail batch
+     * or a stale interactive decode) so the next interactive request wins. */
+    m_editSource.cancelInFlight();
     m_selection = ObjectSelectionContext();
     m_liveSessionRef = FrameRef();
     m_posPoints.clear();
@@ -2649,7 +2851,7 @@ void PaintbrushController::trackObject(int direction, int frames)
         setStatus(m_tracking.unavailableReason());
         return;
     }
-    if (!playerHasVideo())
+    if (!liveMediaReady())
     {
         setStatus(QStringLiteral("Tracking needs a video loaded in the player."));
         return;
@@ -3529,8 +3731,10 @@ void PaintbrushController::generativeFill(const QString &prompt)
     }
     m_generationRequestId = QStringLiteral("gen-%1")
                                 .arg(QDateTime::currentMSecsSinceEpoch());
+    /* P1: the freehand canvas-selection mask is CANVAS-space — the source
+     * must be the composition (canvas-sized) source, not the native frame. */
     m_generation.generate(GenerationService::ACTION_GENERATIVE_FILL,
-                          currentAiSource(), m_canvas->selectionMaskImage(),
+                          compositionAiSource(), m_canvas->selectionMaskImage(),
                           prompt, m_generationRequestId);
     setStatus(QStringLiteral("Generating fill…"));
 }
@@ -3947,8 +4151,59 @@ QString PaintbrushController::fileDialogFilter() const
 
 bool PaintbrushController::playerHasVideo() const
 {
-    return m_intf->p_mainPlayerController->hasVideoOutput() &&
-           m_intf->p_mainPlayerController->isStarted();
+    /* VideoSurface visibility gate (P0.3): needs BOTH a video track in the
+     * media session AND the native vout physically attached. Exact-frame
+     * decode/SAM/capture use `liveMediaReady()` instead so a broken vout can
+     * never block the edit pipeline. */
+    return mediaHasVideoTrack() && videoOutputAttached();
+}
+
+bool PaintbrushController::mediaLoaded() const
+{
+    /* A media session exists: the player holds an input item with an MRL.
+     * Deliberately independent of vout attachment and of playback state. */
+    return !currentMediaMRL().isEmpty();
+}
+
+bool PaintbrushController::mediaHasVideoTrack() const
+{
+    return m_intf->p_mainPlayerController->getVideoTracks()->getCount() > 0;
+}
+
+bool PaintbrushController::videoOutputAttached() const
+{
+    return m_intf->p_mainPlayerController->hasVideoOutput();
+}
+
+bool PaintbrushController::mediaPlaying() const
+{
+    return playerIsPlaying();
+}
+
+bool PaintbrushController::liveMediaReady() const
+{
+    /* Decode/SAM/capture gate: a media session with a video track is loaded.
+     * This is the "A" question (media session) and must NOT depend on the
+     * "B" question (native vout attached). */
+    return mediaLoaded() && mediaHasVideoTrack();
+}
+
+bool PaintbrushController::liveSelectionStillMatchesPlayer() const
+{
+    /* P0.9: a frozen Object Select session belongs to one exact FrameRef.
+     * The player's current PTS moving beyond the configured tolerance (an
+     * external seek via shortcut/media key/another control) must invalidate
+     * the session — a mask must never float over a different player frame. */
+    if (!m_selectionFrozen || m_frozenPtsMs < 0)
+        return true; /* nothing frozen — nothing to invalidate */
+    if (!mediaLoaded())
+        return false; /* the media is gone entirely */
+    const qint64 now = playerTimeMs();
+    const qint64 tol = qBound<qint64>(
+        qint64(20), qint64(pbConfigInt(VLC_OBJECT(m_intf),
+                                       "paintbrush-edit-pts-tolerance-ms")),
+        qint64(2000));
+    return qAbs(now - m_frozenPtsMs) <= tol;
 }
 
 QString PaintbrushController::currentMediaTitle() const
@@ -4071,19 +4326,11 @@ void PaintbrushController::playerSeek(qint64 timeMs)
      * asynchronous (E) probe from the ACTUAL player time/position
      * notification delivered by onMediaTimer after the seek — because an
      * immediate playerTimeMs() right after setTime() is not proof the seek
-     * succeeded. */
+     * succeeded. P0.10: (D) must be logged AFTER setTime() — before it, the
+     * readback is pre-seek evidence and the probe is misleading. */
     pbLogDebug(VLC_OBJECT(m_intf), "media",
                "pb seek C: requested %lld ms (current=%lld)",
                (long long)timeMs, (long long)playerTimeMs());
-    if (m_seekProbeArmed
-        && pbConfigInt(VLC_OBJECT(m_intf), "verbose") >= 2)
-    {
-        /* (D) — the immediate post-setTime value; only useful combined with
-         * the later player notification (E). */
-        pbLogDebug(VLC_OBJECT(m_intf), "media",
-                   "pb seek D: after setTime=%lld ms (target=%lld)",
-                   (long long)playerTimeMs(), (long long)timeMs);
-    }
 
     /* the user took over the playhead: the thumbnail batch must not restore
      * its original position when it finishes. (During a slider drag the
@@ -4097,6 +4344,17 @@ void PaintbrushController::playerSeek(qint64 timeMs)
     m_seekProbeArmed = true;
 
     m_intf->p_mainPlayerController->setTime(VLCTime(timeMs * 1000));
+
+    /* (D) — the immediate POST-setTime readback; only useful combined with
+     * the later player notification (E). */
+    if (m_seekProbeArmed
+        && pbConfigInt(VLC_OBJECT(m_intf), "verbose") >= 2)
+    {
+        pbLogDebug(VLC_OBJECT(m_intf), "media",
+                   "pb seek D: after setTime=%lld ms (target=%lld)",
+                   (long long)playerTimeMs(), (long long)timeMs);
+    }
+
     emit mediaStateChanged();
 }
 
@@ -4328,6 +4586,7 @@ void PaintbrushController::playerStop()
 {
     /* stopping playback ends any live selection and leaves Harvest mode */
     resetLiveSelectionSession();
+    cancelAddFrame();
     enterComposePresentation();
     /* stop batch work that decodes against the outgoing media */
     m_thumbnails.cancel();
@@ -4341,6 +4600,7 @@ void PaintbrushController::closeVideo()
      * mask, busy state and any stale async decode/SAM/VLM tied to it are
      * cleared so the next Open Video starts clean (P0#7). */
     resetLiveSelectionSession();
+    cancelAddFrame();
 
     /* leave Harvest presentation: with no video source the canvas falls back
      * to the normal document composition */
@@ -4394,11 +4654,13 @@ void PaintbrushController::onMediaTimer()
         }
     }
 
-    /* A frozen Object Select session must end if playback resumed (the
-     * selected frame is no longer frozen under the mask). The explicit
-     * play/pause handlers cover the normal path; this catches e.g. a
-     * keyboard media key or an external resume while the mask is shown. */
-    if (m_selectionFrozen && playerIsPlaying())
+    /* P0.9: a frozen Object Select session must end whenever the player no
+     * longer shows the frozen frame — playback resumed, OR an external seek
+     * (shortcut / media key / another player control) moved the PTS beyond
+     * the configured tolerance while paused. A mask must never float over a
+     * different player frame. */
+    if (m_selectionFrozen
+        && (playerIsPlaying() || !liveSelectionStillMatchesPlayer()))
         resetLiveSelectionSession();
 
     /* A batch suspended by a paused scrub resumes as soon as playback
@@ -4414,7 +4676,7 @@ void PaintbrushController::onMediaTimer()
      * decodes through the edit frame source at exact PTS and never
      * touches the playback player, so it cannot disturb what the user is
      * watching. */
-    if (playerHasVideo())
+    if (liveMediaReady())
     {
         const QString mrl = currentMediaMRL();
         const qint64 duration = playerLengthMs();
@@ -4472,6 +4734,71 @@ QString PaintbrushController::diagnosticsText() const
     QStringList lines;
     lines << QStringLiteral("NAI Paintbrush diagnostics");
 
+    /* P0.1 build identity: proves the running binary matches the source tree
+     * (Gate A). The SHA is captured at meson configure; the compile time and
+     * plugin mtime catch a binary rebuilt after the last configure. */
+    lines << QStringLiteral("Build: SHA %1, QML rev %2, compiled %3 %4")
+                 .arg(QStringLiteral(PB_BUILD_SHA),
+                      QStringLiteral(PB_QML_REV),
+                      QStringLiteral(__DATE__),
+                      QStringLiteral(__TIME__));
+    {
+        const QDir appDir(QCoreApplication::applicationDirPath());
+        const QFileInfo plugin(appDir.filePath(QStringLiteral("../modules/libqt_plugin.dll")));
+        lines << QStringLiteral("Plugin: %1 (%2, %3)")
+                     .arg(plugin.exists() ? plugin.absoluteFilePath()
+                                          : QStringLiteral("not found"),
+                          plugin.exists()
+                              ? plugin.lastModified().toString(Qt::ISODate)
+                              : QStringLiteral("-"),
+                          QStringLiteral("%1 MiB")
+                              .arg(plugin.exists()
+                                       ? plugin.size() / (1024 * 1024)
+                                       : 0));
+    }
+
+    /* P0.2 presentation contract: the four values must agree. */
+    lines << QStringLiteral("Presentation: %1")
+                 .arg(m_presentationMode == PresentationMode::HarvestVideo
+                          ? QStringLiteral("HarvestVideo")
+                          : QStringLiteral("ComposeCanvas"));
+    lines << QStringLiteral("  vout = %1, canvasVideoHarvestMode = %2, "
+                            "videoSurfaceVisible = %3")
+                 .arg(videoOutputAttached() ? QStringLiteral("attached")
+                                            : QStringLiteral("detached"),
+                      m_canvas && m_canvas->videoHarvestMode()
+                          ? QStringLiteral("true")
+                          : QStringLiteral("false"),
+                      (playerHasVideo()
+                       && m_presentationMode == PresentationMode::HarvestVideo)
+                          ? QStringLiteral("true")
+                          : QStringLiteral("false"));
+
+    /* P0.12 exact-frame decoder runtime state. */
+    {
+        const EditFrameSource::Diagnostics d = m_editSource.diagnostics();
+lines << QStringLiteral("EditFrameSource: %1 (hwdec %2, PTS tol %3 ms)")
+                 .arg(d.ready ? QStringLiteral("ready")
+                              : QStringLiteral("unavailable"),
+                      d.hwdecPolicy == 1 ? QStringLiteral("software")
+                                         : d.hwdecPolicy == 2
+                                               ? QStringLiteral("required")
+                                               : QStringLiteral("auto"))
+                 .arg(d.ptsToleranceMs);
+        if (!d.currentMRL.isEmpty())
+            lines << QStringLiteral("  MRL: %1").arg(d.currentMRL);
+        if (d.lastRequestedMs >= 0)
+            lines << QStringLiteral("  last decode: requested %1 ms -> actual %2 ms "
+                                    "(verified %3, latency %4 ms)")
+                         .arg(d.lastRequestedMs)
+                         .arg(d.lastDecodedMs)
+                         .arg(d.lastPtsVerified ? QStringLiteral("yes")
+                                                : QStringLiteral("no"))
+                         .arg(d.lastLatencyMs);
+        if (!d.lastError.isEmpty())
+            lines << QStringLiteral("  last error: %1").arg(d.lastError);
+    }
+
     lines << QStringLiteral("Segmentation backend: %1")
                  .arg(m_segmentation.isConfigured()
                           ? QStringLiteral("SAM3 (%1, %2)")
@@ -4480,6 +4807,29 @@ QString PaintbrushController::diagnosticsText() const
                           : QStringLiteral("unavailable"));
     if (!m_segmentation.unavailableReason().isEmpty())
         lines << QStringLiteral("  reason: %1").arg(m_segmentation.unavailableReason());
+    /* P0.12/P0.14: SAM runtime state — model file existence/size, loaded
+     * state, last inference latency/error (not just saved config). */
+    if (m_segmentation.isConfigured())
+    {
+        const QFileInfo model(m_segmentation.modelPath());
+        lines << QStringLiteral("  model file: %1 (%2)")
+                     .arg(model.exists() ? QStringLiteral("exists")
+                                         : QStringLiteral("MISSING"),
+                          QStringLiteral("%1 MiB")
+                              .arg(model.exists()
+                                       ? model.size() / (1024 * 1024)
+                                       : 0));
+        lines << QStringLiteral("  backend: %1")
+                     .arg(m_segmentation.isAvailable()
+                              ? QStringLiteral("loaded")
+                              : QStringLiteral("not loaded"));
+        const qint64 lat = m_segmentation.lastInferenceLatencyMs();
+        if (lat >= 0)
+            lines << QStringLiteral("  last inference: %1 ms").arg(lat);
+        const QString lastErr = m_segmentation.lastError();
+        if (!lastErr.isEmpty())
+            lines << QStringLiteral("  last error: %1").arg(lastErr);
+    }
 
     lines << QStringLiteral("VLM endpoint: %1 (%2)")
                  .arg(m_vision.isConfigured() ? m_vision.baseUrl()
@@ -4555,6 +4905,129 @@ QString PaintbrushController::diagnosticsText() const
     if (!m_statusMessage.isEmpty())
         lines << QStringLiteral("Last status: %1").arg(m_statusMessage);
     return lines.join(QLatin1Char('\n'));
+}
+
+QString PaintbrushController::runDecoderSamSelfTest()
+{
+    /* P0.13: a vout-independent diagnostic — decode the exact frame at the
+     * current player PTS through EditFrameSource, then run a SAM point prompt
+     * on the frame centre. This separates "VLC native video presentation
+     * broken" from "EditFrameSource broken" from "SAM broken". */
+    QStringList report;
+    report << QStringLiteral("=== Decoder+SAM self test (vout-independent) ===");
+    if (!liveMediaReady())
+    {
+        report << QStringLiteral("FAIL: no media session with a video track");
+        setStatus(QStringLiteral("Self test needs a video loaded."));
+        m_selfTestReport = report.join(QLatin1Char('\n'));
+        emit selfTestReportChanged();
+        return m_selfTestReport;
+    }
+    /* The self-test must not race a live selection's SAM result. */
+    resetLiveSelectionSession();
+    m_segmentation.cancel();
+
+    const QString mrl = currentMediaMRL();
+    const qint64 pts = playerTimeMs();
+    report << QStringLiteral("MRL: %1").arg(mrl);
+    report << QStringLiteral("Requested PTS: %1 ms").arg(pts);
+
+    /* The DECODER phase is synchronous — this is an explicit diagnostics
+     * action, not the interactive Add-frame path (which is async, P0.4). */
+    const DecodedFrame f = requestFrame(mrl, pts);
+    if (!f.ok() || f.image.isNull())
+    {
+        const QString err = m_editSource.diagnostics().lastError;
+        report << QStringLiteral("FAIL: exact decode failed%1")
+                      .arg(err.isEmpty() ? QString()
+                                         : QStringLiteral(": %1").arg(err));
+        setStatus(QStringLiteral("Self test failed: exact decode failed."));
+        m_selfTestReport = report.join(QLatin1Char('\n'));
+        emit selfTestReportChanged();
+        return m_selfTestReport;
+    }
+    report << QStringLiteral("Decoded: %1x%2, actual %3 ms (delta %4 ms, verified %5)")
+                  .arg(f.image.width()).arg(f.image.height()).arg(f.ptsMs)
+                  .arg(f.ptsMs - pts)
+                  .arg(f.ptsVerified ? QStringLiteral("yes")
+                                     : QStringLiteral("no"));
+
+    /* diagnostic thumbnail (embedded data URL — no file I/O) */
+    const QImage thumb = (f.image.width() > 480 || f.image.height() > 270)
+                             ? f.image.scaled(QSize(480, 270),
+                                              Qt::KeepAspectRatio,
+                                              Qt::SmoothTransformation)
+                             : f.image;
+    QByteArray bytes;
+    {
+        QBuffer buffer(&bytes);
+        buffer.open(QIODevice::WriteOnly);
+        thumb.save(&buffer, "PNG");
+    }
+    report << QStringLiteral("Thumbnail: data:image/png;base64,%1")
+                  .arg(QString::fromLatin1(bytes.toBase64()));
+
+    if (!m_segmentation.isConfigured())
+    {
+        report << QStringLiteral("SAM: not configured "
+                                 "(set --paintbrush-sam-model / NAI Settings)");
+        setStatus(QStringLiteral("Self test: decoder OK; SAM not configured."));
+        m_selfTestReport = report.join(QLatin1Char('\n'));
+        emit selfTestReportChanged();
+        return m_selfTestReport;
+    }
+
+    /* SAM phase (async — model load + inference can take seconds). The
+     * one-shot connection finalizes the report; it is the ONLY consumer of
+     * maskReady while the self-test is pending. */
+    m_selfTestReport = report.join(QLatin1Char('\n'));
+    emit selfTestReportChanged();
+    m_selfTestFrame = f.image;
+    if (m_selfTestConn)
+        disconnect(m_selfTestConn);
+    if (m_selfTestErrConn)
+        disconnect(m_selfTestErrConn);
+    m_selfTestConn = connect(&m_segmentation, &SegmentationService::maskReady,
+                             this, [this](const QImage &mask, double score,
+                                          const QString &method) {
+        disconnect(m_selfTestConn);
+        m_selfTestConn = QMetaObject::Connection();
+        if (m_selfTestErrConn)
+        {
+            disconnect(m_selfTestErrConn);
+            m_selfTestErrConn = QMetaObject::Connection();
+        }
+        m_selfTestReport += QStringLiteral("\nSAM: mask %1x%2, score %.0f%% (method %3)")
+                                .arg(mask.width())
+                                .arg(mask.height())
+                                .arg(score * 100.0)
+                                .arg(method);
+        setStatus(QStringLiteral("Self test: SAM mask %1x%2, score %.0f%%.")
+                      .arg(mask.width())
+                      .arg(mask.height())
+                      .arg(score * 100.0));
+        m_selfTestFrame = QImage();
+        emit selfTestReportChanged();
+    });
+    m_selfTestErrConn = connect(&m_segmentation, &SegmentationService::errorOccurred,
+                                this, [this](const QString &message) {
+        if (!m_selfTestConn)
+            return; /* not our self-test in flight */
+        disconnect(m_selfTestConn);
+        m_selfTestConn = QMetaObject::Connection();
+        disconnect(m_selfTestErrConn);
+        m_selfTestErrConn = QMetaObject::Connection();
+        m_selfTestReport += QStringLiteral("\nSAM: FAILED — %1").arg(message);
+        setStatus(QStringLiteral("Self test: SAM failed — %1").arg(message));
+        m_selfTestFrame = QImage();
+        emit selfTestReportChanged();
+    });
+    const QPointF center(m_selfTestFrame.width() / 2.0,
+                         m_selfTestFrame.height() / 2.0);
+    m_segmentation.segment(m_selfTestFrame,
+                           QVector<QPointF>{center}, {}, {});
+    setStatus(QStringLiteral("Self test: frame decoded — running SAM…"));
+    return m_selfTestReport;
 }
 
 } // namespace paintbrush

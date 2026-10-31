@@ -28,6 +28,7 @@
 #include <QImage>
 #include <QPointF>
 #include <QSize>
+#include <QString>
 #include <QTransform>
 #include <cstdio>
 #include <cmath>
@@ -40,6 +41,11 @@ static void check(bool cond, const char *what)
 {
     std::printf("%s %-70s\n", cond ? "PASS" : "FAIL", what);
     if (!cond) ++g_fail;
+}
+
+static void check(bool cond, const QString &what)
+{
+    check(cond, what.toUtf8().constData());
 }
 
 static bool near(qreal a, qreal b, qreal eps = 0.5)
@@ -413,6 +419,89 @@ int main()
         check(!nearP(live.itemToFramePoint(QPointF(0, 0)),
                      QPointF(960.0, 540.0), 0.5),
               "real viewport does NOT mis-map the origin to frame center");
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* 14. P0.7 letterbox/pillarbox seed rejection. Every viewport click   */
+    /*     must pass contentRect (gate 1) and native-frame bounds (gate 2) */
+    /*     before reaching SAM — across 16:9-in-4:3, 4:3-in-16:9 and       */
+    /*     portrait-in-landscape, for inside/left/right/top/bottom.        */
+    /* ------------------------------------------------------------------ */
+    {
+        struct Case
+        {
+            const char *name;
+            QSize frame;
+            QSize viewport;
+        };
+        const Case cases[] = {
+            { "16:9 frame in 4:3 viewport",  QSize(1920, 1080), QSize(960, 720)  },
+            { "4:3 frame in 16:9 viewport",  QSize(1440, 1080), QSize(1280, 720) },
+            { "portrait frame in landscape", QSize(1080, 1920), QSize(1280, 720) },
+        };
+        for (const Case &c : cases)
+        {
+            ObjectSelectionContext ctx;
+            ctx.sourceKind = ObjectSelectionContext::SourceLiveVideo;
+            ctx.frame = QImage(c.frame, QImage::Format_RGB32);
+            ctx.viewportSize = c.viewport;
+            buildSelectionTransforms(ctx);
+
+            const QRectF content = ctx.contentRect;
+            /* inside the content rect -> accepted and mapped into frame */
+            QPointF fp;
+            const QPointF inside(content.center());
+            check(selectionPointWithinContent(ctx, inside, &fp),
+                  QStringLiteral("[%1] click inside content is accepted")
+                      .arg(QString::fromUtf8(c.name)));
+            check(fp.x() >= 0 && fp.y() >= 0
+                      && fp.x() < c.frame.width() && fp.y() < c.frame.height(),
+                  QStringLiteral("[%1] accepted click maps inside the frame")
+                      .arg(QString::fromUtf8(c.name)));
+            /* centre of the content maps to the frame centre */
+            const QPointF mappedCenter = ctx.itemToFramePoint(inside);
+            check(nearP(mappedCenter,
+                        QPointF(c.frame.width() / 2.0, c.frame.height() / 2.0), 1.0),
+                  QStringLiteral("[%1] content centre maps to frame centre")
+                      .arg(QString::fromUtf8(c.name)));
+
+            /* the letterbox bars that actually exist -> rejected BEFORE mapping.
+             * A 16:9-in-4:3 case has top/bottom bars only; the others have
+             * left/right bars only. Probe 1px outside the content edge. */
+            QPointF ignored;
+            const qreal l = content.left(), t = content.top();
+            const qreal r = content.right(), b = content.bottom();
+            const qreal midY = content.center().y();
+            const qreal midX = content.center().x();
+            if (l > 0.0)
+            {
+                check(!selectionPointWithinContent(ctx, QPointF(l - 1.0, midY), &ignored),
+                      QStringLiteral("[%1] left bar rejected").arg(QString::fromUtf8(c.name)));
+                check(!selectionPointWithinContent(ctx, QPointF(r + 1.0, midY), &ignored),
+                      QStringLiteral("[%1] right bar rejected").arg(QString::fromUtf8(c.name)));
+            }
+            if (t > 0.0)
+            {
+                check(!selectionPointWithinContent(ctx, QPointF(midX, t - 1.0), &ignored),
+                      QStringLiteral("[%1] top bar rejected").arg(QString::fromUtf8(c.name)));
+                check(!selectionPointWithinContent(ctx, QPointF(midX, b + 1.0), &ignored),
+                      QStringLiteral("[%1] bottom bar rejected").arg(QString::fromUtf8(c.name)));
+            }
+        }
+
+        /* gate 2: a point inside the content rect but whose mapped pixel is
+         * outside the native frame is rejected too (defensive; only reachable
+         * if a caller injects an inconsistent context) */
+        ObjectSelectionContext bad;
+        bad.sourceKind = ObjectSelectionContext::SourceLiveVideo;
+        bad.frame = QImage(QSize(64, 64), QImage::Format_RGB32);
+        bad.viewportSize = QSize(64, 64);
+        buildSelectionTransforms(bad);
+        /* force a mismatched itemToFrame that maps everything to (-5,-5) */
+        bad.itemToFrame = QTransform().translate(-100.0, -100.0);
+        QPointF fp2;
+        check(!selectionPointWithinContent(bad, QPointF(32, 32), &fp2),
+              "mapped-outside-frame point is rejected (gate 2)");
     }
 
     std::printf("\n%d failed assertion(s)\n", g_fail);

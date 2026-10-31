@@ -2036,8 +2036,10 @@ QSGNode *PaintbrushCanvasItem::updatePaintNode(QSGNode *oldNode,
 
     /* grid overlay: kept as a single geometry node under the same transform;
      * rebuilt whenever visibility/spacing/zoom changes (gridVisibleChanged
-     * and zoomChanged both call update()) */
-    if (m_gridVisible)
+     * and zoomChanged both call update()). Hidden in HarvestVideo mode —
+     * the grid is document chrome and must never draw over the live video
+     * (P0.2 structural contract). */
+    if (m_gridVisible && !m_videoHarvestMode)
     {
         if (m_gridNode)
         {

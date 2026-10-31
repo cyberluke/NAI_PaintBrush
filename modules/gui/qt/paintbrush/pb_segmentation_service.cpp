@@ -9,6 +9,8 @@
 #include <QFileInfo>
 #include <QDebug>
 
+#include <chrono>
+
 #ifdef HAVE_SAM3
 # include <sam3.h>
 #endif
@@ -283,6 +285,10 @@ void SegmentationService::runJob(Job job)
         sam3_result result;
         QString method;
 
+        /* P0.12: measure the actual inference latency (model load and frame
+         * encoding are tracked separately by their own progress states). */
+        const auto inferStart = std::chrono::steady_clock::now();
+
         if (!job.textPrompt.isEmpty())
         {
             /* text-driven segmentation (PCS path) */
@@ -304,6 +310,10 @@ void SegmentationService::runJob(Job job)
             result = sam3_segment_pvs(*m_stateSam, *m_model, params);
             method = QStringLiteral("points");
         }
+
+        m_lastInferenceLatencyMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                       std::chrono::steady_clock::now() - inferStart)
+                                       .count();
 
         if (result.detections.empty())
         {

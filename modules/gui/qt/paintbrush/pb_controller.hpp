@@ -152,9 +152,19 @@ class PaintbrushController : public QObject
 
     Q_PROPERTY(QString currentMediaTitle READ currentMediaTitle NOTIFY mediaStateChanged FINAL)
     Q_PROPERTY(QString currentMediaMRL READ currentMediaMRL NOTIFY mediaStateChanged FINAL)
+    /* Media-session vs vout state split (P0.3): one property can no longer
+     * conflate "a media item is loaded" with "the native video output is
+     * attached". VideoSurface visibility needs the vout; exact-frame decode /
+     * SAM / Add-frame only need the media session. */
+    Q_PROPERTY(bool mediaLoaded READ mediaLoaded NOTIFY mediaStateChanged FINAL)
+    Q_PROPERTY(bool mediaHasVideoTrack READ mediaHasVideoTrack NOTIFY mediaStateChanged FINAL)
+    Q_PROPERTY(bool videoOutputAttached READ videoOutputAttached NOTIFY mediaStateChanged FINAL)
+    Q_PROPERTY(bool mediaPlaying READ mediaPlaying NOTIFY mediaStateChanged FINAL)
+    Q_PROPERTY(bool liveMediaReady READ liveMediaReady NOTIFY mediaStateChanged FINAL)
     Q_PROPERTY(qint64 playerTimeMs READ playerTimeMs NOTIFY mediaStateChanged FINAL)
     Q_PROPERTY(qint64 playerLengthMs READ playerLengthMs NOTIFY mediaStateChanged FINAL)
     Q_PROPERTY(bool playerHasVideo READ playerHasVideo NOTIFY mediaStateChanged FINAL)
+    Q_PROPERTY(bool addFrameBusy READ addFrameBusy NOTIFY addFrameBusyChanged FINAL)
     Q_PROPERTY(QString diagnosticsText READ diagnosticsText NOTIFY serviceAvailabilityChanged FINAL)
     Q_PROPERTY(bool lookupAvailable READ lookupAvailable NOTIFY serviceAvailabilityChanged FINAL)
     Q_PROPERTY(QString lookupUnavailableReason READ lookupUnavailableReason NOTIFY serviceAvailabilityChanged FINAL)
@@ -341,7 +351,11 @@ public:
     Q_INVOKABLE void openImageFile(const QUrl &url);
     Q_INVOKABLE void openImageData(const QImage &image, const QString &name);
     Q_INVOKABLE void openVideoFile(const QUrl &url);
+    /* Add frame to canvas (P0.4): ASYNC exact-frame decode — never blocks the
+     * GUI thread. The button binds to addFrameBusy for its busy/disabled
+     * state. */
     Q_INVOKABLE void captureVideoFrame();
+    bool addFrameBusy() const { return m_addFrameBusy; }
     Q_INVOKABLE void pasteImageFromClipboard();
     Q_INVOKABLE void saveProject(const QUrl &url);
     Q_INVOKABLE void openProject(const QUrl &url);
@@ -570,7 +584,33 @@ public:
     qint64 playerLengthMs() const;
     bool playerHasVideo() const;
     bool playerIsPlaying() const;
+    /* Media-session vs vout state split (P0.3). */
+    bool mediaLoaded() const;
+    bool mediaHasVideoTrack() const;
+    bool videoOutputAttached() const;
+    bool mediaPlaying() const;
+    /* Decode/SAM/capture gate: a media session with a video track exists —
+     * does NOT require the native vout to be attached, so a broken video
+     * presentation cannot block EditFrameSource/SAM diagnostics. */
+    bool liveMediaReady() const;
+    /* P0.9: does the frozen Object Select session still belong to the player's
+     * current frame? MRL + frozen PTS vs the player's current PTS within the
+     * configured tolerance. False ends the live selection. */
+    bool liveSelectionStillMatchesPlayer() const;
     QString diagnosticsText() const;
+
+    /* -- decoder self-test (P0.13) --------------------------------------- */
+    /* Decode the exact frame at the current player PTS via EditFrameSource
+     * and run a SAM point prompt on the frame centre (when configured),
+     * returning a diagnostics report (thumbnail data URL + PTS delta + mask
+     * dims/score). Deliberately does NOT depend on the VideoSurface/vout. */
+    Q_INVOKABLE QString runDecoderSamSelfTest();
+    QString selfTestReport() const { return m_selfTestReport; }
+    /* The full decoder+SAM self-test report. The decoder phase completes
+     * synchronously inside runDecoderSamSelfTest(); the SAM phase is async and
+     * appends its mask dims/score here and emits selfTestReportChanged, so a
+     * QML binding re-reads it when the inference lands (P0.13). */
+    Q_PROPERTY(QString selfTestReport READ selfTestReport NOTIFY selfTestReportChanged FINAL)
 
     /* -- NAI Settings (P1#12) ------------------------------------------ */
     /* Current (configured) settings values — the source of truth is the
@@ -645,6 +685,8 @@ signals:
     void presentationModeChanged();
     void askInputChanged();
     void settingsChanged();
+    void addFrameBusyChanged();
+    void selfTestReportChanged();
 
 private slots:
     void onCanvasObjectClick(QPointF canvasPos, bool positive, QPointF itemPos);
@@ -681,6 +723,12 @@ private slots:
      * the new size and refresh the display overlay, so a later refine stroke
      * maps into the correct native pixel (P0#2/#3). */
     void onCanvasResized();
+    /* Async "Add frame to canvas" (P0.4) completion. The token is validated
+     * against the current add-frame request; a stale result (media changed or
+     * superseded) is discarded. */
+    void onAddFrameDecoded(const QString &token,
+                           const paintbrush::DecodedFrame &frame);
+    void onAddFrameDecodeFailed(const QString &token, const QString &message);
 
 private:
     void configureServices();
@@ -715,6 +763,18 @@ private:
     void triggerCompanionEvent(const QString &event);
     QImage objectCrop() const;
     QImage selectionCrop() const;
+    /* P1 source split: native vs composition AI source.
+     * `nativeAiSourceFrame()` — the exact decoded live frame (or the pristine
+     * media frame for stills), NEVER rescaled. SAM mask coordinates equal
+     * this frame's coordinates, so SAM refine / Ask context / generation
+     * mask alignment must use it.
+     * `compositionAiSource()` — the AI source scaled to the document canvas
+     * size: for canvas-space masks (freehand canvas selection) and
+     * composition-boundary operations only.
+     * `currentAiSource()` — the source matching the CURRENT object mask's
+     * coordinate space (native for a live selection, composition otherwise). */
+    QImage nativeAiSourceFrame() const;
+    QImage compositionAiSource() const;
     QImage currentAiSource() const;
     QImage pristineSourceFrame() const;
     /* The authoritative source FrameRef for the CURRENT selection
@@ -763,6 +823,20 @@ private:
      * points (frame space). Used when the exact frame for a live PTS is
      * already held (no async wait needed) so the session stays responsive. */
     void runSegmentationForPendingPoints(const FrameRef &shot);
+    /* Insert a decoded video frame into the document as a LAYER_REFERENCE
+     * (P0.4/P0.5/P0.6): blank canvas adopts the frame size 1:1; an existing
+     * composition fits+centers via the layer transform (never destructive
+     * resampling). `requestedPts` is the player PTS at click time, `actualPts`
+     * the VERIFIED decoder PTS (authoritative provenance). Ends with
+     * enterComposePresentation() so the added frame becomes the visible
+     * composition. */
+    void insertCapturedFrame(const QImage &frame, qint64 actualPts,
+                             const QString &mrl, const QString &title,
+                             qint64 requestedPts, bool ptsVerified);
+    /* Invalidate any in-flight "Add frame" decode (media changed/closed or a
+     * new request supersedes it). The stale callback, when it arrives, is
+     * discarded by its token. */
+    void cancelAddFrame();
     QVector<QPointF> positivePointsForTracking() const;
     /* Exact-frame decode helpers (EditDecodeSource): all edit-pipeline
      * frame acquisition goes through these, never the playback player. */
@@ -882,6 +956,19 @@ private:
      * post-seek player-time notification is still awaited */
     qint64 m_seekProbeTargetMs = -1;
     bool m_seekProbeArmed = false;
+
+    /* async "Add frame to canvas" (P0.4) state */
+    bool m_addFrameBusy = false;
+    QString m_addFrameToken;      /* opaque identity of the in-flight request */
+    FrameRef m_addFrameRequest;   /* requested MRL+title+player PTS (provenance) */
+
+    /* decoder+SAM self-test state (P0.13): the SAM phase is async (model
+     * load + inference can take seconds), so the report is accumulated and
+     * finalized by a one-shot connection. */
+    QString m_selfTestReport;
+    QImage m_selfTestFrame;
+    QMetaObject::Connection m_selfTestConn;
+    QMetaObject::Connection m_selfTestErrConn;
 
     QVariantList m_assistantMessages;
     QVariantList m_lookupMatches;

@@ -144,6 +144,30 @@ public:
     /* Clear the decoded-frame LRU cache. */
     void clearCache();
 
+    /* Runtime decoder diagnostics (P0.12): actual state, never just saved
+     * config. */
+    struct Diagnostics
+    {
+        bool ready = false;          /* preparser/decoder available          */
+        int hwdecPolicy = 0;         /* 0 Auto, 1 Disabled(SW), 2 Required   */
+        qint64 ptsToleranceMs = 250;
+        QString currentMRL;          /* MRL of the last requested decode     */
+        qint64 lastRequestedMs = -1; /* last requested PTS                   */
+        qint64 lastDecodedMs = -1;   /* last actual decoded PTS              */
+        bool lastPtsVerified = false;
+        qint64 lastLatencyMs = -1;   /* decode latency of the last request   */
+        QString lastError;           /* last failure reason, if any          */
+    };
+    Diagnostics diagnostics() const;
+
+    /* Cancel / supersede any in-flight decode request (P0.15/P0.11):
+     * interactive requests (Object Select, Add frame) must win the single
+     * thumbnailer thread over thumbnail batches. The canceled request's
+     * callback still fires (with a failure status) and posts its signal; the
+     * caller's token check discards it as stale. Safe to call with no
+     * request in flight. */
+    void cancelInFlight();
+
     /* Convert a raw decoded VLC picture to QImage (RGBA). Returns a null
      * image for unsupported chroma. Exposed for reuse/diagnostics. */
     static QImage pictureToQImage(const picture_t *pic, vlc_object_t *logObj = nullptr);
@@ -164,6 +188,16 @@ private:
     mutable QWaitCondition m_cond;
     mutable LruCache<DecodedFrame> m_cache;
     mutable FrameRef m_last;
+    /* Runtime diagnostics state (P0.12); guarded by m_mutex. */
+    mutable QString m_diagMRL;
+    mutable qint64 m_diagRequestedMs = -1;
+    mutable qint64 m_diagDecodedMs = -1;
+    mutable bool m_diagPtsVerified = false;
+    mutable qint64 m_diagLatencyMs = -1;
+    mutable QString m_diagLastError;
+    /* The currently submitted (not yet finished) request, if any; guarded by
+     * m_mutex. Used by cancelInFlight() to supersede a decode (P0.15). */
+    mutable vlc_preparser_req *m_activeReq = nullptr;
 };
 
 } // namespace paintbrush

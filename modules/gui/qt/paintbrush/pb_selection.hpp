@@ -121,6 +121,44 @@ inline void buildSelectionTransforms(ObjectSelectionContext &ctx)
     ctx.frameToItem = ctx.itemToFrame.inverted();
 }
 
+/* P0.7: validate a VIEWPORT (item-space) seed click against the live
+ * selection. Gate 1 — the click must lie inside the letterbox content rect
+ * (a letterbox/pillarbox click is not a video point). Gate 2 — the mapped
+ * frame pixel must be finite and inside the native frame. Returns true and
+ * fills `frameOut` when the point is a valid SAM seed; false (with the
+ * reason in `reasonOut` when non-null) otherwise. Clamped/negative/
+ * letterbox coordinates must never reach SAM. */
+inline bool selectionPointWithinContent(const ObjectSelectionContext &ctx,
+                                        const QPointF &itemPos,
+                                        QPointF *frameOut,
+                                        QString *reasonOut = nullptr)
+{
+    if (!ctx.contentRect.contains(itemPos))
+    {
+        if (reasonOut)
+            *reasonOut = QStringLiteral("point is outside the video content");
+        return false;
+    }
+    const QPointF fp = ctx.itemToFramePoint(itemPos);
+    if (qIsNaN(fp.x()) || qIsNaN(fp.y()))
+    {
+        if (reasonOut)
+            *reasonOut = QStringLiteral("point maps outside the frame");
+        return false;
+    }
+    if (fp.x() < 0 || fp.y() < 0
+        || fp.x() >= qreal(ctx.frame.width())
+        || fp.y() >= qreal(ctx.frame.height()))
+    {
+        if (reasonOut)
+            *reasonOut = QStringLiteral("point maps outside the frame");
+        return false;
+    }
+    if (frameOut)
+        *frameOut = fp;
+    return true;
+}
+
 } // namespace paintbrush
 
 #endif // PB_SELECTION_HPP

@@ -109,14 +109,16 @@ QRect CanvasLayer::contentBounds() const
 {
     if (raster.isNull())
         return {};
-    if (type == LAYER_IMAGE || type == LAYER_REFERENCE || type == LAYER_TEXT)
+    if (type == LAYER_IMAGE || type == LAYER_REFERENCE || type == LAYER_TEXT
+        || type == LAYER_STICKER || type == LAYER_GENERATED)
     {
-        /* image/reference layers: the whole raster is content, offset by
-         * position and scaled/rotated by the layer transform. The scaled
-         * size is exact; rotation is treated as its bounding box so the
-         * collage slot stays generous. */
-        QSizeF scaled = QSizeF(raster.size()) * (type == LAYER_IMAGE || type == LAYER_TEXT
-                                                     ? qMax<qreal>(0.001, scale) : 1.0);
+        /* image/reference/generated/sticker layers: the whole raster is
+         * content, offset by position and scaled/rotated by the layer
+         * transform (P0.5 — reference/generated layers now carry the same
+         * transform semantics as image layers). The scaled size is exact;
+         * rotation is treated as its bounding box so the collage slot stays
+         * generous. */
+        QSizeF scaled = QSizeF(raster.size()) * qMax<qreal>(0.001, scale);
         QRectF r(position, scaled);
         if (!qFuzzyIsNull(rotation))
         {

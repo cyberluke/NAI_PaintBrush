@@ -1361,6 +1361,15 @@ if qt6_dep.found()
         paintbrush_extra_cppargs += '-DHAVE_SAM3'
         paintbrush_extra_deps += paintbrush_sam3_dep
     endif
+    # NAI Paintbrush: build identity (P0.1, acceptance Gate A) — the running
+    # binary must be able to prove which source tree it was built from. The
+    # SHA is captured at meson configure time; combined with the compile-time
+    # __DATE__/__TIME__ and the loaded plugin file mtime, Diagnostics can
+    # detect a stale DLL/qrc instead of silently testing an old binary.
+    pb_git_sha = run_command('git', 'rev-parse', 'HEAD', check: false)
+    pb_build_sha = pb_git_sha.returncode() == 0 ? pb_git_sha.stdout().strip() : 'unknown'
+    paintbrush_extra_cppargs += '-DPB_BUILD_SHA="' + pb_build_sha + '"'
+    paintbrush_extra_cppargs += '-DPB_QML_REV="live-harvest-v3"'
 
     qt6pre_files = qt6.preprocess(ui_files: ui_sources,
         moc_headers: moc_headers,

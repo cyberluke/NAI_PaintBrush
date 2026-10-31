@@ -114,7 +114,13 @@ onMoved: {
             }
 
             Widgets.ActionButtonPrimary {
-                text: qsTr("Add frame to canvas")
+                /* P0.4: Add frame is an async exact-frame decode — the button
+                 * disables while the decode is in flight instead of blocking
+                 * the GUI thread. */
+                text: PaintbrushCtx.addFrameBusy
+                      ? qsTr("Decoding frame…")
+                      : qsTr("Add frame to canvas")
+                enabled: !PaintbrushCtx.addFrameBusy
                 onClicked: PaintbrushCtx.captureVideoFrame()
             }
 

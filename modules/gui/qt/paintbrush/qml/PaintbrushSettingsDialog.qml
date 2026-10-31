@@ -285,6 +285,31 @@ Dialog {
                     wrapMode: Text.WordWrap
                     font.pixelSize: VLCStyle.fontSize_xsmall
                 }
+                /* P0.13: vout-independent decoder+SAM self test — decodes the
+                 * exact frame at the current PTS via EditFrameSource and runs
+                 * a SAM point prompt on the frame centre, proving the edit
+                 * pipeline and SAM independently of the native video window. */
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: VLCStyle.margin_xsmall
+                    Widgets.ActionButtonPrimary {
+                        text: qsTr("Run decoder + SAM self test")
+                        onClicked: PaintbrushCtx.runDecoderSamSelfTest()
+                    }
+                }
+                Widgets.LabelExt {
+                    id: selfTestResult
+                    Layout.fillWidth: true
+                    visible: text.length > 0
+                    /* The report is published on runDecoderSamSelfTest() and
+                     * re-emitted when the async SAM phase lands, so this
+                     * binding picks up both the decoder phase and the final
+                     * mask/score without re-running the test (P0.13). */
+                    text: PaintbrushCtx.selfTestReport
+                    color: theme.fg.primary
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: VLCStyle.fontSize_xsmall
+                }
             }
         }
 
