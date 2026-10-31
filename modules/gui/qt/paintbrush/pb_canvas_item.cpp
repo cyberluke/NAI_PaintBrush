@@ -21,6 +21,7 @@
 #include <QDropEvent>
 #include <QMimeData>
 #include <QPainter>
+#include <QDateTime>
 #include <QQueue>
 #include <QRandomGenerator>
 #include <QtMath>
@@ -732,11 +733,13 @@ if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
         m_powderUnion = m_powderUnion.isNull() ? affected : m_powderUnion.united(affected);
         captureBeforeRegion(affected);
         ensureScratch(affected);
-        /* live preview: render the powder region (deterministic) */
+        /* live preview: render the powder region (deterministic; time drives
+         * the holographic shimmer while drawing) */
         QImage flakes = m_powder.render(affected.size(), float(affected.x()),
                                         float(affected.y()), 1.0f,
                                         m_doc->lightRig(), m_powderPal,
-                                        m_doc->paperStock(), m_doc->artScale(1.0f));
+                                        m_doc->paperStock(), m_doc->artScale(1.0f),
+                                        QDateTime::currentMSecsSinceEpoch());
         {
             QPainter p(&m_scratchTile);
             p.setCompositionMode(QPainter::CompositionMode_Source);
@@ -908,7 +911,8 @@ void PaintbrushCanvasItem::renderPowderUnion()
     ensureScratch(u);
     QImage flakes = m_powder.render(u.size(), float(u.x()), float(u.y()), 1.0f,
                                     m_doc->lightRig(), m_powderPal,
-                                    m_doc->paperStock(), m_doc->artScale(1.0f));
+                                    m_doc->paperStock(), m_doc->artScale(1.0f),
+                                    QDateTime::currentMSecsSinceEpoch());
     QPainter p(&m_scratchTile);
     p.setCompositionMode(QPainter::CompositionMode_Source);
     p.drawImage(u.topLeft() - m_scratchOrigin, layer->raster, u);

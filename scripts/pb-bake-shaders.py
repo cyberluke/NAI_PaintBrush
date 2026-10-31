@@ -23,6 +23,7 @@ SHADERS = {
     "paper": ("paper.vert", "paper.frag"),
     "glitter": ("glitter.vert", "glitter.frag"),
     "finish": ("finish.vert", "finish.frag"),
+    "powder": ("powder.vert", "powder.frag"),
 }
 
 # Explicit targets: the shaders use uint bit-twiddling (exact ports of the

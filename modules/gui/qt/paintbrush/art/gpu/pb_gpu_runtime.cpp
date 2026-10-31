@@ -18,6 +18,7 @@
 #include <QRgb>
 #include <QDebug>
 #include <QPainter>
+#include <cstring>
 #include <cmath>
 
 #include <rhi/qrhi.h>
@@ -78,6 +79,12 @@ struct GpuRuntime::PipelineSet
     QRhiBuffer *glitterUb = nullptr;
     QRhiBuffer *glitterVb = nullptr;
 
+    QRhiGraphicsPipeline *powder = nullptr;
+    QRhiShaderResourceBindings *powderBindings = nullptr;
+    QRhiBuffer *powderUb = nullptr;
+    QRhiSampler *powderSim = nullptr;   /* bilinear for smooth height seams */
+    QRhiSampler *powderCol = nullptr;   /* nearest for per-cell palette reads */
+
     QRhiGraphicsPipeline *finish = nullptr;
     QRhiShaderResourceBindings *finishBindings = nullptr;
     QRhiBuffer *finishUb = nullptr;
@@ -98,6 +105,8 @@ QShader vertexFor(const char *name)
         return loadQsb(kQSB_PAPER_VERT, sizeof(kQSB_PAPER_VERT));
     if (qstrcmp(name, "glitter") == 0)
         return loadQsb(kQSB_GLITTER_VERT, sizeof(kQSB_GLITTER_VERT));
+    if (qstrcmp(name, "powder") == 0)
+        return loadQsb(kQSB_POWDER_VERT, sizeof(kQSB_POWDER_VERT));
     return loadQsb(kQSB_FINISH_VERT, sizeof(kQSB_FINISH_VERT));
 }
 
@@ -107,6 +116,8 @@ QShader fragmentFor(const char *name)
         return loadQsb(kQSB_PAPER_FRAG, sizeof(kQSB_PAPER_FRAG));
     if (qstrcmp(name, "glitter") == 0)
         return loadQsb(kQSB_GLITTER_FRAG, sizeof(kQSB_GLITTER_FRAG));
+    if (qstrcmp(name, "powder") == 0)
+        return loadQsb(kQSB_POWDER_FRAG, sizeof(kQSB_POWDER_FRAG));
     return loadQsb(kQSB_FINISH_FRAG, sizeof(kQSB_FINISH_FRAG));
 }
 
@@ -198,10 +209,13 @@ bool GpuRuntime::initialize(bool preferD3D11)
     m_paperFs = fragmentFor("paper");
     m_glitterVs = vertexFor("glitter");
     m_glitterFs = fragmentFor("glitter");
+    m_powderVs = vertexFor("powder");
+    m_powderFs = fragmentFor("powder");
     m_finishVs = vertexFor("finish");
     m_finishFs = fragmentFor("finish");
     if (!m_paperVs.isValid() || !m_paperFs.isValid() ||
         !m_glitterVs.isValid() || !m_glitterFs.isValid() ||
+        !m_powderVs.isValid() || !m_powderFs.isValid() ||
         !m_finishVs.isValid() || !m_finishFs.isValid())
     {
         m_lastError = QStringLiteral("Shader pack invalid (qsb).");
@@ -229,6 +243,35 @@ bool GpuRuntime::initialize(bool preferD3D11)
         return false;
     m_pipelines->glitterVb = m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::VertexBuffer, 1 << 21);
     if (!m_pipelines->glitterVb->create())
+        return false;
+
+    /* powder: fullscreen heightfield pass — ubuf (binding 2) + two samplers
+     * (sim bind 0, col bind 1). Textures are uploaded per renderPowder call;
+     * the SRB keeps a persistent 1x1 dummy so it can be created here once. */
+    m_pipelines->powderUb = m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, 512);
+    if (!m_pipelines->powderUb->create())
+        return false;
+    m_pipelines->powderSim = m_rhi->newSampler(QRhiSampler::Linear, QRhiSampler::Linear,
+                                               QRhiSampler::None, QRhiSampler::ClampToEdge,
+                                               QRhiSampler::ClampToEdge);
+    m_pipelines->powderCol = m_rhi->newSampler(QRhiSampler::Nearest, QRhiSampler::Nearest,
+                                               QRhiSampler::None, QRhiSampler::ClampToEdge,
+                                               QRhiSampler::ClampToEdge);
+    if (!m_pipelines->powderSim->create() || !m_pipelines->powderCol->create())
+        return false;
+    m_pipelines->powderBindings = m_rhi->newShaderResourceBindings();
+    {
+        m_powderSimDummy = m_rhi->newTexture(QRhiTexture::RGBA8, QSize(1, 1), 1, {});
+        m_powderSimDummy->create();
+        m_powderColDummy = m_rhi->newTexture(QRhiTexture::RGBA8, QSize(1, 1), 1, {});
+        m_powderColDummy->create();
+    }
+    m_pipelines->powderBindings->setBindings({
+        QRhiShaderResourceBinding::uniformBuffer(2, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage, m_pipelines->powderUb),
+        QRhiShaderResourceBinding::sampledTexture(0, QRhiShaderResourceBinding::FragmentStage, m_powderSimDummy, m_pipelines->powderSim),
+        QRhiShaderResourceBinding::sampledTexture(1, QRhiShaderResourceBinding::FragmentStage, m_powderColDummy, m_pipelines->powderCol),
+    });
+    if (!m_pipelines->powderBindings->create())
         return false;
 
     m_pipelines->finishUb = m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, 256);
@@ -267,18 +310,20 @@ bool GpuRuntime::ensurePipelines()
     /* the pipelines embed the render pass descriptor they were created with;
      * when the target grows, m_rtRp is a NEW object and the old pipelines
      * reference a DELETED descriptor — rebuild them against the new one */
-    if (m_pipelines->paper && m_pipelines->glitter && m_pipelines->finish &&
-        m_pipelinesRp == m_rtRp)
+    if (m_pipelines->paper && m_pipelines->glitter && m_pipelines->powder &&
+        m_pipelines->finish && m_pipelinesRp == m_rtRp)
         return true;
 
     /* drop pipelines bound to a stale render pass descriptor */
-    if (m_pipelines->paper || m_pipelines->glitter || m_pipelines->finish)
+    if (m_pipelines->paper || m_pipelines->glitter || m_pipelines->powder || m_pipelines->finish)
     {
         delete m_pipelines->paper;
         delete m_pipelines->glitter;
+        delete m_pipelines->powder;
         delete m_pipelines->finish;
         m_pipelines->paper = nullptr;
         m_pipelines->glitter = nullptr;
+        m_pipelines->powder = nullptr;
         m_pipelines->finish = nullptr;
     }
 
@@ -316,6 +361,17 @@ bool GpuRuntime::ensurePipelines()
         return false;
     }
 
+    /* powder: fullscreen heightfield pass (6-triangle-list quad, blend off —
+     * the shader outputs an opaque RGBA which is composited over the paper) */
+    m_pipelines->powder = buildPipeline(m_rhi, m_powderVs, m_powderFs,
+                                        { QRhiVertexInputAttribute(0, 0, QRhiVertexInputAttribute::Float2, 0) },
+                                        4 * sizeof(float), m_pipelines->powderBindings, false, m_rtRp);
+    if (!m_pipelines->powder)
+    {
+        m_lastError = QStringLiteral("Powder pipeline creation failed.");
+        return false;
+    }
+
     /* finish */
     m_pipelines->finish = buildPipeline(m_rhi, m_finishVs, m_finishFs,
                                         { QRhiVertexInputAttribute(0, 0, QRhiVertexInputAttribute::Float2, 0),
@@ -335,6 +391,10 @@ void GpuRuntime::shutdown()
     releaseTarget();
     delete m_finishDummy;
     m_finishDummy = nullptr;
+    delete m_powderSimDummy;
+    m_powderSimDummy = nullptr;
+    delete m_powderColDummy;
+    m_powderColDummy = nullptr;
     delete m_pipelines;
     m_pipelines = nullptr;
     delete m_rhi;
@@ -724,6 +784,145 @@ QImage GpuRuntime::renderGlitter(const QSize &outSize,
     m_rhi->endOffscreenFrame();
 
     return unPremultiply(readback(m_target, outSize));
+}
+
+/* --------------------------------------------------------------- powder */
+
+QImage GpuRuntime::renderPowder(const QSize &outSize,
+                                const glitter::GlitterPowder &powder,
+                                const glitter::PowderPalette &pal,
+                                float outOriginWorldX, float outOriginWorldY,
+                                float worldPerPx, const ArtLightRig &rig,
+                                const PaperStock *paper, qint64 timeMs,
+                                int uiDpr)
+{
+    if (!m_rhi || !m_pipelines || !ensureTarget(outSize))
+        return {};
+    if (powder.cellW() <= 0 || powder.cellH() <= 0 || outSize.isEmpty())
+        return QImage(outSize, QImage::Format_ARGB32);
+    if (!ensurePipelines() || !m_pipelines->powder)
+        return {};
+
+    const int W = powder.cellW();
+    const int H = powder.cellH();
+    const int dpr = qMax(1, uiDpr);
+
+    /* --- per-cell sim + colour textures (RGBA8, ours -> the reference) ----
+     *  uSim: r=height(grain cells)  g=seed(0..1)  b=stuck  a=glue
+     *  uCol: r=looseA slot  g=looseF(share of B)  b=bondedA  a=bondedF */
+    QByteArray simBuf(W * H * 4, '\0');
+    QByteArray colBuf(W * H * 4, '\0');
+    const int palN = qMax(1, pal.colors.size());
+    for (int y = 0; y < H; ++y)
+    {
+        for (int x = 0; x < W; ++x)
+        {
+            const glitter::PowderCell &c = powder.powderCellAt(y * W + x);
+            const int o = (y * W + x) * 4;
+            simBuf[o + 0] = quint8(qBound(0.0f, c.height, 15.0f) * (255.0f / 15.0f));
+            simBuf[o + 1] = quint8(qBound(0.0f, c.seed, 1.0f) * 255.0f);
+            simBuf[o + 2] = quint8(qBound(0.0f, c.stuck, 15.0f) * (255.0f / 15.0f));
+            simBuf[o + 3] = quint8(qBound(0.0f, c.glue, 1.0f) * 255.0f);
+            colBuf[o + 0] = quint8(qBound(0, c.lA, palN - 1));
+            colBuf[o + 1] = quint8(qBound(0.0f, c.lF, 1.0f) * 255.0f);
+            colBuf[o + 2] = quint8(qBound(0, c.sA, palN - 1));
+            colBuf[o + 3] = quint8(qBound(0.0f, c.sF, 1.0f) * 255.0f);
+        }
+    }
+
+    QRhiTexture *simTex = m_rhi->newTexture(QRhiTexture::RGBA8, QSize(W, H), 1, {});
+    QRhiTexture *colTex = m_rhi->newTexture(QRhiTexture::RGBA8, QSize(W, H), 1, {});
+    if (!simTex->create() || !colTex->create())
+        return {};
+
+    /* light context (same as renderGlitter / CPU makeLight) */
+    const QVector3D d = rig.unitDirection();
+    QVector3D L(-d.x(), -d.y(), -d.z());
+    if (L.z() < 0.05f)
+        L.setZ(0.05f);
+    L.normalize();
+    const QVector3D Hv(0.0f, 0.0f, 1.0f);
+    const QVector3D Hh = (L + Hv).normalized();
+    const float pxPerWorld = 1.0f / worldPerPx;
+
+    /* uLight is the key-light POSITION in scene px (like the reference); put
+     * it up-left of centre so flakes catch it from the same direction as L */
+    const float lightPxX = outSize.width() * 0.42f;
+    const float lightPxY = outSize.height() * 0.30f;
+
+    /* --- ubuf (std140) -------------------------------------------------- */
+    static const int kUbSize = 256;
+    QByteArray ub(kUbSize, 0);
+    auto wf = [&ub](int off, float v) { std::memcpy(ub.data() + off, &v, 4); };
+    auto wv2 = [&ub](int off, float a, float b) { float t[2] = { a, b }; std::memcpy(ub.data() + off, t, 8); };
+    auto wv3 = [&ub](int off, float a, float b, float c) { float t[4] = { a, b, c, 0.0f }; std::memcpy(ub.data() + off, t, 16); };
+
+    QMatrix4x4 ident;
+    std::memcpy(ub.data() + 0, ident.constData(), 64);
+    wv2(64, float(outSize.width()), float(outSize.height()));          /* uViewSize */
+    wv2(72, outOriginWorldX, outOriginWorldY);                          /* uWorldOrigin */
+    wf(80, worldPerPx);                                                 /* uWorldPerPx */
+    wf(84, powder.worldCellSize());                                     /* uWorldCell */
+    wf(88, float(dpr));                                                 /* uDpr */
+    wf(92, float(timeMs) / 1000.0f);                                    /* uTime */
+    wv2(96, float(W), float(H));                                        /* uGrid */
+    wv2(112, lightPxX, lightPxY);                                       /* uLight */
+    wf(120, pal.holographic);                                           /* uHolo */
+    wf(124, float(dpr * 5));                                            /* uFlakePx (device px) */
+    wf(128, paper ? paper->tooth : 0.4f);                               /* uTooth */
+    wv3(136, pal.paper.redF(), pal.paper.greenF(), pal.paper.blueF());  /* uPaper */
+    for (int i = 0; i < qMin(palN, 4); ++i)
+    {
+        const QColor &c = pal.colors.at(i);
+        wv3(160 + i * 16, c.redF(), c.greenF(), c.blueF());             /* uPal[i] */
+    }
+
+    /* build owned RGBA8888 images for the upload (the QRhi upload helper takes
+     * a QImage, mirroring the finish pass) */
+    QImage simRaw((const uchar *)simBuf.constData(), W, H, W * 4, QImage::Format_RGBA8888);
+    QImage simImg = simRaw.copy();
+    QImage colRaw((const uchar *)colBuf.constData(), W, H, W * 4, QImage::Format_RGBA8888);
+    QImage colImg = colRaw.copy();
+
+    QRhiResourceUpdateBatch *u = m_rhi->nextResourceUpdateBatch();
+    u->uploadTexture(simTex, simImg);
+    u->uploadTexture(colTex, colImg);
+    u->updateDynamicBuffer(m_pipelines->powderUb, 0, kUbSize, ub.constData());
+
+    /* per-call SRB with the same binding layout the powder pipeline was built
+     * against (QRhi uses the pipeline's SRB only for the layout, the actual
+     * textures come from setShaderResources) — mirrors the finish pass */
+    QRhiShaderResourceBindings *srb = m_rhi->newShaderResourceBindings();
+    srb->setBindings({
+        QRhiShaderResourceBinding::uniformBuffer(2, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage, m_pipelines->powderUb),
+        QRhiShaderResourceBinding::sampledTexture(0, QRhiShaderResourceBinding::FragmentStage, simTex, m_pipelines->powderSim),
+        QRhiShaderResourceBinding::sampledTexture(1, QRhiShaderResourceBinding::FragmentStage, colTex, m_pipelines->powderCol),
+    });
+    if (!srb->create())
+        return {};
+
+    QRhiBuffer *vb = m_rhi->newBuffer(QRhiBuffer::Immutable, QRhiBuffer::VertexBuffer, sizeof(kQuadClip));
+    vb->create();
+    u->uploadStaticBuffer(vb, kQuadClip);
+
+    QRhiCommandBuffer *cb = nullptr;
+    if (m_rhi->beginOffscreenFrame(&cb) != QRhi::FrameOpSuccess)
+        return {};
+    cb->beginPass(m_rt, Qt::transparent, { 1.0f, 0 }, u);
+    cb->setGraphicsPipeline(m_pipelines->powder);
+    cb->setShaderResources(srb);
+    cb->setViewport({ 0, 0, float(outSize.width()), float(outSize.height()) });
+    pbSetVertexInput(cb, vb);
+    cb->draw(6);
+    cb->endPass();
+    m_rhi->endOffscreenFrame();
+
+    delete vb;
+    delete srb;
+    QImage result = readback(m_target, outSize);
+    delete simTex;
+    delete colTex;
+    return unPremultiply(result);
 }
 
 /* ---------------------------------------------------------------- finish */

@@ -982,7 +982,8 @@ void GlitterPowder::clearMaskedPowder(QImage &img, float originWorldX,
 QImage GlitterPowder::render(const QSize &outSize, float outOriginWorldX,
                              float outOriginWorldY, float worldPerPx,
                              const ArtLightRig &rig, const PowderPalette &pal,
-                             const PaperStock *paper, const ArtScale &scale) const
+                             const PaperStock *paper, const ArtScale &scale,
+                             qint64 timeMs) const
 {
     Q_UNUSED(rig); Q_UNUSED(scale);
     QImage img(outSize, QImage::Format_RGBA8888_Premultiplied);
@@ -1110,6 +1111,71 @@ QImage GlitterPowder::render(const QSize &outSize, float outOriginWorldX,
                 glc.setAlpha(int(qMin(255.0f, 120 + 135 * specPow * hFrac)));
                 p.setBrush(glc);
                 p.drawEllipse(QPointF(px, py), r * 0.36f, r * 0.36f);
+            }
+
+            /* --- fine packed beads: the grain-by-grain texture ---------
+             * Each sim cell is ~1-4 px wide; sub-divide it into a small grid
+             * of beads. Only the ones whose seed falls under the (height-gated)
+             * local coverage are drawn, so a sparse heap reads as loose grains
+             * and a deep heap as a packed, glittery surface — exactly the
+             * reference's "packed glass beads" look. */
+            const float cover = qBound(0.0f, tot / 1.5f, 1.0f);
+            if (r >= 0.8f)
+            {
+                /* ~1 px beads within the cell */
+                const int beadN = std::max(1, int(std::ceil(r / 1.6f)));
+                const float cellR = qMax(0.5f, r * 0.32f);
+                for (int by = 0; by < beadN; ++by)
+                {
+                    for (int bx = 0; bx < beadN; ++bx)
+                    {
+                        /* deterministic bead position + seed */
+                        std::uint32_t bh = hx ^ (0x9e3779b9u
+                                                 * (uint32_t(bx + 1) + 0x1f123bb5u * uint32_t(by + 3)));
+                        const float bh1 = ((bh & 0xFFFFu) / 65535.0f);
+                        const float bh2 = (((bh >> 8) & 0xFFFFu) / 65535.0f);
+                        const float thresh = 0.55f + 0.5f * (1.0f - cover); /* sparse when thin */
+                        if (bh1 < thresh)
+                            continue;                     /* this bead is absent here */
+                        const float bcx = px + (bx + 0.5f - beadN * 0.5f) / beadN * (2 * r);
+                        const float bcy = py + (by + 0.5f - beadN * 0.5f) / beadN * (2 * r);
+                        const float br = cellR * (0.6f + 0.5f * bh2);
+                        /* per-bead tone: a few darker, most mid */
+                        const float btone = 0.78f + 0.24f * bh2;
+                        QColor beadCol = col.darker(int(130 - 34 * btone * diff));
+                        beadCol.setAlpha(int(qMin(255.0f, 140 + 100 * hFrac * cover)));
+                        p.setBrush(beadCol);
+                        p.drawEllipse(QPointF(bcx, bcy), br, br);
+                    }
+                }
+            }
+
+            /* --- holographic shimmer (time-driven sparkle) --------------
+             * A deterministic flake phase sweeps a bright specular glint across
+             * the surface as time advances (the reference's uTime), so the
+             * poured powder visibly "glitters" instead of sitting static. */
+            const float t = (timeMs > 0) ? float((timeMs % 4000) / 1000.0) : 0.0f;
+            const float phase = h4 * 6.2832f + t * (1.0f + 1.3f * hg);
+            const float pulse = 0.5f + 0.5f * std::sin(phase);
+            if (hh > 0.35f && specPow * hFrac > 0.03f
+                && pulse > 0.82f)
+            {
+                const float sw = qMax(0.35f, r * 0.30f);
+                QColor glintc = col.lighter(int(200 + 55 * pulse));
+                glintc.setAlpha(int(qMin(255.0f, 220 * pulse)));
+                p.setBrush(glintc);
+                p.drawEllipse(QPointF(px + (hf - 0.5f) * r * 0.8f,
+                                      py + (hg - 0.5f) * r * 0.8f), sw, sw);
+                /* white core on the brightest flashes */
+                if (pulse > 0.94f)
+                {
+                    QColor wc(255, 255, 255);
+                    wc.setAlpha(int(200 * (pulse - 0.94f) / 0.06f));
+                    p.setBrush(wc);
+                    p.drawEllipse(QPointF(px + (hf - 0.5f) * r * 0.8f,
+                                          py + (hg - 0.5f) * r * 0.8f),
+                                  sw * 0.4f, sw * 0.4f);
+                }
             }
 
             /* sparse holographic mirror flakes (a small fraction of grains

@@ -44,6 +44,7 @@
 #include "../runtime/light_rig.hpp"
 #include "../surface/paper_stock.hpp"
 #include "../materials/glitter/glitter_material.hpp"
+#include "../materials/glitter/glitter_powder.hpp"
 #include "../finish/effects.hpp"
 
 class QRhi;
@@ -90,6 +91,22 @@ public:
                          float worldPerPx, const ArtLightRig &rig,
                          const PaperStock *paper);
 
+    /* Render the glitter POWDER heightfield into an RGBA image, faithful to
+     * the reference WebGL2 shader: packed glass beads (Voronoi) over a smooth
+     * multi-scale pile normal, image-based specular, holographic flakes that
+     * shimmer with `timeMs`, wet-glue gloss, a soft contact shadow and bloom.
+     *
+     * The heightfield + per-cell colour data come from a GlitterPowder whose
+     * cells were painted by the caller (the engine is itself CPU for the
+     * physics; this is the configurable surface pass). */
+    QImage renderPowder(const QSize &outSize,
+                        const glitter::GlitterPowder &powder,
+                        const glitter::PowderPalette &pal,
+                        float outOriginWorldX, float outOriginWorldY,
+                        float worldPerPx, const ArtLightRig &rig,
+                        const PaperStock *paper, qint64 timeMs,
+                        int uiDpr = 1);
+
     /* One finish effect applied to `source` (premultiplied ARGB32).
      * `mode`: 0 DirectedBlur, 1 Shadow, 2 Glow — the same three the canvas
      * nodes render. `scale` converts world units to source pixels. */
@@ -111,6 +128,7 @@ private:
     /* shader packs loaded once (qsb-baked at build time) */
     QShader m_paperVs, m_paperFs;
     QShader m_glitterVs, m_glitterFs;
+    QShader m_powderVs, m_powderFs;
     QShader m_finishVs, m_finishFs;
 
     /* scratch resources for readback */
@@ -123,6 +141,9 @@ private:
     /* the finish SRB needs a valid texture at create time; the 1x1 dummy
      * stays alive for the runtime's lifetime */
     QRhiTexture *m_finishDummy = nullptr;
+    /* powder SRB placeholders, replaced per renderPowder call */
+    QRhiTexture *m_powderSimDummy = nullptr;
+    QRhiTexture *m_powderColDummy = nullptr;
 
     QImage readback(QRhiTexture *tex, const QSize &size);
     bool ensureTarget(const QSize &size);

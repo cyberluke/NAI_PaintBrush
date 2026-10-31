@@ -95,6 +95,9 @@ public:
     int cellH() const { return m_cells.height(); }
     int cellCount() const { return m_cells.width() * m_cells.height(); }
     float worldCellSize() const { return m_worldCellSize; }
+    /* read-only per-cell access (flat row-major index), for the GPU surface
+     * pass and diagnostics */
+    const PowderCell &powderCellAt(int i) const { return m_cellsData[i]; }
 
     /* Adhesion: paint wet glue (coverage 0..1, -1 clears) into a disc. */
     void paintGlue(float wx, float wy, float radiusWorld, float coverage);
@@ -139,11 +142,15 @@ public:
     void hydrateFromRaster(const QImage &layer, float worldPerPx);
 
     /* Render into an RGBA surface (world coords). The cell colours map to
-     * palette slots exactly like the reference's uCol/uPal render. */
+     * palette slots exactly like the reference's uCol/uPal render.
+     * `timeMs` drives the holographic shimmer so flakes catch the light and
+     * fade over time exactly like the GPU reference (pass 0 for a static
+     * deterministic frame). */
     QImage render(const QSize &outSize, float outOriginWorldX,
                   float outOriginWorldY, float worldPerPx,
                   const ArtLightRig &rig, const PowderPalette &pal,
-                  const PaperStock *paper, const ArtScale &scale) const;
+                  const PaperStock *paper, const ArtScale &scale,
+                  qint64 timeMs = 0) const;
 
     /* -- inspection / diagnostics -------------------------------------- */
     int looseCount() const;         /* cells with loose powder */
