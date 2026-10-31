@@ -502,8 +502,12 @@ private:
     qreal m_powderBlowSince = 0.0;   /* seconds held still */
     qreal m_powderBlowAge = 0.0;     /* seconds the breath has run */
     qreal m_powderRenderAcc = 0.0;   /* breath render accumulator (~30 Hz) */
-    QPointF m_powderHoldPos;         /* where the pointer is being held */
-    bool m_powderHoldEver = false;   /* a real drag sampled (not a pure click) */
+QPointF m_powderHoldPos;         /* where the pointer is being held */
+bool m_powderHoldEver = false;   /* a real drag sampled (not a pure click) */
+/* Presentation-only shimmer clock: advances with wall time DURING a stroke so
+ * the live preview shimmers; the committed raster uses phase 0 (canonical). */
+qint64 m_powderShimmerMs = 0;
+qint64 m_lastPowderPreviewMs = 0;
     void beginArtStroke(const QPointF &local);
     void artStrokeSegment(const QPointF &fromLocal, const QPointF &toLocal);
     void endArtStroke(const QPointF &local);

@@ -733,13 +733,18 @@ if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
         m_powderUnion = m_powderUnion.isNull() ? affected : m_powderUnion.united(affected);
         captureBeforeRegion(affected);
         ensureScratch(affected);
-        /* live preview: render the powder region (deterministic; time drives
-         * the holographic shimmer while drawing) */
+        /* live preview: a presentation clock (not wall-clock-as-material)
+         * drives the holographic shimmer while drawing; the committed pass
+         * (renderPowderUnion) uses phase 0 for a deterministic static result */
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        if (m_lastPowderPreviewMs > 0)
+            m_powderShimmerMs += now - m_lastPowderPreviewMs;
+        m_lastPowderPreviewMs = now;
         QImage flakes = m_powder.render(affected.size(), float(affected.x()),
                                         float(affected.y()), 1.0f,
                                         m_doc->lightRig(), m_powderPal,
                                         m_doc->paperStock(), m_doc->artScale(1.0f),
-                                        QDateTime::currentMSecsSinceEpoch());
+                                        m_powderShimmerMs);
         {
             QPainter p(&m_scratchTile);
             p.setCompositionMode(QPainter::CompositionMode_Source);
@@ -859,6 +864,8 @@ else if ((m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
     m_powderBlowAge = 0.0f;
     m_powderRenderAcc = 0.0f;
     m_powderHoldEver = false;
+    m_powderShimmerMs = 0;
+    m_lastPowderPreviewMs = 0;
     m_glitterUnion = QRect();
     m_powderUnion = QRect();
 }
@@ -909,10 +916,13 @@ void PaintbrushCanvasItem::renderPowderUnion()
         return;
     captureBeforeRegion(u);
     ensureScratch(u);
+    /* No wall-clock: this is the canonical COMMITTED pass, so the shimmer is
+         * rendered at a deterministic phase (t=0). The static raster result is
+         * invariant to when the stroke finished. */
     QImage flakes = m_powder.render(u.size(), float(u.x()), float(u.y()), 1.0f,
                                     m_doc->lightRig(), m_powderPal,
                                     m_doc->paperStock(), m_doc->artScale(1.0f),
-                                    QDateTime::currentMSecsSinceEpoch());
+                                    0);
     QPainter p(&m_scratchTile);
     p.setCompositionMode(QPainter::CompositionMode_Source);
     p.drawImage(u.topLeft() - m_scratchOrigin, layer->raster, u);

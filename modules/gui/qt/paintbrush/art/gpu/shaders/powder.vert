@@ -14,7 +14,9 @@
 
 layout(location = 0) in vec2 aPos;      // clip-space corner (-1..1)
 
-layout(std140, binding = 0) uniform ubuf {
+// Uniform binding 2 must match powder.frag and the C++ SRB (sampled textures
+// occupy bindings 0 and 1).
+layout(std140, binding = 2) uniform ubuf {
     mat4 qt_Matrix;
     vec2 uViewSize;      // output size in device px
     vec2 uPad0;

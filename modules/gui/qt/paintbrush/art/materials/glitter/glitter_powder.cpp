@@ -985,7 +985,7 @@ QImage GlitterPowder::render(const QSize &outSize, float outOriginWorldX,
                              const PaperStock *paper, const ArtScale &scale,
                              qint64 timeMs) const
 {
-    Q_UNUSED(rig); Q_UNUSED(scale);
+    Q_UNUSED(scale);
     QImage img(outSize, QImage::Format_RGBA8888_Premultiplied);
     img.fill(Qt::transparent);
 
@@ -1013,6 +1013,17 @@ QImage GlitterPowder::render(const QSize &outSize, float outOriginWorldX,
     const int gx0 = std::max(0, cx0), gy0 = std::max(0, cy0);
     const int gx1 = std::min(m_cells.width() - 1, cx1 + 1);
     const int gy1 = std::min(m_cells.height() - 1, cy1 + 1);
+
+    /* Shared ArtLightRig -> the same light context the GPU path and the other
+     * art materials use: L points from the surface toward the key light, H is
+     * the half-vector with the straight-down view. No hardcoded light. */
+    const QVector3D rigDir = rig.unitDirection();          /* points down */
+    QVector3D L = QVector3D(-rigDir.x(), -rigDir.y(), -rigDir.z());
+    if (L.z() < 0.05f)
+        L.setZ(0.05f);
+    L.normalize();
+    const QVector3D Ln = L.normalized();
+    const QVector3D H = (Ln + QVector3D(0.0f, 0.0f, 1.0f)).normalized();
 
     for (int y = gy0; y <= gy1; ++y)
         for (int x = gx0; x <= gx1; ++x)
@@ -1067,10 +1078,7 @@ QImage GlitterPowder::render(const QSize &outSize, float outOriginWorldX,
             const float gy = (atH(0, 1) - atH(0, -1)) * 0.5f;
             const QVector3D N = QVector3D(-gx * 0.9f, -gy * 0.9f, 1.0f).normalized();
 
-            /* top-left key light + camera straight down (half-vector) */
-            const QVector3D L(-0.45f, -0.38f, 0.81f);
-            const QVector3D Ln = L.normalized();
-            const QVector3D H = (Ln + QVector3D(0.0f, 0.0f, 1.0f)).normalized();
+            /* light from the shared rig (outer Ln/H): Lambert + specular */
             const float diff = qMax(0.0f, QVector3D::dotProduct(N, Ln));
             const float spec = qMax(0.0f, QVector3D::dotProduct(N, H));
             const float specPow = std::pow(spec, 45.0f);
@@ -1087,9 +1095,10 @@ QImage GlitterPowder::render(const QSize &outSize, float outOriginWorldX,
             p.setBrush(QColor(0, 0, 0, int(70 * sh + 40 * hFrac)));
             p.drawEllipse(QPointF(px + r * 0.16f, py + r * 0.20f), r, r * 0.96f);
 
-            /* base grain shaded by the Lambert term */
+            /* base grain shaded by the Lambert term and per-grain tone (§ P1-7:
+             * the tone must actually reach the albedo, not be dead code) */
             QColor base = col;
-            base = base.darker(int(100 - 24 * diff));
+            base = base.darker(int(100 - 22 * diff * tone));
             base.setAlpha(int(150 + 90 * hFrac));
             p.setBrush(base);
             p.drawEllipse(QPointF(px, py), r, r);
@@ -1151,26 +1160,28 @@ QImage GlitterPowder::render(const QSize &outSize, float outOriginWorldX,
             }
 
             /* --- holographic shimmer (time-driven sparkle) --------------
-             * A deterministic flake phase sweeps a bright specular glint across
-             * the surface as time advances (the reference's uTime), so the
-             * poured powder visibly "glitters" instead of sitting static. */
+             * Each eligible grain carries a small glint whose BRIGHTNESS pulses
+             * continuously with the explicit render phase t (reference uTime),
+             * so a change in render time always moves the sparkle (no hard
+             * threshold that could stay static between two phases). */
             const float t = (timeMs > 0) ? float((timeMs % 4000) / 1000.0) : 0.0f;
-            const float phase = h4 * 6.2832f + t * (1.0f + 1.3f * hg);
-            const float pulse = 0.5f + 0.5f * std::sin(phase);
-            if (hh > 0.35f && specPow * hFrac > 0.03f
-                && pulse > 0.82f)
+            const float rate = 0.6f + 1.4f * hg;
+            const float phase = h4 * 6.2832f + t * rate;
+            const float amp = 0.5f + 0.5f * std::sin(phase);
+            if (hh > 0.22f && specPow * hFrac > 0.04f && amp > 0.30f)
             {
                 const float sw = qMax(0.35f, r * 0.30f);
-                QColor glintc = col.lighter(int(200 + 55 * pulse));
-                glintc.setAlpha(int(qMin(255.0f, 220 * pulse)));
+                const float alpha = 60.0f + 170.0f * amp;
+                QColor glintc = col.lighter(int(200 + 55 * amp));
+                glintc.setAlpha(int(qMin(255.0f, alpha)));
                 p.setBrush(glintc);
                 p.drawEllipse(QPointF(px + (hf - 0.5f) * r * 0.8f,
                                       py + (hg - 0.5f) * r * 0.8f), sw, sw);
                 /* white core on the brightest flashes */
-                if (pulse > 0.94f)
+                if (amp > 0.90f)
                 {
                     QColor wc(255, 255, 255);
-                    wc.setAlpha(int(200 * (pulse - 0.94f) / 0.06f));
+                    wc.setAlpha(int(200 * (amp - 0.90f) / 0.10f));
                     p.setBrush(wc);
                     p.drawEllipse(QPointF(px + (hf - 0.5f) * r * 0.8f,
                                           py + (hg - 0.5f) * r * 0.8f),

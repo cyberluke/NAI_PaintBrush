@@ -18,6 +18,7 @@
 #include <QRgb>
 #include <QDebug>
 #include <QPainter>
+#include <QDateTime>
 #include <cstring>
 #include <cmath>
 
@@ -119,6 +120,33 @@ QShader fragmentFor(const char *name)
     if (qstrcmp(name, "powder") == 0)
         return loadQsb(kQSB_POWDER_FRAG, sizeof(kQSB_POWDER_FRAG));
     return loadQsb(kQSB_FINISH_FRAG, sizeof(kQSB_FINISH_FRAG));
+}
+
+/* IEEE-754 binary16 encoding for the RGBA16F simulation texture upload.
+ * Keeps the physics' real cell-unit values end-to-end (no 8-bit quantization). */
+quint16 floatToHalf(float f)
+{
+    quint32 x = 0;
+    std::memcpy(&x, &f, 4);                                /* float bits via memcpy (C++17-safe) */
+    const quint32 sign = (x >> 16) & 0x8000u;
+    const int exp = int((x >> 23) & 0xFFu) - 127 + 15;
+    quint32 mant = x & 0x7FFFFFu;
+    if (exp >= 0x1F)
+        return quint16(sign | 0x7C00u);                     /* inf / NaN */
+    if (exp <= 0)
+    {
+        if (exp < -10)
+            return quint16(sign);                           /* underflow to 0 */
+        mant = (mant | 0x800000u) >> (1 - exp);             /* subnormal */
+        return quint16(sign | (mant + 0x1000u) >> 13);
+    }
+    quint32 m = mant >> 13;
+    const quint32 rem = mant & 0x1FFFu;
+    if (rem > 0x1000u || (rem == 0x1000u && (m & 1u)))
+        ++m;                                                /* round-to-nearest-even */
+    if ((m & 0x7C00u) == 0x7C00u)
+        return quint16(sign | 0x7C00u);                     /* rounded up to inf */
+    return quint16(sign | (quint32(exp) << 10) | m);
 }
 
 /* The full-screen quad as a 6-vertex TRIANGLE LIST (two CCW triangles) —
@@ -261,15 +289,20 @@ bool GpuRuntime::initialize(bool preferD3D11)
         return false;
     m_pipelines->powderBindings = m_rhi->newShaderResourceBindings();
     {
-        m_powderSimDummy = m_rhi->newTexture(QRhiTexture::RGBA8, QSize(1, 1), 1, {});
+        /* dummies keep the SRB valid at create; the sim sampler is a float
+         * filter, so its dummy is RGBA16F (format-compatible) */
+        m_powderSimDummy = m_rhi->newTexture(QRhiTexture::RGBA16F, QSize(1, 1), 1, {});
         m_powderSimDummy->create();
         m_powderColDummy = m_rhi->newTexture(QRhiTexture::RGBA8, QSize(1, 1), 1, {});
         m_powderColDummy->create();
+        m_powderColDummyB = m_rhi->newTexture(QRhiTexture::RGBA8, QSize(1, 1), 1, {});
+        m_powderColDummyB->create();
     }
     m_pipelines->powderBindings->setBindings({
         QRhiShaderResourceBinding::uniformBuffer(2, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage, m_pipelines->powderUb),
         QRhiShaderResourceBinding::sampledTexture(0, QRhiShaderResourceBinding::FragmentStage, m_powderSimDummy, m_pipelines->powderSim),
         QRhiShaderResourceBinding::sampledTexture(1, QRhiShaderResourceBinding::FragmentStage, m_powderColDummy, m_pipelines->powderCol),
+        QRhiShaderResourceBinding::sampledTexture(3, QRhiShaderResourceBinding::FragmentStage, m_powderColDummyB, m_pipelines->powderCol),
     });
     if (!m_pipelines->powderBindings->create())
         return false;
@@ -395,6 +428,8 @@ void GpuRuntime::shutdown()
     m_powderSimDummy = nullptr;
     delete m_powderColDummy;
     m_powderColDummy = nullptr;
+    delete m_powderColDummyB;
+    m_powderColDummyB = nullptr;
     delete m_pipelines;
     m_pipelines = nullptr;
     delete m_rhi;
@@ -806,52 +841,71 @@ QImage GpuRuntime::renderPowder(const QSize &outSize,
     const int W = powder.cellW();
     const int H = powder.cellH();
     const int dpr = qMax(1, uiDpr);
-
-    /* --- per-cell sim + colour textures (RGBA8, ours -> the reference) ----
-     *  uSim: r=height(grain cells)  g=seed(0..1)  b=stuck  a=glue
-     *  uCol: r=looseA slot  g=looseF(share of B)  b=bondedA  a=bondedF */
-    QByteArray simBuf(W * H * 4, '\0');
-    QByteArray colBuf(W * H * 4, '\0');
     const int palN = qMax(1, pal.colors.size());
+
+    /* --- FLOAT simulation texture (RGBA16F) ----------------------------
+     * Preserves the REAL cell-unit heights/stuck/glue as the physics has them
+     * (no 0..15 -> 0..1 quantization), so the shader's reference thresholds
+     * see the actual values. r=height g=seed b=stuck a=glue */
+    QByteArray simHalf(W * H * 4 * 2, '\0');     /* 4 channels x float16 */
+    quint8 *sim8 = reinterpret_cast<quint8 *>(simHalf.data());
     for (int y = 0; y < H; ++y)
     {
         for (int x = 0; x < W; ++x)
         {
             const glitter::PowderCell &c = powder.powderCellAt(y * W + x);
-            const int o = (y * W + x) * 4;
-            simBuf[o + 0] = quint8(qBound(0.0f, c.height, 15.0f) * (255.0f / 15.0f));
-            simBuf[o + 1] = quint8(qBound(0.0f, c.seed, 1.0f) * 255.0f);
-            simBuf[o + 2] = quint8(qBound(0.0f, c.stuck, 15.0f) * (255.0f / 15.0f));
-            simBuf[o + 3] = quint8(qBound(0.0f, c.glue, 1.0f) * 255.0f);
-            colBuf[o + 0] = quint8(qBound(0, c.lA, palN - 1));
-            colBuf[o + 1] = quint8(qBound(0.0f, c.lF, 1.0f) * 255.0f);
-            colBuf[o + 2] = quint8(qBound(0, c.sA, palN - 1));
-            colBuf[o + 3] = quint8(qBound(0.0f, c.sF, 1.0f) * 255.0f);
+            const quint16 vh = floatToHalf(c.height);
+            const quint16 vs = floatToHalf(c.seed);
+            const quint16 vb = floatToHalf(c.stuck);
+            const quint16 va = floatToHalf(c.glue);
+            quint8 *p = sim8 + size_t(y * W + x) * 8;
+            p[0] = quint8(vh & 0xFF);   p[1] = quint8(vh >> 8);
+            p[2] = quint8(vs & 0xFF);   p[3] = quint8(vs >> 8);
+            p[4] = quint8(vb & 0xFF);   p[5] = quint8(vb >> 8);
+            p[6] = quint8(va & 0xFF);   p[7] = quint8(va >> 8);
         }
     }
 
-    QRhiTexture *simTex = m_rhi->newTexture(QRhiTexture::RGBA8, QSize(W, H), 1, {});
-    QRhiTexture *colTex = m_rhi->newTexture(QRhiTexture::RGBA8, QSize(W, H), 1, {});
-    if (!simTex->create() || !colTex->create())
-        return {};
+    /* --- two-slot colour textures (RGBA8) ------------------------------
+     *  uColL: r=loose slotA  g=loose shareF  b=loose slotB
+     *  uColB: r=bonded slotA g=bonded shareF b=bonded slotB
+     * B is a real palette slot (may differ from A arbitrarily). a unused. */
+    QByteArray colLBuf(W * H * 4, '\0');
+    QByteArray colBBuf(W * H * 4, '\0');
+    for (int y = 0; y < H; ++y)
+    {
+        for (int x = 0; x < W; ++x)
+        {
+            const glitter::PowderCell &c = powder.powderCellAt(y * W + x);
+            const size_t o = size_t(y * W + x) * 4;
+            colLBuf[o + 0] = quint8(qBound(0, c.lA, palN - 1));
+            colLBuf[o + 1] = quint8(qBound(0.0f, c.lF, 1.0f) * 255.0f);
+            colLBuf[o + 2] = quint8(qBound(0, c.lB, palN - 1));
+            colBBuf[o + 0] = quint8(qBound(0, c.sA, palN - 1));
+            colBBuf[o + 1] = quint8(qBound(0.0f, c.sF, 1.0f) * 255.0f);
+            colBBuf[o + 2] = quint8(qBound(0, c.sB, palN - 1));
+        }
+    }
 
-    /* light context (same as renderGlitter / CPU makeLight) */
-    const QVector3D d = rig.unitDirection();
+    QRhiTexture *simTex = m_rhi->newTexture(QRhiTexture::RGBA16F, QSize(W, H), 1, {});
+    QRhiTexture *colLTex = m_rhi->newTexture(QRhiTexture::RGBA8, QSize(W, H), 1, {});
+    QRhiTexture *colBTex = m_rhi->newTexture(QRhiTexture::RGBA8, QSize(W, H), 1, {});
+    if (!simTex->create() || !colLTex->create() || !colBTex->create())
+        return {};
+    /* a float sampler needs a linear float filter on most backends */
+    QRhiSampler *simSampler = m_rhi->newSampler(QRhiSampler::Linear, QRhiSampler::Linear,
+                                                QRhiSampler::None, QRhiSampler::ClampToEdge,
+                                                QRhiSampler::ClampToEdge);
+
+    /* light context from the shared ArtLightRig (same derivation as CPU) */
+    const QVector3D d = rig.unitDirection();       /* points down onto paper */
     QVector3D L(-d.x(), -d.y(), -d.z());
     if (L.z() < 0.05f)
         L.setZ(0.05f);
     L.normalize();
-    const QVector3D Hv(0.0f, 0.0f, 1.0f);
-    const QVector3D Hh = (L + Hv).normalized();
-    const float pxPerWorld = 1.0f / worldPerPx;
 
-    /* uLight is the key-light POSITION in scene px (like the reference); put
-     * it up-left of centre so flakes catch it from the same direction as L */
-    const float lightPxX = outSize.width() * 0.42f;
-    const float lightPxY = outSize.height() * 0.30f;
-
-    /* --- ubuf (std140) -------------------------------------------------- */
-    static const int kUbSize = 256;
+    /* --- ubuf (std140), see powder.frag --------------------------------- */
+    static const int kUbSize = 512;
     QByteArray ub(kUbSize, 0);
     auto wf = [&ub](int off, float v) { std::memcpy(ub.data() + off, &v, 4); };
     auto wv2 = [&ub](int off, float a, float b) { float t[2] = { a, b }; std::memcpy(ub.data() + off, t, 8); };
@@ -866,37 +920,36 @@ QImage GpuRuntime::renderPowder(const QSize &outSize,
     wf(88, float(dpr));                                                 /* uDpr */
     wf(92, float(timeMs) / 1000.0f);                                    /* uTime */
     wv2(96, float(W), float(H));                                        /* uGrid */
-    wv2(112, lightPxX, lightPxY);                                       /* uLight */
-    wf(120, pal.holographic);                                           /* uHolo */
-    wf(124, float(dpr * 5));                                            /* uFlakePx (device px) */
-    wf(128, paper ? paper->tooth : 0.4f);                               /* uTooth */
-    wv3(136, pal.paper.redF(), pal.paper.greenF(), pal.paper.blueF());  /* uPaper */
-    for (int i = 0; i < qMin(palN, 4); ++i)
+    wf(104, pal.holographic);                                           /* uHolo */
+    wf(108, float(dpr * 5));                                            /* uFlakePx */
+    wf(112, paper ? paper->tooth : 0.4f);                               /* uTooth */
+    wv3(128, L.x(), L.y(), L.z());                                      /* uLightDir */
+    wv3(144, pal.paper.redF(), pal.paper.greenF(), pal.paper.blueF());  /* uPaper */
+    for (int i = 0; i < qMin(palN, 16); ++i)                            /* uPal[16] */
     {
         const QColor &c = pal.colors.at(i);
-        wv3(160 + i * 16, c.redF(), c.greenF(), c.blueF());             /* uPal[i] */
+        wv3(160 + i * 16, c.redF(), c.greenF(), c.blueF());
     }
 
-    /* build owned RGBA8888 images for the upload (the QRhi upload helper takes
-     * a QImage, mirroring the finish pass) */
-    QImage simRaw((const uchar *)simBuf.constData(), W, H, W * 4, QImage::Format_RGBA8888);
-    QImage simImg = simRaw.copy();
-    QImage colRaw((const uchar *)colBuf.constData(), W, H, W * 4, QImage::Format_RGBA8888);
-    QImage colImg = colRaw.copy();
-
     QRhiResourceUpdateBatch *u = m_rhi->nextResourceUpdateBatch();
-    u->uploadTexture(simTex, simImg);
-    u->uploadTexture(colTex, colImg);
+    /* raw float16 upload for the sim texture (tightly packed 4xH=RGBA) */
+    u->uploadTexture(simTex, { QRhiTextureUploadEntry(0, 0,
+                            QRhiTextureSubresourceUploadDescription(simHalf.constData(),
+                                                                    quint32(simHalf.size()))) });
+    /* colour textures as owned QImages (removes the colour swap on ARGB) */
+    QImage colL((const uchar *)colLBuf.constData(), W, H, W * 4, QImage::Format_RGBA8888);
+    QImage colB((const uchar *)colBBuf.constData(), W, H, W * 4, QImage::Format_RGBA8888);
+    u->uploadTexture(colLTex, colL.copy());
+    u->uploadTexture(colBTex, colB.copy());
     u->updateDynamicBuffer(m_pipelines->powderUb, 0, kUbSize, ub.constData());
 
-    /* per-call SRB with the same binding layout the powder pipeline was built
-     * against (QRhi uses the pipeline's SRB only for the layout, the actual
-     * textures come from setShaderResources) — mirrors the finish pass */
+    /* per-call SRB (layout must match the powder pipeline's) */
     QRhiShaderResourceBindings *srb = m_rhi->newShaderResourceBindings();
     srb->setBindings({
         QRhiShaderResourceBinding::uniformBuffer(2, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage, m_pipelines->powderUb),
-        QRhiShaderResourceBinding::sampledTexture(0, QRhiShaderResourceBinding::FragmentStage, simTex, m_pipelines->powderSim),
-        QRhiShaderResourceBinding::sampledTexture(1, QRhiShaderResourceBinding::FragmentStage, colTex, m_pipelines->powderCol),
+        QRhiShaderResourceBinding::sampledTexture(0, QRhiShaderResourceBinding::FragmentStage, simTex, simSampler),
+        QRhiShaderResourceBinding::sampledTexture(1, QRhiShaderResourceBinding::FragmentStage, colLTex, m_pipelines->powderCol),
+        QRhiShaderResourceBinding::sampledTexture(3, QRhiShaderResourceBinding::FragmentStage, colBTex, m_pipelines->powderCol),
     });
     if (!srb->create())
         return {};
@@ -919,9 +972,11 @@ QImage GpuRuntime::renderPowder(const QSize &outSize,
 
     delete vb;
     delete srb;
+    delete simSampler;
     QImage result = readback(m_target, outSize);
     delete simTex;
-    delete colTex;
+    delete colLTex;
+    delete colBTex;
     return unPremultiply(result);
 }
 

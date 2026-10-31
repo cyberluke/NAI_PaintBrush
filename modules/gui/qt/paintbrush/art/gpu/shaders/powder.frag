@@ -1,18 +1,27 @@
 // powder.frag — NAI Paintbrush GPU glitter powder (reference-faithful port)
 //
 // Direct port of cray4pasta/glitter-powder's GPU fragment shader to the
-// Paintbrush RHI: the powder heightfield (uSim) is turned into packed glass
-// beads (Voronoi), smooth multi-scale normals, image-based specular,
-// holographic flakes that shimmer with uTime, wet-glue gloss, a soft contact
-// shadow and additive bloom. Coordinates are world-space (top-left origin);
-// the fragment position `vPin` is device px (y down) matched to the layer
-// raster the canvas composites into.
+// Paintbrush RHI. The powder heightfield (uSim, RGBA16F floating point) is
+// turned into packed glass beads (Voronoi), smooth multi-scale normals,
+// image-based specular, holographic flakes that shimmer with uTime, wet-glue
+// gloss, a soft contact shadow and additive bloom.
+//
+// Coordinate model: the fragment position `vPin` is device px (top-left
+// origin, y down). Every world position is derived ONCE as
+//     world = uWorldOrigin + px * uWorldPerPx
+// so grain/flake lookups use the same absolute world space as the CPU physics
+// and stay spatially stable across output size, crop origin and DPR.
+//
+// Lighting: uLightDir is the normalized direction to the key light (from the
+// shared ArtLightRig, in the same coordinate unit as the surface) — no
+// pixel-space light, no hardcoded top-left source.
 #version 440
 
 layout(location = 0) in vec2 vPin;      // device px, top-left, y down
 
-layout(binding = 0) uniform sampler2D uSim;   // r=height(grain),g=seed,b=stuck,a=glue
-layout(binding = 1) uniform sampler2D uCol;   // per-cell: r=looseA,g=looseF,b=bondedA,a=bondedF
+layout(binding = 0) uniform sampler2D uSim;    // RGBA16F: r=height g=seed b=stuck a=glue (real cell units)
+layout(binding = 1) uniform sampler2D uColL;   // RGBA8 loose: r=slotA g=shareF b=slotB
+layout(binding = 3) uniform sampler2D uColB;   // RGBA8 bonded: r=slotA g=shareF b=slotB
 
 layout(std140, binding = 2) uniform ubuf {
     mat4 qt_Matrix;
@@ -23,20 +32,20 @@ layout(std140, binding = 2) uniform ubuf {
     float uDpr;            // device-pixel ratio (>= 1 for hi-dpi)
     float uTime;           // seconds, drives the holographic shimmer
     vec2 uGrid;            // sim grid size (cells)
-    vec2 uPadA;
-    vec2 uLight;           // key light position (scene px)
     float uHolo;           // 0 metallic ... 1 rainbow (shimmer)
     float uFlakePx;        // holographic flake spacing (device px)
     float uTooth;          // 0..1 paper tooth (subtle base noise)
-    float uPadB;
+    float uPad0;
+    vec3 uLightDir;        // normalized direction to the key light
+    float uPad1;
     vec3 uPaper;           // paper colour
-    float uPadC;
-    vec3 uPal[4];          // powder palette (slots; tint + two mix slots)
+    float uPad2;
+    vec3 uPal[16];         // powder palette slots
 };
 
 layout(location = 0) out vec4 fragColor;
 
-// ---- hashing (reference art_noise-style) ------------------------------
+// ---- hashing (reference noise) ---------------------------------------
 float hash12(vec2 p)
 {
     vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
@@ -51,7 +60,7 @@ vec3 hash32(vec2 p)
 }
 vec3 clamp01v(vec3 x) { return clamp(x, 0.0, 1.0); }
 
-// ---- heightfield -------------------------------------------------------
+// ---- heightfield (real float values, no quantization) ----------------
 vec2 simUV(vec2 world) { return world / (uWorldCell * uGrid); }
 float heightAt(vec2 world)
 {
@@ -61,24 +70,30 @@ float seedAt(vec2 world)
 {
     return texture(uSim, clamp(simUV(world), 0.001, 0.999)).g;
 }
-vec4 simAtCell(vec2 worldCell)   // per-cell (texelFetch) data
+vec4 simAtCell(vec2 worldCell)
 {
-    ivec2 c = ivec2(clamp(ivec2(floor(worldCell)), ivec2(0),
-                          ivec2(uGrid) - ivec2(1)));
+    ivec2 c = ivec2(clamp(ivec2(floor(worldCell)), ivec2(0), ivec2(uGrid) - ivec2(1)));
     return texelFetch(uSim, c, 0);
+}
+
+// Real two-slot colour: choose A (slot v.r) or B (slot v.b) by share v.g.
+// Preserves discrete colours; B may be any palette slot (not A+1).
+vec3 slotColour(int a, int b, float share, float pick)
+{
+    if (pick < share && b >= 0)
+        return uPal[clamp(b, 0, 15)];
+    return uPal[clamp(a, 0, 15)];
 }
 vec3 cellColour(ivec2 c, float pick, bool loose)
 {
-    vec4 v = texelFetch(uCol, c, 0);
-    vec2 lv = loose ? v.rg : v.ba;
-    int a = int(lv.x);
-    int b = int(lv.x) + 1;   // blend toward the next slot by share
-    float share = clamp(lv.y, 0.0, 1.0);
-    vec3 A = uPal[clamp(a, 0, 3)];
-    vec3 B = uPal[clamp(b, 0, 3)];
-    return mix(A, B, pick < share ? 1.0 : 0.0);
+    vec4 v;
+    if (loose)
+        v = texelFetch(uColL, c, 0);
+    else
+        v = texelFetch(uColB, c, 0);
+    return slotColour(int(v.r + 0.5), int(v.b + 0.5), clamp(v.g, 0.0, 1.0), pick);
 }
-// thin-film interference for holographic flakes
+
 vec3 thinFilm(float cosI, float d)
 {
     const float n = 1.5;
@@ -91,7 +106,6 @@ vec3 thinFilm(float cosI, float d)
 }
 vec3 tintSpec(vec3 c) { return c / max(max(c.r, max(c.g, c.b)), 0.04); }
 
-// ---- holographic flake sparkle (shimmers under uTime) -----------------
 vec3 flakeLight(vec2 sidSeed, float chance, float flatness,
                 vec3 N, vec3 L, vec3 H, vec3 tint,
                 out vec3 rainbow, out float isFlake)
@@ -122,14 +136,14 @@ void main()
     float unit = min(uViewSize.x, uViewSize.y);
     vec2 p = (vPin - 0.5 * uViewSize) / unit;
 
-    // world coordinate of this fragment (top-left origin, y down)
+    // the one world mapping used everywhere below
     vec2 world = uWorldOrigin + vPin * uWorldPerPx;
 
-    // ---- surface from the heightfield -------------------------------
+    // ---- surface from the float heightfield -------------------------
     vec4 sim = simAtCell(world / uWorldCell);
     float h = texture(uSim, clamp(simUV(world), 0.001, 0.999)).r;
     float stuckLow = sim.b;
-    float glueAmtCell = sim.a;
+    float glueAmtCell = sim.a;                     // cell-res glue (our sim's truth)
     float bonded = smoothstep(0.02, 0.25, stuckLow);
     float looseH = max(h - stuckLow, 0.0);
 
@@ -142,22 +156,21 @@ void main()
         grad += vec2(heightAt(world + vec2(o, 0.0)) - heightAt(world - vec2(o, 0.0)),
                      heightAt(world + vec2(0.0, o)) - heightAt(world - vec2(0.0, o))) / w;
     }
-    grad /= (uWorldCell / (uWorldPerPx * uDpr));   // normalize by cell px
-    vec3 N = normalize(vec3(-grad * 3.0, 1.0));
+    vec3 N = normalize(vec3(-grad * (uWorldCell / uWorldPerPx), 1.0));
 
-    vec3 L = normalize(vec3(uLight - p, 0.6));
+    vec3 L = normalize(uLightDir);
     vec3 H = normalize(L + vec3(0.0, 0.0, 1.0));
 
     // ---- paper with a soft cast shadow ------------------------------
-    vec2 away = normalize(p - uLight + 1e-4);
+    vec2 away = normalize(uLightDir.xy) * -1.0;
     float sh = 0.0;
     for (int k = 1; k <= 3; k++)
-        sh += smoothstep(0.3, 7.0 * (uWorldPerPx / uDpr), heightAt(world - away * float(k) * 7.0 * uWorldCell));
+        sh += smoothstep(0.3, 7.0, heightAt(world - away * float(k) * 7.0 * uWorldCell));
     float shadow = 0.10 * sh / 3.0 + 0.06 * smoothstep(0.1, 1.0, h);
     vec3 bg = uPaper - shadow * vec3(1.0, 1.0, 0.97);
 
     // ---- grain field (packed glass beads via Voronoi) ---------------
-    float scale = unit / (1.0 * uDpr);              // ~1 px per grain
+    float scale = unit / max(1.0, uDpr);           // ~1 px per grain
     vec2 g = p * scale;
     vec2 gi = floor(g), gf = fract(g);
     float b1 = 8.0, b2 = 8.0;
@@ -175,8 +188,9 @@ void main()
     float dist = sqrt(b1);
     float edge = sqrt(b2) - dist;
 
-    // grain centre world cell + shuffle seed (disturbed grains look fresh)
-    vec2 gcWorld = (bPt / scale) * unit + uWorldOrigin + vPin * uWorldPerPx;
+    // grain centre: Voronoi id -> viewport px -> world (single mapping)
+    vec2 grainPx = (bPt / scale) * unit + 0.5 * uViewSize;
+    vec2 gcWorld = uWorldOrigin + grainPx * uWorldPerPx;
     ivec2 scC = ivec2(clamp(ivec2(floor(gcWorld / uWorldCell)), ivec2(0), ivec2(uGrid) - ivec2(1)));
     float s = seedAt(gcWorld);
     vec2 sid = bId + s * 13.17;
@@ -184,7 +198,6 @@ void main()
     vec3 gh2 = hash32(sid * 1.37 + 5.1);
     vec3 gh3 = hash32(sid * 0.73 + 19.0);
 
-    // grain colour from a jittered cell near its centre (loose or bonded)
     vec3 gj = hash32(sid * 2.31 + 9.7);
     vec2 gcJit = gcWorld + (gj.xy - 0.5) * uWorldCell * 1.6;
     ivec2 ccC = ivec2(clamp(ivec2(floor(gcJit / uWorldCell)), ivec2(0), ivec2(uGrid) - ivec2(1)));
@@ -218,7 +231,7 @@ void main()
     vec3 gapPowder = tint * 0.935 * (0.76 + 0.26 * macroDiff);
     vec3 col = mix(mix(bg, gapPowder, deep), bead, inBead * present);
 
-    // ---- wet glue (clear raised glossy line) ------------------------
+    // ---- wet glue (clear raised glossy line; cell-res measured surface)
     float wet = smoothstep(0.08, 0.5, glueAmtCell) * (1.0 - bonded)
               * (1.0 - smoothstep(0.05, 0.6, h));
     if (wet > 0.001)
@@ -233,7 +246,7 @@ void main()
     }
 
     // ---- larger holographic flakes + bloom --------------------------
-    float fscale = unit / (uFlakePx * uDpr);
+    float fscale = unit / max(1.0, uFlakePx);
     vec2 fg = p * fscale;
     vec2 fi = floor(fg);
     vec3 bloom = vec3(0.0);
@@ -243,7 +256,9 @@ void main()
         vec2 id = fi + vec2(float(x), float(y));
         vec3 r1 = hash32(id * 1.91 + 2.7);
         vec2 c = id + 0.2 + 0.6 * r1.yz;
-        vec2 cWorld = ((c / fscale) * unit) + uWorldOrigin + vPin * uWorldPerPx;
+        // flake centre: Voronoi id -> viewport px -> world
+        vec2 cPx = (c / fscale) * unit + 0.5 * uViewSize;
+        vec2 cWorld = uWorldOrigin + cPx * uWorldPerPx;
         ivec2 ct = ivec2(clamp(ivec2(floor(cWorld / uWorldCell)), ivec2(0), ivec2(uGrid) - ivec2(1)));
         vec4 cs = texelFetch(uSim, ct, 0);
         float glueF = cs.a * smoothstep(0.02, 0.25, cs.b);

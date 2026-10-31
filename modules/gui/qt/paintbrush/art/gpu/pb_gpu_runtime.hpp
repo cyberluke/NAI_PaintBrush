@@ -144,6 +144,7 @@ private:
     /* powder SRB placeholders, replaced per renderPowder call */
     QRhiTexture *m_powderSimDummy = nullptr;
     QRhiTexture *m_powderColDummy = nullptr;
+    QRhiTexture *m_powderColDummyB = nullptr;
 
     QImage readback(QRhiTexture *tex, const QSize &size);
     bool ensureTarget(const QSize &size);
