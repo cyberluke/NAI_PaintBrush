@@ -47,7 +47,6 @@ Item {
         { toolId: 16, iconSource: "bristle",         tip: qsTr("Bristle Paint") },
         { toolId: 17, iconSource: "glitter",         tip: qsTr("Glitter") },
         { toolId: 18, iconSource: "glitter",         tip: qsTr("Glitter Powder") },
-        { toolId: 19, iconSource: "brush",           tip: qsTr("Smear") },
         { toolId: 10, iconSource: "line",            tip: qsTr("Line") },
         { toolId: 11, iconSource: "rect",            tip: qsTr("Rectangle") },
         { toolId: 12, iconSource: "rounded_rect",    tip: qsTr("Rounded Rectangle") },

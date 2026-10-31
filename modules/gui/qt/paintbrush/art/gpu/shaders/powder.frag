@@ -36,7 +36,8 @@ layout(std140, binding = 2) uniform ubuf {
     float uHolo;           // 0 metallic ... 1 rainbow (shimmer)
     float uFlakePx;        // holographic flake spacing (device px)
     float uTooth;          // 0..1 paper tooth (subtle base noise)
-    float uPad0;
+    float uMaterialMode;   // 0 = REFERENCE_SURFACE (opaque paper+powder)
+                           // 1 = MATERIAL_LAYER (transparent material only)
     vec3 uLightDir;        // normalized direction to the key light
     float uPad1;
     vec3 uPaper;           // paper colour
@@ -286,5 +287,69 @@ void main()
     }
     col += bloom;
 
-    fragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+    /* ---- MATERIAL_LAYER output contract -------------------------------
+     * A Paintbrush powder/material layer must be transparent outside its
+     * physical material: background paper is NEVER emitted (the document
+     * compositor owns PaperStock). The powder/glue/shadow contribution is
+     * assembled over transparent and given a physical coverage alpha, so the
+     * layer composites cleanly onto the paper beneath it.
+     *
+     * REFERENCE_SURFACE (mode 0) keeps the standalone reference harness's
+     * contract: opaque paper + powder. Same shading equations in both modes;
+     * only the final assembly (bg/alpha) differs. */
+    if (uMaterialMode >= 0.5)
+    {
+        /* physical material coverage: a grain bead, loose/gap powder under
+         * it, and wet glue are all supporting material. */
+        float support = max(inBead * present, deep);
+        float glueA = smoothstep(0.08, 0.5, glueAmtCell) * (1.0 - bonded)
+                    * (1.0 - smoothstep(0.05, 0.6, h));
+        glueA = max(glueA, 0.0);
+
+        /* material colour over transparent: dust/gap powder fades in with the
+         * heap depth, then beads sit on top and wet glue glosses over. */
+        vec3 mat = gapPowder * deep;
+        mat = mix(mat, bead, inBead * present);
+        if (glueA > 0.001)
+        {
+            vec2 gGm = vec2(heightAt(world + vec2(uWorldCell, 0.0)) - heightAt(world - vec2(uWorldCell, 0.0)),
+                            heightAt(world + vec2(0.0, uWorldCell)) - heightAt(world - vec2(0.0, uWorldCell)));
+            vec3 Ng = normalize(vec3(-gGm * 2.2, 1.0));
+            float rim = clamp(length(gGm) * 1.6, 0.0, 1.0);
+            float gloss = pow(max(dot(Ng, H), 0.0), 70.0);
+            /* translucent raised gloss, NOT paper-tinted: a clear film that
+             * stages slight specular. */
+            vec3 glueCol = vec3(0.9, 0.92, 0.95) * (0.925 - 0.12 * rim) + gloss * 0.85;
+            mat = mix(mat, glueCol, glueA);
+        }
+        /* soft contact shadow rides WITH the material (dimming it), never
+         * baked onto paper. Matches the CPU material renderer, which darkens
+         * the tint colour by the shadow but never drives a grain to pure
+         * black: cap the reduction so the material body keeps its colour. */
+        float shadowCap = clamp(shadow, 0.0, 0.5);
+        mat = mat * (1.0 - 0.55 * shadowCap);
+
+        float a = clamp(support, 0.0, 1.0)
+                + 0.5 * smoothstep(0.08, 0.3, glueA);
+        a = min(a, 1.0);
+
+        /* no pure-black material: this palette has no black colour, so a
+         * material pixel with real coverage must keep a faint tinted body even
+         * inside the deepest contact shadow — never collapse to (0,0,0).
+         * Apply the floor to the PREMULTIPLIED output (mat*a), so a grain with
+         * low alpha still reads a tinted color rather than rounding to black. */
+        vec3 outCol = mat * a;
+        float outLum = dot(outCol, vec3(0.299, 0.587, 0.114));
+        float floorV = 0.012 + 0.05 * a * (1.0 - dot(mat, vec3(0.333)));
+        if (a > 0.03 && outLum < floorV)
+            outCol = vec3(floorV, floorV * 0.97, floorV * 1.02);
+
+        /* outside support: fully transparent (no opaque rectangle) */
+        fragColor = vec4(outCol, a);
+    }
+    else
+    {
+        /* reference surface: opaque paper + powder (standalone harness) */
+        fragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+    }
 }

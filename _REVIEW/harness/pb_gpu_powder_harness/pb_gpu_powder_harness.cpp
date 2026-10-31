@@ -265,7 +265,21 @@ static QImage renderScene(GpuRuntime &rt, const Scene &s,
 {
     return rt.renderPowder(QSize(512, 512), s.g, s.pal,
                            originX, originY, worldPerPx, rig, paper,
-                           timeMs, uiDpr);
+                           timeMs, uiDpr,
+                           GpuRuntime::PowderOutput::ReferenceSurface);
+}
+
+/* Render the same scene through the MATERIAL_LAYER contract (transparent
+ * outside the physical material), used by the CPU-vs-GPU parity gate. */
+static QImage renderSceneLayer(GpuRuntime &rt, const Scene &s,
+                               float originX, float originY, float worldPerPx,
+                               const ArtLightRig &rig, const PaperStock *paper,
+                               qint64 timeMs, int uiDpr = 1)
+{
+    return rt.renderPowder(QSize(512, 512), s.g, s.pal,
+                           originX, originY, worldPerPx, rig, paper,
+                           timeMs, uiDpr,
+                           GpuRuntime::PowderOutput::MaterialLayer);
 }
 
 static bool savePng(const QImage &img, const QString &path)
@@ -546,6 +560,152 @@ int main(int argc, char **argv)
 
     /* ---- glue state actually bonds ------------------------------------ */
     CHECK("glue heap has bonded cells", glue.g.bondedCount() > 0);
+
+    /* -----------------------------------------------------------
+     * P0.5 MATERIAL_LAYER parity gate: same serialized state rendered through
+     * the CPU material renderer and the GPU MATERIAL_LAYER contract must agree
+     * on transparent extent / no opaque rectangle / no pure-black material.
+     * ----------------------------------------------------------- */
+    {
+        /* transparent material layer + one long pink stroke -> commit. */
+        GlitterPowder stroke; stroke.reset(QSize(256, 256), 4.0f, 3u);
+        GlitterParams p; p.amount = 0.9f; p.flakeSize = 0.8f;
+        p.color = QColor("#f2a7c8");
+        /* a long horizontal stroke across the heap centre. */
+        const float yc = (256 / 2.0f) * 4.0f;
+        for (float sx = yc - 128.0f * 4.0f; sx <= yc + 128.0f * 4.0f; sx += 6.0f)
+            stroke.pourGlitter(sx, yc, 18.0f, p);
+        stroke.relax(); stroke.relax();
+
+        const float ox = 384.0f, oy = 384.0f, perPx = 0.5f;
+        GpuRuntime rtL; rtL.initialize(true);
+        if (rtL.isReady())
+        {
+            /* GPU material layer render of the same state. */
+            QImage gpuL = renderSceneLayer(rtL, Scene{ stroke, pal }, ox, oy, perPx, rig0, paper, T0);
+            QImage gpuRef = renderScene(rtL, Scene{ stroke, pal }, ox, oy, perPx, rig0, paper, T0);
+
+            /* CPU material renderer of the same state (the canonical path). */
+            QImage cpuL = stroke.render(QSize(512, 512), ox, oy, perPx,
+                                        rig0, pal, nullptr, ArtScale(), 0);
+            gpuL = gpuL.convertToFormat(QImage::Format_ARGB32);
+            gpuRef = gpuRef.convertToFormat(QImage::Format_ARGB32);
+            cpuL = cpuL.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+
+            /* --- transparent extent: outside material support alpha must be 0 */
+
+            /* bounding boxes of non-transparent pixels (alpha > 8). */
+            auto alphaBounds = [](const QImage &i, int &mnx, int &mny, int &mxx, int &mxy)
+            {
+                mnx = i.width(); mny = i.height(); mxx = -1; mxy = -1; qint64 n = 0;
+                for (int y = 0; y < i.height(); ++y)
+                {
+                    const QRgb *row = reinterpret_cast<const QRgb *>(i.constScanLine(y));
+                    for (int x = 0; x < i.width(); ++x)
+                        if (qAlpha(row[x]) > 8) { if (x < mnx) mnx = x; if (x > mxx) mxx = x;
+                                                  if (y < mny) mny = y; if (y > mxy) mxy = y; ++n; }
+                }
+                return n;
+            };
+            int gmnx, gmny, gmxx, gmxy, cmnx, cmny, cmxx, cmxy;
+            const qint64 gn = alphaBounds(gpuL, gmnx, gmny, gmxx, gmxy);
+            const qint64 cn = alphaBounds(cpuL, cmnx, cmny, cmxx, cmxy);
+
+            /* identical transparent extent within a tolerance (a grain-radius
+             * slack on each side covers the CPU coarsening / GPU Voronoi). */
+            const int slack = 14;
+            const bool sameExtent =
+                std::abs(gmnx - cmnx) <= slack && std::abs(gmny - cmny) <= slack
+                && std::abs(gmxx - cmxx) <= slack && std::abs(gmxy - cmxy) <= slack;
+            std::printf("    material extent  gpu=(%d,%d)-(%d,%d) n=%lld  cpu=(%d,%d)-(%d,%d) n=%lld\n",
+                        gmnx, gmny, gmxx, gmxy, (long long)gn, cmnx, cmny, cmxx, cmxy, (long long)cn);
+            CHECK("MATERIAL_LAYER transparent extent matches CPU", sameExtent && gn > 0);
+
+            /* no opaque rectangle: far-corner pixels must be fully transparent. */
+            const bool cornersTransparent =
+                qAlpha(gpuL.pixel(8, 8)) <= 8 && qAlpha(gpuL.pixel(503, 8)) <= 8
+                && qAlpha(gpuL.pixel(8, 503)) <= 8 && qAlpha(gpuL.pixel(503, 503)) <= 8;
+            CHECK("MATERIAL_LAYER no opaque rectangle (corners transparent)", cornersTransparent);
+
+            /* no pure-black material unless black is in the palette. */
+            const bool hasBlackPal = std::any_of(pal.colors.cbegin(), pal.colors.cend(),
+                [](const QColor &c) { return c.redF() == 0.0f && c.greenF() == 0.0f && c.blueF() == 0.0f; });
+            qint64 blackMat = 0;
+            for (int y = 0; y < gpuL.height(); ++y)
+            {
+                const QRgb *row = reinterpret_cast<const QRgb *>(gpuL.constScanLine(y));
+                for (int x = 0; x < gpuL.width(); ++x)
+                    if (qAlpha(row[x]) > 8 && qRed(row[x]) == 0 && qGreen(row[x]) == 0 && qBlue(row[x]) == 0)
+                        ++blackMat;
+            }
+            std::printf("    material pure-black px (alpha>8, rgb 0): %lld (palette has black=%d)\n",
+                        (long long)blackMat, hasBlackPal ? 1 : 0);
+            CHECK("MATERIAL_LAYER no pure-black material body", blackMat == 0 || hasBlackPal);
+
+            /* same powder silhouette: alpha on/off roughly agrees. */
+            qint64 agreed = 0, disagree = 0;
+            for (int y = 0; y < gpuL.height(); ++y)
+            {
+                const QRgb *gr = reinterpret_cast<const QRgb *>(gpuL.constScanLine(y));
+                const QRgb *cr = reinterpret_cast<const QRgb *>(cpuL.constScanLine(y));
+                for (int x = 0; x < gpuL.width(); ++x)
+                {
+                    const bool g = qAlpha(gr[x]) > 8, c = qAlpha(cr[x]) > 8;
+                    if (g == c) ++agreed; else ++disagree;
+                }
+            }
+            const double agreeFrac = double(agreed) / double(agreed + disagree);
+            std::printf("    silhouette agreement (alpha presence) = %.4f\n", agreeFrac);
+            CHECK("MATERIAL_LAYER same powder silhouette as CPU", agreeFrac > 0.90);
+
+            /* acceptable RGB material difference inside the shared support. */
+            double sumR = 0, sumG = 0, sumB = 0; qint64 np = 0;
+            for (int y = 0; y < gpuL.height(); ++y)
+            {
+                const QRgb *gr = reinterpret_cast<const QRgb *>(gpuL.constScanLine(y));
+                const QRgb *cr = reinterpret_cast<const QRgb *>(cpuL.constScanLine(y));
+                for (int x = 0; x < gpuL.width(); ++x)
+                    if (qAlpha(gr[x]) > 8 && qAlpha(cr[x]) > 8)
+                    {
+                        sumR += std::abs(qRed(gr[x])   - qRed(cr[x]));
+                        sumG += std::abs(qGreen(gr[x]) - qGreen(cr[x]));
+                        sumB += std::abs(qBlue(gr[x])  - qBlue(cr[x]));
+                        ++np;
+                    }
+            }
+            const double meanR = np ? sumR / np : 0.0;
+            const double meanG = np ? sumG / np : 0.0;
+            const double meanB = np ? sumB / np : 0.0;
+            std::printf("    material RGB mean|diff| (shared support) = R %.2f G %.2f B %.2f over %lld px\n",
+                        meanR, meanG, meanB, (long long)np);
+            CHECK("MATERIAL_LAYER RGB material within tolerance of CPU",
+                  np > 0 && meanR < 60.0 && meanG < 60.0 && meanB < 60.0);
+
+            /* save the parity images + a diff PNG into the build dir. */
+            savePng(gpuL, QDir(buildDir).filePath(QStringLiteral("gpu_material_layer.png")));
+            savePng(gpuRef, QDir(buildDir).filePath(QStringLiteral("gpu_reference_surface.png")));
+            savePng(cpuL, QDir(buildDir).filePath(QStringLiteral("cpu_material_render.png")));
+            QImage diff(gpuL.size(), QImage::Format_ARGB32);
+            diff.fill(Qt::white);
+            for (int y = 0; y < gpuL.height(); ++y)
+            {
+                const QRgb *gr = reinterpret_cast<const QRgb *>(gpuL.constScanLine(y));
+                const QRgb *cr = reinterpret_cast<const QRgb *>(cpuL.constScanLine(y));
+                QRgb *dr = reinterpret_cast<QRgb *>(diff.scanLine(y));
+                for (int x = 0; x < gpuL.width(); ++x)
+                    dr[x] = qRgb(std::min(255, std::abs(qRed(gr[x]) - qRed(cr[x]))),
+                                 std::min(255, std::abs(qGreen(gr[x]) - qGreen(cr[x]))),
+                                 std::min(255, std::abs(qBlue(gr[x]) - qBlue(cr[x]))));
+            }
+            savePng(diff, QDir(buildDir).filePath(QStringLiteral("gpu_cpu_diff.png")));
+        }
+        else
+        {
+            std::printf("  [%s] MATERIAL_LAYER renderer unavailable\n",
+                        "FAIL");
+            CHECK("MATERIAL_LAYER renderer available", false);
+        }
+    }
 
     /* ---- final summary ------------------------------------------------ */
     std::printf("\nGPU_HARNESS %d/%d\n", s_pass, s_checks);

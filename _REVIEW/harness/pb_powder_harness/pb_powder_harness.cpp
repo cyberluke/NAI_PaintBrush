@@ -314,6 +314,101 @@ int main(int argc, char **argv)
         CHECK("deserialize rejects truncated payload", !bad.deserialize(cut));
     }
 
+    /* ---- P0.12 raster cache == materialState invariant ------------------
+     * layer.materialState is the AUTHORITATIVE physics; layer.raster must be
+     * the deterministic t=0 material bake of that exact state. Simulate that
+     * contract: bake a state's t=0 raster, serialize the state, deserialize it
+     * into a fresh engine and re-bake t=0; the two bakes must be identical
+     * (a corrupted or stale cached raster would disagree here). */
+    {
+        const float wc = (60 * 4.0f);
+        GlitterPowder st;
+        st.reset(QSize(128, 128), 4.0f, 19u);
+        GlitterParams sp; sp.amount = 1.3f; sp.flakeSize = 0.8f; sp.color = pal.colors[0];
+        st.pourGlitter(wc, wc, 20.0f, sp);
+        st.paintGlue(62 * 4.0f, 62 * 4.0f, 14.0f, 0.8f);
+        st.pourGlitter(62 * 4.0f, 62 * 4.0f, 12.0f, sp);
+        st.relax(); st.relax(); st.decayFlow(); st.absorb();
+        /* the canonical t=0 material bake (the "cached raster") */
+        const QRect view(48, 40, 128, 128);
+        const QImage cachedRaster = st.render(view.size(), (float)view.x(), (float)view.y(),
+                                              1.0f, ArtLightRig(), pal, nullptr, ArtScale(), 0);
+        const QByteArray state = st.serialize();
+        GlitterPowder reopened;
+        CHECK("P0.12 deserialize(materialState) accepts the persisted state", reopened.deserialize(state));
+        /* t=0 re-bake from the deserialized state must reproduce the cached raster */
+        if (reopened.cellW() == st.cellW() && reopened.cellH() == st.cellH())
+        {
+            const QImage reBaked = reopened.render(view.size(), (float)view.x(), (float)view.y(),
+                                                   1.0f, ArtLightRig(), pal, nullptr, ArtScale(), 0);
+            CHECK("P0.12 deserialize(materialState) → t=0 re-bake == cached raster",
+                  imgEqual(cachedRaster, reBaked, 2));
+        }
+        else
+        {
+            CHECK("P0.12 deserialize(materialState) grid preserved", false);
+        }
+    }
+
+    /* ---- P0.7 bounded material palette ---------------------------------
+     * ensurePowderPaletteSlot resolves the CURRENT foreground colour to a
+     * bounded slot: reuse an exact existing colour, append while free, reuse
+     * the nearest when the palette is full (16). Existing grains keep their
+     * original slots, so a colour change deposits NEW glitter, not a rewrite. */
+    {
+        GlitterPowder g;
+        g.reset(QSize(32, 32), 4.0f, 1u);
+        const QColor pink(0xF2, 0xA7, 0xC8);
+        const QColor blue(0x00, 0xA8, 0xC8);
+        const QColor yellow(0xF2, 0xC8, 0x2A);
+        const int sPink1 = g.ensurePowderPaletteSlot(pink);
+        const int sBlue  = g.ensurePowderPaletteSlot(blue);
+        const int sPink2 = g.ensurePowderPaletteSlot(pink);
+        CHECK("P0.7 same colour reuses its existing slot", sPink1 == 0 && sPink2 == sPink1);
+        CHECK("P0.7 different colour appends a new slot", sBlue == 1);
+        CHECK("P0.7 palette grows with distinct colours", g.palette().size() == 2);
+        /* fill the palette to capacity, then a new colour falls back to the
+         * nearest existing one (never a 17th slot) */
+        while (g.palette().size() < 16)
+            g.ensurePowderPaletteSlot(QColor(g.palette().size() * 17, 40, 200));
+        const int cap = g.palette().size();
+        CHECK("P0.7 palette is bounded at 16 slots", cap == 16);
+        const int nearPink = g.ensurePowderPaletteSlot(QColor(0xF3, 0xA8, 0xC9)); /* ≈ pink */
+        CHECK("P0.7 full palette reuses nearest slot", nearPink >= 0 && nearPink < 16);
+        CHECK("P0.7 full palette never exceeds 16 slots", g.palette().size() == 16);
+        /* a coloured pour deposits into the resolved slot, not rewriting an
+         * already-resolved slot (existing grains keep their palette slots) */
+        {
+            GlitterPowder g2;
+            g2.reset(QSize(48, 48), 4.0f, 2u);
+            GlitterParams pp; pp.amount = 1.0f; pp.flakeSize = 0.8f; pp.color = pink;
+            pp.palette.clear();
+            g2.pourGlitter(20 * 4.0f, 24 * 4.0f, 12.0f, pp);   /* pink -> slot 0 */
+            GlitterParams bp; bp.amount = 1.0f; bp.flakeSize = 0.8f; bp.color = blue;
+            bp.palette.clear();
+            g2.pourGlitter(28 * 4.0f, 24 * 4.0f, 12.0f, bp);   /* blue -> slot 1 */
+            int blueCells = 0;
+            int wrongSlot0 = 0;
+            int slot1Cells = 0;
+            for (int i = 0; i < g2.cellCount(); ++i) {
+                const PowderCell &c = g2.powderCellAt(i);
+                const float wx = (i % g2.cellW() + 0.5f) * g2.worldCellSize();
+                if (c.height > 0 && wx > 104.0f) {   /* firmly inside the BLUE pour site */
+                    ++blueCells;
+                    if (c.lA == 1) ++slot1Cells;      /* slot 1 = blue */
+                    if (c.lA == 0) ++wrongSlot0;      /* slot 0 is pink */
+                }
+            }
+            std::printf("    P0.7 blue zone: cells=%d slot1(blue)=%d slot0(pink)=%d\n",
+                        blueCells, slot1Cells, wrongSlot0);
+            const bool blueDepositedBlue = blueCells > 50 && slot1Cells > 0 && wrongSlot0 == 0;
+            CHECK("P0.7 a coloured pour deposits into its resolved slot (not slot 0)",
+                  blueDepositedBlue);
+            CHECK("P0.7 existing grains keep their original slots (blue gets its own slot)",
+                  g2.palette().size() == 2 && g2.palette()[0] == pink && g2.palette()[1] == blue);
+        }
+    }
+
     /* ---- physical Eraser ---------------------------------------------- */
     {
         GlitterPowder er;

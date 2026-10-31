@@ -373,6 +373,10 @@ static void applyMaterialState(PaintbrushDocument &doc, int layerIndex, int laye
         return;
     layers[found].materialPreset = s.preset;
     layers[found].materialState = s.state;
+    /* re-derive the display from the authoritative material state: mark the
+     * document dirty and notify so the controller refreshes the visual cache
+     * / re-renders from state (P0.11 — apply and revert are full operations). */
+    doc.setDirty(true);
     emit doc.layersChanged();
 }
 void SetMaterialStateCommand::apply(PaintbrushDocument &doc) { applyMaterialState(doc, layerIndex, layerId, after); }

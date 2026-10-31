@@ -156,10 +156,9 @@ Rectangle {
                            value: canvas.brushSize, onChange: (v) => canvas.brushSize = v })
         }
 
-        /* -------- Smear (19): size only ----------------------------------- */
-        if (canvas.tool === 19)
-            out.push({ kind: "slider", label: qsTr("Size"), from: 1, to: 160, stepSize: 1,
-                       value: canvas.brushSize, onChange: (v) => canvas.brushSize = v })
+        /* the old standalone Smear (19) option has been removed from the main
+         * rail (P0.10): Smear is now the Push sub-tool of the Glitter Powder
+         * material workbench, exposed via the powder tool bar instead. */
 
         optionBar.items = out
     }

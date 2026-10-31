@@ -824,7 +824,8 @@ QImage GpuRuntime::renderPowder(const QSize &outSize,
                                 float outOriginWorldX, float outOriginWorldY,
                                 float worldPerPx, const ArtLightRig &rig,
                                 const PaperStock *paper, qint64 timeMs,
-                                int uiDpr)
+                                int uiDpr,
+                                PowderOutput output)
 {
     if (!m_rhi || !m_pipelines || !ensureTarget(outSize))
         return {};
@@ -849,10 +850,16 @@ QImage GpuRuntime::renderPowder(const QSize &outSize,
         for (int x = 0; x < W; ++x)
         {
             const glitter::PowderCell &c = powder.powderCellAt(y * W + x);
-            const quint16 vh = floatToHalf(c.height);
-            const quint16 vs = floatToHalf(c.seed);
-            const quint16 vb = floatToHalf(c.stuck);
-            const quint16 va = floatToHalf(c.glue);
+            /* never feed the shader a non-finite height/seed: a giant or NaN
+             * seed NaN's the hash lookups -> solid black band. */
+            const float h  = std::isfinite(c.height) ? qMax(0.0f, c.height) : 0.0f;
+            const float sd = std::isfinite(c.seed)   ? std::fmod(c.seed, 1024.0f) : 0.0f;
+            const float st = std::isfinite(c.stuck)  ? qMax(0.0f, c.stuck)  : 0.0f;
+            const float gl = std::isfinite(c.glue)   ? qMax(0.0f, c.glue)   : 0.0f;
+            const quint16 vh = floatToHalf(h);
+            const quint16 vs = floatToHalf(sd);
+            const quint16 vb = floatToHalf(st);
+            const quint16 va = floatToHalf(gl);
             quint8 *p = sim8 + size_t(y * W + x) * 8;
             p[0] = quint8(vh & 0xFF);   p[1] = quint8(vh >> 8);
             p[2] = quint8(vs & 0xFF);   p[3] = quint8(vs >> 8);
@@ -931,11 +938,19 @@ QImage GpuRuntime::renderPowder(const QSize &outSize,
     wf(104, pal.holographic);                                           /* uHolo */
     wf(108, float(dpr * 5));                                            /* uFlakePx */
     wf(112, paper ? paper->tooth : 0.4f);                               /* uTooth */
+    wf(116, output == PowderOutput::MaterialLayer ? 1.0f : 0.0f);       /* uMaterialMode */
     wv3(128, L.x(), L.y(), L.z());                                      /* uLightDir */
     wv3(144, pal.paper.redF(), pal.paper.greenF(), pal.paper.blueF());  /* uPaper */
-    for (int i = 0; i < qMin(palN, 16); ++i)                            /* uPal[16] */
+    for (int i = 0; i < 16; ++i)                            /* uPal[16] */
     {
-        const QColor &c = pal.colors.at(i);
+        /* Pad ALL 16 palette slots so an out-of-range cell index never samples
+         * an uninitialized (black) slot: unused slots repeat slot 0 / paper.
+         * This is the P0.6 invariant "no black from uninitialised palette". */
+        QColor c;
+        if (i < palN)
+            c = pal.colors.at(i);
+        else
+            c = pal.colors.isEmpty() ? QColor(255, 255, 255) : pal.colors.at(0);
         wv3(160 + i * 16, c.redF(), c.greenF(), c.blueF());
     }
 

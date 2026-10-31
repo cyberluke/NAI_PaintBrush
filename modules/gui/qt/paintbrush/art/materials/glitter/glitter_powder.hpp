@@ -189,12 +189,22 @@ public:
     /* The engine's working colour palette (the reference's per-cell slots),
      * recoverable after a deserialize so the render palette can be rebuilt. */
     QVector<QColor> palette() const { return m_palette; }
+
+    /* Resolve the CURRENT foreground colour to a bounded material-palette slot
+     * (0..15), appending a colour when a free slot exists and reusing the
+     * nearest existing colour when the palette is full. Existing grains keep
+     * their original slot IDs, so changing the UI colour deposits NEW glitter
+     * of that colour instead of rewriting the whole body. Returns -1 only if
+     * the colour is invalid. */
+    int ensurePowderPaletteSlot(const QColor &color);
     const QVector<quint8> &powderMask() const { return m_powderMask; }
     bool hasPowderMask() const { return !m_powderMask.isEmpty(); }
     /* Erase previously-committed powder from `img` in the cells the mask
-     * flagged (restoring `paper` under them), so a blow can clear old powder
-     * instead of leaving the blobs in the raster. `originWorldX/Y/worldPerPx`
-     * map img pixels to world/cell space. */
+     * flagged, restoring TRANSPARENT ((0,0,0,0)) under them — never a baked
+     * paper colour (the document compositor owns PaperStock). Matches the
+     * transparent material-layer contract. `paper` is retained as a
+     * compatibility parameter and ignored. `originWorldX/Y/worldPerPx` map img
+     * pixels to world/cell space. */
     void clearMaskedPowder(QImage &img, float originWorldX, float originWorldY,
                            float worldPerPx, const QColor &paper) const;
 

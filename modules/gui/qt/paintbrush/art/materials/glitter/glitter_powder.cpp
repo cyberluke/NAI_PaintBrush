@@ -221,6 +221,12 @@ bool GlitterPowder::deserialize(const QByteArray &bytes)
         c.height = height; c.stuck = stuck; c.glue = glue; c.seed = sd;
         c.flow = flow; c.vx = vx; c.vy = vy; c.lF = lF; c.sF = sF;
         c.lA = lA; c.lB = lB; c.sA = sA; c.sB = sB;
+        /* bound the shuffle seed: legacy state that grew it geometrically could
+         * hold +inf, which NaN's the GPU renderer's hash lookups. */
+        if (!std::isfinite(c.seed))
+            c.seed = 0.5f;
+        else
+            c.seed = std::fmod(c.seed, 1024.0f);
     }
     m_activeCells = active;
     m_powderMask.clear();
@@ -399,22 +405,60 @@ void GlitterPowder::setStuck(int i, float ns)
     c.stuck = ns;
 }
 
+/* Resolve the current foreground colour to a bounded material-palette slot.
+ * The palette is capped at kMaxPaletteSlots (16, matching the GPU uPal[16]);
+ * an exact existing colour reuses its slot, a free slot is appended to, and a
+ * full palette falls back to the nearest existing colour. Existing grains
+ * therefore keep their ORIGINAL slot ids — changing the UI colour only changes
+ * what the NEXT pour deposits, never the powder already on the page. */
+int GlitterPowder::ensurePowderPaletteSlot(const QColor &color)
+{
+    constexpr int kMaxSlots = 16;
+    if (!color.isValid())
+        return -1;
+    for (int i = 0; i < m_palette.size(); ++i)
+        if (m_palette[i] == color)
+            return i;
+    if (m_palette.size() < kMaxSlots)
+    {
+        m_palette.append(color);
+        return m_palette.size() - 1;
+    }
+    /* palette full: reuse the nearest existing colour */
+    int best = 0;
+    float bestD = 1e30f;
+    for (int i = 0; i < m_palette.size(); ++i)
+    {
+        const float dr = m_palette[i].redF()   - color.redF();
+        const float dg = m_palette[i].greenF() - color.greenF();
+        const float db = m_palette[i].blueF()  - color.blueF();
+        const float d2 = dr * dr + dg * dg + db * db;
+        if (d2 < bestD) { bestD = d2; best = i; }
+    }
+    return best;
+}
+
 void GlitterPowder::pourGlitter(float wx, float wy, float radiusWorld,
                                 const GlitterParams &p)
 {
     const float cell = m_worldCellSize;
     const float cx = wx / cell, cy = wy / cell;
     const float r = qMax(0.5f, radiusWorld / cell);
-    /* the flakes added use the palette's first slot (dominant colour) */
-    int slot = m_palette.isEmpty() ? -1 : 0;
-    if (slot < 0)
+    /* Seed the bounded material palette on first use: prefer the params'
+     * named palette, else start from the current foreground colour. */
+    if (m_palette.isEmpty())
     {
-        /* (re)build the palette from the params' bounded palette */
-        auto srcSlotsQ = p.palette;
-        if (srcSlotsQ.isEmpty()) srcSlotsQ << p.color;
-        m_palette = QVector<QColor>(srcSlotsQ.begin(), srcSlotsQ.end());
-        slot = 0;
+        QVector<QColor> srcSlotsQ = p.palette;
+        if (srcSlotsQ.isEmpty() && p.color.isValid())
+            srcSlotsQ << p.color;
+        if (!srcSlotsQ.isEmpty())
+            m_palette = QVector<QColor>(srcSlotsQ.begin(), srcSlotsQ.end());
     }
+    /* Deposit the CURRENT UI colour into a bounded palette slot (reuse /
+     * append / nearest when full). Existing grains retain their original slot
+     * ids, so a foreground colour change creates NEW coloured glitter instead
+     * of rewriting what is already on the page. */
+    const int slot = ensurePowderPaletteSlot(p.color);
 
     const float seedOff = m_rng.generateDouble() * 100.0f;
     const float stretch = 0.0f;
@@ -497,7 +541,12 @@ void GlitterPowder::smear(float wx, float wy, float fx, float fy,
                 continue;
             const float take = ex * 0.7f;
             c.height -= take;
-            c.seed = (c.seed + 1) * 1024;
+            /* wrap the shuffle seed into [0,1024): the seed is a stable per-cell
+             * grain-shuffle offset (packed to float16 and hashed in the GPU
+             * renderer). Growing it geometrically ((seed+1)*1024) overflows to
+             * +inf after a few relaxes, which NaN's the shader's hash lookups
+             * and renders the material a solid black band. */
+            c.seed = std::fmod(c.seed + 1.0f, 1024.0f);
             const float cling = std::min(take * 0.15f, std::max(0.0f, kClingMax - carried));
             carried += cling;   /* a little sticks to the finger */
             const float pushed = take - cling;
@@ -584,7 +633,7 @@ void GlitterPowder::relax(const QRect &cellRect)
                     addLoose(j, t, c.lA, c.lB, c.lF);
                     nj.flow += t * 1.5f;
                     if (t > 0.03f)
-                        nj.seed = (nj.seed + 1.0f) * 1024;
+                        nj.seed = std::fmod(nj.seed + 1.0f, 1024.0f);
                 }
                 else
                 {
@@ -598,7 +647,7 @@ void GlitterPowder::relax(const QRect &cellRect)
                     addLoose(i, t, nj.lA, nj.lB, nj.lF);
                     c.flow += t * 1.5f;
                     if (t > 0.03f)
-                        c.seed = (c.seed + 1.0f) * 1024;
+                        c.seed = std::fmod(c.seed + 1.0f, 1024.0f);
                 }
             }
         }
@@ -1116,11 +1165,14 @@ void GlitterPowder::clearMaskedPowder(QImage &img, float originWorldX,
                                       float originWorldY, float worldPerPx,
                                       const QColor &paper) const
 {
+    Q_UNUSED(paper);
     if (img.isNull() || m_powderMask.isEmpty())
         return;
+    /* The powder material layer is TRANSPARENT outside its physical material:
+     * removed material restores transparent RGBA, never a baked paper colour
+     * (paper belongs to DocumentRenderer beneath the layer). `paper` is kept as
+     * a compatibility parameter and ignored for the transparent contraction. */
     const float cell = m_worldCellSize;
-    const uchar pr = uchar(paper.red()), pg = uchar(paper.green()),
-               pb = uchar(paper.blue());
     for (int y = 0; y < m_cells.height(); ++y)
         for (int x = 0; x < m_cells.width(); ++x)
         {
@@ -1135,7 +1187,7 @@ void GlitterPowder::clearMaskedPowder(QImage &img, float originWorldX,
             if (px < -half || py < -half || px > img.width() + half
                 || py > img.height() + half)
                 continue;
-            /* clear the cell's disc to the paper colour (Source) */
+            /* clear the cell's disc to TRANSPARENT (Source, fully cleared) */
             int x0 = std::max(0, int(std::floor(px - half)));
             int y0 = std::max(0, int(std::floor(py - half)));
             int x1 = std::min(img.width() - 1, int(std::ceil(px + half)));
@@ -1148,7 +1200,7 @@ void GlitterPowder::clearMaskedPowder(QImage &img, float originWorldX,
                     if (dx * dx + dy * dy > r2)
                         continue;
                     QRgb *line = reinterpret_cast<QRgb *>(img.scanLine(yy));
-                    line[xx] = qRgba(pr, pg, pb, 255);
+                    line[xx] = qRgba(0, 0, 0, 0);
                 }
         }
 }

@@ -796,7 +796,18 @@ if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
             return;
         if (layer != pwLayer)
             layer = pwLayer;   /* a dedicated powder layer was created for this edit */
+        /* refresh the live interaction colour each segment so the NEXT deposited
+         * material uses the current foreground colour (P0.7/P0.8), without
+         * touching the persisted sim's existing grains. m_powderParams always
+         * mirrors the live UI params (the current colour/amount/flake/shimmer)
+         * while keeping the sim's bounded palette authoritative for existing
+         * grains, so a fresh pour extends the palette via ensurePowderPaletteSlot. */
+        m_glitterParams.color = m_fgColor;
         ensurePowder();
+        m_powderParams = m_glitterParams;
+        m_powderParams.palette = m_powder.palette();
+        m_powderParams.seed = std::uint32_t(m_doc->artSeed() ^
+            (std::uint32_t(m_undoStack ? m_undoStack->count() : 0) * 40503u + 7u));
         /* capture the powder layer's material state before the first edit of
          * this physical operation so one undo restores exactly one op */
         if (!m_powderMaterialCaptured)
@@ -880,6 +891,9 @@ if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
         if (m_lastPowderPreviewMs > 0)
             m_powderShimmerMs += now - m_lastPowderPreviewMs;
         m_lastPowderPreviewMs = now;
+        /* render with the sim's AUTHORITATIVE palette so grains deposited as
+         * new colours resolve to their true slots (never clamped to paper) */
+        m_powderPal.colors = m_powder.palette();
         QImage flakes = m_powder.render(affected.size(), float(affected.x()),
                                         float(affected.y()), 1.0f,
                                         m_doc->lightRig(), m_powderPal,
@@ -989,7 +1003,7 @@ else if ((m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
         renderPowderUnion();
         pbCrashTrace("endArtStroke -> renderPowderUnion return");
     }
-    if (m_strokeHadPaint)
+if (m_strokeHadPaint)
     {
         const QString name = m_tool == TOOL_GLITTER ? QStringLiteral("Glitter")
                             : m_tool == TOOL_GLITTER_POWDER ? QStringLiteral("Glitter powder")
@@ -998,6 +1012,27 @@ else if ((m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
         pbCrashTrace("commitScratch begin");
         commitScratch(name);
         pbCrashTrace("commitScratch end");
+    }
+    else if (m_powderInsertCmd)
+    {
+        /* The stroke painted nothing but a dedicated powder layer was
+         * auto-created for it: cancel the creation — remove the empty layer
+         * and restore the previous selection, discarding the deferred insert
+         * so no phantom layer or bogus undo entry lingers (P0.11). */
+        if (m_doc)
+        {
+            const int insertedIdx = m_powderInsertCmd->index;
+            const int prevIdx = m_powderInsertCmd->prevCurrentIndex;
+            QList<CanvasLayer> layers = m_doc->layers();
+            if (insertedIdx >= 0 && insertedIdx < layers.size()
+                && layers.at(insertedIdx).id == m_powderInsertCmd->layer.id)
+                layers.removeAt(insertedIdx);
+            m_doc->setLayers(layers);
+            if (prevIdx >= 0 && prevIdx < layers.size())
+                m_doc->setCurrentLayerIndex(prevIdx);
+            m_doc->setDirty(true);
+        }
+        m_powderInsertCmd.reset();
     }
     if (m_tool == TOOL_BRISTLE)
         m_bristle.endStroke();
@@ -1016,6 +1051,7 @@ else if ((m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
     m_glitterUnion = QRect();
     m_powderUnion = QRect();
     m_powderMaterialCaptured = false;
+    m_powderInsertCmd.reset();
     pbCrashTrace("endArtStroke exit");
 }
 
@@ -1050,6 +1086,17 @@ void PaintbrushCanvasItem::ensurePowder(bool force)
             m_powderPal.colors = m_powder.palette();
             if (const art::PaperStock *ps = m_doc->paperStock())
                 m_powderPal.paper = ps->baseColor;
+            /* P0.8: the CURRENT UI interaction parameters (colour/amount/flake
+             * size/shimmer/adhesion) must describe the NEXT deposited material.
+             * Refresh m_powderParams from the live UI params WITHOUT destroying
+             * the restored persisted palette (existing grains keep their slots).
+             * The engine's own palette is authoritative for existing grains;
+             * m_powderParams.palette stays in sync so pours extend it via
+             * ensurePowderPaletteSlot. */
+            m_powderParams = m_glitterParams;
+            m_powderParams.palette = m_powder.palette();
+            m_powderParams.seed = std::uint32_t(m_doc->artSeed() ^
+                (std::uint32_t(m_undoStack ? m_undoStack->count() : 0) * 40503u + 7u));
             m_powderReady = true;
             qInfo("pb powder: restored material layer %dx%d (cell %.2f)",
                   m_powder.cellW(), m_powder.cellH(), m_powder.worldCellSize());
@@ -1108,8 +1155,10 @@ CanvasLayer *PaintbrushCanvasItem::ensurePowderLayer()
     m_doc->setLayers(layers);
     m_doc->setCurrentLayerIndex(cmd.index);
     cmd.layer = *m_doc->layerAt(cmd.index);
-    if (m_undoStack)
-        m_undoStack->pushInsertLayer(cmd);
+    /* DEFER the insert until commit (P0.11): it becomes the first child of the
+     * operation's CompositeCommand, so the auto-created layer + the raster
+     * stroke + the material state are ONE undo step. Not pushed here. */
+    m_powderInsertCmd = std::make_unique<InsertLayerCommand>(cmd);
     m_doc->setDirty(true);
     /* the powder grid must size to this new layer */
     m_powderReady = false;
@@ -1136,15 +1185,25 @@ void PaintbrushCanvasItem::renderPowderUnion()
     captureBeforeRegion(u);
     ensureScratch(u);
 
-    /* Deterministic COMMIT bake: t=0 through the GPU powder.frag surface so the
-     * committed document + export carry the reference GPU look. Falls back to
-     * the CPU Voronoi renderer if no offscreen GPU runtime could be created /
-     * produced no content, or if PB_POWDER_COMMIT=cpu (temporary containment
-     * switch until the real-GUI stroke is visually confirmed). */
+    /* Deterministic COMMIT bake: t=0 material bake. The CPU material renderer
+     * used by the live preview is the CANONICAL commit path (transparent
+     * material layer, no baked paper). The GPU powder.frag surface is an
+     * EXPERIMENTAL path only while a real-GUI parity gate proves its
+     * MATERIAL_LAYER output matches the CPU material renderer.
+     *
+     * Gate semantics (temporary containment):
+     *   PB_POWDER_COMMIT=gpu   -> GPU experimental path
+     *   everything else        -> CPU canonical path
+     */
     QImage flakes;
     bool bakedGpu = false;
+    /* render with the sim's AUTHORITATIVE palette so the committed material
+     * matches the live preview (grains deposited as new colours resolve to
+     * their true slots) */
+    m_powderPal.colors = m_powder.palette();
     const QByteArray commitMode = qgetenv("PB_POWDER_COMMIT").trimmed();
-    const bool allowGpuCommit = commitMode.isNull() || !commitMode.compare("gpu", Qt::CaseInsensitive);
+    const bool allowGpuCommit =
+        !commitMode.isNull() && !commitMode.compare("gpu", Qt::CaseInsensitive);
     pbCrashTrace("GpuRuntime initialize begin");
     if (!m_gpuRenderTried) {
         m_gpuRenderTried = true;
@@ -1156,7 +1215,8 @@ void PaintbrushCanvasItem::renderPowderUnion()
         flakes = m_gpuRender.renderPowder(u.size(), m_powder, m_powderPal,
                                           float(u.x()), float(u.y()), 1.0f,
                                           m_doc->lightRig(), m_doc->paperStock(),
-                                          /*timeMs=*/0, /*uiDpr=*/1);
+                                          /*timeMs=*/0, /*uiDpr=*/1,
+                                          art::GpuRuntime::PowderOutput::MaterialLayer);
         pbCrashTrace("renderPowder end");
         /* Redo the bake semantics via the renderer result, NOT by guessing a
          * background colour on a 32-bit image. `renderPowder` returns an opaque
@@ -1201,15 +1261,12 @@ void PaintbrushCanvasItem::renderPowderUnion()
     pbCrashTrace("QPainter composite");
     QPainter p(&m_scratchTile);
     p.setCompositionMode(QPainter::CompositionMode_Source);
-    p.drawImage(u.topLeft() - m_scratchOrigin, layer->raster, u);
-    /* Hydrate-blow: the sim now owns the previously-committed powder cells;
-     * erase their old pixels back to the paper so the breath actually clears
-     * them (fixes the "committed powder never leaves the raster" bug). */
-    if (m_powder.hasPowderMask())
-        m_powder.clearMaskedPowder(m_scratchTile, float(m_scratchOrigin.x()),
-                                   float(m_scratchOrigin.y()), 1.0f,
-                                   m_powderPal.paper);
-    p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+    /* The powder layer is a MATERIAL layer: its raster is a deterministic
+     * re-bake of layer.materialState (the authoritative physics). Regenerate
+     * the union region from scratch (clear to transparent then draw the fresh
+     * material render) so removed material actually vanishes — never re-seed
+     * stale committed powder from the old raster. */
+    p.fillRect(u.translated(-m_scratchOrigin), QColor(0, 0, 0, 0));
     p.drawImage(u.topLeft() - m_scratchOrigin, flakes);
     p.end();
     pbCrashTrace("markTilesDirty");
@@ -1253,20 +1310,24 @@ void PaintbrushCanvasItem::startPowderBlow()
         || (m_tool != TOOL_GLITTER_POWDER && m_tool != TOOL_SMEAR))
         return;
     /* A pure press-and-hold (no drag: `m_powderHoldEver` stays false) is the
-     * reference's "blow" gesture — it should clear powder a PREVIOUS stroke
-     * already committed. Hydrate the heightfield from the raster for that case
-     * (overwriting the phantom first dab). A drag-then-hold blows the freshly
-     * poured spread (the sim already holds it), so no hydration needed there. */
+     * reference's "blow" gesture — it should clear powder from a PREVIOUS
+     * stroke already committed.
+     *
+     * The authoritative material state lives in layer.materialState (CanvasLayer
+     * is the single source of truth), NEVER reconstructed from the cached
+     * raster. `ensurePowder` deserializes that state into `m_powder` when the
+     * layer carries one; the breath then operates on the true physics. We do
+     * not call hydrateFromRaster here — that is a legacy/import recovery path
+     * only, never the normal persistent-material blow flow. */
     if (!m_powderHoldEver)
     {
         CanvasLayer *layer = m_doc ? m_doc->currentLayer() : nullptr;
         if (layer && !layer->raster.isNull())
         {
             ensurePowder(false);
-            m_powder.hydrateFromRaster(layer->raster, 1.0f);
             /* the breath sweeps powder anywhere across (and off) the page, so
-             * render the re-hydrated powder bounds grown by a travel margin —
-             * keeps pushed flakes visible without a full-canvas render budget */
+             * render the powder bounds grown by a travel margin — keeps pushed
+             * flakes visible without a full-canvas render budget */
             float minx = 0, miny = 0, maxx = 0, maxy = 0;
             if (m_powder.powderBoundsWorld(minx, miny, maxx, maxy))
             {
@@ -1999,21 +2060,71 @@ void PaintbrushCanvasItem::commitScratch(const QString &desc)
     }
 
     maskStrokeToSelectionAndAlphaLock();
-    pushStrokeEntry(desc);
 
-    /* powder: persist the physical material state AND make this one operation
-     * undoable at the material level (undo restores the sim from layer state) */
-    if (m_powderMaterialCaptured && m_undoStack)
+    /* ---- powder: atomic undo (P0.11) ----------------------------------
+     * A powder operation is committed as ONE CompositeCommand whose children
+     * (in redo/apply order) are:
+     *   1. the auto-created dedicated powder layer (InsertLayerCommand, only on
+     *      the first material edit of a non-powder layer),
+     *   2. the raster stroke (StrokeCommand),
+     *   3. the physical material state (SetMaterialStateCommand).
+     * One Ctrl+Z reverts them in reverse (material -> raster -> remove layer),
+     * restoring the previous layer selection in the same step. */
+    const bool isPowder =
+        m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR;
+    bool pushed = false;
+    if (isPowder && m_undoStack)
     {
-        m_powderMaterialCaptured = false;
-        const bool materialChanged =
-            m_powderMaterialCmd.before.preset != m_powderMaterialCmd.after.preset
-            || m_powderMaterialCmd.before.state != m_powderMaterialCmd.after.state;
-        if (materialChanged)
+        auto composite = std::make_unique<CompositeCommand>();
+        composite->desc = desc;
+
+        if (m_powderInsertCmd)
+            composite->children.push_back(std::move(m_powderInsertCmd));
+
+        if (std::unique_ptr<StrokeCommand> sc = makeStrokeCommand(desc))
+            composite->children.push_back(std::move(sc));
+
+        if (m_powderMaterialCaptured)
         {
-            m_powderMaterialCmd.desc = desc;
-            m_powderMaterialCmd.layerIndex = m_doc->currentLayerIndex();
-            m_undoStack->pushMaterialState(m_powderMaterialCmd);
+            m_powderMaterialCaptured = false;
+            const bool materialChanged =
+                m_powderMaterialCmd.before.preset != m_powderMaterialCmd.after.preset
+                || m_powderMaterialCmd.before.state != m_powderMaterialCmd.after.state;
+            if (materialChanged)
+            {
+                m_powderMaterialCmd.desc = desc;
+                m_powderMaterialCmd.layerIndex = m_doc->currentLayerIndex();
+                composite->children.push_back(
+                    std::make_unique<SetMaterialStateCommand>(m_powderMaterialCmd));
+            }
+        }
+
+        if (!composite->children.empty())
+        {
+            m_undoStack->pushCommand(std::move(composite));
+            m_doc->setDirty(true);
+            pushed = true;
+        }
+    }
+
+    if (!pushed)
+    {
+        /* generic (non-powder) commit: stroke raster, and pend any material
+         * state as a separate typed command (non-powder paths don't reach
+         * material state, but keep the old separate push as a safe fallback) */
+        pushStrokeEntry(desc);
+        if (m_powderMaterialCaptured && m_undoStack)
+        {
+            m_powderMaterialCaptured = false;
+            const bool materialChanged =
+                m_powderMaterialCmd.before.preset != m_powderMaterialCmd.after.preset
+                || m_powderMaterialCmd.before.state != m_powderMaterialCmd.after.state;
+            if (materialChanged)
+            {
+                m_powderMaterialCmd.desc = desc;
+                m_powderMaterialCmd.layerIndex = m_doc->currentLayerIndex();
+                m_undoStack->pushMaterialState(m_powderMaterialCmd);
+            }
         }
     }
 
@@ -2662,12 +2773,28 @@ void PaintbrushCanvasItem::pushStrokeEntry(const QString &desc)
     if (!m_undoStack || !m_doc || m_strokeBefore.isEmpty())
         return;
 
+    std::unique_ptr<StrokeCommand> cmd = makeStrokeCommand(desc);
+    if (cmd)
+    {
+        m_undoStack->pushCommand(std::move(cmd));
+        m_doc->setDirty(true);
+    }
+}
+
+/* Build a region-delta StrokeCommand for the current stroke (before/after
+ * tiles only for the touched area). Used directly by the generic paint push
+ * AND as a child of the powder CompositeCommand so undo restores the raster
+ * atomically with the material state + auto-created layer (P0.11). Returns
+ * nullptr when there is no stroke content to record. */
+std::unique_ptr<StrokeCommand> PaintbrushCanvasItem::makeStrokeCommand(const QString &desc)
+{
+    if (!m_doc || m_strokeBefore.isEmpty())
+        return nullptr;
+
     CanvasLayer *layer = m_doc->currentLayer();
     if (!layer || layer->raster.isNull())
-        return;
+        return nullptr;
 
-    /* typed region-delta command: before/after tiles only for the touched
-     * area (layer-local coords) — never a whole-document serialization */
     StrokeCommand cmd;
     cmd.data.layerIndex = m_doc->currentLayerIndex();
     cmd.data.layerId = layer->id;
@@ -2675,8 +2802,7 @@ void PaintbrushCanvasItem::pushStrokeEntry(const QString &desc)
     cmd.data.beforeRects = m_strokeBefore;
     cmd.data.after = layer->raster.copy(cmd.data.unionRect);
     cmd.data.description = desc;
-    m_undoStack->pushStroke(cmd);
-    m_doc->setDirty(true);
+    return std::make_unique<StrokeCommand>(std::move(cmd));
 }
 
 QPainterPath PaintbrushCanvasItem::buildShapePath(const QPointF &a,

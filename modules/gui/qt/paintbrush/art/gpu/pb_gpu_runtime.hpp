@@ -99,13 +99,24 @@ public:
      * The heightfield + per-cell colour data come from a GlitterPowder whose
      * cells were painted by the caller (the engine is itself CPU for the
      * physics; this is the configurable surface pass). */
+    /* Material-layer output modes for renderPowder (matches powder.frag's
+     * uMaterialMode): the reference surface contract bakes opaque paper+powder
+     * (standalone reference harness); the material-layer contract keeps the
+     * output transparent outside the physical powder so a Paintbrush layer
+     * never owns PaperStock a second time. */
+    enum class PowderOutput {
+        ReferenceSurface = 0,
+        MaterialLayer   = 1,
+    };
+
     QImage renderPowder(const QSize &outSize,
                         const glitter::GlitterPowder &powder,
                         const glitter::PowderPalette &pal,
                         float outOriginWorldX, float outOriginWorldY,
                         float worldPerPx, const ArtLightRig &rig,
                         const PaperStock *paper, qint64 timeMs,
-                        int uiDpr = 1);
+                        int uiDpr = 1,
+                        PowderOutput output = PowderOutput::MaterialLayer);
 
     /* One finish effect applied to `source` (premultiplied ARGB32).
      * `mode`: 0 DirectedBlur, 1 Shadow, 2 Glow — the same three the canvas

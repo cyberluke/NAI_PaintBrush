@@ -365,6 +365,9 @@ private:
     void commitShape(const QPainterPath &path, bool filled);
     void captureBeforeRegion(const QRect &localRect);
     void pushStrokeEntry(const QString &desc);
+    /* Build a region-delta StrokeCommand for the current stroke (not pushed); a
+     * child of the powder CompositeCommand (P0.11 atomic undo). */
+    std::unique_ptr<StrokeCommand> makeStrokeCommand(const QString &desc);
     void maskStrokeToSelectionAndAlphaLock();
     void notifyModified();
     QPointF eventLastItemPos() const;
@@ -514,6 +517,12 @@ private:
      * edit) so one undo restores exactly one physical operation's material */
     SetMaterialStateCommand m_powderMaterialCmd;
     bool m_powderMaterialCaptured = false;
+    /* Deferred InsertLayerCommand for the automatic dedicated powder-layer
+     * creation on a layer's FIRST material edit. Folded into the operation's
+     * CompositeCommand (with the raster stroke + material state) so the whole
+     * physical operation — including the auto-created layer — undoes as ONE
+     * undo step and restores the previous layer selection (P0.11). */
+    std::unique_ptr<InsertLayerCommand> m_powderInsertCmd;
     /* Dedicated offscreen GPU runtime for the DETERMINISTIC COMMIT bake of the
      * powder (and future paint/glitter paths) at t=0. The live preview stays
      * on the CPU Voronoi fallback until the interactive scene-graph node is
