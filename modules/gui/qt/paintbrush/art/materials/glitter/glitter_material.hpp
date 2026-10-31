@@ -47,7 +47,7 @@ namespace art {
 struct GlitterParams
 {
     QColor color{ 0xE8, 0xC6, 0x2A };   /* base glitter color */
-    float amount = 1.0f;                /* coverage 0..2 */
+    float amount = 1.2f;                /* coverage 0..2 (reference powder default) */
     float flakeSize = 0.8f;             /* world-unit flake scale */
     float shimmer = 0.55f;              /* specular sparkle 0..1 */
     float adhesion = 0.6f;              /* glue strength 0..1 */

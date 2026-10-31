@@ -56,6 +56,9 @@ void GlitterPowder::reset(const QSize &cells, float worldCellSize, std::uint32_t
     m_palette.clear();
     m_powderMask.clear();
     m_activeCells = QRect();
+    /* full-resolution glue field: sub-res per cell, zeroed (P0.2) */
+    const int gw = cells.width() * kGlueSubRes, gh = cells.height() * kGlueSubRes;
+    m_glueField.fill(0, gw * gh);
     setSeed(seed);
 }
 
@@ -117,6 +120,26 @@ void GlitterPowder::erase(float wx, float wy, float radiusWorld, float amount)
                 c.height = 0.0f; c.stuck = 0.0f; c.glue = 0.0f;
                 c.lA = c.lB = c.sA = c.sB = -1; c.lF = c.sF = 0.0f;
             }
+            /* clear the same disc in the full-res glue field (P0.2) */
+            if (c.glue <= 0.002f && !m_glueField.isEmpty())
+            {
+                const int s0 = std::max(0, int((cx - rCells) * kGlueSubRes));
+                const int s1 = std::min(m_cells.width() * kGlueSubRes - 1,
+                                        int((cx + rCells + 1) * kGlueSubRes));
+                const int st0 = std::max(0, int((cy - rCells) * kGlueSubRes));
+                const int st1 = std::min(m_cells.height() * kGlueSubRes - 1,
+                                         int((cy + rCells + 1) * kGlueSubRes));
+                for (int syy = st0; syy <= st1; ++syy)
+                    for (int sxx = s0; sxx <= s1; ++sxx)
+                    {
+                        const float wxx = (sxx + 0.5f) / float(kGlueSubRes) * cell;
+                        const float wyy = (syy + 0.5f) / float(kGlueSubRes) * cell;
+                        const float ddx = wxx - wx, ddy = wyy - wy;
+                        if (ddx * ddx + ddy * ddy > radiusWorld * radiusWorld)
+                            continue;
+                        m_glueField[glueFieldIndex(sxx, syy)] = 0;
+                    }
+            }
         }
     }
     (void)erasedMass;
@@ -142,7 +165,7 @@ QByteArray GlitterPowder::serialize() const
     QDataStream ds(&out, QIODevice::WriteOnly);
     ds.setVersion(QDataStream::Qt_6_0);
     ds << quint32(0x474C5450u)   /* "GLTP" */
-       << quint32(1u)            /* version */
+       << quint32(2u)            /* version 2 = adds full-res glue field (P0.2) */
        << quint32(m_cells.width()) << quint32(m_cells.height())
        << float(m_worldCellSize)
        << quint32(m_palette.size());
@@ -166,6 +189,18 @@ QByteArray GlitterPowder::serialize() const
            << float(c.lF) << float(c.sF)
            << qint32(c.lA) << qint32(c.lB) << qint32(c.sA) << qint32(c.sB);
     }
+    /* P0.2: persist the full-resolution (sub-cell) glue field as a raw byte
+     * blob (coverage 0..255, one byte per sub-sample, row-major). */
+    if (!m_glueField.isEmpty())
+    {
+        ds << qint64(m_glueField.size());
+        ds.writeRawData(reinterpret_cast<const char *>(m_glueField.constData()),
+                        int(m_glueField.size()));
+    }
+    else
+    {
+        ds << qint64(0);
+    }
     return out;
 }
 
@@ -178,7 +213,8 @@ bool GlitterPowder::deserialize(const QByteArray &bytes)
     float worldCell;
     quint32 palN;
     ds >> magic >> ver >> w >> h >> worldCell >> palN;
-    if (ds.status() != QDataStream::Ok || magic != 0x474C5450u || ver != 1u)
+    if (ds.status() != QDataStream::Ok || magic != 0x474C5450u
+        || (ver != 1u && ver != 2u))
         return false;
     if (w == 0 || h == 0 || w > 65536u || h > 65536u)
         return false;
@@ -230,6 +266,28 @@ bool GlitterPowder::deserialize(const QByteArray &bytes)
     }
     m_activeCells = active;
     m_powderMask.clear();
+    /* P0.2: the full-resolution glue field is version-2. Version 1 state has no
+     * trailer, so the field is rebuilt from the coarse cell glue (as a legacy
+     * fallback the sub-res field is simply zeroed; the renderer still falls back
+     * to the coarse glue for presentation). */
+    m_glueField.resize(int(w) * kGlueSubRes * int(h) * kGlueSubRes);
+    m_glueField.fill(0);
+    if (ver >= 2u)
+    {
+        qint64 glueN = 0;
+        ds >> glueN;
+        if (ds.status() != QDataStream::Ok)
+            return false;
+        /* exact-size glue field; a mismatched (e.g. grid-changed) field is
+         * dropped and rebuilt from zero (legacy-ish tolerant load) */
+        if (glueN == qint64(m_glueField.size()))
+        {
+            const qint64 got = ds.readRawData(reinterpret_cast<char *>(m_glueField.data()),
+                                              int(m_glueField.size()));
+            if (got != qint64(m_glueField.size()))
+                return false;
+        }
+    }
     /* lazy buffers are dropped; they rebuild on the next physics step */
     m_dh.clear(); m_outM.clear(); m_mIn.clear(); m_pX.clear(); m_pY.clear();
     m_inA.clear(); m_inB.clear(); m_inF.clear();
@@ -356,7 +414,65 @@ void GlitterPowder::paintGlue(float wx, float wy, float radiusWorld, float cover
                 c.glue = std::max(0.0f, c.glue - g);
             else
                 c.glue = std::min(1.0f, c.glue + g * coverage);
+
+            /* P0.2: write the SAME disc into the full-resolution glue field at
+             * sub-res so the render gets a crisp edge (not upscaled cells). */
+            const int s0 = std::max(0, int((x - R) * kGlueSubRes));
+            const int s1 = std::min(m_cells.width() * kGlueSubRes - 1,
+                                    int((x + 1 + R) * kGlueSubRes));
+            const int st0 = std::max(0, int((y - R) * kGlueSubRes));
+            const int st1 = std::min(m_cells.height() * kGlueSubRes - 1,
+                                     int((y + 1 + R) * kGlueSubRes));
+            for (int syy = st0; syy <= st1; ++syy)
+                for (int sxx = s0; sxx <= s1; ++sxx)
+                {
+                    /* sub-res world position */
+                    const float wxx = (sxx + 0.5f) / float(kGlueSubRes) * cell;
+                    const float wyy = (syy + 0.5f) / float(kGlueSubRes) * cell;
+                    const float ddx = wxx - wx, ddy = wyy - wy;
+                    const float dd2 = ddx * ddx + ddy * ddy;
+                    if (dd2 > radiusWorld * radiusWorld)
+                        continue;
+                    const float g1 = 1.0f - std::min(1.0f, std::sqrt(dd2) / radiusWorld);
+                    quint8 &fv = m_glueField[glueFieldIndex(sxx, syy)];
+                    const int cur = fv;
+                    if (coverage < 0)
+                        fv = quint8(std::max(0, cur - int(g1 * 255)));
+                    else
+                        fv = quint8(std::min(255, cur + int(g1 * coverage * 255)));
+                }
         }
+    if (coverage > 0)
+        m_activeCells = m_activeCells.united(
+            QRect(x0, y0, x1 - x0 + 1, y1 - y0 + 1));
+}
+
+/* Sample the full-resolution glue field (0..1) with bilinear interpolation at an
+ * arbitrary world position (clamped to the grid). */
+float GlitterPowder::gluePresence(float wx, float wy) const
+{
+    if (m_glueField.isEmpty() || kGlueSubRes <= 0)
+    {
+        /* fallback when no sub-res field yet: use the coarse cell glue */
+        return 0.0f;
+    }
+    const float fw = float(m_cells.width() * kGlueSubRes);
+    const float fh = float(m_cells.height() * kGlueSubRes);
+    float gx = (wx / m_worldCellSize) * float(kGlueSubRes) - 0.5f;
+    float gy = (wy / m_worldCellSize) * float(kGlueSubRes) - 0.5f;
+    gx = std::clamp(gx, 0.0f, fw - 1.001f);
+    gy = std::clamp(gy, 0.0f, fh - 1.001f);
+    const int ix = int(gx), iy = int(gy);
+    const float fx = gx - ix, fy = gy - iy;
+    const int ix1 = std::min(int(fw) - 1, ix + 1);
+    const int iy1 = std::min(int(fh) - 1, iy + 1);
+    const float v00 = m_glueField[glueFieldIndex(ix, iy)] / 255.0f;
+    const float v10 = m_glueField[glueFieldIndex(ix1, iy)] / 255.0f;
+    const float v01 = m_glueField[glueFieldIndex(ix, iy1)] / 255.0f;
+    const float v11 = m_glueField[glueFieldIndex(ix1, iy1)] / 255.0f;
+    const float top = v00 + (v10 - v00) * fx;
+    const float bot = v01 + (v11 - v01) * fx;
+    return top + (bot - top) * fy;
 }
 
 /* Colour mixing (reference mixInto). Keeps a cell's two dominant colours;
@@ -1128,7 +1244,24 @@ float GlitterPowder::looseMassInRect(float wx0, float wy0, float wx1, float wy1)
 
 bool GlitterPowder::isEmpty() const
 {
-    return looseMass() <= 0.01f && bondedCount() == 0;
+    /* A Glitter Powder material is empty only when it holds neither powder nor
+     * meaningful wet glue — a glue-only layer is still a real material and must
+     * persist/render/export (it is NOT empty). */
+    return !hasPowder() && !hasGlue();
+}
+
+bool GlitterPowder::hasGlue() const
+{
+    for (int y = 0; y < m_cells.height(); ++y)
+        for (int x = 0; x < m_cells.width(); ++x)
+            if (cellAt(idx(x, y)).glue > 0.02f)
+                return true;
+    return false;
+}
+
+bool GlitterPowder::hasPowder() const
+{
+    return looseMass() > 0.01f || bondedCount() > 0;
 }
 
 bool GlitterPowder::powderBoundsWorld(float &minx, float &miny,
@@ -1142,6 +1275,29 @@ bool GlitterPowder::powderBoundsWorld(float &minx, float &miny,
         {
             const PowderCell &c = cellAt(idx(x, y));
             if (c.height <= 0.02f)
+                continue;
+            any = true;
+            const float wx0 = x * cell, wy0 = y * cell;
+            const float wx1 = (x + 1) * cell, wy1 = (y + 1) * cell;
+            if (wx0 < minx) minx = wx0; if (wy0 < miny) miny = wy0;
+            if (wx1 > maxx) maxx = wx1; if (wy1 > maxy) maxy = wy1;
+        }
+    if (!any) return false;
+    return true;
+}
+
+bool GlitterPowder::materialBoundsWorld(float &minx, float &miny,
+                                        float &maxx, float &maxy) const
+{
+    const float cell = m_worldCellSize;
+    minx = 1e30f; miny = 1e30f; maxx = -1e30f; maxy = -1e30f;
+    bool any = false;
+    for (int y = 0; y < m_cells.height(); ++y)
+        for (int x = 0; x < m_cells.width(); ++x)
+        {
+            const PowderCell &c = cellAt(idx(x, y));
+            /* powder OR meaningful wet glue counts as material */
+            if (c.height <= 0.02f && c.glue <= 0.02f)
                 continue;
             any = true;
             const float wx0 = x * cell, wy0 = y * cell;
@@ -1287,27 +1443,30 @@ QImage GlitterPowder::render(const QSize &outSize, float outOriginWorldX,
 
     /* ---- CONTINUOUS GLOBAL Voronoi grain field (reference GPU, CPU) -------
      * The reference derives ~one packed glass bead per output pixel from a
-     * 3x3-lookup Voronoi field in normalized viewport space (hash32-jittered
-     * cell centres), then shades each bead from the heightfield under its
-     * grain CENTRE. We reproduce that same continuous field here by sampling it
-     * at grain resolution (~one sample per Voronoi cell) instead of every pixel,
-     * which is the natural CPU analogue: grain positions come from the jittered
-     * centres in screen space, so a large dense heap is an irregular packed
-     * surface with NO rows/columns/checkerboard. The sim cells control only
-     * height/loose/bonded/colour/glue + the shuffle seed — never the layout. */
-    const float unit = qMin(float(outSize.width()), float(outSize.height()));
-    const float grainPx = qBound(2.5f, unit / 140.0f, 7.0f); /* ~1 css-px-per-grain, coarsened for CPU */
-    const float gscale = unit / grainPx;                    /* scale: g = p*scale */
-    const float stepX = qMax(0.6f, grainPx * 0.9f);
-    const float stepY = stepX;
+     * 3x3-lookup Voronoi field, then shades each bead from the heightfield
+     * under its grain CENTRE. We reproduce that field here by sampling it at
+     * grain resolution (~one sample per Voronoi cell).
+     *
+     * CROP INVARIANCE (P0.7): grain identity and size are anchored to ABSOLUTE
+     * WORLD coordinates at a fixed world "pitch", NOT to the temporary render
+     * crop. A seed sits at `world / grainPitch`; `floor()` gives a stable
+     * integer grain id hashed into the Voronoi jitter. Only the crop's origin/
+     * size decide WHICH pixels are drawn — they never change grain size,
+     * identity, random seed, flake identity or holo phase. So the small live
+     * stroke crop and the large commit union render the same overlapping world
+     * pixels identically (P0.7/P0.8). One Voronoi seed per sim cell keeps the
+     * field stable across zoom/export too. */
+    const float grainPitch = m_worldCellSize;               /* world units per seed */
+    const float stepW = grainPitch * 0.5f;                  /* sample stride (world) */
 
     /* Sample region = output viewport clipped to the pow-ish bounds (the cell
-     * scan above) and to where powder actually lives, so we never issue grain
-     * samples over empty paper and the interactive stroke stays cheap. */
+     * scan above) and to where MATERIAL (powder OR wet glue) actually lives, so
+     * we never issue grain samples over empty paper, glue-only strokes stay
+     * visible, and the interactive stroke stays cheap. */
     float sx0 = outOriginWorldX, sx1 = outOriginWorldX + outSize.width() * worldPerPx;
     float sy0 = outOriginWorldY, sy1 = outOriginWorldY + outSize.height() * worldPerPx;
     float pMinX = 0, pMinY = 0, pMaxX = 0, pMaxY = 0;
-    if (powderBoundsWorld(pMinX, pMinY, pMaxX, pMaxY))
+    if (materialBoundsWorld(pMinX, pMinY, pMaxX, pMaxY))
     {
         sx0 = qMax(sx0, pMinX); sx1 = qMin(sx1, pMaxX);
         sy0 = qMax(sy0, pMinY); sy1 = qMin(sy1, pMaxY);
@@ -1315,17 +1474,19 @@ QImage GlitterPowder::render(const QSize &outSize, float outOriginWorldX,
     /* also keep the pow-ish cell-scan extent (viewport ∩ sim grid) as a bound */
     sx0 = qMax(sx0, float(gx0) * cell);      sx1 = qMin(sx1, float(gx1 + 1) * cell);
     sy0 = qMax(sy0, float(gy0) * cell);      sy1 = qMin(sy1, float(gy1 + 1) * cell);
+    /* padding that lets a grain centred just outside the viewport still cover
+     * an edge pixel (one grain pitch in world units) */
+    const float padW = grainPitch;
 
     p.setPen(Qt::NoPen);
     const int gridW = m_cells.width(), gridH = m_cells.height();
-    const float padPx = grainPx * 1.2f;
     if (sx1 > sx0 && sy1 > sy0 && worldPerPx > 0.0f)
     {
-        /* px range of the sample grid (output px) */
-        const float pxBeg = (sx0 - outOriginWorldX) / worldPerPx - padPx;
-        const float pxEnd = (sx1 - outOriginWorldX) / worldPerPx + padPx;
-        const float pyBeg = (sy0 - outOriginWorldY) / worldPerPx - padPx;
-        const float pyEnd = (sy1 - outOriginWorldY) / worldPerPx + padPx;
+        /* world bounds of the sample grid (a grain pitch of padding so a grain
+         * centred just outside the viewport still covers an edge pixel) */
+        const float wxBeg = sx0 - padW, wyBeg = sy0 - padW;
+        const float wxEnd = sx1 + padW, wyEnd = sy1 + padW;
+        const float oneOverPitch = 1.0f / grainPitch;
 
         /* heightfield read at an arbitrary world position (clamped, reference
          * clamps the sim uv to the grid). */
@@ -1338,24 +1499,27 @@ QImage GlitterPowder::render(const QSize &outSize, float outOriginWorldX,
             return cellAt(idx(x, y)).height;
         };
 
-        for (float sy = pyBeg; sy <= pyEnd; sy += stepY)
-            for (float sx = pxBeg; sx <= pxEnd; sx += stepX)
+        for (float wy = wyBeg; wy <= wyEnd; wy += stepW)
+            for (float wxp = wxBeg; wxp <= wxEnd; wxp += stepW)
             {
-                /* pixel -> normalized viewport space (reference p) */
-                const float pnx = sx / unit - 0.5f;
-                const float pny = sy / unit - 0.5f;
-                const float gx = pnx * gscale, gy = pny * gscale;
-                const float gix = std::floor(gx), giy = std::floor(gy);
-                const float gfx = gx - gix, gfy = gy - giy;
+                /* ABSOLUTE world-anchored grain coordinate: world / grainPitch.
+                 * The crop's origin/size never enter this, so the same world
+                 * pixel always maps to the same grain id and jitter (P0.7). */
+                const float gx = wxp * oneOverPitch;
+                const float gy = wy * oneOverPitch;
+                const float gixf = std::floor(gx), giyf = std::floor(gy);
+                const int gix = int(gixf), giy = int(giyf);
+                const float gfx = gx - gixf, gfy = gy - giyf;
 
-                /* 3x3 Voronoi field, exact reference equations */
+                /* 3x3 Voronoi field, exact reference equations on world-locked
+                 * integer grain ids (refHash32 keys stable vs the crop). */
                 float b1 = 8.0f, b2 = 8.0f;
                 float bRx = 0.0f, bRy = 0.0f, bIx = 0.0f, bIy = 0.0f, bPx = 0.0f, bPy = 0.0f;
                 for (int cy = -1; cy <= 1; ++cy)
                     for (int cx = -1; cx <= 1; ++cx)
                     {
                         const float ccx = float(cx), ccy = float(cy);
-                        const QVector3D h = refHash32(gix + ccx, giy + ccy);
+                        const QVector3D h = refHash32(float(gix) + ccx, float(giy) + ccy);
                         const float ptx = ccx + 0.15f + 0.7f * h.x();
                         const float pty = ccy + 0.15f + 0.7f * h.y();
                         const float rx = ptx - gfx, ry = pty - gfy;
@@ -1365,7 +1529,7 @@ QImage GlitterPowder::render(const QSize &outSize, float outOriginWorldX,
                             b2 = b1; b1 = dd;
                             bRx = rx; bRy = ry;
                             bIx = gix + ccx; bIy = giy + ccy;
-                            bPx = gix + ptx; bPy = giy + pty;
+                            bPx = gixf + ptx; bPy = giyf + pty;
                         }
                         else if (dd < b2)
                         {
@@ -1375,25 +1539,50 @@ QImage GlitterPowder::render(const QSize &outSize, float outOriginWorldX,
                 const float dist = std::sqrt(b1);
                 const float edge = std::sqrt(b2) - dist;
 
-                /* grain centre -> output px -> world (single mapping) */
-                const float gcxPx = (bPx / gscale) * unit + 0.5f * outSize.width();
-                const float gcyPx = (bPy / gscale) * unit + 0.5f * outSize.height();
-                const float gw = outOriginWorldX + gcxPx * worldPerPx;
-                const float ghw = outOriginWorldY + gcyPx * worldPerPx;
+                /* grain centre in ABSOLUTE WORLD (bPt is in grain-pitch units);
+                 * convert to output px ONLY for drawing (never the reverse). */
+                const float gw = bPx * grainPitch;
+                const float ghw = bPy * grainPitch;
+                const float gcxPx = (gw - outOriginWorldX) / worldPerPx;
+                const float gcyPx = (ghw - outOriginWorldY) / worldPerPx;
+                /* crop culling: draw only grains intersecting the viewport */
+                if (gcxPx < -grainPitch / worldPerPx
+                    || gcyPx < -grainPitch / worldPerPx
+                    || gcxPx > outSize.width() + grainPitch / worldPerPx
+                    || gcyPx > outSize.height() + grainPitch / worldPerPx)
+                    continue;
+                /* one world grain pitch in output px: a fixed world-space bead size
+                 * (crop/zoom invariant). The glue film and coverage discs use
+                 * this directly; the bead disc radius is rad * grainPitchPx. */
+                const float grainPitchPx = grainPitch / worldPerPx;
+                const float covRPx = grainPitchPx * 0.75f;   /* coverage disc */
                 int scx = int(std::floor(gw / cell));
                 int scy = int(std::floor(ghw / cell));
                 scx = std::clamp(scx, 0, gridW - 1);
                 scy = std::clamp(scy, 0, gridH - 1);
                 const PowderCell &cg = cellAt(idx(scx, scy));
                 const float hVal = cg.height;
-                if (hVal <= 0.02f)
-                    continue;                       /* no powder under this grain */
+                const float glueAmtCell = cg.glue;
+                /* A cell is rendered when it holds powder OR wet glue. Glue-only
+                 * cells (h==0, stuck==0, glue>0) must be visible — never skipped
+                 * before glue shading (P0.1). */
+                if (hVal <= 0.02f && glueAmtCell <= 0.02f)
+                    continue;                       /* nothing under this grain */
 
                 /* reference coverage gates from the heightfield under the grain */
                 const float stuckLow = cg.stuck;
-                const float glueAmtCell = cg.glue;
                 const float bonded = gSmoothstep(0.02f, 0.25f, stuckLow);
                 const float looseH = qMax(hVal - stuckLow, 0.0f);
+
+                /* Coarse-cell glue coverage: independent of any powder. A glue
+                 * cell with no powder shows the wet adhesive; with powder it
+                 * bonds the column. `wetGlue` drives the visible film/gloss.
+                 * P0.2: use the full-resolution world-anchored glue field at the
+                 * grain centre for a crisp paint edge (complement, falling back
+                 * to the coarse cell value if the sub-res field is absent). */
+                const float hiGlue = gluePresence(gw, ghw);
+                const float wetGlue = gSmoothstep(0.15f, 0.85f,
+                                                  hiGlue > 0.0f ? hiGlue : glueAmtCell);
 
                 /* shuffle seed is the 2D grain-identity offset (reference s) */
                 const float s = cg.seed;
@@ -1419,15 +1608,25 @@ QImage GlitterPowder::render(const QSize &outSize, float outOriginWorldX,
                 const float rad = 0.5f + 0.12f * gh.x();
                 const float rr = dist / rad;
                 const float inBead = 1.0f - gSmoothstep(0.82f, 1.0f, rr);
-                const float glueAmt = gSmoothstep(0.15f, 0.85f,
-                                                  glueAmtCell + (gh.x() - 0.5f) * 0.55f) * bonded;
+                /* Bonded (over-powder) glue gloss: smooth across the cell with a
+                 * grain-hash dither, scaled by how much is actually bonded to
+                 * powder. Glue-ONLY cells use `wetGlue` below so the visible
+                 * adhesive does not depend on powder being present. */
+                const float bondedGloss = gSmoothstep(0.15f, 0.85f,
+                                                      glueAmtCell + (gh.x() - 0.5f) * 0.55f) * bonded;
+                const float glueAmt = qMax(bondedGloss, wetGlue);
                 const float exposedGlue = glueAmt * (1.0f - gSmoothstep(0.25f, 1.1f, looseH));
-                const float present = (gh.y() < qBound(0.0f, looseH / 0.9f, 1.0f) ||
-                                       gh.y() < glueAmt) ? 1.0f : 0.0f;
+                const float present = (gh.y() < qBound(0.0f, looseH / 0.9f, 1.0f)
+                                       || gh.y() < glueAmt) ? 1.0f : 0.0f;
                 const float deep = gSmoothstep(0.4f, 1.4f,
                                                looseH + std::pow(glueAmt, 1.5f) * 1.6f);
                 if (present <= 0.001f)
                     continue;
+                /* A glue-ONLY grain: no powder under it, but wet glue > 0. It
+                 * must render a transparent adhesive film (glossy centre,
+                 * refractive darker edge), independent of any powder (P0.1). */
+                const bool glueOnly = (hVal <= 0.02f && looseH <= 0.02f
+                                       && wetGlue > 0.02f);
 
                 /* multi-scale pile normal + per-grain bead normal (reference) */
                 float gradx = 0.0f, grady = 0.0f;
@@ -1491,11 +1690,54 @@ QImage GlitterPowder::render(const QSize &outSize, float outOriginWorldX,
                     + 0.18f * diff * macroDiff);
                 const int aOut8 = int(qBound(0.0f, aOut, 1.0f) * 255.0f);
 
+                /* --- WET GLUE FILM (glue-only grain) ----------------------
+                 * A transparent clear adhesive: low-alpha neutral film with a
+                 * raised glossy centre, a subtle darker/refractive rim and a
+                 * light-dependent highlight. Rendered over the paper wherever
+                 * the grain's Voronoi cell carries glue with no powder. The
+                 * film must stay visible on both light AND dark paper, so it is
+                 * a translucent mid-tone with a bright specular edge rather
+                 * than a dark or light baked fill. */
+                if (glueOnly)
+                {
+                    /* the glue film fills the grain's Voronoi coverage disc so a
+                     * continuous glue stroke forms an unbroken sheet */
+                    const float covR = covRPx;
+                    /* distance from the grain centre normalized to the disc */
+                    const float rnf = rr;                 /* 0 centre .. ~1 edge */
+                    const float rim = rnf;                /* darker/refractive edge */
+                    /* glossy raised centre: bright towards the light, falling
+                     * off at the rim (a subtle dome). */
+                    const float gloss = gMix(1.0f, 0.35f, gSmoothstep(0.1f, 0.9f, rim));
+                    const float hli = 0.55f + 0.45f * diff;   /* light-dependent */
+                    /* refractive edge adds a faint cool/violet cast */
+                    const float edgeCast = gSmoothstep(0.55f, 0.98f, rim);
+                    const float baseA = gMix(0.16f, 0.34f, wetGlue); /* transparent film */
+                    const float refrA = baseA + 0.10f * edgeCast;
+                    const float filmA = qBound(0.02f, refrA * hli, 0.55f);
+                    /* neutral adhesive base so it reads on any paper */
+                    const float baseTint = gMix(0.92f, 0.82f, edgeCast);
+                    const float specA = std::pow(qMax(0.0f, QVector3D::dotProduct(Nb, H)), 40.0f);
+                    const float glR = baseTint * (0.90f + 0.10f * hli)
+                                        + 0.90f * specA * gloss;
+                    const float glG = baseTint * (0.93f + 0.07f * hli)
+                                        - 0.08f * edgeCast + 0.90f * specA * gloss;
+                    const float glB = baseTint * (1.00f) - 0.06f * edgeCast
+                                        + 0.92f * specA * gloss;
+                    p.setBrush(QColor(int(qBound(0.0f, glR, 1.0f) * 255.0f),
+                                      int(qBound(0.0f, glG, 1.0f) * 255.0f),
+                                      int(qBound(0.0f, glB, 1.0f) * 255.0f),
+                                      int(qBound(0.0f, filmA, 1.0f) * 255.0f)));
+                    p.drawEllipse(QPointF(gcxPx, gcyPx), covR, covR);
+                    /* skip the powder bead + glint: this is pure adhesive */
+                    continue;
+                }
+
                 /* coverage disc fills the surrounding Voronoi cell so a deep
                  * heap never shows transparent gaps between beads (the bead
                  * disc is then shaded on top). */
-                const float covR = grainPx * 0.75f;
-                const float radPx = rad * grainPx;
+                const float covR = covRPx;
+                const float radPx = rad * grainPitchPx;
                 p.setBrush(QColor(int(qBound(0.0f, baseR, 1.0f) * 255.0f),
                                   int(qBound(0.0f, baseG, 1.0f) * 255.0f),
                                   int(qBound(0.0f, baseB, 1.0f) * 255.0f),
@@ -1509,17 +1751,25 @@ QImage GlitterPowder::render(const QSize &outSize, float outOriginWorldX,
 
                 /* --- time-driven shimmer: a per-grain glint in the bright
                  * specular core, keyed to the 2D grain id so a change in
-                 * timeMs always moves a few pixels (reference uTime). ---- */
+                 * timeMs always moves a few pixels (reference uTime). The
+                 * holographic amount (pal.holographic == the ONE UI shimmer
+                 * control) scales the iridescent intensity: 0 = muted metallic
+                 * white glint, 1 = strong magenta/rainbow flash (P0.12). ---- */
                 const float t = (timeMs > 0) ? float((timeMs % 4000) / 1000.0) : 0.0f;
                 const float rate = 0.6f + 1.4f * gh.y();
                 const float phase = gh2.y() * 6.2832f + t * rate;
                 const float amp = 0.5f + 0.5f * std::sin(phase);
-                if (specPow > 0.02f && amp > 0.30f)
+                const float holo = qBound(0.0f, pal.holographic, 1.0f);
+                if (specPow > 0.02f && amp > 0.30f && holo > 0.02f)
                 {
                     const float sw = qMax(0.35f, radPx * 0.34f);
-                    const float alpha = qMin(255.0f, 60.0f + 170.0f * amp);
-                    QColor glintc(255, int(qBound(0.0f, 1.0f - 0.25f * amp, 1.0f) * 255.0f),
-                                  255, int(alpha));
+                    const float alpha = qMin(255.0f, (30.0f + 150.0f * amp) * holo);
+                    /* metallic white at holo 0, magenta/cyan flash toward 1 */
+                    const float iride = 0.15f + 0.85f * holo * amp;
+                    QColor glintc(255,
+                                  int(qBound(0.0f, 0.92f - 0.35f * iride, 1.0f) * 255.0f),
+                                  int(qBound(0.0f, 0.92f - 0.18f * holo, 1.0f) * 255.0f),
+                                  int(alpha));
                     p.setBrush(glintc);
                     p.drawEllipse(QPointF(gcxPx + (gh.x() - 0.5f) * radPx * 0.8f,
                                           gcyPx + (gh.z() - 0.5f) * radPx * 0.8f), sw, sw);

@@ -35,8 +35,9 @@ Rectangle {
         colorSet: ColorContext.View
     }
 
-    /* two rows deep so a tight window wraps the sliders instead of clipping */
-    height: VLCStyle.dp(64, VLCStyle.scale) + VLCStyle.dp(30, VLCStyle.scale)
+    /* height grows to the toolbar's ACTUAL wrapped content so a narrow window
+     * wraps sliders to more rows instead of clipping them (P1 layout) */
+    height: optionBar.contentHeight + VLCStyle.margin_medium * 2
     color: theme.bg.primary
     border.width: 1
     border.color: theme.border
@@ -114,46 +115,48 @@ Rectangle {
         {
             /* leading subtool group: Glue / Glitter / Push / Eraser are
              * mutually-exclusive checkable modes; Pour / Blow are momentary
-             * actions. A non-interactive spacer separates the two groups. */
+             * actions. A non-interactive spacer separates the two groups.
+             * Declarative action data (never JS callbacks): the toolbar emits
+             * triggered(action, value) and rebuild() below dispatches (P0.3). */
             out.push({ kind: "tool", iconSource: "dropzone", tip: qsTr("Glue"),
                        checkable: true, checked: canvas.powderTool === 0,
-                       onTriggered: () => { canvas.powderTool = 0 } })
+                       action: "powderTool", value: 0 })
             out.push({ kind: "tool", iconSource: "glitter", tip: qsTr("Glitter"),
                        checkable: true, checked: canvas.powderTool === 1,
-                       onTriggered: () => { canvas.powderTool = 1 } })
+                       action: "powderTool", value: 1 })
             out.push({ kind: "tool", iconSource: "move", tip: qsTr("Push"),
                        checkable: true, checked: canvas.powderTool === 2,
-                       onTriggered: () => { canvas.powderTool = 2 } })
+                       action: "powderTool", value: 2 })
             out.push({ kind: "tool", iconSource: "eraser", tip: qsTr("Eraser"),
                        checkable: true, checked: canvas.powderTool === 3,
-                       onTriggered: () => { canvas.powderTool = 3 } })
+                       action: "powderTool", value: 3 })
             out.push({ kind: "spacer" })
             out.push({ kind: "icon", iconSource: "download", tip: qsTr("Pour"),
-                       onTriggered: () => canvas.pourPowderNow() })
+                       action: "powderPour" })
             out.push({ kind: "icon", iconSource: "windy", tip: qsTr("Blow"),
-                       onTriggered: () => canvas.blowPowderNow() })
+                       action: "powderBlow" })
 
-            /* contextual options, dependent on the active subtool */
-            if (canvas.powderTool === 0)            /* Glue: size */
-                out.push({ kind: "slider", label: qsTr("Size"), from: 1, to: 160, stepSize: 1,
-                           value: canvas.brushSize, onChange: (v) => canvas.brushSize = v })
-            else if (canvas.powderTool === 1)       /* Glitter: size + amount (+ flakes/shimmer) */
+            /* contextual options, dependent on the active subtool (P0.5: each
+             * sub-tool keeps its OWN reference size range/default; Glitter adds
+             * Amount; Shimmer is a single semantic control on Glitter). */
+            if (canvas.powderTool === 0)            /* Glue: width */
+                out.push({ kind: "slider", label: qsTr("Size"), from: 4, to: 60, stepSize: 1,
+                           value: canvas.powderGlueWidth, onChange: (v) => canvas.powderGlueWidth = v })
+            else if (canvas.powderTool === 1)       /* Glitter: radius + amount + shimmer */
             {
-                out.push({ kind: "slider", label: qsTr("Size"), from: 1, to: 160, stepSize: 1,
-                           value: canvas.brushSize, onChange: (v) => canvas.brushSize = v })
+                out.push({ kind: "slider", label: qsTr("Size"), from: 6, to: 80, stepSize: 1,
+                           value: canvas.powderGlitterSize, onChange: (v) => canvas.powderGlitterSize = v })
                 out.push({ kind: "slider", label: qsTr("Amount"), from: 0.1, to: 2, stepSize: 0.05,
                            value: canvas.glitterAmount, onChange: (v) => canvas.glitterAmount = v })
-                out.push({ kind: "slider", label: qsTr("Flake"), from: 0.2, to: 2.5, stepSize: 0.05,
-                           value: canvas.glitterFlakeSize, onChange: (v) => canvas.glitterFlakeSize = v })
                 out.push({ kind: "slider", label: qsTr("Shimmer"), from: 0.0, to: 1, stepSize: 0.05,
                            value: canvas.glitterShimmer, onChange: (v) => canvas.glitterShimmer = v })
             }
-            else if (canvas.powderTool === 2)       /* Push: size */
-                out.push({ kind: "slider", label: qsTr("Size"), from: 1, to: 160, stepSize: 1,
-                           value: canvas.brushSize, onChange: (v) => canvas.brushSize = v })
-            else if (canvas.powderTool === 3)       /* Eraser: size */
-                out.push({ kind: "slider", label: qsTr("Size"), from: 1, to: 160, stepSize: 1,
-                           value: canvas.brushSize, onChange: (v) => canvas.brushSize = v })
+            else if (canvas.powderTool === 2)       /* Push: radius */
+                out.push({ kind: "slider", label: qsTr("Size"), from: 8, to: 60, stepSize: 1,
+                           value: canvas.powderPushSize, onChange: (v) => canvas.powderPushSize = v })
+            else if (canvas.powderTool === 3)       /* Eraser: width */
+                out.push({ kind: "slider", label: qsTr("Size"), from: 8, to: 120, stepSize: 1,
+                           value: canvas.powderEraserWidth, onChange: (v) => canvas.powderEraserWidth = v })
         }
 
         /* the old standalone Smear (19) option has been removed from the main
@@ -164,6 +167,32 @@ Rectangle {
     }
 
     Component.onCompleted: rebuild()
+
+    /* Declarative action dispatch (P0.3): the toolbar emits triggered(action,
+     * value) — one observable path, no JS callbacks in the item model. */
+    function dispatchPowderAction(action, value) {
+        switch (action) {
+        case "powderTool":
+            const names = ["Glue", "Glitter", "Push", "Eraser"]
+            console.log("powder UI action:", (value >= 0 && value < names.length) ? names[value] : String(value))
+            console.log("powder tool changed:", canvas.powderTool, "->", value)
+            canvas.powderTool = value
+            break
+        case "powderPour":
+            console.log("powder UI action: Pour")
+            canvas.pourPowderNow()
+            break
+        case "powderBlow":
+            console.log("powder UI action: Blow")
+            canvas.blowPowderNow()
+            break
+        }
+    }
+
+    Connections {
+        target: optionBar
+        function onTriggered(action, value) { dispatchPowderAction(action, value) }
+    }
 
     /* precision toggles + sliders mirror the canvas, so any of these state
      * changes repaints the cells (the unified toolbar renders plain cells,

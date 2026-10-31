@@ -47,6 +47,13 @@ Item {
     /* list of item objects (see header doc) */
     property var items: []
 
+    /* Declarative action dispatch: instead of storing JS closures in the item
+     * objects (fragile QV4 callbacks), a cell may carry:
+     *   action: "powderTool", value: 2     or     action: "powderPour"
+     * The owning bar connects to `triggered` and performs the observable
+     * dispatch. Kept alongside the legacy onTriggered path for compat. */
+    signal triggered(string action, var value)
+
     /* square cell size used for icon buttons (sliders size their own width) */
     property real cell: VLCStyle.dp(40, VLCStyle.scale)
 
@@ -56,15 +63,52 @@ Item {
     /* spacing between cells */
     property real spacing: VLCStyle.margin_xxxsmall
 
+    /* per-cell width: icons/actions are one cell, sliders are five cells,
+     * spacers are a fraction (so no item is silently clipped — P1 layout) */
+    function _itemW(d) {
+        if (d) {
+            if (d.kind === "spacer") return root.cell * 0.4
+            if (d.kind === "slider" || d.kind === "option")
+                return (root.orientation === Qt.Horizontal ? root.cell * 5 : root.cell)
+        }
+        return root.cell
+    }
+
+    /* horizontal wrappable Flow: how many rows are needed given the available
+     * `width` (wraps sliders instead of clipping them) */
+    function _wrappedRows(width) {
+        if (root.orientation !== Qt.Horizontal) return _rows
+        let rows = 1, w = 0
+        for (const d of root.items) {
+            if (!d || d.visible === false) continue
+            const iw = _itemW(d)
+            if (w + iw + (w > 0 ? root.spacing : 0) > Math.max(1, width)) { ++rows; w = iw }
+            else w += iw + (w > 0 ? root.spacing : 0)
+        }
+        return rows
+    }
+
     /* vertical content height = rows * (cell + spacing) so the Flow wraps
      * into `columns` columns */
     readonly property real _rows: Math.ceil(items.length / Math.max(1, columns))
-    readonly property real _flowHeight: _rows * (cell + spacing)
+    readonly property bool _isHoriz: orientation === Qt.Horizontal
+    readonly property real _layoutRows: _isHoriz && width > 0
+                                        ? _wrappedRows(width) : _rows
+    readonly property real _fluidHeight: _layoutRows * (cell + spacing)
+    readonly property real _allWidth: {
+        /* sum of every item's own width for the ideal horizontal strip */
+        let w = 0
+        for (const d of items) if (d) w += _itemW(d) + (w > 0 ? spacing : 0)
+        return Math.max(cell, w)
+    }
 
-    implicitWidth: orientation === Qt.Horizontal
-                   ? (cell + spacing) * items.length
-                   : columns * cell + (columns - 1) * spacing
-    implicitHeight: orientation === Qt.Horizontal ? cell : _flowHeight
+    /* Exposed for a floating host bar to size itself to the ACTUAL wrapped
+     * content (including sliders) instead of an assumption — no clipping */
+    readonly property real contentHeight: _fluidHeight
+
+    implicitWidth: _isHoriz ? _allWidth
+                            : columns * cell + (columns - 1) * spacing
+    implicitHeight: _isHoriz ? _fluidHeight : _fluidHeight
 
     ColorContext {
         id: theme
@@ -81,11 +125,10 @@ Item {
          * Grid would give the same result but Flow keeps ONE code path */
         width: root.orientation === Qt.Horizontal
                ? root.width : root.columns * root.cell + (root.columns - 1) * root.spacing
-        height: root.orientation === Qt.Horizontal
-                ? root.cell : root._flowHeight
+        height: root._fluidHeight
         flow: root.orientation === Qt.Horizontal ? Flow.LeftToRight : Flow.TopToBottom
         spacing: root.spacing
-        clip: true
+        clip: false
 
         Repeater {
             model: root.items
@@ -152,8 +195,13 @@ Item {
                         acceptedButtons: Qt.LeftButton
                         onEntered: cellBg.cellHover = true
                         onExited: cellBg.cellHover = false
-                        onClicked: if (cell.modelData && cell.modelData.onTriggered)
-                                       cell.modelData.onTriggered()
+                        onClicked: {
+                        const d = cell.modelData
+                        if (d && d.action)
+                            root.triggered(d.action, d.value)
+                        else if (d && d.onTriggered)
+                            d.onTriggered()
+                    }
                     }
 
                     ToolTip {

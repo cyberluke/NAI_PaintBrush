@@ -896,11 +896,33 @@ QImage GpuRuntime::renderPowder(const QSize &outSize,
 
     QRhiTexture *simTex = m_rhi->newTexture(QRhiTexture::RGBA16F, QSize(W, H), 1, {});
     QRhiTexture *colTex = m_rhi->newTexture(QRhiTexture::RGBA8, QSize(W, H), 1, {});
+    /* P0.2: full-resolution world-anchored glue field (sub-res per cell) as a
+     * dedicated R8 texture (the reference `uGlue`). Cleanly built when the
+     * engine carries a glue field; a 1x1 zero stub keeps the SRB binding valid
+     * and the shader tolerant when there is none (e.g. reference-surface or
+     * pre-glue states). */
+    const int glueSub = art::glitter::GlitterPowder::glueSubRes();
+    QRhiTexture *glueTex = nullptr;
+    QRhiSampler *glueSampler = nullptr;
+    QVector<quint8> glueField;
+    {
+        QSize gsz(1, 1);
+        if (output == PowderOutput::MaterialLayer && powder.hasGlueField())
+        {
+            glueField = powder.glueFieldBytes();
+            gsz = QSize(W * glueSub, H * glueSub);
+        }
+        glueTex = m_rhi->newTexture(QRhiTexture::R8, gsz, 1, {});
+        if (glueTex)
+            glueTex->create();
+        glueSampler = m_pipelines->powderSim;   /* Linear, reuse */
+    }
     /* RAII scopes: guarantee no leaked resource on every early-return before
      * the frame is submitted. */
     auto freeResources = [&]() {
         if (simTex) { simTex->destroy(); delete simTex; simTex = nullptr; }
         if (colTex) { colTex->destroy(); delete colTex; colTex = nullptr; }
+        if (glueTex) { glueTex->destroy(); delete glueTex; glueTex = nullptr; }
     };
     if (!simTex || !colTex || !simTex->create() || !colTex->create()) {
         freeResources();
@@ -962,6 +984,23 @@ QImage GpuRuntime::renderPowder(const QSize &outSize,
     /* packed colour texture as an owned QImage (removes ARGB swap) */
     QImage colI((const uchar *)colBuf.constData(), W, H, W * 4, QImage::Format_RGBA8888);
     u->uploadTexture(colTex, colI.copy());
+    /* P0.2: upload the full-res glue field as the uGlue texture (R8, or a 1x1
+     * zero stub when none exists so the SRB binding is always valid). */
+    if (glueTex)
+    {
+        if (!glueField.isEmpty())
+        {
+            u->uploadTexture(glueTex, { QRhiTextureUploadEntry(0, 0,
+                QRhiTextureSubresourceUploadDescription(glueField.constData(),
+                                                        quint32(glueField.size()))) });
+        }
+        else
+        {
+            static const quint8 zeroGlue = 0;
+            u->uploadTexture(glueTex, { QRhiTextureUploadEntry(0, 0,
+                QRhiTextureSubresourceUploadDescription(&zeroGlue, 1)) });
+        }
+    }
     u->updateDynamicBuffer(m_pipelines->powderUb, 0, kUbSize, ub.constData());
 
     /* per-call SRB (layout must match the powder pipeline's) */
@@ -970,6 +1009,7 @@ QImage GpuRuntime::renderPowder(const QSize &outSize,
         QRhiShaderResourceBinding::uniformBuffer(2, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage, m_pipelines->powderUb),
         QRhiShaderResourceBinding::sampledTexture(0, QRhiShaderResourceBinding::FragmentStage, simTex, simSampler),
         QRhiShaderResourceBinding::sampledTexture(1, QRhiShaderResourceBinding::FragmentStage, colTex, m_pipelines->powderCol),
+        QRhiShaderResourceBinding::sampledTexture(3, QRhiShaderResourceBinding::FragmentStage, glueTex, glueSampler),
     });
     if (!srb->create()) {
         delete srb;

@@ -177,9 +177,32 @@ public:
      * a plow/smear actually pushed anything (cheap, scoped to the rect). */
     float looseMassInRect(float wx0, float wy0, float wx1, float wy1) const;
     bool isEmpty() const;
+    /* Material-state predicates. A plain raster/paint layer is not a material;
+     * a Glitter Powder physical layer is a material when it carries any powder
+     * OR any wet glue. `isEmpty()` for a Glitter Powder material must return
+     * false when meaningful glue coverage exists (otherwise glue-only layers
+     * would be dropped from persistence). */
+    bool hasGlue() const;      /* any cell with meaningful wet-glue coverage */
+    bool hasPowder() const;    /* any cell with loose or bonded powder */
+    bool hasMaterial() const { return hasPowder() || hasGlue(); }
+
+    /* Full-resolution (sub-cell) world-anchored glue coverage, sampled with
+     * bilinear interpolation at an arbitrary world position (P0.2). The coarse
+     * cell `glue` is the physics adhesion approximation; this field carries the
+     * crisp paint edge / wet-glue normal / bonding boundary used by the render
+     * path. Returns 0..1. */
+    float gluePresence(float wx, float wy) const;
+    /* Sub-cell resolution of the glue field (P0.2). */
+    static int glueSubRes() { return kGlueSubRes; }
+    bool hasGlueField() const { return !m_glueField.isEmpty(); }
+    const QVector<quint8> &glueFieldBytes() const { return m_glueField; }
     /* World-space bounding box (minx,miny,maxx,maxy) of cells carrying any
-     * powder (loose or bonded), or false if the field is empty. */
+     * loose or bonded powder, or false if the field holds no powder. */
     bool powderBoundsWorld(float &minx, float &miny, float &maxx, float &maxy) const;
+    /* World-space bounding box of ALL physical material: wet glue + bonded +
+     * loose glitter. Used to drive the dirty/commit render union so glue-only
+     * strokes are never clipped to an empty (powder-derived) rect. */
+    bool materialBoundsWorld(float &minx, float &miny, float &maxx, float &maxy) const;
 
     /* True if cell (cx,cy) was detected as carrying committed powder by the
      * most recent hydrateFromRaster(). Used to know which raster pixels the sim
@@ -234,6 +257,15 @@ private:
     QSize m_cells;
     float m_worldCellSize = 1.0f;
     QVector<PowderCell> m_cellsData;
+    /* Full-resolution world-anchored glue field (P0.2): kGlueSubRes sub-samples
+     * per cell edge, stored as coverage 0..255. Independent of the coarse cell
+     * `glue` (which stays the physics adhesion approximation). Painted by
+     * paintGlue alongside the cell, sampled by gluePresence() for crisp glue
+     * edges / wet-glue normals / bonding boundary, and persisted in state. */
+    enum { kGlueSubRes = 8 };
+    QVector<quint8> m_glueField;
+    inline int glueFieldIndex(int subX, int subY) const
+    { return subY * (m_cells.width() * kGlueSubRes) + subX; }
     QRandomGenerator m_rng;
     /* the palette slots currently in use (grow on demand, freed when empty) */
     QVector<QColor> m_palette;

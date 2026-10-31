@@ -23,6 +23,8 @@ layout(binding = 0) uniform sampler2D uSim;    // RGBA16F: r=height g=seed b=stu
 layout(binding = 1) uniform highp sampler2D uCol;  // RGBA8 packed, reference layout:
                                                   //  r = loose A<<4 | B, g = loose B share (0..255)
                                                   //  b = bonded A<<4 | B, a = bonded B share
+layout(binding = 3) uniform sampler2D uGlue;   // P0.2: full-res world-anchored glue field (R8),
+                                               // sub-cell coverage at 0..1 with uGrid*glueSub res.
 
 layout(std140, binding = 2) uniform ubuf {
     mat4 qt_Matrix;
@@ -76,6 +78,13 @@ vec4 simAtCell(vec2 worldCell)
 {
     ivec2 c = ivec2(clamp(ivec2(floor(worldCell)), ivec2(0), ivec2(uGrid) - ivec2(1)));
     return texelFetch(uSim, c, 0);
+}
+
+// P0.2: the full-resolution glue field (uGlue) — same world extent as uSim, so
+// simUV(world) maps to it at sub-cell resolution. Returns 0..1 coverage.
+float glueAt(vec2 world)
+{
+    return texture(uGlue, clamp(simUV(world), 0.0, 1.0)).r;
 }
 
 // Real two-slot colour from the reference-packed uCol texture. Each sim cell
@@ -300,9 +309,13 @@ void main()
     if (uMaterialMode >= 0.5)
     {
         /* physical material coverage: a grain bead, loose/gap powder under
-         * it, and wet glue are all supporting material. */
-        float support = max(inBead * present, deep);
-        float glueA = smoothstep(0.08, 0.5, glueAmtCell) * (1.0 - bonded)
+         * it, and wet glue are all supporting material. P0.2: the full-res
+         * glue field provides the crisp presence even where the coarse cell
+         * says no powder (glue-only cells must show the wet adhesive). */
+        float gluePres = glueAt(world);
+        float support = max(max(inBead * present, deep), gluePres);
+        float glueA = smoothstep(0.08, 0.5,
+                                 max(glueAmtCell, gluePres)) * (1.0 - bonded)
                     * (1.0 - smoothstep(0.05, 0.6, h));
         glueA = max(glueA, 0.0);
 

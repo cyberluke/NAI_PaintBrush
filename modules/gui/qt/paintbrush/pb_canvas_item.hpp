@@ -81,6 +81,14 @@ class PaintbrushCanvasItem : public QQuickItem
     Q_PROPERTY(qreal brushColorVariation READ brushColorVariation WRITE setBrushColorVariation NOTIFY artParamsChanged FINAL)
     /* Glitter-Powder workbench: active subtool for TOOL_GLITTER_POWDER. */
     Q_PROPERTY(int powderTool READ powderTool WRITE setPowderTool NOTIFY powderToolChanged FINAL)
+    /* Per-subtool physical sizes (reference P0.5):
+     *   Glue / Eraser values = visible width
+     *   Glitter / Push values = reference radius
+     * Distinct from the generic brushSize and persisted independently. */
+    Q_PROPERTY(qreal powderGlueWidth   READ powderGlueWidth   WRITE setPowderGlueWidth   NOTIFY powderSizeChanged FINAL)
+    Q_PROPERTY(qreal powderGlitterSize READ powderGlitterSize WRITE setPowderGlitterSize NOTIFY powderSizeChanged FINAL)
+    Q_PROPERTY(qreal powderPushSize    READ powderPushSize    WRITE setPowderPushSize    NOTIFY powderSizeChanged FINAL)
+    Q_PROPERTY(qreal powderEraserWidth READ powderEraserWidth WRITE setPowderEraserWidth NOTIFY powderEraserWidthChanged FINAL)
 
 public:
     qreal glitterAmount() const { return m_glitterParams.amount; }
@@ -102,13 +110,27 @@ public:
     int powderTool() const { return int(m_powderTool); }
     void setPowderTool(int t);   /* clamps to the 4 stroke modes (never Pour/Blow stored) */
 
-    void pourPowderNow();        /* momentary Pour: heap of the current colour */
-    void blowPowderNow();        /* momentary Blow: run the breath over state */
+    qreal powderGlueWidth()   const { return m_powderGlueWidth; }
+    qreal powderGlitterSize() const { return m_powderGlitterSize; }
+    qreal powderPushSize()    const { return m_powderPushSize; }
+    qreal powderEraserWidth() const { return m_powderEraserWidth; }
+    void setPowderGlueWidth(qreal v);
+    void setPowderGlitterSize(qreal v);
+    void setPowderPushSize(qreal v);
+    void setPowderEraserWidth(qreal v);
+    /* The physics radius for the active powder sub-tool: a width for Glue /
+     * Eraser (half it for the radius), a reference radius for Glitter / Push. */
+    float powderSubRadius() const;
+
+    Q_INVOKABLE void pourPowderNow();        /* momentary Pour: heap of the current colour */
+    Q_INVOKABLE void blowPowderNow();        /* momentary Blow: run the breath over state */
     /* Glitter grain palette from the mood (bounded set, spec §14.4). */
     void setGlitterPalette(const QVector<QColor> &palette, const QString &id);
 
 signals:
     void artParamsChanged();
+    void powderSizeChanged();
+    void powderEraserWidthChanged();
 
 private:
     qreal m_brushFlow = 0.75;
@@ -509,10 +531,19 @@ private:
     art::glitter::PowderPalette m_powderPal;   /* render palette (single source) */
     QRect m_powderUnion;
     bool m_powderReady = false;   /* grid sized/reset once for the current layer */
+    /* Per-subtool reference sizes (P0.5): Glue/Eraser = visible width, Glitter/
+     * Push = reference radius. Distinct from the generic brushSize. */
+    qreal m_powderGlueWidth   = 14.0;
+    qreal m_powderGlitterSize = 22.0;
+    qreal m_powderPushSize    = 20.0;
+    qreal m_powderEraserWidth = 28.0;
     /* Active Glitter-Powder workbench sub-tool (reference Glue/Glitter/Push/
      * Eraser + momentary Pour/Blow). The vertical rail stays a single
      * TOOL_GLITTER_POWDER; this selects the mode within it. */
     PowderToolId m_powderTool = POWDER_GLITTER;
+    /* First-ever powder entry arms the default sub-tool (Glitter); once armed it
+     * stays false so later rail re-entries PRESERVE the last sub-tool (P0.4). */
+    bool m_powderToolNeedsDefault = true;
     /* material-state snapshot at powder-stroke start (captured before the first
      * edit) so one undo restores exactly one physical operation's material */
     SetMaterialStateCommand m_powderMaterialCmd;
@@ -537,6 +568,10 @@ private:
     qreal m_powderBlowSince = 0.0;   /* seconds held still */
     qreal m_powderBlowAge = 0.0;     /* seconds the breath has run */
     qreal m_powderRenderAcc = 0.0;   /* breath render accumulator (~30 Hz) */
+    /* Standalone employ started by blowPowderNow() with NO active pointer
+     * stroke: the breath must still commit its result atomically on finish
+     * (P0.10). Cleared once the breath ends. */
+    bool m_blowStandalone = false;
 QPointF m_powderHoldPos;         /* where the pointer is being held */
 bool m_powderHoldEver = false;   /* a real drag sampled (not a pure click) */
 /* Presentation-only shimmer clock: advances with wall time DURING a stroke so

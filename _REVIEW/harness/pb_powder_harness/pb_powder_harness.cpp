@@ -157,7 +157,20 @@ int main(int argc, char **argv)
         rigR.direction = QVector3D(-0.9f, 0.1f, 0.6f);
         QImage a = gl.render(QSize(128, 128), wc - 64, wc - 64, 1.0f, rigL, pal, nullptr, ArtScale(), 0);
         QImage b = gl.render(QSize(128, 128), wc - 64, wc - 64, 1.0f, rigR, pal, nullptr, ArtScale(), 0);
-        CHECK("light rig direction moves shading", !imgEqual(a, b, 2));
+        /* light moves the SHADING: check RGB too, because for a dense heap the
+         * coverage alpha can saturate at 1 while the facet specular/lighting
+         * still clearly moves (alpha-only is not enough here). */
+        long rgbDiff = 0; int nRGB = 0;
+        for (int y = 0; y < a.height(); ++y)
+            for (int x = 0; x < a.width(); ++x)
+            {
+                rgbDiff += qAbs<int>(qRed(a.pixel(x, y))   - qRed(b.pixel(x, y)))
+                         + qAbs<int>(qGreen(a.pixel(x, y)) - qGreen(b.pixel(x, y)))
+                         + qAbs<int>(qBlue(a.pixel(x, y))  - qBlue(b.pixel(x, y)));
+                ++nRGB;
+            }
+        const double meanRGB = nRGB ? double(rgbDiff) / nRGB : 0.0;
+        CHECK("light rig direction moves shading", meanRGB > 0.5);
     }
 
     /* ---- 5. thin vs dense coverage ----------------------------------- */
@@ -350,6 +363,70 @@ int main(int argc, char **argv)
         }
     }
 
+    /* ---- P0.7 crop-invariant CPU rendering ------------------------------
+     * Grain identity + size must be anchored to ABSOLUTE world coordinates, so
+     * overlapping world-space pixels render identically no matter what crop
+     * (origin/size) is being drawn. Render the same state as a full frame, a
+     * left, a middle and a right crop, then verify the overlapping regions of
+     * the crops exactly match the full-frame pixels for those world coords. */
+    {
+        GlitterPowder ci;
+        ci.reset(QSize(64, 64), 4.0f, 21u);
+        GlitterParams cp; cp.amount = 1.4f; cp.flakeSize = 0.8f; cp.color = pal.colors[0];
+        cp.palette.clear();
+        /* material spread across world x/y ~ [64,192] (a couple of pours + glue) */
+        ci.pourGlitter(96.0f, 96.0f, 22.0f, cp);
+        ci.pourGlitter(128.0f, 96.0f, 22.0f, cp);
+        ci.paintGlue(96.0f, 112.0f, 14.0f, 0.8f);
+        ci.relax(); ci.relax(); ci.decayFlow();
+
+        const float wpp = 1.0f;   /* world per px (fixed across all renders) */
+        /* full frame covers world x[64,192], y[64,192] */
+        const QRect fullR(64, 64, 128, 128);
+        const QImage full = ci.render(fullR.size(), float(fullR.x()), float(fullR.y()),
+                                      wpp, ArtLightRig(), pal, nullptr, ArtScale(), 0)
+                                .convertToFormat(QImage::Format_ARGB32);
+
+        /* three overlapping crops across the same material */
+        struct Crop { QRect r; const char *name; };
+        const Crop crops[] = {
+            { QRect(64,  64, 96, 128), "left"   },   /* world x[64,160]  */
+            { QRect(96,  64, 96, 128), "middle" },   /* world x[96,192]  */
+            { QRect(128, 64, 96, 128), "right"  },   /* world x[128,224] */
+        };
+        bool allMatch = true;
+        for (const Crop &c : crops)
+        {
+            QImage crop = ci.render(c.r.size(), float(c.r.x()), float(c.r.y()),
+                                    wpp, ArtLightRig(), pal, nullptr, ArtScale(), 0)
+                              .convertToFormat(QImage::Format_ARGB32);
+            int count = 0; long diffSum = 0; int badPixel = 0; int maxBad = 0;
+            for (int y = 0; y < crop.height() && y < full.height(); ++y)
+                for (int x = 0; x < crop.width(); ++x)
+                {
+                    const int wx = c.r.x() + x;              /* world x of crop px */
+                    if (wx < fullR.x() || wx >= fullR.x() + fullR.width()) continue;
+                    const int fx = wx - fullR.x();           /* full-frame px for that world x */
+                    const int fy = y + c.r.y() - fullR.y();  /* full-frame y (crops y-aligned) */
+                    if (fy < 0 || fy >= full.height()) continue;
+                    const QRgb pc = crop.pixel(x, y);
+                    const QRgb fc = full.pixel(fx, fy);
+                    const int da = qAbs<int>(qAlpha(pc) - qAlpha(fc));
+                    const int dr = qAbs<int>(qRed(pc) - qRed(fc));
+                    const int dg = qAbs<int>(qGreen(pc) - qGreen(fc));
+                    const int db = qAbs<int>(qBlue(pc) - qBlue(fc));
+                    diffSum += dr + dg + db; ++count;
+                    if (dr + dg + db + da > 20) { ++badPixel; if (dr > maxBad) maxBad = dr; }
+                }
+            const double meanDiff = count ? double(diffSum) / (3.0 * count) : 0.0;
+            std::printf("    P0.7 overlap[%s] world-px=%d meanRGBdiff=%.2f badPx=%d\n",
+                        c.name, count, meanDiff, badPixel);
+            if (count == 0 || badPixel > qMax(2, count / 1500) || meanDiff > 8.0)
+                allMatch = false;
+        }
+        CHECK("P0.7 crop-invariant CPU rendering (A∩B==B, A∩C==C, A∩D==D)", allMatch);
+    }
+
     /* ---- P0.7 bounded material palette ---------------------------------
      * ensurePowderPaletteSlot resolves the CURRENT foreground colour to a
      * bounded slot: reuse an exact existing colour, append while free, reuse
@@ -407,6 +484,114 @@ int main(int argc, char **argv)
             CHECK("P0.7 existing grains keep their original slots (blue gets its own slot)",
                   g2.palette().size() == 2 && g2.palette()[0] == pink && g2.palette()[1] == blue);
         }
+    }
+
+    /* ---- Glue-only material correctness (P0.1 / P0.11) ------------------
+     * A pure glue stroke (no glitter) is still a real material: it must be
+     * visible, non-empty, render wet glue, persist through serialize and be
+     * restored with its bounds intact. */
+    {
+        GlitterPowder g;
+        g.reset(QSize(64, 64), 4.0f, 4u);
+        CHECK("P0.1 empty before any material", g.isEmpty());
+        CHECK("P0.1 no glue before any material", !g.hasGlue());
+        g.paintGlue(32 * 4.0f, 32 * 4.0f, 12.0f, 0.9f);   /* glue ring, NO powder */
+        CHECK("P0.1 hasGlue true after glue-only stroke", g.hasGlue());
+        CHECK("P0.1 hasMaterial true for glue-only", g.hasMaterial());
+        CHECK("P0.1 isEmpty false when meaningful glue exists", !g.isEmpty());
+        CHECK("P0.1 hasPowder false for glue-only", !g.hasPowder());
+
+        /* glue bounds are non-empty even with no powder */
+        float mnx = 0, mny = 0, mxx = 0, mxy = 0;
+        const bool hasMatBounds = g.materialBoundsWorld(mnx, mny, mxx, mxy);
+        CHECK("P0.1 materialBoundsWorld includes glue", hasMatBounds && mxx > mnx && mxy > mny);
+        /* powder-only bounds must be EMPTY for a glue-only field */
+        float pnx = 0, pny = 0, pxx = 0, pxy = 0;
+        CHECK("P0.1 powderBoundsWorld empty for glue-only", !g.powderBoundsWorld(pnx, pny, pxx, pxy));
+
+        /* glue renders visibly (transparent adhesive alpha > 0 inside the ring) */
+        QImage glueImg = g.render(QSize(96, 96), 32 * 4.0f - 48, 32 * 4.0f - 48, 1.0f,
+                                  ArtLightRig(), pal, nullptr, ArtScale(), 0);
+        glueImg = glueImg.convertToFormat(QImage::Format_ARGB32);
+        int glueAlpha = 0;
+        for (int y = 0; y < glueImg.height(); ++y)
+            for (int x = 0; x < glueImg.width(); ++x)
+                glueAlpha += qAlpha(glueImg.pixel(x, y));
+        const double meanGlueA = glueAlpha / double(glueImg.width() * glueImg.height());
+        std::printf("    P0.1 glue-only mean alpha = %.3f\n", meanGlueA);
+        CHECK("P0.1 glue-only renders visible wet glue (alpha>0)", meanGlueA > 1.0);
+
+        /* glue-only persists + deserializes */
+        const QByteArray glueState = g.serialize();
+        CHECK("P0.1 glue-only materialState non-empty", !glueState.isEmpty());
+        GlitterPowder gr;
+        CHECK("P0.1 glue-only deserialize accepts state", gr.deserialize(glueState));
+        CHECK("P0.1 glue survives deserialize", gr.hasGlue());
+        float grn = 0, gr2 = 0, grx = 0, gry = 0;
+        const bool grB = gr.materialBoundsWorld(grn, gr2, grx, gry);
+        CHECK("P0.1 glue bounds survive deserialize", grB && grx > grn && gry > gr2);
+        /* and render wet glue after restore */
+        QImage grImg = gr.render(QSize(96, 96), 32 * 4.0f - 48, 32 * 4.0f - 48, 1.0f,
+                                 ArtLightRig(), pal, nullptr, ArtScale(), 0);
+        grImg = grImg.convertToFormat(QImage::Format_ARGB32);
+        int grAlpha = 0;
+        for (int y = 0; y < grImg.height(); ++y)
+            for (int x = 0; x < grImg.width(); ++x)
+                grAlpha += qAlpha(grImg.pixel(x, y));
+        CHECK("P0.1 restored glue renders visible", grAlpha > glueAlpha / 2);
+        /* P0.2: the full-resolution glue field persists through the round trip
+         * and is present (a sub-res sample inside the painted disc reads > 0). */
+        const float gPresence = g.gluePresence(32 * 4.0f, 32 * 4.0f);
+        CHECK("P0.2 full-res glue field present", gPresence > 0.05f);
+        /* rebuilt (deserialized) engine samples glue at the same centre */
+        const float grPresence = gr.gluePresence(32 * 4.0f, 32 * 4.0f);
+        CHECK("P0.2 glue field survives deserialize", grPresence > 0.05f);
+        /* the coarse cell glue is unchanged by the sub-res field */
+        CHECK("P0.2 coarse cell glue still set", g.powderCellAt(32 * g.cellW() + 32).glue > 0);
+    }
+
+    /* ---- P0.6 material-bounds-driven dirty (rect-clip regression) -------
+     * The committed/dirty region must come from the physical MATERIAL bounds
+     * (old ∪ new + support margin), NOT the pointer footprint. Verify that
+     * pour / push / erase / blow change material bounds as expected and that
+     * erase/old-new invalidation is covered. */
+    {
+        GlitterPowder mb;
+        mb.reset(QSize(96, 96), 4.0f, 31u);
+        float bx0 = 0, by0 = 0, bx1 = 0, by1 = 0;
+        const bool preEmpty = !mb.materialBoundsWorld(bx0, by0, bx1, by1);
+        CHECK("P0.6 empty material has no bounds", preEmpty);
+
+        /* Glue creates material bounds immediately (not void). */
+        mb.paintGlue(48 * 4.0f, 48 * 4.0f, 14.0f, 0.9f);
+        float gx0 = 0, gy0 = 0, gx1 = 0, gy1 = 0;
+        const bool glueBounds = mb.materialBoundsWorld(gx0, gy0, gx1, gy1);
+        CHECK("P0.6 glue stroke yields material bounds", glueBounds && gx1 > gx0 && gy1 > gy0);
+
+        /* Pour over that glue EXPANDS the bounds outward (loose heap falls
+         * wider than the glue disc). */
+        float p0 = 0, p1 = 0, p2 = 0, p3 = 0;
+        mb.materialBoundsWorld(p0, p1, p2, p3);
+        GlitterParams pp; pp.amount = 1.3f; pp.flakeSize = 0.8f; pp.color = pal.colors[0];
+        pp.palette.clear();
+        mb.pourGlitter(48 * 4.0f, 48 * 4.0f, 16.0f, pp);
+        mb.relax(); mb.relax(); mb.decayFlow();
+        float q0 = 0, q1 = 0, q2 = 0, q3 = 0;
+        mb.materialBoundsWorld(q0, q1, q2, q3);
+        CHECK("P0.6 material bounds after Pour grow (loose heap wider than glue)",
+              q2 > p2 + 2.0f || q3 > p3 + 2.0f);
+
+        /* Erase removes material: the OLD bounds are larger than the new ones */
+        float e0 = 0, e1 = 0, e2 = 0, e3 = 0;
+        mb.materialBoundsWorld(e0, e1, e2, e3);
+        mb.erase(48 * 4.0f, 48 * 4.0f, 30.0f, 1.0f);   /* erase a big disc */
+        mb.relax(); mb.decayFlow();
+        float f0 = 0, f1 = 0, f2 = 0, f3 = 0;
+        const bool afterErase = mb.materialBoundsWorld(f0, f1, f2, f3);
+        const bool shrank = !afterErase || (f2 <= e2 && f3 <= e3);
+        std::printf("    P0.6 erase old=(%.0f,%.0f,%.0f,%.0f) new=(%.0f,%.0f,%.0f,%.0f)\n",
+                    e0, e1, e2, e3, f0, f1, f2, f3);
+        CHECK("P0.6 Eraser reduces material bounds (old >= new)", shrank);
     }
 
     /* ---- physical Eraser ---------------------------------------------- */

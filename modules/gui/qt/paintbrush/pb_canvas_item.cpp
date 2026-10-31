@@ -206,10 +206,21 @@ void PaintbrushCanvasItem::setTool(int tool)
     {
         setBrushSize(12.0);
     }
-    /* entering the powder rail tool arms the workbench's default mode; the
-     * legacy TOOL_SMEAR is the direct Push shortcut */
-    if (tool == TOOL_GLITTER_POWDER || tool == TOOL_SMEAR)
-        setPowderTool(tool == TOOL_SMEAR ? int(POWDER_PUSH) : int(POWDER_GLITTER));
+    /* first-ever entry into the workbench arms the default mode (Glitter); later
+     * re-entries PRESERVE the last selected subtool instead of resetting it
+     * back to Glitter every time (P0.4). The legacy TOOL_SMEAR is a direct Push
+     * shortcut (always forced to Push while it is the active rail tool). */
+    if (tool == TOOL_GLITTER_POWDER ||
+        tool == TOOL_SMEAR)
+    {
+        if (tool == TOOL_SMEAR)
+            setPowderTool(int(POWDER_PUSH));
+        else if (m_powderToolNeedsDefault)
+        {
+            m_powderToolNeedsDefault = false;
+            setPowderTool(int(POWDER_GLITTER));
+        }
+    }
     emit toolChanged(tool);
     updateStatus(m_lastCanvasPos);
     updateCursor();
@@ -236,10 +247,54 @@ void PaintbrushCanvasItem::setPowderTool(int t)
     m_powderTool = PowderToolId(clamped);
     emit powderToolChanged(int(m_powderTool));
     updateStatus(m_lastCanvasPos);
+    updateCursor();   /* the ring reflects the newly selected sub-tool's radius */
 }
 
-/* Momentary Pour: deposit a heap of the CURRENT colour over existing material
- * (existing powder stays); one undo action. */
+void PaintbrushCanvasItem::setPowderGlueWidth(qreal v)
+{
+    if (qFuzzyCompare(v, m_powderGlueWidth)) return;
+    m_powderGlueWidth = qBound<qreal>(4.0, v, 60.0);
+    emit powderSizeChanged();
+}
+void PaintbrushCanvasItem::setPowderGlitterSize(qreal v)
+{
+    if (qFuzzyCompare(v, m_powderGlitterSize)) return;
+    m_powderGlitterSize = qBound<qreal>(6.0, v, 80.0);
+    emit powderSizeChanged();
+}
+void PaintbrushCanvasItem::setPowderPushSize(qreal v)
+{
+    if (qFuzzyCompare(v, m_powderPushSize)) return;
+    m_powderPushSize = qBound<qreal>(8.0, v, 60.0);
+    emit powderSizeChanged();
+}
+void PaintbrushCanvasItem::setPowderEraserWidth(qreal v)
+{
+    if (qFuzzyCompare(v, m_powderEraserWidth)) return;
+    m_powderEraserWidth = qBound<qreal>(8.0, v, 120.0);
+    emit powderEraserWidthChanged();
+}
+
+/* Physics radius for the active powder sub-tool. Glue/Eraser store a VISIBLE
+ * WIDTH (radius = width/2); Glitter/Push store a REFERENCE RADIUS directly
+ * (P0.5 semantics — never divide all four by two). */
+float PaintbrushCanvasItem::powderSubRadius() const
+{
+    switch (m_powderTool)
+    {
+    case POWDER_GLUE:    return float(qMax<qreal>(2.0, m_powderGlueWidth)   * 0.5);
+    case POWDER_PUSH:    return float(qMax<qreal>(4.0, m_powderPushSize));
+    case POWDER_ERASER:  return float(qMax<qreal>(4.0, m_powderEraserWidth) * 0.5);
+    case POWDER_GLITTER:
+    default:             return float(qMax<qreal>(3.0, m_powderGlitterSize));
+    }
+}
+
+/* Momentary Pour: deposit a heap of the CURRENT colour OVER existing glue/
+ * material (what is already present stays); one undo action (P0.9/P0.10). The
+ * pour target is derived from the glue/material bounds when glue exists, NOT
+ * from stale last-pointer coordinates. Manual local sprinkling stays the
+ * Glitter sub-tool. */
 void PaintbrushCanvasItem::pourPowderNow()
 {
     if (m_tool != TOOL_GLITTER_POWDER && m_tool != TOOL_SMEAR)
@@ -251,30 +306,91 @@ void PaintbrushCanvasItem::pourPowderNow()
     if (!layer)
         return;
     ensurePowder();
-    const qreal radius = qMax<qreal>(3.0, m_brushSize) * 0.5;
-    const QPointF local = localFromCanvas(m_lastCanvasPos);
-    m_powder.pourGlitter(float(local.x()), float(local.y()),
-                         float(radius), m_powderParams);
+
+    /* begin the material capture (atomic undo: material before/after) */
+    if (!m_powderMaterialCaptured) {
+        m_powderMaterialCmd = SetMaterialStateCommand();
+        m_powderMaterialCmd.layerIndex = m_doc->currentLayerIndex();
+        m_powderMaterialCmd.layerId = layer->id;
+        m_powderMaterialCmd.before.preset = layer->materialPreset;
+        m_powderMaterialCmd.before.state = layer->materialState;
+        m_powderMaterialCmd.after = m_powderMaterialCmd.before;
+        m_powderMaterialCaptured = true;
+    }
+
+    const float radius = float(powderSubRadius());   /* Glitter reference radius (P0.5) */
+
+    /* P0.9: pour over the authoritative glue/material bounds when present. */
+    float gx0 = 0, gy0 = 0, gx1 = 0, gy1 = 0;
+    const bool hasMat = m_powder.materialBoundsWorld(gx0, gy0, gx1, gy1);
+    QVector<QPointF> targets;
+    if (hasMat)
+    {
+        /* a few pours across the material bounds so the current colour lands on
+         * every glued/bonded region that should catch it */
+        const int cols = qMax(1, int((gx1 - gx0) / qMax(16.0f, radius * 1.5f)) + 1);
+        const int rows = qMax(1, int((gy1 - gy0) / qMax(16.0f, radius * 1.5f)) + 1);
+        for (int r = 0; r < rows; ++r)
+            for (int c = 0; c < cols; ++c)
+            {
+                const float px = gx0 + (gx1 - gx0) * (cols == 1 ? 0.5f : float(c) / (cols - 1));
+                const float py = gy0 + (gy1 - gy0) * (rows == 1 ? 0.5f : float(r) / (rows - 1));
+                targets.append(QPointF(px, py));
+            }
+    }
+    else
+    {
+        /* no glue/material: fall back to the explicit current pointer target. */
+        const QPointF local = localFromCanvas(m_lastCanvasPos);
+        if (local.x() < -radius || local.y() < -radius
+            || local.x() > layer->raster.width() + radius
+            || local.y() > layer->raster.height() + radius)
+            return;   /* pointer never meaningfully entered the canvas */
+        targets.append(local);
+    }
+
+    float obx = 0, oby = 0, ox2 = 0, oy2 = 0;
+    const bool hasOld = m_powder.materialBoundsWorld(obx, oby, ox2, oy2);
+    for (const QPointF &t : targets)
+        m_powder.pourGlitter(float(t.x()), float(t.y()), radius, m_powderParams);
     m_powder.relax();
     m_powder.decayFlow();
     m_powder.endBlow();
-    /* one-shot render + commit of the touched disc, then clear the union so a
-     * retick doesn't re-commit (no persistent stroke session for a momentary
-     * action). */
-    const QRectF rr(local.x() - radius, local.y() - radius, radius * 2, radius * 2);
-    const QRect affected = rr.toAlignedRect().intersected(layer->raster.rect());
-    if (affected.isEmpty())
+
+    /* dirty bounds from old ∪ new material bounds + margin (P0.6). */
+    float nb0 = 0, nb1 = 0, nb2 = 0, nb3 = 0;
+    const bool hasNew = m_powder.materialBoundsWorld(nb0, nb1, nb2, nb3);
+    const float margin = qMax<float>(qreal(powderSubRadius()) + 8.0f,
+                                     m_powder.worldCellSize() * 3.0f);
+    const int mi = int(margin);
+    QRect dirty;
+    if (hasOld) dirty = QRect(QPoint(int(obx), int(oby)), QPoint(int(ox2), int(oy2))).adjusted(-mi, -mi, mi, mi);
+    if (hasNew)
+    {
+        const QRect nbRect = QRect(QPoint(int(nb0), int(nb1)), QPoint(int(nb2), int(nb3)));
+        const QRect nr = nbRect.adjusted(-mi, -mi, mi, mi);
+        dirty = dirty.isNull() ? nr : dirty.united(nr);
+    }
+    m_powderUnion = dirty.isNull() ? QRect() : dirty.intersected(layer->raster.rect());
+    if (m_powderUnion.isNull() || m_powderUnion.isEmpty())
+    {
+        m_powderMaterialCaptured = false;
         return;
-    m_powderUnion = m_powderUnion.isNull() ? affected : m_powderUnion.united(affected);
+    }
     m_strokeHadPaint = true;
     renderPowderUnion();
+    /* route through the shared atomic commit so Pour is EXACTLY one undo
+     * (P0.10): raster + material state + deferred layer fold to one command. */
+    commitScratch(QStringLiteral("Pour glitter"));
     m_powderUnion = QRect();
     m_strokeHadPaint = false;
-    persistPowderStateToLayer(layer);
+    m_powderMaterialCaptured = false;
 }
 
 /* Momentary Blow: run the full breath over the existing material state (loose
- * leaves/bonds differently, bonded stays); one undo action. */
+ * leaves/bonds differently, bonded stays); one undo action (P0.10). Starts and
+ * re-arms the blow timer itself; it does NOT depend on an active pointer
+ * stroke existing. */
 void PaintbrushCanvasItem::blowPowderNow()
 {
     if (m_tool != TOOL_GLITTER_POWDER && m_tool != TOOL_SMEAR)
@@ -283,6 +399,23 @@ void PaintbrushCanvasItem::blowPowderNow()
      * the breath then moves that layer's loose powder, bonded stays */
     if (!ensurePowderLayer())
         return;
+    ensurePowder();
+    /* begin the material capture so the blow commits as exactly one undo */
+    if (!m_powderMaterialCaptured)
+    {
+        CanvasLayer *layer = m_doc->currentLayer();
+        if (layer)
+        {
+            m_powderMaterialCmd = SetMaterialStateCommand();
+            m_powderMaterialCmd.layerIndex = m_doc->currentLayerIndex();
+            m_powderMaterialCmd.layerId = layer->id;
+            m_powderMaterialCmd.before.preset = layer->materialPreset;
+            m_powderMaterialCmd.before.state = layer->materialState;
+            m_powderMaterialCmd.after = m_powderMaterialCmd.before;
+            m_powderMaterialCaptured = true;
+        }
+    }
+    m_blowStandalone = !m_strokeActive;   /* commit on finish without a stroke */
     startPowderBlow();
 }
 
@@ -330,7 +463,11 @@ void PaintbrushCanvasItem::updateCursor()
         /* round tip cursor at the exact on-screen dab size, filled with the
          * current color — the cursor IS the brush (eraser: white fill) */
         const qreal dpr = window() ? window()->devicePixelRatio() : 1.0;
-        const qreal r = qMax<qreal>(3.0, m_brushSize * 0.5 * m_zoom);
+        /* the cursor shows the real affected footprint: the powder workbench
+         * uses the active sub-tool's own radius (P0.5), not the generic brush */
+        const qreal r = (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
+                        ? qMax<qreal>(3.0, qreal(powderSubRadius()) * m_zoom)
+                        : qMax<qreal>(3.0, m_brushSize * 0.5 * m_zoom);
         const int sizeL = int(qCeil(r * 2 + 8));      /* logical px */
         const int sizePx = int(qCeil(sizeL * dpr));
         QPixmap pm(sizePx, sizePx);
@@ -623,6 +760,11 @@ void PaintbrushCanvasItem::setGlitterShimmer(qreal v)
         return;
     m_glitterParams.shimmer = float(v);
     m_powderParams.shimmer = float(v);
+    /* P0.12: ONE semantic holographic control. The UI value is the SAME value
+     * the render pipeline consumes (CPU fallback + GPU uHolo via the render
+     * palette). Keep m_powderPal.holographic in lockstep so a later
+     * m_powderPal.colors reassignment never splits the two. */
+    m_powderPal.holographic = float(v);
     emit artParamsChanged();
 }
 
@@ -820,7 +962,10 @@ if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
             m_powderMaterialCmd.after = m_powderMaterialCmd.before;
             m_powderMaterialCaptured = true;
         }
-        const float radius = float(qMax<qreal>(3.0, m_brushSize) * 0.5);
+        /* the active powder sub-tool's own reference radius (P0.5): never the
+         * generic brushSize, so Glue/Eraser width vs Glitter/Push radius and
+         * per-subtool defaults/ranges are respected */
+        const float radius = powderSubRadius();
         const QLineF seg(fromLocal, toLocal);
         const qreal len = seg.length();
         const qreal step = qMax<qreal>(1.0, radius * 0.35);
@@ -838,6 +983,13 @@ if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
             || m_powder.looseMassInRect(float(beforeB.left()), float(beforeB.top()),
                                         float(beforeB.right()), float(beforeB.bottom()))
                    > 0.002f;
+
+        /* P0.6: the authoritative dirty bounds come from the PHYSICAL MATERIAL
+         * bounds (old ∪ new), never just the pointer segment. The sim expands
+         * beyond the pointer via heap profile / dust / relax / Push / Blow, and
+         * a pointer-derived render rect would CLIP the spilled material. */
+        float obx = 0, oby = 0, ox2 = 0, oy2 = 0;
+        const bool hasOld = m_powder.materialBoundsWorld(obx, oby, ox2, oy2);
 
         for (int i = 0; i <= steps; ++i)
         {
@@ -876,9 +1028,35 @@ if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
         m_powder.relax();
         m_powder.decayFlow();
 
-        const QRectF r = QRectF(fromLocal, toLocal).normalized()
-                             .adjusted(-radius - 4, -radius - 4, radius + 4, radius + 4);
-        const QRect affected = r.toAlignedRect().intersected(layer->raster.rect());
+        /* union the OLD and NEW physical material bounds + a presentation
+         * support margin (grain radius, flake radius, contact shadow, wet-glue
+         * gradient, bloom), then fold into the running operation dirty union.
+         * The physics decides the bounds — the pointer never does (P0.6). */
+        float nbx = 0, nby = 0, nx2 = 0, ny2 = 0;
+        const bool hasNew = m_powder.materialBoundsWorld(nbx, nby, nx2, ny2);
+        const float margin = qMax<float>(qreal(powderSubRadius()) + 8.0f,
+                                         m_powder.worldCellSize() * 3.0f);
+        const int mi = int(margin);
+        QRect opDirty;
+        if (hasOld)
+            opDirty = QRect(QPoint(int(obx), int(oby)), QPoint(int(ox2), int(oy2)))
+                          .adjusted(-mi, -mi, mi, mi);
+        if (hasNew)
+        {
+            const QRect nbRect = QRect(QPoint(int(nbx), int(nby)), QPoint(int(nx2), int(ny2)));
+            const QRect nr = nbRect.adjusted(-mi, -mi, mi, mi);
+            opDirty = opDirty.isNull() ? nr : opDirty.united(nr);
+        }
+        /* Eraser must also invalidate its OLD material so deleted material is
+         * actually cleared from the raster (P0.6). */
+        if (m_powderTool == POWDER_ERASER)
+        {
+            const QRect obRect = QRect(QPoint(int(obx), int(oby)), QPoint(int(ox2), int(oy2)));
+            const QRect er = obRect.adjusted(-mi, -mi, mi, mi);
+            opDirty = opDirty.isNull() ? er : opDirty.united(er);
+        }
+        const QRect affected = opDirty.isNull()
+            ? QRect() : opDirty.intersected(layer->raster.rect());
         if (affected.isEmpty())
             return;
         m_powderUnion = m_powderUnion.isNull() ? affected : m_powderUnion.united(affected);
@@ -892,8 +1070,10 @@ if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
             m_powderShimmerMs += now - m_lastPowderPreviewMs;
         m_lastPowderPreviewMs = now;
         /* render with the sim's AUTHORITATIVE palette so grains deposited as
-         * new colours resolve to their true slots (never clamped to paper) */
+         * new colours resolve to their true slots (never clamped to paper), and
+         * ONE holographic control drives the material (P0.12) */
         m_powderPal.colors = m_powder.palette();
+        m_powderPal.holographic = m_powderParams.shimmer;
         QImage flakes = m_powder.render(affected.size(), float(affected.x()),
                                         float(affected.y()), 1.0f,
                                         m_doc->lightRig(), m_powderPal,
@@ -1201,6 +1381,7 @@ void PaintbrushCanvasItem::renderPowderUnion()
      * matches the live preview (grains deposited as new colours resolve to
      * their true slots) */
     m_powderPal.colors = m_powder.palette();
+    m_powderPal.holographic = m_powderParams.shimmer;
     const QByteArray commitMode = qgetenv("PB_POWDER_COMMIT").trimmed();
     const bool allowGpuCommit =
         !commitMode.isNull() && !commitMode.compare("gpu", Qt::CaseInsensitive);
@@ -1326,10 +1507,11 @@ void PaintbrushCanvasItem::startPowderBlow()
         {
             ensurePowder(false);
             /* the breath sweeps powder anywhere across (and off) the page, so
-             * render the powder bounds grown by a travel margin — keeps pushed
-             * flakes visible without a full-canvas render budget */
+             * render the MATERIAL bounds (powder + glue, P0.6) grown by a
+             * travel margin — keeps pushed flakes visible without a
+             * full-canvas render budget */
             float minx = 0, miny = 0, maxx = 0, maxy = 0;
-            if (m_powder.powderBoundsWorld(minx, miny, maxx, maxy))
+            if (m_powder.materialBoundsWorld(minx, miny, maxx, maxy))
             {
                 const float margin = std::max(96.0f, layer->raster.width() * 0.12f);
                 m_powderUnion = QRectF(minx, miny, (maxx - minx) + margin,
@@ -1378,7 +1560,24 @@ void PaintbrushCanvasItem::stepPowderBlow(float dtSec)
         m_powderRenderAcc = 0.0f;
         /* finish the stroke so the blown result is committed once */
         if (m_strokeActive)
+        {
             endArtStroke(m_powderHoldPos);
+        }
+        else if (m_blowStandalone)
+        {
+            /* P0.10: standalone Blow (no active pointer stroke) must commit the
+             * blown result + material state as exactly ONE atomic undo */
+            if (m_strokeHadPaint)
+            {
+                renderPowderUnion();
+                commitScratch(QStringLiteral("Blow"));
+            }
+            m_powderUnion = QRect();
+            m_strokeHadPaint = false;
+            m_powderMaterialCaptured = false;
+            m_powderInsertCmd.reset();
+            m_blowStandalone = false;
+        }
     }
 }
 
