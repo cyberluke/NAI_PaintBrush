@@ -10,6 +10,7 @@
 #include "art/style/typography_style.hpp"
 #include "art/surface/paper_renderer.hpp"
 #include "art/materials/glitter/glitter_material.hpp"
+#include "art/materials/glitter/glitter_powder.hpp"
 
 #include <QPainter>
 #include <QtMath>
@@ -573,7 +574,30 @@ QImage DocumentRenderer::effectiveSourceAt(const CanvasLayer &layer, const Conte
 
     /* 1) source pixels at the context scale */
     if (scaled && !layer.materialState.isEmpty() &&
-        layer.materialPreset.startsWith(QLatin1String("material.glitter")))
+        layer.materialPreset == QLatin1String(art::glitter::kPowderMaterialPreset))
+    {
+        /* re-render the powder from its persisted physical state in world
+         * units so flakes keep their apparent size at export (spec §55).
+         * The grain branch below uses startsWith("material.glitter") so we
+         * MUST match the powder preset here first and exactly — otherwise the
+         * powder layer would fall into the grain branch and reconstitute it
+         * as a substrateless GlitterState. */
+        art::glitter::GlitterPowder pw;
+        if (pw.deserialize(layer.materialState))
+        {
+            const QSize out(qMax(1, int(std::lround(layer.raster.width() * s))),
+                            qMax(1, int(std::lround(layer.raster.height() * s))));
+            art::glitter::PowderPalette pal;
+            pal.colors = pw.palette();
+            pal.paper = ctx.paper ? QColor(ctx.paper->baseColor)
+                                  : QColor(255, 255, 255);
+            pal.holographic = 0.55f;
+            src = pw.render(out, 0.0f, 0.0f, 1.0f / s, ctx.rig, pal,
+                            ctx.paper, ctx.scale, timeMs);
+        }
+    }
+    else if (scaled && !layer.materialState.isEmpty() &&
+             layer.materialPreset.startsWith(QLatin1String("material.glitter")))
     {
         /* re-render the material from its state in world units so flakes keep
          * their apparent size at export (spec §11, §55) */

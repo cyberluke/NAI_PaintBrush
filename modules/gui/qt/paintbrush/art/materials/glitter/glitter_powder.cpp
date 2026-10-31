@@ -13,6 +13,8 @@
 
 #include <QPainter>
 #include <QVector3D>
+#include <QDataStream>
+#include <QIODevice>
 #include <QtMath>
 #include <cmath>
 #include <algorithm>
@@ -20,6 +22,9 @@
 namespace paintbrush {
 namespace art {
 namespace glitter {
+
+/* forward decl (defined later in the file): erase() uses it above definition */
+static float gSmoothstep(float e0, float e1, float x);
 
 /* Reference constants (glitter_engine.js). */
 static const float kRepose    = 0.42f;   /* base angle of repose (thr) */
@@ -57,6 +62,175 @@ void GlitterPowder::reset(const QSize &cells, float worldCellSize, std::uint32_t
 void GlitterPowder::setSeed(std::uint32_t seed)
 {
     m_rng.seed(seed);
+}
+
+void GlitterPowder::endBlow()
+{
+    /* a finished breath leaves settled height/glue/colour; drop the transient
+     * per-step momentum so a later serialization captures a clean surface */
+    m_blowTime = 0.0f;
+    if (!m_outM.isEmpty()) {
+        for (int i = 0; i < m_outM.size(); ++i)
+            m_outM[i] = 0.0f;
+        for (int i = 0; i < m_mIn.size(); ++i)
+            m_mIn[i] = 0.0f;
+    }
+}
+
+/* Physical Eraser: removes powder AND glue under a disc (never the raster
+ * eraser). Matches the reference erasing by really taking material away. */
+void GlitterPowder::erase(float wx, float wy, float radiusWorld, float amount)
+{
+    if (radiusWorld <= 0.0f || m_cells.width() <= 0 || m_cells.height() <= 0)
+        return;
+    const float cell = m_worldCellSize;
+    const int rCells = int(std::ceil(radiusWorld / cell)) + 1;
+    const int cxc = int(std::floor(wx / cell));
+    const int cyc = int(std::floor(wy / cell));
+    float erasedMass = 0.0f;
+    for (int dy = -rCells; dy <= rCells; ++dy)
+    {
+        for (int dx = -rCells; dx <= rCells; ++dx)
+        {
+            const int cx = cxc + dx, cy = cyc + dy;
+            if (cx < 0 || cy < 0 || cx >= m_cells.width() || cy >= m_cells.height())
+                continue;
+            const float wx0 = (cx + 0.5f) * cell;
+            const float wy0 = (cy + 0.5f) * cell;
+            const float ddx = wx0 - wx, ddy = wy0 - wy;
+            const float d2 = ddx * ddx + ddy * ddy;
+            if (d2 > radiusWorld * radiusWorld * 1.44f)   /* ~1.2x, soft cap */
+                continue;
+            const float fall = gSmoothstep(radiusWorld * 1.44f, 0.0f, std::sqrt(d2));
+            const float a = qBound(0.0f, amount * qMax(0.0f, fall), 1.0f);
+            if (a <= 0.0f)
+                continue;
+            PowderCell &c = cellAt(idx(cx, cy));
+            erasedMass += c.height * a;
+            c.height = qMax(0.0f, c.height * (1.0f - a));
+            c.stuck = qMax(0.0f, c.stuck * (1.0f - a));
+            c.glue = qMax(0.0f, c.glue * (1.0f - a * 0.9f));
+            c.flow = 0.0f;
+            c.vx = 0.0f; c.vy = 0.0f;
+            if (c.height <= 0.002f && c.glue <= 0.002f)
+            {
+                c.height = 0.0f; c.stuck = 0.0f; c.glue = 0.0f;
+                c.lA = c.lB = c.sA = c.sB = -1; c.lF = c.sF = 0.0f;
+            }
+        }
+    }
+    (void)erasedMass;
+    if (m_activeCells.isValid())
+        m_activeCells = m_activeCells.intersected(QRect(0, 0, m_cells.width() - 1, m_cells.height() - 1));
+}
+
+/* ------------------------------------------------------------ persistence
+ * Versioned binary material state (NOT a raster snapshot). Layout:
+ *   u32 magic "GLTP"
+ *   u32 version (1)
+ *   u32 gridW, gridH
+ *   float worldCellSize
+ *   u32 paletteCount            (<= 64) then paletteCount * RGB (float32 x3)
+ *   u32 activeRect flags + x,y,w,h (packed as 5 x u32, flags 0=invalid)
+ *   u32 seed (RNG)
+ *   per cell (row-major): 8x f32 (height, stuck, glue, seed, flow, vx, vy,
+ *                                   lF, sF) + 6x i32 (lA, lB, sA, sB, pad, pad)
+ * Cel/ml bounds so a corrupt file can't over-allocate. */
+QByteArray GlitterPowder::serialize() const
+{
+    QByteArray out;
+    QDataStream ds(&out, QIODevice::WriteOnly);
+    ds.setVersion(QDataStream::Qt_6_0);
+    ds << quint32(0x474C5450u)   /* "GLTP" */
+       << quint32(1u)            /* version */
+       << quint32(m_cells.width()) << quint32(m_cells.height())
+       << float(m_worldCellSize)
+       << quint32(m_palette.size());
+    for (const QColor &c : m_palette)
+        ds << float(c.redF()) << float(c.greenF()) << float(c.blueF());
+    /* persist a deterministic PRNG seed (the engine's live `m_rng` is not
+     * readable from a const method; a fresh deterministic pump on load keeps
+     * the sim's own later pours stable). */
+    const quint32 seed = quint32(qint64(m_cells.width()) * 1299709u
+                                 ^ qint64(m_cells.height()) * 104729u);
+    ds << seed
+       << (m_activeCells.isValid() ? quint32(1u) : quint32(0u));
+    if (m_activeCells.isValid())
+        ds << qint32(m_activeCells.x()) << qint32(m_activeCells.y())
+           << qint32(m_activeCells.width()) << qint32(m_activeCells.height());
+    for (int i = 0; i < m_cellsData.size(); ++i)
+    {
+        const PowderCell &c = m_cellsData.at(i);
+        ds << float(c.height) << float(c.stuck) << float(c.glue) << float(c.seed)
+           << float(c.flow) << float(c.vx) << float(c.vy)
+           << float(c.lF) << float(c.sF)
+           << qint32(c.lA) << qint32(c.lB) << qint32(c.sA) << qint32(c.sB);
+    }
+    return out;
+}
+
+bool GlitterPowder::deserialize(const QByteArray &bytes)
+{
+    QDataStream ds(bytes);
+    ds.setVersion(QDataStream::Qt_6_0);
+    quint32 magic, ver;
+    quint32 w, h;
+    float worldCell;
+    quint32 palN;
+    ds >> magic >> ver >> w >> h >> worldCell >> palN;
+    if (ds.status() != QDataStream::Ok || magic != 0x474C5450u || ver != 1u)
+        return false;
+    if (w == 0 || h == 0 || w > 65536u || h > 65536u)
+        return false;
+    if (qint64(w) * qint64(h) > 16LL * 1024 * 1024)
+        return false;
+    if (palN > 64u)
+        return false;
+    QVector<QColor> pal;
+    pal.reserve(int(palN));
+    for (quint32 i = 0; i < palN; ++i)
+    {
+        float r, g, b;
+        ds >> r >> g >> b;
+        pal.append(QColor::fromRgbF(qBound(0.0, r, 1.0), qBound(0.0, g, 1.0), qBound(0.0, b, 1.0)));
+    }
+    quint32 seed, hasActive;
+    ds >> seed >> hasActive;
+    QRect active;
+    if (hasActive)
+    {
+        qint32 x, y, aw, ah;
+        ds >> x >> y >> aw >> ah;
+        active = QRect(x, y, aw, ah);
+    }
+    /* build the engine state without touching the renderer */
+    m_cells = QSize(int(w), int(h));
+    m_worldCellSize = worldCell;
+    m_palette = pal;
+    m_rng.seed(seed);
+    m_cellsData.resize(int(w) * int(h));
+    for (int i = 0; i < m_cellsData.size(); ++i)
+    {
+        PowderCell &c = m_cellsData[i];
+        float height, stuck, glue, sd, flow, vx, vy, lF, sF;
+        qint32 lA, lB, sA, sB;
+        ds >> height >> stuck >> glue >> sd >> flow >> vx >> vy >> lF >> sF
+           >> lA >> lB >> sA >> sB;
+        if (ds.status() != QDataStream::Ok)
+            return false;
+        c.height = height; c.stuck = stuck; c.glue = glue; c.seed = sd;
+        c.flow = flow; c.vx = vx; c.vy = vy; c.lF = lF; c.sF = sF;
+        c.lA = lA; c.lB = lB; c.sA = sA; c.sB = sB;
+    }
+    m_activeCells = active;
+    m_powderMask.clear();
+    /* lazy buffers are dropped; they rebuild on the next physics step */
+    m_dh.clear(); m_outM.clear(); m_mIn.clear(); m_pX.clear(); m_pY.clear();
+    m_inA.clear(); m_inB.clear(); m_inF.clear();
+    m_blowTime = 0.0f;
+    m_particlesActive = false;
+    m_flakes.clear();
+    return true;
 }
 
 /* Smooth value noise (fbm) ported from the reference's ihash/vnoise/fbm. */

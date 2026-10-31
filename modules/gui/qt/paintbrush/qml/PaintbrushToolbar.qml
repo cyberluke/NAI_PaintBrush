@@ -96,12 +96,16 @@ Item {
                 required property var modelData
                 readonly property bool isSlider: modelData
                     && (modelData.kind === "slider" || modelData.kind === "option")
+                readonly property bool isSpacer: modelData
+                    && modelData.kind === "spacer"
 
                 visible: modelData ? (modelData.visible !== false) : true
-                width: isSlider
-                       ? (root.orientation === Qt.Horizontal
-                          ? (root.cell * 5) : root.cell)
-                       : root.cell
+                width: isSpacer
+                       ? (root.cell * 0.4)
+                       : (isSlider
+                          ? (root.orientation === Qt.Horizontal
+                             ? (root.cell * 5) : root.cell)
+                          : root.cell)
                 height: root.cell
 
                 /* ---------- iconic action cell ------------------------- */
@@ -114,7 +118,7 @@ Item {
                            : (cellHover ? Qt.rgba(1.0, 1.0, 1.0, 0.10) : "transparent")
                     border.width: cellHover && !cellBtnChecked ? 1 : 0
                     border.color: Qt.rgba(1.0, 1.0, 1.0, 0.25)
-                    visible: !cell.isSlider
+                    visible: !cell.isSlider && !cell.isSpacer
 
                     property bool cellBtnChecked: !!(cell.modelData && cell.modelData.checked)
                     property bool cellHover: false
@@ -125,7 +129,7 @@ Item {
                         anchors.centerIn: parent
                         fillMode: Image.PreserveAspectFit
                         smooth: true
-                        visible: cell.modelData && cell.modelData.iconSource
+                        visible: !!(cell.modelData && cell.modelData.iconSource)
                         source: (cell.modelData && cell.modelData.iconSource)
                                 ? root.tdesignPath
                                   + (cellBg.cellBtnChecked || cellBg.cellHover
@@ -169,7 +173,7 @@ Item {
                     enabled: visible
 
                     Widgets.LabelExt {
-                        text: cell.modelData ? cell.modelData.label : ""
+                        text: (cell.isSlider && cell.modelData) ? (cell.modelData.label ?? "") : ""
                         color: theme.fg.secondary
                         font.pixelSize: VLCStyle.fontSize_small
                     }
@@ -177,16 +181,15 @@ Item {
                         id: sld
                         Layout.fillWidth: true
                         Layout.alignment: Qt.AlignVCenter
-                        from: cell.modelData ? (cell.modelData.from ?? 0) : 0
-                        to: cell.modelData ? (cell.modelData.to ?? 1) : 1
-                        stepSize: cell.modelData ? (cell.modelData.stepSize ?? 0.05) : 0.05
-                        value: cell.modelData ? cell.modelData.value : 0
-                        onMoved: if (cell.modelData && cell.modelData.onChange)
+                        from: (cell.isSlider && cell.modelData) ? (cell.modelData.from ?? 0) : 0
+                        to: (cell.isSlider && cell.modelData) ? (cell.modelData.to ?? 1) : 1
+                        stepSize: (cell.isSlider && cell.modelData) ? (cell.modelData.stepSize ?? 0.05) : 0.05
+                        value: (cell.isSlider && cell.modelData) ? (cell.modelData.value ?? 0) : 0
+                        onMoved: if (cell.isSlider && cell.modelData && cell.modelData.onChange)
                                      cell.modelData.onChange(value)
                     }
                     Widgets.LabelExt {
-                        text: sld.stepSize < 1 ? sld.value.toFixed(2)
-                                               : Math.round(sld.value)
+                        text: (cell.isSlider && cell.modelData) ? (Math.round(sld.value)) : ""
                         color: theme.fg.secondary
                         font.pixelSize: VLCStyle.fontSize_small
                     }

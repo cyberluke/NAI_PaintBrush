@@ -353,6 +353,37 @@ static void applyArtState(PaintbrushDocument &doc, const SetArtStateCommand::Sta
 void SetArtStateCommand::apply(PaintbrushDocument &doc) { applyArtState(doc, after); }
 void SetArtStateCommand::revert(PaintbrushDocument &doc) { applyArtState(doc, before); }
 
+/* Apply a per-layer material state (materialPreset+materialState). The target
+ * layer is found by index (falling back to stable id); the raster is untouched —
+ * only the authoritative material carries the undo/redo. */
+static void applyMaterialState(PaintbrushDocument &doc, int layerIndex, int layerId,
+                               const SetMaterialStateCommand::State &s)
+{
+    QList<CanvasLayer> &layers = doc.layersRef();
+    int found = -1;
+    if (layerIndex >= 0 && layerIndex < layers.size()
+        && (layers[layerIndex].id == layerId || layerId == 0))
+        found = layerIndex;
+    else if (layerId != 0)
+    {
+        for (int i = 0; i < layers.size(); ++i)
+            if (layers[i].id == layerId) { found = i; break; }
+    }
+    if (found < 0)
+        return;
+    layers[found].materialPreset = s.preset;
+    layers[found].materialState = s.state;
+    emit doc.layersChanged();
+}
+void SetMaterialStateCommand::apply(PaintbrushDocument &doc) { applyMaterialState(doc, layerIndex, layerId, after); }
+void SetMaterialStateCommand::revert(PaintbrushDocument &doc) { applyMaterialState(doc, layerIndex, layerId, before); }
+
+qint64 SetMaterialStateCommand::bytes() const
+{
+    return qint64(before.state.size()) + qint64(after.state.size())
+         + qint64(after.preset.size());
+}
+
 AddHarvestCommand::AddHarvestCommand() = default;
 AddHarvestCommand::~AddHarvestCommand() = default;
 
@@ -505,6 +536,11 @@ void UndoStack::pushMask(const MaskCommand &cmd)
 void UndoStack::pushCanvasResize(const CanvasResizeCommand &cmd)
 {
     pushCommand(std::make_unique<CanvasResizeCommand>(cmd));
+}
+
+void UndoStack::pushMaterialState(const SetMaterialStateCommand &cmd)
+{
+    pushCommand(std::make_unique<SetMaterialStateCommand>(cmd));
 }
 
 void UndoStack::dropOldest()

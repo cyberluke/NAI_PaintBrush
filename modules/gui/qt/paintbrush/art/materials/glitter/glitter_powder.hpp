@@ -37,6 +37,12 @@ namespace paintbrush {
 namespace art {
 namespace glitter {
 
+/* The material-preset identity for a Glitter-POWDER layer in the paintbrush
+ * material registry (`materialPreset` on a CanvasLayer). The grain "glitter"
+ * material uses "material.glitter.fine"; powder uses this so save/load, export
+ * and the document renderer can re-derive from the serialized physical state. */
+const char kPowderMaterialPreset[] = "material.glitter.powder";
+
 /* The glitter colours in the reference's default look. `#f2a7c8` pink is the
  * signature "add next" colour, `shimmer` 0.55 (partly iridescent). */
 struct PowderPalette
@@ -134,6 +140,17 @@ public:
      * blowStep calls begin with a gentle puff that builds to full strength. */
     void beginBlow();
 
+    /* Finish a breath cleanly: clears the blow transient buffers so a later
+     * persist/serialize captures a settled heightfield (drops per-step
+     * momentum). Safe to call any time. */
+    void endBlow();
+
+    /* ERASER (reference physical erase): physically remove powder and glue
+     * under a disc. Loose powder, bonded powder and wet glue within `radiusWorld`
+     * of (wx,wy) are all cleared, so erasing part of a stroke really takes the
+     * material away — it is NOT the normal raster eraser. */
+    void erase(float wx, float wy, float radiusWorld, float amount = 1.0f);
+
     /* Hydrate the heightfield from an already-rasterised powder layer (world
      * coords, `worldPerPx` converts layer px to world units). Used so a long-
      * press breath can clear powder that a PREVIOUS stroke already committed to
@@ -169,6 +186,9 @@ public:
      * now owns (so a blow can erase previously-committed powder instead of
      * leaving the old blobs behind). */
     bool hydatedPowderAt(int cx, int cy) const;
+    /* The engine's working colour palette (the reference's per-cell slots),
+     * recoverable after a deserialize so the render palette can be rebuilt. */
+    QVector<QColor> palette() const { return m_palette; }
     const QVector<quint8> &powderMask() const { return m_powderMask; }
     bool hasPowderMask() const { return !m_powderMask.isEmpty(); }
     /* Erase previously-committed powder from `img` in the cells the mask
@@ -180,6 +200,16 @@ public:
 
     /* seeded RNG for reproducible step math */
     void setSeed(std::uint32_t seed);
+
+    /* -- persistence ------------------------------------------------------
+     * Versioned binary serialization of the full physical material state so a
+     * powder layer can be saved/loaded, switched between tools without loss,
+     * and re-rendered at export from state instead of only the cached raster.
+     * Round-trips every field the physics needs (PowderCell all, plus grid /
+     * world-cell / palette / RNG seed / active region). NOT a raster snapshot.
+     * Magic "GLTP" + version + u32 header + packed cell records. */
+    QByteArray serialize() const;
+    bool deserialize(const QByteArray &bytes);
 
 private:
     int idx(int cx, int cy) const { return cy * m_cells.width() + cx; }

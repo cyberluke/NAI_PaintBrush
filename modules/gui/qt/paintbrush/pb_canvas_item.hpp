@@ -79,6 +79,8 @@ class PaintbrushCanvasItem : public QQuickItem
     Q_PROPERTY(qreal powderLoose READ powderLoose WRITE setPowderLoose NOTIFY artParamsChanged FINAL)
     Q_PROPERTY(qreal brushFlow READ brushFlow WRITE setBrushFlow NOTIFY artParamsChanged FINAL)
     Q_PROPERTY(qreal brushColorVariation READ brushColorVariation WRITE setBrushColorVariation NOTIFY artParamsChanged FINAL)
+    /* Glitter-Powder workbench: active subtool for TOOL_GLITTER_POWDER. */
+    Q_PROPERTY(int powderTool READ powderTool WRITE setPowderTool NOTIFY powderToolChanged FINAL)
 
 public:
     qreal glitterAmount() const { return m_glitterParams.amount; }
@@ -95,6 +97,13 @@ public:
     void setBrushFlow(qreal v);
     qreal brushColorVariation() const { return m_brushColorVariation; }
     void setBrushColorVariation(qreal v);
+
+    /* -- Glitter-Powder workbench subtool --------------------------------- */
+    int powderTool() const { return int(m_powderTool); }
+    void setPowderTool(int t);   /* clamps to the 4 stroke modes (never Pour/Blow stored) */
+
+    void pourPowderNow();        /* momentary Pour: heap of the current colour */
+    void blowPowderNow();        /* momentary Blow: run the breath over state */
     /* Glitter grain palette from the mood (bounded set, spec §14.4). */
     void setGlitterPalette(const QVector<QColor> &palette, const QString &id);
 
@@ -263,8 +272,9 @@ public:
     bool strokeActive() const { return m_strokeActive; }
 
 signals:
-    void toolChanged(int tool);
-    void fgColorChanged();
+void toolChanged(int tool);
+void powderToolChanged(int tool);
+void fgColorChanged();
     void bgColorChanged();
     void brushSizeChanged();
     void sprayDensityChanged();
@@ -496,6 +506,14 @@ private:
     art::glitter::PowderPalette m_powderPal;   /* render palette (single source) */
     QRect m_powderUnion;
     bool m_powderReady = false;   /* grid sized/reset once for the current layer */
+    /* Active Glitter-Powder workbench sub-tool (reference Glue/Glitter/Push/
+     * Eraser + momentary Pour/Blow). The vertical rail stays a single
+     * TOOL_GLITTER_POWDER; this selects the mode within it. */
+    PowderToolId m_powderTool = POWDER_GLITTER;
+    /* material-state snapshot at powder-stroke start (captured before the first
+     * edit) so one undo restores exactly one physical operation's material */
+    SetMaterialStateCommand m_powderMaterialCmd;
+    bool m_powderMaterialCaptured = false;
     /* Dedicated offscreen GPU runtime for the DETERMINISTIC COMMIT bake of the
      * powder (and future paint/glitter paths) at t=0. The live preview stays
      * on the CPU Voronoi fallback until the interactive scene-graph node is
@@ -522,10 +540,19 @@ qint64 m_lastPowderPreviewMs = 0;
     void ensurePowder(bool force = false);   /* (re)size the powder engine grid to
                                                 cover the layer; idempotent within a
                                                 stroke unless `force` is true */
+    /* Ensure the current layer is a Glitter-POWDER material layer, creating a
+     * dedicated transparent powder layer on first material edit (never
+     * destructively converting an arbitrary raster/image layer). Returns the
+     * powder layer (may switch the current layer) and stores it in `outLayer`. */
+    CanvasLayer *ensurePowderLayer();
     /* Long-press breath helpers (reference blowOnLongPress). */
     void startPowderBlow();
     void stepPowderBlow(float dtSec);
     void renderPowderUnion();    /* re-render m_powderUnion from the sim */
+    /* Persist the authoritative powder physical material state onto the layer
+     * (materialPreset = "material.glitter.powder", materialState = serialized
+     * GlitterPowder). The raster stays a cached bake. */
+    void persistPowderStateToLayer(CanvasLayer *layer);
 
     /* selection state */
     QPointF m_dragStartCanvas;

@@ -33,6 +33,30 @@
 #include <QGuiApplication>
 #include <QCursor>
 #include <QPixmap>
+#include <cstdio>
+
+#include <QFile>
+#include <QMutex>
+
+/* Crash-path instrumentation: writes ordered markers to stdout and to a
+ * persistent trace file under the project so we can see exactly how far the
+ * post-stroke commit got before a crash, even when the GUI dies. */
+namespace {
+QMutex g_traceMutex;
+void pbCrashTrace(const char *msg)
+{
+    QMutexLocker lock(&g_traceMutex);
+    const QString line = QStringLiteral("[pbtrace] %1").arg(QLatin1String(msg));
+    fprintf(stderr, "%s\n", msg);
+    fflush(stderr);
+    QFile f(QStringLiteral("D:/_SATIN_AI/NAI-OS/vlc/pb_stroke_trace.log"));
+    if (f.open(QIODevice::Append | QIODevice::Text)) {
+        f.write(line.toUtf8());
+        f.write("\n");
+        f.close();
+    }
+}
+} // namespace
 
 namespace paintbrush {
 
@@ -132,6 +156,17 @@ void PaintbrushCanvasItem::setDocument(PaintbrushDocument *doc)
                     markAllTilesDirty();
                     emit selectionChanged(hasSelection());
                 });
+        /* switching layers is a per-layer material switch: invalidate the
+         * in-memory powder/grain state so the next edit re-derives from that
+         * layer's own materialPreset/materialState (never a stale sim). */
+        connect(m_doc, &PaintbrushDocument::currentLayerChanged, this,
+                [this](int) {
+                    m_powderReady = false;
+                    m_powderUnion = QRect();
+                    m_powderBlowing = false;
+                    m_glitterUnion = QRect();
+                    m_strokeHadPaint = false;
+                });
     }
     markAllTilesDirty();
     update();
@@ -171,9 +206,84 @@ void PaintbrushCanvasItem::setTool(int tool)
     {
         setBrushSize(12.0);
     }
+    /* entering the powder rail tool arms the workbench's default mode; the
+     * legacy TOOL_SMEAR is the direct Push shortcut */
+    if (tool == TOOL_GLITTER_POWDER || tool == TOOL_SMEAR)
+        setPowderTool(tool == TOOL_SMEAR ? int(POWDER_PUSH) : int(POWDER_GLITTER));
     emit toolChanged(tool);
     updateStatus(m_lastCanvasPos);
     updateCursor();
+}
+
+void PaintbrushCanvasItem::setPowderTool(int t)
+{
+    /* the workbench keeps only the four mutual-exclusive stroke modes as its
+     * sticky state; Pour/Blow are momentary and never persist here */
+    int clamped = t;
+    switch (t)
+    {
+    case POWDER_GLUE:
+    case POWDER_GLITTER:
+    case POWDER_PUSH:
+    case POWDER_ERASER:
+        break;   /* valid sticky modes */
+    default:
+        clamped = int(POWDER_GLITTER);
+        break;
+    }
+    if (int(m_powderTool) == clamped)
+        return;
+    m_powderTool = PowderToolId(clamped);
+    emit powderToolChanged(int(m_powderTool));
+    updateStatus(m_lastCanvasPos);
+}
+
+/* Momentary Pour: deposit a heap of the CURRENT colour over existing material
+ * (existing powder stays); one undo action. */
+void PaintbrushCanvasItem::pourPowderNow()
+{
+    if (m_tool != TOOL_GLITTER_POWDER && m_tool != TOOL_SMEAR)
+        return;
+    CanvasLayer *layer = m_doc ? m_doc->currentLayer() : nullptr;
+    if (!layer)
+        return;
+    layer = ensurePowderLayer();   /* create the dedicated powder layer on first edit */
+    if (!layer)
+        return;
+    ensurePowder();
+    const qreal radius = qMax<qreal>(3.0, m_brushSize) * 0.5;
+    const QPointF local = localFromCanvas(m_lastCanvasPos);
+    m_powder.pourGlitter(float(local.x()), float(local.y()),
+                         float(radius), m_powderParams);
+    m_powder.relax();
+    m_powder.decayFlow();
+    m_powder.endBlow();
+    /* one-shot render + commit of the touched disc, then clear the union so a
+     * retick doesn't re-commit (no persistent stroke session for a momentary
+     * action). */
+    const QRectF rr(local.x() - radius, local.y() - radius, radius * 2, radius * 2);
+    const QRect affected = rr.toAlignedRect().intersected(layer->raster.rect());
+    if (affected.isEmpty())
+        return;
+    m_powderUnion = m_powderUnion.isNull() ? affected : m_powderUnion.united(affected);
+    m_strokeHadPaint = true;
+    renderPowderUnion();
+    m_powderUnion = QRect();
+    m_strokeHadPaint = false;
+    persistPowderStateToLayer(layer);
+}
+
+/* Momentary Blow: run the full breath over the existing material state (loose
+ * leaves/bonds differently, bonded stays); one undo action. */
+void PaintbrushCanvasItem::blowPowderNow()
+{
+    if (m_tool != TOOL_GLITTER_POWDER && m_tool != TOOL_SMEAR)
+        return;
+    /* ensure a powder material layer exists (creating one on first Blow edit):
+     * the breath then moves that layer's loose powder, bonded stays */
+    if (!ensurePowderLayer())
+        return;
+    startPowderBlow();
 }
 
 QString PaintbrushCanvasItem::toolName() const
@@ -638,9 +748,9 @@ void PaintbrushCanvasItem::beginArtStroke(const QPointF &local)
         m_powderHoldPos = local;
         m_powderHoldEver = false;
         ensurePowder(true);
-        qInfo("pb powder: stroke begin (grid %dx%d cell %.2f, brush %.1f)",
+        qInfo("pb powder: stroke begin (grid %dx%d cell %.2f, brush %.1f, subtool %d)",
               m_powder.cellW(), m_powder.cellH(), m_powder.worldCellSize(),
-              m_brushSize);
+              m_brushSize, int(m_powderTool));
         m_powderUnion = QRect();
         artStrokeSegment(local, local);
     }
@@ -680,8 +790,25 @@ void PaintbrushCanvasItem::artStrokeSegment(const QPointF &fromLocal, const QPoi
 
 if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
     {
-        /* ensure the powder engine covers the layer (bounded grid) */
+        /* ensure the (per-edition) powder layer exists and the engine covers it */
+        CanvasLayer *pwLayer = ensurePowderLayer();
+        if (!pwLayer)
+            return;
+        if (layer != pwLayer)
+            layer = pwLayer;   /* a dedicated powder layer was created for this edit */
         ensurePowder();
+        /* capture the powder layer's material state before the first edit of
+         * this physical operation so one undo restores exactly one op */
+        if (!m_powderMaterialCaptured)
+        {
+            m_powderMaterialCmd = SetMaterialStateCommand();
+            m_powderMaterialCmd.layerIndex = m_doc->currentLayerIndex();
+            m_powderMaterialCmd.layerId = pwLayer->id;
+            m_powderMaterialCmd.before.preset = pwLayer->materialPreset;
+            m_powderMaterialCmd.before.state = pwLayer->materialState;
+            m_powderMaterialCmd.after = m_powderMaterialCmd.before;
+            m_powderMaterialCaptured = true;
+        }
         const float radius = float(qMax<qreal>(3.0, m_brushSize) * 0.5);
         const QLineF seg(fromLocal, toLocal);
         const qreal len = seg.length();
@@ -690,13 +817,13 @@ if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
         const QPointF trans = len > 0.0 ? QPointF(delta.x() / len, delta.y() / len) : QPointF();
         int steps = qMax(1, int(len / step));
 
-        /* A plow/smear only changes things when there is loose powder to push;
-         * snapshot the scoped loose mass first so an empty smear doesn't commit
-         * a pointless (empty) undo entry. */
+        /* A plow/smear/erase only changes things when there is existing powder to
+         * push/remove; snapshot the scoped loose mass first so an empty gesture
+         * doesn't commit a pointless (empty) undo entry. */
         const QRectF beforeB = QRectF(fromLocal, toLocal).normalized()
                                    .adjusted(-radius - 6, -radius - 6, radius + 6, radius + 6);
-        const bool smearHasMaterial =
-            m_tool == TOOL_GLITTER_POWDER
+        const bool toStringHasMaterial =
+            m_powderTool == POWDER_GLUE || m_powderTool == POWDER_GLITTER
             || m_powder.looseMassInRect(float(beforeB.left()), float(beforeB.top()),
                                         float(beforeB.right()), float(beforeB.bottom()))
                    > 0.002f;
@@ -704,22 +831,35 @@ if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
         for (int i = 0; i <= steps; ++i)
         {
             const QPointF p = len > 0.0 ? seg.pointAt(qreal(i) / steps) : fromLocal;
-            if (m_tool == TOOL_GLITTER_POWDER)
+            switch (m_powderTool)
             {
-                /* pour loose powder (reference deposit) with adhesive bonding;
-                 * the Loose control scales how much glue actually binds the
-                 * fresh deposit (looseMix = fraction treated as loose grains) */
+            case POWDER_GLUE:
+                /* draw a visible wet transparent glue stroke; changes glue only,
+                 * never emits glitter */
                 m_powder.paintGlue(float(p.x()), float(p.y()), radius,
-                                   m_powderParams.adhesion * 0.5f
-                                       * (1.0f - 0.7f * m_powderParams.looseMix));
+                                   m_powderParams.adhesion);
+                break;
+            case POWDER_GLITTER:
+                /* sprinkle loose glitter; no glue deposition (the reference's
+                 * Glitter mode) */
                 m_powder.pourGlitter(float(p.x()), float(p.y()), radius,
                                      m_powderParams);
-            }
-            else
-            {
-                /* smear/plow: push loose grains along the stroke; bonded stay */
+                break;
+            case POWDER_PUSH:
+                /* smear/plow existing loose grains; bonded stay; creates nothing */
                 m_powder.smear(float(p.x()), float(p.y()), float(trans.x()),
                                float(trans.y()), radius, 0.0f);
+                break;
+            case POWDER_ERASER:
+                /* physically erase glue + bonded + loose under the disc */
+                m_powder.erase(float(p.x()), float(p.y()), radius, 1.0f);
+                break;
+            case POWDER_POUR:
+            case POWDER_BLOW:
+            default:
+                /* momentary actions are invoked explicitly (pourPowderNow /
+                 * blowPowderNow); they are never a stroke mode */
+                break;
             }
         }
         m_powder.relax();
@@ -753,7 +893,7 @@ if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
             p.drawImage(affected.topLeft() - m_scratchOrigin, flakes);
             p.end();
         }
-        if (smearHasMaterial)
+        if (toStringHasMaterial)
             m_strokeHadPaint = true;
         markTilesDirty(mappedRect(affected));
         m_strokeLastDab = toLocal;
@@ -813,8 +953,11 @@ if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
 
 void PaintbrushCanvasItem::endArtStroke(const QPointF &local)
 {
-    if (!m_strokeActive)
+    pbCrashTrace("endArtStroke enter");
+    if (!m_strokeActive) {
+        pbCrashTrace("endArtStroke exit (not active)");
         return;
+    }
     artStrokeSegment(m_strokeLastDab, local);
     m_strokeActive = false;
     CanvasLayer *layer = m_doc ? m_doc->currentLayer() : nullptr;
@@ -842,7 +985,9 @@ else if ((m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
     {
         /* final powder pass over the full union (reseeds + clears masked
          * committed powder + overlays current sim, then marks tiles dirty) */
+        pbCrashTrace("endArtStroke -> renderPowderUnion enter");
         renderPowderUnion();
+        pbCrashTrace("endArtStroke -> renderPowderUnion return");
     }
     if (m_strokeHadPaint)
     {
@@ -850,7 +995,9 @@ else if ((m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
                             : m_tool == TOOL_GLITTER_POWDER ? QStringLiteral("Glitter powder")
                             : m_tool == TOOL_SMEAR ? QStringLiteral("Smear")
                             : QStringLiteral("Bristle paint");
+        pbCrashTrace("commitScratch begin");
         commitScratch(name);
+        pbCrashTrace("commitScratch end");
     }
     if (m_tool == TOOL_BRISTLE)
         m_bristle.endStroke();
@@ -868,6 +1015,8 @@ else if ((m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
     m_lastPowderPreviewMs = 0;
     m_glitterUnion = QRect();
     m_powderUnion = QRect();
+    m_powderMaterialCaptured = false;
+    pbCrashTrace("endArtStroke exit");
 }
 
 void PaintbrushCanvasItem::ensurePowder(bool force)
@@ -880,10 +1029,38 @@ void PaintbrushCanvasItem::ensurePowder(bool force)
      * silently disables the tool (see boundedArtGrid) */
     float cell = art::glitter::powderWorldCellSize(m_glitterParams, kGlitterFlakeWorld);
     const QSize cells = boundedArtGrid(layer->raster.size(), cell, 2 * 1024 * 1024);
+
+    const bool existingPowder =
+        layer->materialPreset == QLatin1String(art::glitter::kPowderMaterialPreset)
+        && !layer->materialState.isEmpty();
+
+    /* If the layer already carries a persisted physical powder state, recover it
+     * (switch-to-powder or switch-layers): never wipe it with a fresh reset. */
+    if (existingPowder && (!m_powderReady
+                           || m_powder.cellW() != cells.width()
+                           || m_powder.cellH() != cells.height()))
+    {
+        art::glitter::GlitterPowder restored;
+        if (restored.deserialize(layer->materialState)
+            && restored.cellW() == cells.width()
+            && restored.cellH() == cells.height())
+        {
+            /* adopt the persisted state + its palette so edits continue the sim */
+            m_powder = std::move(restored);
+            m_powderPal.colors = m_powder.palette();
+            if (const art::PaperStock *ps = m_doc->paperStock())
+                m_powderPal.paper = ps->baseColor;
+            m_powderReady = true;
+            qInfo("pb powder: restored material layer %dx%d (cell %.2f)",
+                  m_powder.cellW(), m_powder.cellH(), m_powder.worldCellSize());
+            return;
+        }
+        /* fall through: persisted state is incompatible (e.g. grid changed) */
+    }
+
     /* Idempotent within a stroke: once the grid covers the current layer we
-     * don't reset it every segment (a reset would wipe powder poured by
-     * earlier samples of the same stroke). Only `force` (stroke begin, or a
-     * layer that actually changed) rebuilds from scratch. */
+     * don't reset it every segment. Only `force` (stroke begin) OR a grid/layer
+     * change rebuilds; a NON-powder layer always gets a fresh grid. */
     if (!force && m_powderReady && m_powder.cellW() == cells.width()
         && m_powder.cellH() == cells.height())
         return;
@@ -904,52 +1081,124 @@ void PaintbrushCanvasItem::ensurePowder(bool force)
     m_powderReady = true;
 }
 
+/* Ensure the current layer is a Glitter-POWDER material layer. On the first
+ * physical powder edit of any non-powder layer, create a DEDICATED transparent
+ * powder material layer (never destructively convert the selected raster/image
+ * layer), switch to it and mark it as the powder material preset. */
+CanvasLayer *PaintbrushCanvasItem::ensurePowderLayer()
+{
+    if (!m_doc)
+        return nullptr;
+    CanvasLayer *cur = m_doc->currentLayer();
+    if (cur && cur->materialPreset == QLatin1String(art::glitter::kPowderMaterialPreset))
+        return cur;   /* already a powder material layer: edit it */
+
+    /* create a dedicated transparent powder layer sized to the canvas */
+    const QSize cs = m_doc->canvasSize();
+    CanvasLayer layer = CanvasLayer::createRaster(cs, QStringLiteral("Glitter powder"));
+    layer.materialPreset = art::glitter::kPowderMaterialPreset;
+    layer.materialState.clear();       /* empty physical state; filled on commit */
+
+    InsertLayerCommand cmd;
+    cmd.desc = QStringLiteral("Glitter powder layer");
+    QList<CanvasLayer> layers = m_doc->layers();
+    layers.append(std::move(layer));
+    cmd.index = layers.size() - 1;
+    cmd.prevCurrentIndex = m_doc->currentLayerIndex();
+    m_doc->setLayers(layers);
+    m_doc->setCurrentLayerIndex(cmd.index);
+    cmd.layer = *m_doc->layerAt(cmd.index);
+    if (m_undoStack)
+        m_undoStack->pushInsertLayer(cmd);
+    m_doc->setDirty(true);
+    /* the powder grid must size to this new layer */
+    m_powderReady = false;
+    return m_doc->currentLayer();
+}
+
 void PaintbrushCanvasItem::renderPowderUnion()
 {
+    pbCrashTrace("renderPowderUnion enter");
     CanvasLayer *layer = m_doc ? m_doc->currentLayer() : nullptr;
-    if (!layer || layer->raster.isNull())
+    if (!layer || layer->raster.isNull()) {
+        pbCrashTrace("renderPowderUnion exit (no layer)");
         return;
-    if (m_powderUnion.isNull() || m_powderUnion.isEmpty())
+    }
+    if (m_powderUnion.isNull() || m_powderUnion.isEmpty()) {
+        pbCrashTrace("renderPowderUnion exit (no union)");
         return;
+    }
     const QRect u = m_powderUnion.intersected(layer->raster.rect());
-    if (u.isEmpty())
+    if (u.isEmpty()) {
+        pbCrashTrace("renderPowderUnion exit (empty union)");
         return;
+    }
     captureBeforeRegion(u);
     ensureScratch(u);
 
     /* Deterministic COMMIT bake: t=0 through the GPU powder.frag surface so the
      * committed document + export carry the reference GPU look. Falls back to
-     * the CPU Voronoi renderer if no offscreen GPU runtime could be created
-     * (or the bake produced nothing). */
+     * the CPU Voronoi renderer if no offscreen GPU runtime could be created /
+     * produced no content, or if PB_POWDER_COMMIT=cpu (temporary containment
+     * switch until the real-GUI stroke is visually confirmed). */
     QImage flakes;
     bool bakedGpu = false;
+    const QByteArray commitMode = qgetenv("PB_POWDER_COMMIT").trimmed();
+    const bool allowGpuCommit = commitMode.isNull() || !commitMode.compare("gpu", Qt::CaseInsensitive);
+    pbCrashTrace("GpuRuntime initialize begin");
     if (!m_gpuRenderTried) {
         m_gpuRenderTried = true;
         m_gpuRender.initialize(true);
     }
-    if (m_gpuRender.isReady()) {
+    pbCrashTrace("GpuRuntime initialize end");
+    if (allowGpuCommit && m_gpuRender.isReady()) {
+        pbCrashTrace("renderPowder begin");
         flakes = m_gpuRender.renderPowder(u.size(), m_powder, m_powderPal,
                                           float(u.x()), float(u.y()), 1.0f,
                                           m_doc->lightRig(), m_doc->paperStock(),
                                           /*timeMs=*/0, /*uiDpr=*/1);
-        if (!flakes.isNull()) {
-            int nonBg = 0;
-            const int npx = flakes.width() * flakes.height();
-            const QRgb *px = reinterpret_cast<const QRgb *>(flakes.constBits());
-            const QRgb bg = flakes.color(0);
-            for (int i = 0; i < npx && nonBg < 8; ++i)
-                if (px[i] != bg)
-                    ++nonBg;
-            bakedGpu = nonBg > 0;
+        pbCrashTrace("renderPowder end");
+        /* Redo the bake semantics via the renderer result, NOT by guessing a
+         * background colour on a 32-bit image. `renderPowder` returns an opaque
+         * ARGB32 image; treat a non-null, non-empty image as a renderer success
+         * and verify content on actual scanlines/format below. */
+        if (!flakes.isNull() && !flakes.size().isEmpty()) {
+            pbCrashTrace("GPU result validation");
+            bakedGpu = true;
+            /* content sanity: a format-aware scanline probe (never .color(0)) */
+            if (flakes.format() == QImage::Format_ARGB32
+                || flakes.format() == QImage::Format_RGBA8888
+                || flakes.format() == QImage::Format_RGB32) {
+                const int h = flakes.height();
+                const int w = flakes.width();
+                const int bpl = flakes.bytesPerLine();
+                const uchar *p0 = flakes.constBits();
+                int nonZero = 0;
+                /* scan a sparse set of scanlines for any non-black pixel */
+                const int stepY = qMax(1, h / 16);
+                for (int y = 0; y < h && nonZero < 4; y += stepY) {
+                    const uchar *sl = p0 + qint64(y) * bpl;
+                    for (int x = 0; x < w; x += 3) {
+                        if (sl[x * 4 + 0] || sl[x * 4 + 1] || sl[x * 4 + 2] || sl[x * 4 + 3]) {
+                            ++nonZero;
+                            break;
+                        }
+                    }
+                }
+                if (nonZero == 0)
+                    bakedGpu = false;   /* genuinely empty frame: don't bake*/
+            }
         }
     }
     if (!bakedGpu) {
+        pbCrashTrace("CPU Voronoi fallback render");
         flakes = m_powder.render(u.size(), float(u.x()), float(u.y()), 1.0f,
                                  m_doc->lightRig(), m_powderPal,
                                  m_doc->paperStock(), m_doc->artScale(1.0f),
                                  0);
     }
 
+    pbCrashTrace("QPainter composite");
     QPainter p(&m_scratchTile);
     p.setCompositionMode(QPainter::CompositionMode_Source);
     p.drawImage(u.topLeft() - m_scratchOrigin, layer->raster, u);
@@ -963,9 +1212,39 @@ void PaintbrushCanvasItem::renderPowderUnion()
     p.setCompositionMode(QPainter::CompositionMode_SourceOver);
     p.drawImage(u.topLeft() - m_scratchOrigin, flakes);
     p.end();
+    pbCrashTrace("markTilesDirty");
     markTilesDirty(mappedRect(u));
     m_strokeHadPaint = true;
+    pbCrashTrace("renderPowderUnion exit");
     qDebug() << "pb_powder commit" << u.size() << "gpu=" << bakedGpu;
+    /* the committed raster is now a cached bake of the authoritative state */
+    CanvasLayer *cur = layer;
+    if (cur && !m_powder.isEmpty())
+        persistPowderStateToLayer(cur);
+}
+
+/* Persist the authoritative GlitterPowder physical state onto the layer. The
+ * raster remains a cached bake; save/load, export and tool switches re-derive
+ * from this material state (never from raster re-hydration). */
+void PaintbrushCanvasItem::persistPowderStateToLayer(CanvasLayer *layer)
+{
+    if (!layer)
+        return;
+    m_powder.endBlow();          /* drop transient blow momentum before capturing */
+    if (m_powder.isEmpty()) {
+        /* nothing left (fully erased/blown): record no material state */
+        if (layer->materialPreset == art::glitter::kPowderMaterialPreset)
+            layer->materialPreset.clear();
+        layer->materialState.clear();
+        /* keep the undo command's `after` in sync with what we persist */
+        m_powderMaterialCmd.after.preset = layer->materialPreset;
+        m_powderMaterialCmd.after.state = layer->materialState;
+        return;
+    }
+    layer->materialPreset = art::glitter::kPowderMaterialPreset;
+    layer->materialState = m_powder.serialize();
+    m_powderMaterialCmd.after.preset = layer->materialPreset;
+    m_powderMaterialCmd.after.state = layer->materialState;
 }
 
 void PaintbrushCanvasItem::startPowderBlow()
@@ -1721,6 +2000,22 @@ void PaintbrushCanvasItem::commitScratch(const QString &desc)
 
     maskStrokeToSelectionAndAlphaLock();
     pushStrokeEntry(desc);
+
+    /* powder: persist the physical material state AND make this one operation
+     * undoable at the material level (undo restores the sim from layer state) */
+    if (m_powderMaterialCaptured && m_undoStack)
+    {
+        m_powderMaterialCaptured = false;
+        const bool materialChanged =
+            m_powderMaterialCmd.before.preset != m_powderMaterialCmd.after.preset
+            || m_powderMaterialCmd.before.state != m_powderMaterialCmd.after.state;
+        if (materialChanged)
+        {
+            m_powderMaterialCmd.desc = desc;
+            m_powderMaterialCmd.layerIndex = m_doc->currentLayerIndex();
+            m_undoStack->pushMaterialState(m_powderMaterialCmd);
+        }
+    }
 
     const QRect localUnion = m_strokeUnion.intersected(layer->raster.rect());
     if (!localUnion.isEmpty())

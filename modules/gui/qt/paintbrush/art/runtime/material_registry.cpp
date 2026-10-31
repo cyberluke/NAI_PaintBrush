@@ -68,6 +68,20 @@ MaterialRegistry::MaterialRegistry()
           { QStringLiteral("adhesion"), 0.0f, 1.0f, 0.6f, QString() },
           { QStringLiteral("holographic"), 0.0f, 1.0f, 0.0f, QString() } }));
 
+    /* -- glitter powder (re-renders from persistent physical state) ------- */
+    registerMaterial(makeManifest(
+        "material.glitter.powder", "material", 1,
+        { QStringLiteral("paper"), QStringLiteral("light"), QStringLiteral("adhesion") },
+        { QStringLiteral("coverage"), QStringLiteral("bonded"),
+          QStringLiteral("height"), QStringLiteral("palette_slots") },
+        { QStringLiteral("interactive"), QStringLiteral("export"),
+          QStringLiteral("boost_tool") },
+        { { QStringLiteral("amount"), 0.0f, 2.0f, 1.0f, QString() },
+          { QStringLiteral("flake_size"), 0.2f, 2.5f, 0.8f, QString() },
+          { QStringLiteral("adhesion"), 0.0f, 1.0f, 0.6f, QString() },
+          { QStringLiteral("loose"), 0.0f, 1.0f, 0.5f, QString() },
+          { QStringLiteral("holographic"), 0.0f, 1.0f, 0.0f, QString() } }));
+
     /* -- finish runtime effects ------------------------------------------ */
     registerMaterial(makeManifest(
         "finish.shadow", "finish", 1,

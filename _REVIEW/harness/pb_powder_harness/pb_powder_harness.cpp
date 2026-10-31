@@ -268,6 +268,95 @@ int main(int argc, char **argv)
         CHECK("empty powder renders fully transparent", imageMeanAlpha(e) == 0.0);
     }
 
+    /* ---- persistence: serialize/deserialize round-trip ----------------- */
+    {
+        GlitterPowder a;
+        a.reset(QSize(128, 128), 4.0f, 5u);
+        GlitterParams sp; sp.amount = 1.3f; sp.flakeSize = 0.8f; sp.color = pal.colors[0];
+        a.pourGlitter(70 * 4.0f, 70 * 4.0f, 20.0f, sp);
+        a.paintGlue(50 * 4.0f, 50 * 4.0f, 16.0f, 0.8f);
+        a.pourGlitter(50 * 4.0f, 50 * 4.0f, 14.0f, sp);
+        a.relax(); a.relax(); a.decayFlow();
+        a.absorb(); /* some loose bonds to the glue */
+        const QByteArray bytes = a.serialize();
+        CHECK("serialize produces non-empty bytes", !bytes.isEmpty() && bytes.size() > 32);
+        GlitterPowder b;
+        CHECK("deserialize accepts its own serialization", b.deserialize(bytes));
+        CHECK("round-trip preserves grid", b.cellW() == a.cellW() && b.cellH() == a.cellH());
+        CHECK("round-trip preserves worldCell", std::fabs(b.worldCellSize() - a.worldCellSize()) < 1e-6f);
+        int sameCells = 0;
+        for (int i = 0; i < a.cellCount(); ++i)
+        {
+            const PowderCell &x = a.powderCellAt(i);
+            const PowderCell &y = b.powderCellAt(i);
+            if (std::fabs(x.height - y.height) < 1e-5f && std::fabs(x.stuck - y.stuck) < 1e-5f
+                && std::fabs(x.glue - y.glue) < 1e-5f && std::fabs(x.seed - y.seed) < 1e-5f
+                && std::fabs(x.flow - y.flow) < 1e-5f && std::fabs(x.vx - y.vx) < 1e-5f
+                && std::fabs(x.vy - y.vy) < 1e-5f && x.lA == y.lA && x.lB == y.lB
+                && x.sA == y.sA && x.sB == y.sB
+                && std::fabs(x.lF - y.lF) < 1e-5f && std::fabs(x.sF - y.sF) < 1e-5f)
+                ++sameCells;
+        }
+        CHECK("round-trip preserves every physics field", sameCells == a.cellCount());
+        CHECK("round-trip preserves palette", b.palette() == a.palette());
+        /* a restored powder must render the same as the original (state, not
+         * raster, is authoritative) */
+        QImage ra = a.render(QSize(96, 96), 50 * 4.0f - 48, 50 * 4.0f - 48, 1.0f, ArtLightRig(), pal, nullptr, ArtScale(), 0);
+        QImage rb = b.render(QSize(96, 96), 50 * 4.0f - 48, 50 * 4.0f - 48, 1.0f, ArtLightRig(), pal, nullptr, ArtScale(), 0);
+        CHECK("restored state renders identically", imgEqual(ra, rb));
+        /* corrupt input must be rejected, not crash */
+        GlitterPowder bad;
+        QByteArray junk(24, '\xAA');
+        CHECK("deserialize rejects garbage", !bad.deserialize(junk));
+        std::vector<char> shortEnd(bytes.begin(), bytes.end());
+        shortEnd.resize(shortEnd.size() - 7);
+        QByteArray cut(shortEnd.data(), int(shortEnd.size()));
+        CHECK("deserialize rejects truncated payload", !bad.deserialize(cut));
+    }
+
+    /* ---- physical Eraser ---------------------------------------------- */
+    {
+        GlitterPowder er;
+        er.reset(QSize(96, 96), 4.0f, 11u);
+        GlitterParams sp; sp.amount = 1.4f; sp.flakeSize = 0.8f; sp.color = pal.colors[0];
+        er.pourGlitter(48 * 4.0f, 48 * 4.0f, 22.0f, sp);
+        er.paintGlue(48 * 4.0f, 48 * 4.0f, 18.0f, 0.9f);
+        er.pourGlitter(48 * 4.0f, 48 * 4.0f, 18.0f, sp);
+        er.relax(); er.relax(); er.decayFlow(); er.absorb();
+        float prevL = 0, prevS = 0;
+        for (int i = 0; i < er.cellCount(); ++i)
+        {
+            prevL += er.powderCellAt(i).height - er.powderCellAt(i).stuck;
+            prevS += er.powderCellAt(i).stuck;
+        }
+        /* erase a disc slightly SMALLER than the poured heap, but well inside
+         * the settled mass, so the falloff region is covered */
+        er.erase(48 * 4.0f, 48 * 4.0f, 18.0f, 1.0f);
+        float afterL = 0, afterS = 0;
+        for (int i = 0; i < er.cellCount(); ++i)
+        {
+            afterL += er.powderCellAt(i).height - er.powderCellAt(i).stuck;
+            afterS += er.powderCellAt(i).stuck;
+        }
+        CHECK("erase removes loose substance (mass drops)",
+              afterL < prevL);
+        CHECK("erase removes bonded substance too (not just loose)",
+              afterS < prevS * 0.4f);
+        CHECK("erase clears wet glue in the disc", [&]() -> bool {
+            for (int i = 0; i < er.cellCount(); ++i)
+            {
+                const float wx = (i % er.cellW() + 0.5f) * er.worldCellSize();
+                const float wy = (i / er.cellW() + 0.5f) * er.worldCellSize();
+                const float dx = wx - 48 * 4.0f;
+                const float dy = wy - 48 * 4.0f;
+                const float d2 = dx * dx + dy * dy;
+                if (d2 < 100.0f && er.powderCellAt(i).glue > 0.5f)
+                    return false;
+            }
+            return true;
+        }());
+    }
+
     /* ---- reference sheets for the visual audit ----------------------- */
     {
         const float wc = (256 / 2.0f) * 4.0f;

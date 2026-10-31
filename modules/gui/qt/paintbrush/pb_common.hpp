@@ -82,6 +82,21 @@ enum ToolId {
     TOOL_COUNT
 };
 
+/* Glitter-POWDER workbench subtools (the reference's separate interaction modes).
+ * Kept distinct from ToolId: the vertical rail still exposes a single
+ * "Glitter Powder" TOOL_GLITTER_POWDER; selecting it arms m_powderTool below.
+ * Glue / Glitter / Push / Eraser are mutually-exclusive stroke modes; Pour and
+ * Blow are momentary actions. */
+enum PowderTool {
+    POWDER_GLUE = 0,      /* draw wet glue (no glitter emitted) */
+    POWDER_GLITTER,       /* sprinkle loose glitter (no glue deposited) */
+    POWDER_PUSH,          /* plow/smear existing loose powder (no creation) */
+    POWDER_ERASER,        /* physically erase glue + bonded material */
+    POWDER_POUR,          /* momentary: pour a heap of the current colour */
+    POWDER_BLOW           /* momentary: blow loose powder away, bonded stays */
+};
+typedef PowderTool PowderToolId;
+
 enum LayerType {
     LAYER_RASTER = 0,   /* drawn/painted content               */
     LAYER_IMAGE,        /* imported / cutout image layer       */

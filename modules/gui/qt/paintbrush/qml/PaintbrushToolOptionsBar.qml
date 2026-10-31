@@ -109,21 +109,51 @@ Rectangle {
                        value: canvas.glitterAdhesion, onChange: (v) => canvas.glitterAdhesion = v })
         }
 
-        /* -------- Glitter Powder (18): full option set -------------------- */
+        /* -------- Glitter Powder (18): workbench ------------------------ */
         if (canvas.tool === 18)
         {
-            out.push({ kind: "slider", label: qsTr("Size"), from: 1, to: 160, stepSize: 1,
-                       value: canvas.brushSize, onChange: (v) => canvas.brushSize = v })
-            out.push({ kind: "slider", label: qsTr("Amount"), from: 0.1, to: 2, stepSize: 0.05,
-                       value: canvas.glitterAmount, onChange: (v) => canvas.glitterAmount = v })
-            out.push({ kind: "slider", label: qsTr("Flake"), from: 0.2, to: 2.5, stepSize: 0.05,
-                       value: canvas.glitterFlakeSize, onChange: (v) => canvas.glitterFlakeSize = v })
-            out.push({ kind: "slider", label: qsTr("Glue"), from: 0.0, to: 1, stepSize: 0.05,
-                       value: canvas.glitterAdhesion, onChange: (v) => canvas.glitterAdhesion = v })
-            out.push({ kind: "slider", label: qsTr("Loose"), from: 0.0, to: 1, stepSize: 0.05,
-                       value: canvas.powderLoose, onChange: (v) => canvas.powderLoose = v })
-            out.push({ kind: "slider", label: qsTr("Shimmer"), from: 0.0, to: 1, stepSize: 0.05,
-                       value: canvas.glitterShimmer, onChange: (v) => canvas.glitterShimmer = v })
+            /* leading subtool group: Glue / Glitter / Push / Eraser are
+             * mutually-exclusive checkable modes; Pour / Blow are momentary
+             * actions. A non-interactive spacer separates the two groups. */
+            out.push({ kind: "tool", iconSource: "dropzone", tip: qsTr("Glue"),
+                       checkable: true, checked: canvas.powderTool === 0,
+                       onTriggered: () => { canvas.powderTool = 0 } })
+            out.push({ kind: "tool", iconSource: "glitter", tip: qsTr("Glitter"),
+                       checkable: true, checked: canvas.powderTool === 1,
+                       onTriggered: () => { canvas.powderTool = 1 } })
+            out.push({ kind: "tool", iconSource: "move", tip: qsTr("Push"),
+                       checkable: true, checked: canvas.powderTool === 2,
+                       onTriggered: () => { canvas.powderTool = 2 } })
+            out.push({ kind: "tool", iconSource: "eraser", tip: qsTr("Eraser"),
+                       checkable: true, checked: canvas.powderTool === 3,
+                       onTriggered: () => { canvas.powderTool = 3 } })
+            out.push({ kind: "spacer" })
+            out.push({ kind: "icon", iconSource: "download", tip: qsTr("Pour"),
+                       onTriggered: () => canvas.pourPowderNow() })
+            out.push({ kind: "icon", iconSource: "windy", tip: qsTr("Blow"),
+                       onTriggered: () => canvas.blowPowderNow() })
+
+            /* contextual options, dependent on the active subtool */
+            if (canvas.powderTool === 0)            /* Glue: size */
+                out.push({ kind: "slider", label: qsTr("Size"), from: 1, to: 160, stepSize: 1,
+                           value: canvas.brushSize, onChange: (v) => canvas.brushSize = v })
+            else if (canvas.powderTool === 1)       /* Glitter: size + amount (+ flakes/shimmer) */
+            {
+                out.push({ kind: "slider", label: qsTr("Size"), from: 1, to: 160, stepSize: 1,
+                           value: canvas.brushSize, onChange: (v) => canvas.brushSize = v })
+                out.push({ kind: "slider", label: qsTr("Amount"), from: 0.1, to: 2, stepSize: 0.05,
+                           value: canvas.glitterAmount, onChange: (v) => canvas.glitterAmount = v })
+                out.push({ kind: "slider", label: qsTr("Flake"), from: 0.2, to: 2.5, stepSize: 0.05,
+                           value: canvas.glitterFlakeSize, onChange: (v) => canvas.glitterFlakeSize = v })
+                out.push({ kind: "slider", label: qsTr("Shimmer"), from: 0.0, to: 1, stepSize: 0.05,
+                           value: canvas.glitterShimmer, onChange: (v) => canvas.glitterShimmer = v })
+            }
+            else if (canvas.powderTool === 2)       /* Push: size */
+                out.push({ kind: "slider", label: qsTr("Size"), from: 1, to: 160, stepSize: 1,
+                           value: canvas.brushSize, onChange: (v) => canvas.brushSize = v })
+            else if (canvas.powderTool === 3)       /* Eraser: size */
+                out.push({ kind: "slider", label: qsTr("Size"), from: 1, to: 160, stepSize: 1,
+                           value: canvas.brushSize, onChange: (v) => canvas.brushSize = v })
         }
 
         /* -------- Smear (19): size only ----------------------------------- */
@@ -142,6 +172,7 @@ Rectangle {
     Connections {
         target: canvas
         function onToolChanged(t) { rebuild() }
+        function onPowderToolChanged(t) { rebuild() }
         function onGridVisibleChanged() { rebuild() }
         function onRulersVisibleChanged() { rebuild() }
         function onSnapToGridChanged() { rebuild() }

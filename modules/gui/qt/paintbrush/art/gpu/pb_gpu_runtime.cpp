@@ -889,12 +889,21 @@ QImage GpuRuntime::renderPowder(const QSize &outSize,
 
     QRhiTexture *simTex = m_rhi->newTexture(QRhiTexture::RGBA16F, QSize(W, H), 1, {});
     QRhiTexture *colTex = m_rhi->newTexture(QRhiTexture::RGBA8, QSize(W, H), 1, {});
-    if (!simTex->create() || !colTex->create())
+    /* RAII scopes: guarantee no leaked resource on every early-return before
+     * the frame is submitted. */
+    auto freeResources = [&]() {
+        if (simTex) { simTex->destroy(); delete simTex; simTex = nullptr; }
+        if (colTex) { colTex->destroy(); delete colTex; colTex = nullptr; }
+    };
+    if (!simTex || !colTex || !simTex->create() || !colTex->create()) {
+        freeResources();
         return {};
-    /* a float sampler needs a linear float filter on most backends */
-    QRhiSampler *simSampler = m_rhi->newSampler(QRhiSampler::Linear, QRhiSampler::Linear,
-                                                QRhiSampler::None, QRhiSampler::ClampToEdge,
-                                                QRhiSampler::ClampToEdge);
+    }
+    /* Reuse the PERSISTENT, already-created powder sampler for the float sim
+     * texture — never allocate a throwaway sampler per render call (an
+     * uncreated sampler in an SRB crashes; a created-and-deleted one that is
+     * still referenced by submitted commands is a lifetime bug). */
+    QRhiSampler *simSampler = m_pipelines->powderSim;   /* Linear, created in initialize */
 
     /* light context from the shared ArtLightRig (same derivation as CPU) */
     const QVector3D d = rig.unitDirection();       /* points down onto paper */
@@ -947,16 +956,31 @@ QImage GpuRuntime::renderPowder(const QSize &outSize,
         QRhiShaderResourceBinding::sampledTexture(0, QRhiShaderResourceBinding::FragmentStage, simTex, simSampler),
         QRhiShaderResourceBinding::sampledTexture(1, QRhiShaderResourceBinding::FragmentStage, colTex, m_pipelines->powderCol),
     });
-    if (!srb->create())
+    if (!srb->create()) {
+        delete srb;
+        u->release();
+        freeResources();
         return {};
+    }
 
     QRhiBuffer *vb = m_rhi->newBuffer(QRhiBuffer::Immutable, QRhiBuffer::VertexBuffer, sizeof(kQuadClip));
-    vb->create();
+    if (!vb || !vb->create()) {
+        delete srb;
+        u->release();
+        if (vb) delete vb;
+        freeResources();
+        return {};
+    }
     u->uploadStaticBuffer(vb, kQuadClip);
 
     QRhiCommandBuffer *cb = nullptr;
-    if (m_rhi->beginOffscreenFrame(&cb) != QRhi::FrameOpSuccess)
+    if (m_rhi->beginOffscreenFrame(&cb) != QRhi::FrameOpSuccess) {
+        delete vb;
+        delete srb;
+        u->release();
+        freeResources();
         return {};
+    }
     cb->beginPass(m_rt, Qt::transparent, { 1.0f, 0 }, u);
     cb->setGraphicsPipeline(m_pipelines->powder);
     cb->setShaderResources(srb);
@@ -966,12 +990,10 @@ QImage GpuRuntime::renderPowder(const QSize &outSize,
     cb->endPass();
     m_rhi->endOffscreenFrame();
 
-    delete vb;
-    delete srb;
-    delete simSampler;
+    delete vb;          /* no longer referenced once the frame is submitted */
+    delete srb;         /* ditto */
+    freeResources();
     QImage result = readback(m_target, outSize);
-    delete simTex;
-    delete colTex;
     return unPremultiply(result);
 }
 

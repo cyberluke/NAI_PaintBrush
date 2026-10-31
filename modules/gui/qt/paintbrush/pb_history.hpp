@@ -84,6 +84,7 @@ public:
         SetRole,
         SetArtState,
         SetText,
+        SetMaterialState,    /* per-layer art-material physical state */
         AddHarvest,
         SetPuppet,
         AddPuppet
@@ -221,6 +222,31 @@ public:
     StrokeUndoData data;
     Kind kind() const override { return Kind::Stroke; }
     QString description() const override { return data.description; }
+    qint64 bytes() const override;
+    void apply(PaintbrushDocument &doc) override;
+    void revert(PaintbrushDocument &doc) override;
+};
+
+/* Per-layer art-material physical state (e.g. GlitterPowder serialize). Makes a
+ * powder/glitter operation undoable at the material level: apply()/revert()
+ * restore materialPreset+materialState on the target layer so re-render/edit
+ * re-derive the real sim (the raster stays a cached bake, restored by the paired
+ * StrokeCommand). */
+class SetMaterialStateCommand : public UndoCommand
+{
+public:
+    struct State
+    {
+        QString preset;
+        QByteArray state;
+    };
+    int layerIndex = -1;
+    int layerId = 0;
+    State before;
+    State after;
+    QString desc;
+    Kind kind() const override { return Kind::SetMaterialState; }
+    QString description() const override { return desc; }
     qint64 bytes() const override;
     void apply(PaintbrushDocument &doc) override;
     void revert(PaintbrushDocument &doc) override;
@@ -386,6 +412,7 @@ public:
     void pushDeleteLayer(const DeleteLayerCommand &cmd);
     void pushMask(const MaskCommand &cmd);
     void pushCanvasResize(const CanvasResizeCommand &cmd);
+    void pushMaterialState(const SetMaterialStateCommand &cmd);
 
     bool canUndo() const { return m_undoIndex > 0; }
     bool canRedo() const { return m_undoIndex < m_entries.size(); }

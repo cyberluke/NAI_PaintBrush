@@ -31,9 +31,15 @@
         <file alias="fill_active.svg">paintbrush/pixmaps/tdesign/fill_active.svg</file>
         <file alias="freeform_select.svg">paintbrush/pixmaps/tdesign/freeform_select.svg</file>
         <file alias="freeform_select_active.svg">paintbrush/pixmaps/tdesign/freeform_select_active.svg</file>
+        <file alias="download.svg">paintbrush/pixmaps/tdesign/download.svg</file>
+        <file alias="download_active.svg">paintbrush/pixmaps/tdesign/download_active.svg</file>
+        <file alias="dropzone.svg">paintbrush/pixmaps/tdesign/dropzone.svg</file>
+        <file alias="dropzone_active.svg">paintbrush/pixmaps/tdesign/dropzone_active.svg</file>
         <file alias="glitter.svg">paintbrush/pixmaps/tdesign/glitter.svg</file>
         <file alias="glitter_active.svg">paintbrush/pixmaps/tdesign/glitter_active.svg</file>
         <file alias="line.svg">paintbrush/pixmaps/tdesign/line.svg</file>
+        <file alias="windy.svg">paintbrush/pixmaps/tdesign/windy.svg</file>
+        <file alias="windy_active.svg">paintbrush/pixmaps/tdesign/windy_active.svg</file>
         <file alias="line_active.svg">paintbrush/pixmaps/tdesign/line_active.svg</file>
         <file alias="move.svg">paintbrush/pixmaps/tdesign/move.svg</file>
         <file alias="move_active.svg">paintbrush/pixmaps/tdesign/move_active.svg</file>
