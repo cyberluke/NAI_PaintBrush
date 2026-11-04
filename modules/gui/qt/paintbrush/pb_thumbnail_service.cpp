@@ -50,10 +50,13 @@ void ThumbnailService::startBatch(FrameProvider *provider,
 
     if (!provider || mediaKey.isEmpty() || durationMs <= 0)
     {
-        emit generationFailed(QStringLiteral("No playable media for thumbnails."));
+        m_lastFailureReason =
+            QStringLiteral("No playable media for thumbnails.");
+        emit generationFailed(m_lastFailureReason);
         return;
     }
 
+    m_lastFailureReason.clear();
     m_provider = provider;
     m_mediaKey = mediaKey;
     maxThumbnails = qBound(4, maxThumbnails, 48);

@@ -70,6 +70,10 @@ public:
     int count() const { return m_thumbnails.size(); }
     QList<Thumbnail> thumbnails() const { return m_thumbnails; }
     QImage cachedImage(const QString &mediaKey, qint64 timeMs) const;
+    /* Last batch-level failure reason (empty = none/none since last start).
+     * Set by startBatch() when no media can be decoded and on generation
+     * failure; cleared by a successful startBatch(). */
+    QString lastFailureReason() const { return m_lastFailureReason; }
 
     /* PTS verification tolerance (ms). Must be set by the controller from
      * the paintbrush-edit-pts-tolerance-ms config before batches run. */
@@ -102,6 +106,7 @@ private:
     QList<Thumbnail> m_thumbnails;     /* slots, in display order */
     bool m_suspended = false;          /* user scrubbing: timer stopped */
     mutable LruCache<QImage> m_cache;  /* mediaKey|timeMs -> thumbnail, LRU bytes */
+    QString m_lastFailureReason;       /* batch-level failure for diagnostics */
 };
 
 } // namespace paintbrush

@@ -323,6 +323,10 @@ onMoved: {
                     orientation: ListView.Horizontal
                     spacing: VLCStyle.margin_xxxsmall
                     clip: true
+                    /* a horizontal scrollbar (AsNeeded) so a 24-frame batch
+                     * wider than the strip can always be reached; the strip
+                     * itself never games the drawer height */
+                    ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
                     model: PaintbrushCtx.thumbnailList
                     delegate: Rectangle {
                         width: VLCStyle.dp(86, VLCStyle.scale)

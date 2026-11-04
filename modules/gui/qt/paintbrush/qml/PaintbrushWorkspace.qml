@@ -546,7 +546,9 @@ Item {
 
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.bottom: parent.bottom
+        anchors.bottom: bottomChrome.top
+        anchors.bottomMargin: VLCStyle.margin_xsmall
+        z: 6
         /* size to the content (transport + media + tracked lane + timeline)
          * instead of a fixed height, so the timeline never overflows */
         height: visible ? implicitHeight : 0

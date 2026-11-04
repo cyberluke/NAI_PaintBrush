@@ -792,8 +792,19 @@ void PaintbrushController::insertCapturedFrame(const QImage &frame,
         m_canvas->fitToView();
     }
     /* P0.6: "Add frame to canvas" is a transition from live harvesting to
-     * composition — the added frame becomes the visible composition. */
-    enterComposePresentation();
+     * composition — the added frame becomes the visible composition and the
+     * live video player session is dismissed so the user can continue editing
+     * on the canvas. The frame's exact-FrameRef provenance is preserved
+     * (kept above via setSourceFrame), so AI/crop paths can still re-decode
+     * this exact frame even though the player session has ended. */
+    resetLiveSelectionSession();          /* no mask floats over the new canvas */
+    cancelAddFrame();                     /* clear any residual add-frame busy */
+    m_thumbnails.cancel();                /* stop batch decode against the media */
+    m_thumbnailsAutoMedia.clear();
+    enterComposePresentation();           /* composition is the visual source   */
+    emit mediaStateChanged();
+    if (m_intf && m_intf->p_mainPlaylistController)
+        m_intf->p_mainPlaylistController->stop(); /* hide the video surface/drawer */
     emit mediaStateChanged();
     setStatus(QStringLiteral("Frame added at %1 ms%2")
                   .arg(actualPts)
@@ -4798,6 +4809,21 @@ lines << QStringLiteral("EditFrameSource: %1 (hwdec %2, PTS tol %3 ms)")
         if (!d.lastError.isEmpty())
             lines << QStringLiteral("  last error: %1").arg(d.lastError);
     }
+
+    /* Thumbnail timeline runtime state — slots, generating/suspended status,
+     * and the last batch failure so an "empty timeline" resolves to a cause
+     * (no media / batch never started / decode failure) instead of guessing. */
+    lines << QStringLiteral("Thumbnail timeline: %1 slot(s), %2, %3")
+                 .arg(m_thumbnails.count())
+                 .arg(m_thumbnails.isGenerating()
+                          ? QStringLiteral("generating")
+                          : (m_thumbnails.isSuspended()
+                                 ? QStringLiteral("suspended")
+                                 : QStringLiteral("idle")))
+                 .arg(m_thumbnails.lastFailureReason().isEmpty()
+                          ? QStringLiteral("no error")
+                          : QStringLiteral("last error: %1")
+                                .arg(m_thumbnails.lastFailureReason()));
 
     lines << QStringLiteral("Segmentation backend: %1")
                  .arg(m_segmentation.isConfigured()
