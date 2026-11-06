@@ -6,6 +6,7 @@
 
 #include "pb_thumbnail_service.hpp"
 
+#include <QDateTime>
 #include <QtMath>
 
 namespace paintbrush {
@@ -161,11 +162,13 @@ void ThumbnailService::onTick()
     /* pop the highest-priority (anchor-nearest) slot and decode it via the
      * edit frame source: exact PTS, no player seeks, no vout snapshots */
     const qint64 targetMs = m_pending.popHighest();
+    const qint64 t0 = QDateTime::currentMSecsSinceEpoch();
 
     DecodedFrame frame = m_provider
                              ? m_provider->request(FrameRef{m_mediaKey, {},
                                                             targetMs})
                              : DecodedFrame();
+    const qint64 latency = QDateTime::currentMSecsSinceEpoch() - t0;
     if (frame.image.isNull() || !frame.ptsVerified)
     {
         /* correctness gate (A11): never publish a frame whose actual PTS
@@ -175,6 +178,14 @@ void ThumbnailService::onTick()
             if (th.timeMs == targetMs)
                 th.failed = true;
         }
+        pbLogWarn(m_logObj, "media",
+                  "thumbnail slot %lld ms: decode %s%s (latency %lld ms, "
+                  "VERIFIED PTS %lld ms, %lldx%lld)",
+                  (long long)targetMs,
+                  frame.image.isNull() ? "null" : "frame",
+                  frame.ptsVerified ? "" : ", PTS outside tolerance",
+                  (long long)latency, (long long)frame.ptsMs,
+                  frame.image.width(), frame.image.height());
         return; /* continue with the next slot on the next tick */
     }
 
@@ -194,6 +205,12 @@ void ThumbnailService::onTick()
             break;
         }
     }
+    pbLogInfo(m_logObj, "media",
+              "thumbnail slot %lld ms ready in %lld ms "
+              "(%lldx%lld -> %dx%d)",
+              (long long)targetMs, (long long)latency,
+              (long long)frame.ptsMs, frame.image.width(),
+              frame.image.height(), thumb.width(), thumb.height());
 }
 
 QImage ThumbnailService::cachedImage(const QString &mediaKey,

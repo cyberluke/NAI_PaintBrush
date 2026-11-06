@@ -49,10 +49,16 @@ Item {
     readonly property real drawerWidth: Math.min((parent ? parent.width : 320) * 0.26,
                                                  VLCStyle.dp(320, VLCStyle.scale))
 
-    /* open/close requested from outside (topbar toggle) */
+    /* open/close requested from outside (topbar toggle). Open() must FORCE
+     * the drawer open even with no active selection/object, otherwise the
+     * toggle appears to do nothing (expanded stayed false because both
+     * canvas.hasSelection and objectSelected were false and pinned was never
+     * raised). Pin it so a user can always reach the ML tool surface. */
     function setOpen(open) {
         manualClosed = !open
-        if (!open)
+        if (open)
+            pinned = true
+        else
             pinned = false
     }
 
@@ -152,6 +158,16 @@ Item {
                        ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.15)
                        : "transparent"
 
+                /* Full-row click selects the layer. Declared FIRST so it paints
+                 * BELOW the content RowLayout: the interactive visibility Switch
+                 * stays on top and receives its own clicks, while clicks on the
+                 * label/thumbnail fall through to this MouseArea. (Declared last,
+                 * it sat on top and swallowed every click — the toggle did
+                 * nothing.) */
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: PaintbrushCtx.setCurrentLayer(index)
+                }
                 RowLayout {
                     anchors.fill: parent
                     anchors.leftMargin: VLCStyle.margin_xsmall
@@ -167,12 +183,15 @@ Item {
                         asynchronous: true
                     }
 
-                    /* visibility checkbox bound to the real layer state */
+                    /* visibility checkbox bound to the real layer state. Toggle
+                     * off the model's current value (the T.Switch `checked`
+                     * binding re-syncs, so reading `checked` can hand back the
+                     * old value). */
                     Widgets.CheckButton {
                         Layout.preferredWidth: VLCStyle.dp(22, VLCStyle.scale)
                         Layout.preferredHeight: VLCStyle.dp(22, VLCStyle.scale)
                         checked: layerVisible
-                        onClicked: PaintbrushCtx.setLayerVisible(index, checked)
+                        onClicked: PaintbrushCtx.setLayerVisible(index, !layerVisible)
                     }
 
                     /* real layer name */
@@ -183,11 +202,6 @@ Item {
                         font.pixelSize: VLCStyle.fontSize_small
                         elide: Text.ElideRight
                     }
-                }
-
-                MouseArea {
-                    anchors.fill: parent
-                    onClicked: PaintbrushCtx.setCurrentLayer(index)
                 }
             }
         }
@@ -428,6 +442,32 @@ Item {
         }
 
         /* ------------------------------ AI actions (object / selection) */
+            /* First-step affordance (no selection/object yet): the only way
+             * the segmentation/ML surface becomes actionable is the Object
+             * Select tool, so surface it as the obvious next click whenever the
+             * Inspector is open on a document with no active selection. */
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: VLCStyle.margin_xxxsmall
+                visible: root.expanded
+                         && !PaintbrushCtx.objectSelected
+                         && !canvas.hasSelection
+
+                Widgets.LabelExt {
+                    text: qsTr("Segment a subject")
+                    color: theme.fg.secondary
+                    font.pixelSize: VLCStyle.fontSize_small
+                }
+                Widgets.ActionButtonPrimary {
+                    Layout.fillWidth: true
+                    text: qsTr("Object Select…")
+                    enabled: PaintbrushCtx.segmentationAvailable
+                    onClicked: {
+                        canvas.tool = 3 /* Object Select (AI) */
+                    }
+                }
+            }
+
             /* Legacy voice/generation actions are collapsed by default so the
              * primary Inspector stays clean after a plain Rect Select; the
              * product verbs (Keep / Boost / Add to canvas / Export object / Cut)

@@ -120,6 +120,11 @@ class PaintbrushController : public QObject
     Q_PROPERTY(QString assistantUnavailableReason READ assistantUnavailableReason NOTIFY serviceAvailabilityChanged FINAL)
     Q_PROPERTY(bool thumbnailsGenerating READ thumbnailsGenerating NOTIFY thumbnailsChanged FINAL)
     Q_PROPERTY(int thumbnailCount READ thumbnailCount NOTIFY thumbnailsChanged FINAL)
+    /* The thumbnail-timeline model. Must be a Q_PROPERTY with a NOTIFY so the
+     * QML ListView (`model: PaintbrushCtx.thumbnailList`) re-reads it when a
+     * slot decodes; a plain method is invisible to QML and left the timeline
+     * permanently empty even though the batch decodes fine. */
+    Q_PROPERTY(QVariantList thumbnailList READ thumbnailList NOTIFY thumbnailsChanged FINAL)
 
     Q_PROPERTY(bool objectSelected READ objectSelected NOTIFY objectSelectionChanged FINAL)
     Q_PROPERTY(QString objectMaskBoundsText READ objectMaskBoundsText NOTIFY objectSelectionChanged FINAL)
@@ -687,6 +692,9 @@ signals:
     void settingsChanged();
     void addFrameBusyChanged();
     void selfTestReportChanged();
+    /* A frame was successfully inserted into the composition (Add Frame to
+     * canvas completed). The workspace pins the Inspector open on this. */
+    void frameAddedToCanvas(int ptsMs);
 
 private slots:
     void onCanvasObjectClick(QPointF canvasPos, bool positive, QPointF itemPos);
@@ -794,6 +802,11 @@ private:
      * builds the transforms against the viewport, so the pointer position in
      * the actual QML/video viewport is the correct input domain (P0#2). */
     ObjectSelectionContext captureLiveFrameContext(const QSize &viewportSize);
+    /* The actual on-screen canvas viewport for live/object-selection mapping.
+     * The canvas QQuickItem's own size() can read 0x0 when the reparent+anchor
+     * hasn't materialized a real geometry; fall back to the host view / the
+     * document size so frame<->viewport transforms stay sane. */
+    QSize liveViewportSize() const;
     /* Map the document/source frame used for a compose-mode SAM/Keep onto
      * the given viewport size (1:1 when the canvas matches the frame). */
     ObjectSelectionContext composeFrameContext(const QSize &viewportSize) const;
@@ -994,6 +1007,7 @@ private:
     /* MRL for which the thumbnail timeline was auto-started, so the timer
      * does not restart generation on every tick for the same media */
     QString m_thumbnailsAutoMedia;
+    mutable QAtomicInt m_thumbnailUrlLogCount = 0;  /* one-shot dataUrl log */
 };
 
 } // namespace paintbrush

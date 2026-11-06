@@ -343,7 +343,10 @@ onMoved: {
                             anchors.margins: 1
                             source: model.hasImage ? PaintbrushCtx.thumbnailDataUrl(index) : ""
                             fillMode: Image.PreserveAspectFit
-                            asynchronous: true
+                            /* NOTE: do NOT set asynchronous:true here — these
+                             * thumbnails are small data: URLs and Qt's async
+                             * loader silently fails on data: sources, leaving
+                             * the strip with boxes but no images. */
                         }
 
                         Widgets.LabelExt {

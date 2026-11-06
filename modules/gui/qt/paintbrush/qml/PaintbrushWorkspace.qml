@@ -197,6 +197,15 @@ Item {
         target: inspectorDock
         function onRequestSettings() { settingsDialog.open() }
     }
+    /* After a successful "Add frame to canvas", pin the Inspector open and
+     * make the Object Select / ML surface the user's next step, instead of
+     * leaving them to hunt for the machine-learning features. */
+    Connections {
+        target: PaintbrushCtx
+        function onFrameAddedToCanvas() {
+            inspectorDock.setOpen(true)
+        }
+    }
 
     /* small top bar: workspace title + back to VLC + quick actions */
     Rectangle {

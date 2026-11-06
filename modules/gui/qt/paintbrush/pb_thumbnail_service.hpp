@@ -13,6 +13,7 @@
 #define PB_THUMBNAIL_SERVICE_HPP
 
 #include "pb_media_logic.hpp"
+#include "pb_common.hpp"
 
 #include <QObject>
 #include <QImage>
@@ -65,6 +66,8 @@ public:
      * frame requests. No player interaction of any kind. */
     void startBatch(FrameProvider *provider, const QString &mediaKey,
                     qint64 durationMs, qint64 anchorMs, int maxThumbnails);
+    /* Logging target for decode/status diagnostics (may be null). */
+    void setLogObj(vlc_object_t *obj) { m_logObj = obj; }
     void cancel();
     bool isGenerating() const { return m_timer.isActive(); }
     int count() const { return m_thumbnails.size(); }
@@ -100,6 +103,7 @@ private slots:
 private:
     FrameProvider *m_provider = nullptr;
     QString m_mediaKey;
+    vlc_object_t *m_logObj = nullptr;  /* diagnostics log target (nullable) */
     qint64 m_ptsToleranceMs = 250;
     QTimer m_timer;
     ThumbnailPriorityQueue m_pending;  /* highest priority (anchor-nearest) first */

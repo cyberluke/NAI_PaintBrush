@@ -128,6 +128,7 @@ PaintbrushController::PaintbrushController(qt_intf_t *intf, QObject *parent)
             this, [this]() { emit thumbnailsChanged(); });
     connect(&m_thumbnails, &ThumbnailService::generationFailed,
             this, [this](const QString &reason) { setStatus(reason); emit thumbnailsChanged(); });
+    m_thumbnails.setLogObj(VLC_OBJECT(m_intf)); /* decode/latency diagnostics */
 
     /* keep the sticker-editor track selection valid when tracks change
      * (track finished, deleted, document reset/loaded) */
@@ -799,8 +800,6 @@ void PaintbrushController::insertCapturedFrame(const QImage &frame,
      * this exact frame even though the player session has ended. */
     resetLiveSelectionSession();          /* no mask floats over the new canvas */
     cancelAddFrame();                     /* clear any residual add-frame busy */
-    m_thumbnails.cancel();                /* stop batch decode against the media */
-    m_thumbnailsAutoMedia.clear();
     enterComposePresentation();           /* composition is the visual source   */
     emit mediaStateChanged();
     if (m_intf && m_intf->p_mainPlaylistController)
@@ -810,6 +809,10 @@ void PaintbrushController::insertCapturedFrame(const QImage &frame,
                   .arg(actualPts)
                   .arg(ptsVerified ? QString() : QStringLiteral(" (unverified)")));
     triggerCompanionEvent(QStringLiteral("media-frame-captured"));
+    /* P0.6 UX: let the workspace auto-open the Inspector after a successful
+     * capture so the user lands on the ML/segmentation surface instead of
+     * wondering what to do next. */
+    emit frameAddedToCanvas(actualPts);
 }
 
 void PaintbrushController::cancelAddFrame()
@@ -1329,6 +1332,11 @@ void PaintbrushController::setCurrentLayer(int index)
 void PaintbrushController::setLayerVisible(int index, bool visible)
 {
     CanvasLayer *layer = m_document.layerAt(index);
+    pbLogInfo(VLC_OBJECT(m_intf), "layers",
+              "setLayerVisible: index=%d visible=%d layerPresent=%d "
+              "currentBefore=%d",
+              index, visible, layer != nullptr,
+              layer ? layer->visible : -1);
     if (!layer || layer->visible == visible)
         return;
 
@@ -1501,6 +1509,20 @@ void PaintbrushController::onCanvasObjectClick(QPointF canvasPos, bool positive,
                                               QPointF itemPos)
 {
     Q_UNUSED(canvasPos);
+    const QSize viewport = liveViewportSize();   /* resolved early for diagnosis */
+    vlc_object_t *debugObj = VLC_OBJECT(m_intf);
+    pbLogInfo(debugObj, "objectselect",
+              "click: positive=%d itemPos=(%g,%g) viewport=%dx%d "
+              "(canvas=%dx%d) liveMediaReady=%d presentationMode=%d "
+              "segmentationConfigured=%d layerCount=%d sourceFrameValid=%d",
+              positive, itemPos.x(), itemPos.y(),
+              viewport.width(), viewport.height(),
+              m_canvas ? m_canvas->width() : -1,
+              m_canvas ? m_canvas->height() : -1,
+              liveMediaReady(), int(m_presentationMode),
+              m_segmentation.isConfigured(),
+              (int)m_document.layerCount(),
+              (int)m_document.sourceFrame().isValid());
     if (!m_segmentation.isConfigured())
     {
         setStatus(m_segmentation.unavailableReason());
@@ -1513,15 +1535,18 @@ void PaintbrushController::onCanvasObjectClick(QPointF canvasPos, bool positive,
      * coordinates (`canvasPos`) — `captureLiveFrameContext` builds the
      * transforms against the viewport, and `itemPos` already is a real
      * viewport point. */
-    const QSize viewport = m_canvas
-                               ? m_canvas->size().toSize()
-                               : m_document.canvasSize();
+    /* viewport resolved above (liveViewportSize) for the click diagnostic */
     if (viewport.isEmpty())
         return;
 
     /* P0.3: live Object Select decodes through EditFrameSource, which only
-     * needs the media session + video track — never the vout. */
-    if (liveMediaReady())
+     * needs the media session + video track — never the vout. BUT only when
+     * the app is actually presenting live video: after "Add frame to canvas"
+     * we transition to ComposeCanvas, and a click must segment the added
+     * canvas frame (still/compose path), never route to a stopped player with
+     * a stale PTS just because the source MRL is still remembered. */
+    if (liveMediaReady()
+        && m_presentationMode == PresentationMode::HarvestVideo)
     {
         /* ---- LIVE video seed ---------------------------------------- */
         /* The viewport the seed click was made on. `adoptAsyncFrameIntoSelection`
@@ -1618,6 +1643,11 @@ void PaintbrushController::onCanvasObjectClick(QPointF canvasPos, bool positive,
 
     /* ---- still / compose seed -------------------------------------- */
     ObjectSelectionContext ctx = composeFrameContext(viewport);
+    pbLogInfo(VLC_OBJECT(m_intf), "objectselect",
+              "compose route: validFrame=%d frame=%dx%d viewport=%dx%d "
+              "itemPos=(%g,%g)",
+              ctx.validFrame(), ctx.frame.width(), ctx.frame.height(),
+              viewport.width(), viewport.height(), itemPos.x(), itemPos.y());
     if (!ctx.validFrame())
     {
         setStatus(QStringLiteral("No video frame to select from (open a video "
@@ -1647,6 +1677,12 @@ void PaintbrushController::onCanvasObjectClick(QPointF canvasPos, bool positive,
     emit objectSelectionChanged();
     if (m_canvas)
         m_canvas->setObjectSelectBusy(true);
+    pbLogInfo(VLC_OBJECT(m_intf), "objectselect",
+              "compose segment: frame=%dx%d pos=%d neg=%d point=(%g,%g)",
+              ctx.frame.width(), ctx.frame.height(), (int)pos.size(),
+              (int)neg.size(),
+              pos.isEmpty() ? -1.0 : pos.first().x(),
+              pos.isEmpty() ? -1.0 : pos.first().y());
     m_segmentation.segment(ctx.frame, m_posPoints, m_negPoints, {});
 }
 
@@ -2164,6 +2200,41 @@ ObjectSelectionContext PaintbrushController::captureLiveFrameContext(const QSize
     }
     buildSelectionTransforms(ctx);
     return ctx;
+}
+
+QSize PaintbrushController::liveViewportSize() const
+{
+    if (m_canvas)
+    {
+        QSize s = m_canvas->size().toSize();
+        if (!s.isEmpty())
+            return s;
+        QQuickItem *host = m_canvas->parentItem();
+        if (host)
+        {
+            s = host->size().toSize();
+            if (!s.isEmpty())
+            {
+                const QByteArray hostName =
+                    host->objectName().toUtf8();
+                pbLogInfo(VLC_OBJECT(m_intf), "objectselect",
+                          "liveViewportSize: canvas 0x0, using host "
+                          "%dx%d (host '%s')",
+                          s.width(), s.height(),
+                          hostName.constData());
+                return s;
+            }
+            const QByteArray hostName =
+                host->objectName().toUtf8();
+            pbLogInfo(VLC_OBJECT(m_intf), "objectselect",
+                      "liveViewportSize: canvas 0x0 AND host 0x0 (host '%s'); "
+                      "falling back to document %dx%d",
+                      hostName.constData(),
+                      m_document.canvasSize().width(),
+                      m_document.canvasSize().height());
+        }
+    }
+    return m_document.canvasSize();
 }
 
 ObjectSelectionContext PaintbrushController::composeFrameContext(const QSize &viewportSize) const
@@ -4258,6 +4329,15 @@ void PaintbrushController::setPresentationMode(int mode)
     if (m_presentationMode == newMode)
         return;
     m_presentationMode = newMode;
+    pbLogInfo(VLC_OBJECT(m_intf), "presentation",
+              "setPresentationMode -> %s (canvas %dx%d, videoHarvestMode set, "
+              "playerHasVideo=%d, videoOutputAttached=%d)",
+              newMode == PresentationMode::HarvestVideo ? "HarvestVideo"
+                                                        : "ComposeCanvas",
+              m_canvas ? m_canvas->size().width() : -1,
+              m_canvas ? m_canvas->size().height() : -1,
+              playerHasVideo() ? 1 : 0,
+              videoOutputAttached() ? 1 : 0);
     emit presentationModeChanged();
     if (m_canvas)
     {
@@ -4413,6 +4493,12 @@ QString PaintbrushController::thumbnailDataUrl(int index) const
     const auto &th = thumbs[index];
     if (th.image.isNull())
         return {};
+    if (m_thumbnailUrlLogCount.loadAcquire() < 2 &&
+        m_thumbnailUrlLogCount.fetchAndAddRelaxed(1) < 2)
+        pbLogInfo(VLC_OBJECT(m_intf), "media",
+                  "thumbnailDataUrl(%d): serving %dx%d image (%lld ms)",
+                  int(index), th.image.width(), th.image.height(),
+                  (long long)th.timeMs);
     QByteArray bytes;
     QBuffer buffer(&bytes);
     buffer.open(QIODevice::WriteOnly);
