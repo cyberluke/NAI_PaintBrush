@@ -114,9 +114,36 @@ QString PaintbrushController::saveInstance(const QVariantMap &instance)
 
 QString PaintbrushController::deleteInstance(const QString &id)
 {
+    SubjectStore &store = subjectStore();
+    if (!store.findInstance(id))
+        return QStringLiteral("Instance not found.");
+
+    /* Find the layer this instance materializes BEFORE removing the record, so
+     * a failed removal can never leave an orphaned layer behind. */
+    int layerIndex = -1;
+    for (int i = 0; i < m_document.layerCount(); ++i)
+    {
+        const CanvasLayer *layer = m_document.layerAt(i);
+        if (layer && layer->subjectInstanceId == id)
+        {
+            layerIndex = i;
+            break;
+        }
+    }
+
     QString error;
-    if (!subjectStore().removeInstance(id, &error))
+    if (!store.removeInstance(id, &error))
         return error;
+
+    if (layerIndex >= 0)
+    {
+        /* Layer removal is itself an undoable command; the transaction keeps
+         * the pair (layer + instance record) as one coherent step. */
+        beginTransaction(QStringLiteral("Delete subject instance"));
+        deleteLayer(layerIndex);
+        endTransaction();
+    }
+    emit objectSelectionChanged();
     return QString();
 }
 

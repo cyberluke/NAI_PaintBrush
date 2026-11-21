@@ -81,6 +81,18 @@ modules\gui\qt\paintbrush\probes\run-probes.ps1
 
 ## Exact next action
 
+Wrap multi-mutation operations in beginTransaction/endTransaction, then implement
+DerivedArtwork generation:
+
+1. Adopt the transaction scope in placeSubject and any style operation, with an
+   RAII guard so an early-return error cannot leave a composite open.
+2. applySubjectStyle(instanceId, recipeId): resolve the layer linked by
+   subjectInstanceId, append an art::EffectNode to layer->effects, push
+   SetEffectsCommand, mark canvas dirty. Verify the effect renders and that the
+   source segmentation/mask is untouched (invariant 3).
+3. Generation: contours/fills from the segmentation mask into a DerivedArtwork
+   with mode raster|vector|hybrid, storing sourceRevisionId and provenance.
+
 Implement instance transform write-back:
 
 1. Add `Q_INVOKABLE QString updateInstance(const QVariantMap &instance)` (or a
