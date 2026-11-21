@@ -675,6 +675,14 @@ public:
     Q_INVOKABLE QString exportPalette(const QString &id,
                                       const QString &filePath);
     Q_INVOKABLE QString importPalette(const QString &filePath);
+
+    /* -- persistent subject library (ADR 1.1) -----------------------------
+     * SubjectAsset only: source identity + tracks. Composition placement is
+     * SubjectInstance and is deliberately not part of this surface. Every
+     * mutator returns an EMPTY string on success, else a readable reason. */
+    Q_INVOKABLE QVariantList subjectList() const;
+    Q_INVOKABLE QString saveSubject(const QVariantMap &subject);
+    Q_INVOKABLE QString deleteSubject(const QString &id);
     /* Current capability status text for the NAI Settings status rows; used
      * to show POSITIVE text when a capability is green (P1#12). */
     QString trackingStatusText() const;

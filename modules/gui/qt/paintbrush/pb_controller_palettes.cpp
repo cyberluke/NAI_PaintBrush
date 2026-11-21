@@ -6,6 +6,7 @@
 
 #include "pb_controller.hpp"
 #include "pb_palette_store.hpp"
+#include "pb_subject_store.hpp"
 
 namespace paintbrush
 {
@@ -58,6 +59,37 @@ QString PaintbrushController::importPalette(const QString &filePath)
 {
     QString error;
     if (!paletteStore().importFrom(filePath, &error))
+        return error;
+    return QString();
+}
+
+static SubjectStore &subjectStore()
+{
+    static SubjectStore store;
+    return store;
+}
+
+QVariantList PaintbrushController::subjectList() const
+{
+    QVariantList out;
+    const QVector<SubjectAsset> all = subjectStore().all();
+    for (const SubjectAsset &a : all)
+        out.append(a.toVariantMap());
+    return out;
+}
+
+QString PaintbrushController::saveSubject(const QVariantMap &subject)
+{
+    QString error;
+    if (!subjectStore().save(SubjectAsset::fromVariantMap(subject), &error))
+        return error;
+    return QString();
+}
+
+QString PaintbrushController::deleteSubject(const QString &id)
+{
+    QString error;
+    if (!subjectStore().remove(id, &error))
         return error;
     return QString();
 }
