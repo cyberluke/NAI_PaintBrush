@@ -7,6 +7,8 @@
 #include "pb_controller.hpp"
 #include "pb_palette_store.hpp"
 #include "pb_subject_store.hpp"
+#include "pb_canvas_item.hpp"
+#include "qt.hpp"
 
 namespace paintbrush
 {
@@ -209,6 +211,47 @@ QString PaintbrushController::updateInstanceTransform(const QString &instanceId,
         return error;
     emit objectSelectionChanged();
     return QString();
+}
+
+int PaintbrushController::restoreCompositionInstances(const QString &compositionId)
+{
+    SubjectStore &store = subjectStore();
+    const QVector<SubjectInstance> list = store.instances(compositionId);
+    int restored = 0;
+
+    for (const SubjectInstance &inst : list)
+    {
+        const SubjectAsset *asset = store.find(inst.subjectAssetId);
+        if (!asset)
+        {
+            pbLogWarn(VLC_OBJECT(m_intf), "subject",
+                      "restore: instance %s skipped (asset %s missing)",
+                      inst.id.toUtf8().constData(),
+                      inst.subjectAssetId.toUtf8().constData());
+            continue;
+        }
+        QImage cutout(store.assetImagePath(asset->id));
+        if (cutout.isNull())
+        {
+            pbLogWarn(VLC_OBJECT(m_intf), "subject",
+                      "restore: instance %s skipped (cut-out missing)",
+                      inst.id.toUtf8().constData());
+            continue;
+        }
+        insertStickerLayer(cutout, QPointF(inst.x, inst.y), asset->name,
+                           asset->sourceMediaId, asset->name,
+                           inst.sourceStartMs, QImage());
+        ++restored;
+    }
+
+    /* Opening a project must not create undo history. */
+    m_undoStack.clear();
+    if (m_canvas)
+        m_canvas->markCanvasDirty();
+    pbLogInfo(VLC_OBJECT(m_intf), "subject",
+              "restore: %d/%d instances materialized for '%s'",
+              restored, int(list.size()), compositionId.toUtf8().constData());
+    return restored;
 }
 
 } // namespace paintbrush

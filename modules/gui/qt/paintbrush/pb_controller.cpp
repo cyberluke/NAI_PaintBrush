@@ -948,6 +948,9 @@ void PaintbrushController::openProject(const QUrl &url)
     m_document.setProjectPath(path);
     m_projectName = QFileInfo(path).completeBaseName();
     m_undoStack.clear();
+    /* Re-materialize persisted subject placements. Missing assets/cut-outs are
+     * skipped with a logged reason inside the restore, never fatal to open. */
+    restoreCompositionInstances(QStringLiteral("main"));
     pushRecentProject(path);
     if (m_canvas)
     {
