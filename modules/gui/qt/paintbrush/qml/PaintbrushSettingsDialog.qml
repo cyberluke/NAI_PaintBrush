@@ -256,7 +256,9 @@ Dialog {
                     }
                     SettingsInfoRow {
                         label: qsTr("Object tracking")
-                        value: PaintbrushCtx.trackingStatusText
+                        /* the tracking service can still be uninitialized on
+                         * the first dialog open; never bind undefined */
+                        value: PaintbrushCtx.trackingStatusText || qsTr("Idle")
                     }
                     SettingsInfoRow {
                         label: qsTr("Product lookup")
