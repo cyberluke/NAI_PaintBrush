@@ -19,13 +19,14 @@
   VLCIcons glyph fallback, and capability refresh. `b11892c597` — capture/
   compose keeps the decoded keyframe instead of the black viewer snapshot.
   `452ac7e835` — lazy SAM load on first segmentation (no 706 MB startup
-  stall). This lamp is the docs commit that contains this file.
-- **Verified build (2026-11-21 16:42):**
+  stall). `01112f6900` — settings tracking status guarded before the service
+  is ready. This lamp is the docs commit that contains this file.
+- **Verified build (2026-11-21 16:50):**
   `ninja -C win64-meson modules/libqt_plugin.dll` → `EXIT=0` (clean workspace
   rebuild). Artifact: `win64-meson/modules/libqt_plugin.dll`,
-  `21.11.2026 16:42:57`, 417,229,068 bytes. QML resource
-  `paintbrush_assets.cpp` regenerated `16:42:51`.
-- **Provenance:** app code is committed at `452ac7e835`; the temporary
+  `21.11.2026 16:50:20`, 417,229,068 bytes. QML resource
+  `paintbrush_assets.cpp` regenerated `16:49:00`.
+- **Provenance:** app code is committed at `01112f6900`; the temporary
   end-to-end QML probe was removed before the build. Four launch helper scripts
   (`scripts/launch-pb-noskip.ps1`, `launch-pb-sam.ps1`,
   `launch-pb-software-decode.ps1`, `run-paintbrush.ps1`) are modified by
@@ -322,9 +323,9 @@ Render/interaction contract for that future preview:
   `452ac7e835`; the worker waits idle and the 706 MB model loads on the first
   segmentation request. This removes the startup “Loading SAM model…” stall
   that starved the workspace. **Native acceptance pending.**
-- **Worktree**: app code committed at `452ac7e835`; four launch helper scripts
-  are modified by another workstream and uncommitted (not staged). Verify in
-  the built app.
+- **Worktree**: app code committed at `01112f6900`; four launch helper scripts
+  and the concurrent docs (`DEMO.md`, root/superseded handoffs) are modified by
+  another workstream and uncommitted (not staged). Verify in the built app.
 - **Store/document atomicity**: the composite makes undo/redo coherent across
   the layer and the store, but they are separate files with no cross-file crash
   journal. A process crash between the two writes can leave a mismatch; store
@@ -353,8 +354,8 @@ Render/interaction contract for that future preview:
   committed at `c03ecc0bd1`; the toolbar theme/icon fix is committed at
   `317ca0ad1b`; the capture keyframe fix is committed at `b11892c597`.**
 - No app files from this work are left uncommitted; app code is at
-  `452ac7e835`. The four modified launch helper scripts belong to another
-  workstream and are not staged.
+  `01112f6900`. The four modified launch helper scripts and concurrent docs
+  belong to another workstream and are not staged.
 - **Do not** add a plaintext API-key field or a `var_SetString`-based setter.
   The supported secret path is the environment, read by `pbApiKey()`.
 - For native verification, use the built app; the app is the UI gate.
@@ -400,18 +401,19 @@ Render/interaction contract for that future preview:
 ## 9. Build / most-recent evidence
 
 ```
-ninja -C win64-meson modules/libqt_plugin.dll   EXIT=0 (clean workspace rebuild 16:42:57)
-modules/libqt_plugin.dll                        21.11.2026 16:42:57, 417,229,068 bytes
-QML resource paintbrush_assets.cpp              regenerated 16:42:51
+ninja -C win64-meson modules/libqt_plugin.dll   EXIT=0 (clean workspace rebuild 16:50:20)
+modules/libqt_plugin.dll                        21.11.2026 16:50:20, 417,229,068 bytes
+QML resource paintbrush_assets.cpp              regenerated 16:49:00
 probes                                          check-qml-contracts PASS (264),
                                                 check-palettes PASS (27),
                                                 2/2 probes passed, EXIT=0
-                                                (after 452ac7e835)
+                                                (after 01112f6900)
 code repair commit                              453f11e913
 video-state commit                              c03ecc0bd1
 toolbar theme/icon commit                       317ca0ad1b
 capture keyframe commit                         b11892c597
 lazy SAM commit                                 452ac7e835
+settings status guard commit                    01112f6900
 runtime smoke (built app, 1.mp4, 10:38)         video track count=1 playerHasVideo=0
                                                 player video state: hasVideoOutput=1
                                                 playerHasVideo=1
@@ -420,9 +422,9 @@ capture UI smoke                                temporary QML timer probe did no
                                                 probe removed; native UI acceptance
                                                 pending
 HEAD                                            this docs commit
-worktree                                        app code 452ac7e835; four launch
-                                                scripts modified by another
-                                                workstream (not staged)
+worktree                                        app code 01112f6900; four launch
+                                                scripts + concurrent docs modified
+                                                by another workstream (not staged)
 ```
 
 ## 10. Superseded documents
