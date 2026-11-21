@@ -398,25 +398,13 @@ Item {
             anchors.fill: parent
             spacing: 0
 
-            /* Two rows, ONE visual surface. Both bars are direct children of
-             * bottomChrome, share the same margins and the palette paints no
-             * seam border. The previous Rectangle wrapper created a sizing
-             * loop (implicitHeight <- ColumnLayout <- anchors.fill) and pushed
-             * the colour controls outside the surface. */
-            PaintbrushToolOptionsBar {
-                id: toolOptionsBar
+            /* ONE adaptive strip: parameters flex, colour is intrinsic and
+             * collapses entirely for colour-independent tools. The strip owns
+             * a fixed height, so switching tools cannot reflow the canvas. */
+            PaintbrushStrip {
+                id: bottomStrip
                 Layout.fillWidth: true
-                Layout.preferredHeight: bottomChrome.optionsRow
-                Layout.leftMargin: VLCStyle.margin_small
-                Layout.rightMargin: VLCStyle.margin_small
-                canvas: paintbrushCanvas
-                z: 7
-            }
-
-            PaintbrushPaletteBar {
-                id: paletteBar
-                Layout.fillWidth: true
-                Layout.preferredHeight: VLCStyle.dp(64, VLCStyle.scale)
+                Layout.preferredHeight: VLCStyle.dp(96, VLCStyle.scale)
                 Layout.leftMargin: VLCStyle.margin_small
                 Layout.rightMargin: VLCStyle.margin_small
                 canvas: paintbrushCanvas
