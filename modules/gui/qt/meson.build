@@ -1027,6 +1027,7 @@ qml_modules += {
     'outdir' : 'VLC/Paintbrush',
     'sources': files(
         'paintbrush/qml/PaintbrushWorkspace.qml',
+    'paintbrush/qml/PaintbrushStrip.qml',
         'paintbrush/qml/PaintbrushFirstLaunch.qml',
         'paintbrush/qml/PaintbrushCanvasView.qml',
         'paintbrush/qml/PaintbrushToolRail.qml',
