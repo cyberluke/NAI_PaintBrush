@@ -500,6 +500,21 @@ Item {
                             console.log("PB_QML style failed: " + err)
                     }
                 }
+                Widgets.ActionButtonPrimary {
+                    Layout.fillWidth: true
+                    text: qsTr("Derive artwork — Ink")
+                    onClicked: {
+                        const list = PaintbrushCtx.subjectList()
+                        if (list.length === 0) {
+                            console.log("PB_QML derive: no subjects")
+                            return
+                        }
+                        const err = PaintbrushCtx.deriveArtwork(
+                                        list[list.length - 1].id, "ink")
+                        if (err.length > 0)
+                            console.log("PB_QML derive failed: " + err)
+                    }
+                }
             }
 
             /* Legacy voice/generation actions are collapsed by default so the

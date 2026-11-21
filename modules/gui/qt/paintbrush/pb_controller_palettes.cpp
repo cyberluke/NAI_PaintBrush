@@ -10,6 +10,8 @@
 #include "pb_layer.hpp"
 #include "pb_history.hpp"
 #include "art/finish/effects.hpp"
+#include <QDateTime>
+#include <QUuid>
 #include "pb_canvas_item.hpp"
 #include "qt.hpp"
 
@@ -401,6 +403,76 @@ QString PaintbrushController::applySubjectStyle(const QString &instanceId,
         m_canvas->markCanvasDirty();
     emit documentChanged();
     setStatus(QStringLiteral("Applied style: %1").arg(recipeId));
+    return QString();
+}
+
+QString PaintbrushController::deriveArtwork(const QString &subjectId,
+                                            const QString &recipeId)
+{
+    SubjectStore &store = subjectStore();
+    const SubjectAsset *asset = store.find(subjectId);
+    if (!asset)
+        return QStringLiteral("Subject not found.");
+
+    QImage src(store.assetImagePath(subjectId));
+    if (src.isNull())
+        return QStringLiteral("This subject has no stored cut-out yet.");
+    src = src.convertToFormat(QImage::Format_ARGB32);
+
+    /* Honest RASTER derivation: tone quantisation over the cut-out, recorded
+     * with mode="raster". This is deliberately not presented as vector. */
+    const int levels = (recipeId == QStringLiteral("ink")) ? 4 : 6;
+    const int step = 255 / levels;
+    const bool gloss = (recipeId == QStringLiteral("gloss"));
+    for (int y = 0; y < src.height(); ++y)
+    {
+        for (int x = 0; x < src.width(); ++x)
+        {
+            QColor c = src.pixelColor(x, y);
+            const int a = c.alpha();
+            if (a == 0)
+                continue;
+            int l = qGray(c.rgb());
+            l = (l / step) * step;
+            c.setRgb(l, l, l);
+            if (gloss && l > 190)
+                c = c.lighter(125);
+            c.setAlpha(a);
+            src.setPixelColor(x, y, c);
+        }
+    }
+
+    DerivedArtwork art;
+    art.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    art.sourceSubjectId = subjectId;
+    art.sourceRevisionId = asset->createdUtc;
+    art.mode = QStringLiteral("raster");
+    art.styleRecipeId = recipeId;
+    art.fillLayerIds.append(art.id);
+    art.provenanceId = QStringLiteral("derive:posterize-v1");
+    art.createdUtc = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+
+    if (!src.save(store.artworkImagePath(art.id), "PNG"))
+        return QStringLiteral("Could not write the derived artwork image.");
+
+    QString error;
+    if (!store.saveArtwork(art, &error))
+        return error;
+
+    SubjectAsset updated = *asset;
+    if (!updated.derivedArtworkIds.contains(art.id))
+        updated.derivedArtworkIds.append(art.id);
+    store.save(updated, &error);
+
+    beginTransaction(QStringLiteral("Add derived artwork"));
+    insertStickerLayer(src, QPointF(0, 0),
+                       QStringLiteral("%1 (%2)").arg(asset->name, recipeId),
+                       asset->sourceMediaId, asset->name,
+                       asset->sourcePtsMs, QImage());
+    endTransaction();
+
+    emit objectSelectionChanged();
+    setStatus(QStringLiteral("Derived %1 artwork").arg(recipeId));
     return QString();
 }
 

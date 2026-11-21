@@ -127,6 +127,10 @@ bool SubjectStore::remove(const QString &id, QString *error)
     return true;
 }
 
+QString SubjectStore::artworkImagePath(const QString &id) const
+{
+    return artworkDir() + QLatin1Char('/') + id + QStringLiteral(".png");
+}
 void SubjectStore::reload()
 {
     m_assets.clear();
