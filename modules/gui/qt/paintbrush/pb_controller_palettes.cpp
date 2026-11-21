@@ -503,6 +503,8 @@ QString PaintbrushController::deriveContour(const QString &subjectId)
     m_canvas->setSelectionFromMask(alpha);
 
     const QPainterPath path = m_document.selectionPath();
+    if (path.isEmpty())
+        return QStringLiteral("The subject produced an empty contour.");
 
     DerivedArtwork art;
     art.id = QUuid::createUuid().toString(QUuid::WithoutBraces);

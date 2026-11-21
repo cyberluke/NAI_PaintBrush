@@ -84,6 +84,15 @@ is explicitly forbidden by the ADR.
 
 Start here: `pb_layer.hpp` (enum + fields) -> `pb_document.cpp` compositeLayer ->
 `pb_project_store.cpp` serialization -> `pb_controller::deriveArtwork`.
+## Delivered after this lamp was first written
+
+- deriveArtwork(subjectId, recipeId): raster tone-ramp derivation, mode=raster.
+- deriveContour(subjectId): cut-out alpha -> document QPainterPath selection,
+  path persisted as nai-paintbrush/contour/v1, mode=vector.
+- applySubjectStyle(instanceId, recipeId): Outline/Glow/Ghost on the linked layer.
+- deleteInstance removes the record and its layer atomically.
+- One bottom strip surface (options + palette, constant height).
+
 ## Known issues / evidence
 
 - Settings magenta was fixed (Dialog `background` must not resolve `theme.*`
