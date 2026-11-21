@@ -10,7 +10,7 @@
 #include <QTimer>
 
 #ifdef HAVE_SAM3
-# include <sam3.h>
+# include "gpu/pb_sam3.h"
 #endif
 
 namespace paintbrush {
@@ -42,9 +42,9 @@ void TrackingService::configure(vlc_object_t *obj)
         qint64(5), qint64(pbConfigInt(obj, "paintbrush-tracking-step-ms")),
         qint64(1000));
     pbLogInfo(obj, "tracking",
-              "configured model=%s device=%s gpuBackend=%s step=%lld ms",
+              "configured model=%s requested=%s step=%lld ms (runtime backend "
+              "is verified when the model loads)",
               qUtf8Printable(m_modelPath), qUtf8Printable(m_device),
-              pbSamGpuBackendLinked() ? "linked" : "missing",
               (long long)m_stepMs);
 
     if (m_modelPath.isEmpty())
@@ -376,7 +376,14 @@ sam3_image toSamImage(const QImage &image)
     out.width = rgb.width();
     out.height = rgb.height();
     out.channels = 3;
-    out.data.assign(rgb.constBits(), rgb.constBits() + rgb.sizeInBytes());
+    /* Pack rows tightly: QImage rows are 4-byte aligned, while sam3_image
+     * expects width*height*3 with no padding. A flat sizeInBytes() copy
+     * shears the image whenever width*3 is not a multiple of 4. */
+    const size_t row_bytes = size_t(rgb.width()) * 3;
+    out.data.resize(row_bytes * size_t(rgb.height()));
+    for (int y = 0; y < rgb.height(); ++y)
+        memcpy(out.data.data() + size_t(y) * row_bytes,
+               rgb.constScanLine(y), row_bytes);
     return out;
 }
 
@@ -385,8 +392,11 @@ QImage maskFromSam(const sam3_mask &mask)
     if (mask.width <= 0 || mask.height <= 0 || mask.data.empty())
         return {};
     QImage out(mask.width, mask.height, QImage::Format_Grayscale8);
-    memcpy(out.bits(), mask.data.data(),
-           size_t(mask.width) * size_t(mask.height));
+    /* packed 0/255 rows -> QImage's 4-byte-aligned rows */
+    for (int y = 0; y < mask.height; ++y)
+        memcpy(out.scanLine(y),
+               mask.data.data() + size_t(y) * size_t(mask.width),
+               size_t(mask.width));
     return out;
 }
 
@@ -446,37 +456,37 @@ void TrackingService::runWorkerJob(const WorkerJob &job)
             sam3_params params;
             params.model_path = m_modelPath.toStdString();
             params.n_threads = static_cast<int>(std::thread::hardware_concurrency());
-            params.use_gpu = (m_device != QStringLiteral("cpu"));
-            if (params.use_gpu && !pbSamGpuBackendLinked())
-            {
-                pbLogWarn(m_obj, "tracking",
-                          "device=%s requested, but this build links a CPU-only "
-                          "SAM3/ggml backend; using CPU",
-                          m_device.toUtf8().constData());
-                params.use_gpu = false;
-            }
             params.encode_img_size = 0;
+            if (m_device.compare(QStringLiteral("cpu"), Qt::CaseInsensitive) == 0)
+                params.device_tier = SAM3_DEVICE_CPU;
+            else if (m_device.compare(QStringLiteral("gpu"), Qt::CaseInsensitive) == 0)
+                params.device_tier = SAM3_DEVICE_GPU;
+            else
+                params.device_tier = SAM3_DEVICE_AUTO;
+            params.use_gpu = params.device_tier != SAM3_DEVICE_CPU;
 
             auto model = sam3_load_model(params);
-            if (!model && params.use_gpu
-                && m_device != QStringLiteral("gpu"))
-            {
-                /* "auto" means GPU first with a CPU fallback; only an explicit
-                 * "gpu" tier is allowed to fail without trying the CPU. */
-                pbLogWarn(m_obj, "tracking",
-                          "model: GPU load failed, falling back to CPU");
-                params.use_gpu = false;
-                model = sam3_load_model(params);
-            }
             if (!model)
             {
-                emit workerError(QStringLiteral("Tracking: failed to load the SAM model."));
+                const QString detail = QString::fromUtf8(sam3_last_error());
+                pbLogWarn(m_obj, "tracking", "model: load FAILED: %s",
+                          qUtf8Printable(detail));
+                emit workerError(QStringLiteral("Tracking: %1").arg(detail));
                 return;
             }
+            const QString actualBackend = QString::fromUtf8(sam3_backend_name(*model));
+            const QString actualDevice = QString::fromUtf8(sam3_device_name(*model));
+            const bool actualGpu = sam3_backend_is_gpu(*model);
+            pbLogInfo(m_obj, "tracking",
+                      "model: load DONE backend=%s device='%s' gpu=%d",
+                      qUtf8Printable(actualBackend),
+                      qUtf8Printable(actualDevice), actualGpu ? 1 : 0);
+
             auto state = sam3_create_state(*model, params);
             if (!state)
             {
-                emit workerError(QStringLiteral("Tracking: failed to create SAM state."));
+                emit workerError(QStringLiteral("Tracking: failed to create SAM state on %1.")
+                                     .arg(actualBackend));
                 return;
             }
 

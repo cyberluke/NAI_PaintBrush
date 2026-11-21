@@ -36,7 +36,9 @@ param(
     [string]$OutFile = "D:\_SATIN_AI\NAI-OS\vlc\pb-window.png",
     [int]$WaitSeconds = 9,
     [string[]]$ExtraArgs = @(),
-    [string]$Keys = ""
+    [string]$Keys = "",
+    [string]$SamModel = "",
+    [string]$SamDevice = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -94,14 +96,25 @@ if ($existing) {
 }
 
 $log = Join-Path $env:TEMP "pb-capture-vlc.log"
-$args = @(
+$extra = @()
+foreach ($e in $ExtraArgs) {
+    foreach ($part in ($e -split ',')) {
+        if ($part.Trim() -ne "") { $extra += $part.Trim() }
+    }
+}
+if ($SamModel -ne "") { $extra += "--paintbrush-sam-model=$SamModel" }
+if ($SamDevice -ne "") { $extra += "--paintbrush-sam-device=$SamDevice" }
+
+$vlcArgs = @(
     "--paintbrush", "--no-media-library", "--no-qt-privacy-ask",
     "--no-qt-updates-notif", "--no-qt-name-in-title", "--no-one-instance",
     "--verbose=2", "--file-logging", "--logmode=text", "--logfile=$log",
     "-I", "qt"
-) + $ExtraArgs
+) + $extra
 
-$proc = Start-Process -FilePath $Exe -ArgumentList $args -WorkingDirectory $bin -PassThru
+$stderrLog = Join-Path $env:TEMP "pb-capture-stderr.log"
+Remove-Item $stderrLog -ErrorAction SilentlyContinue
+$proc = Start-Process -FilePath $Exe -ArgumentList ($vlcArgs -join ' ') -WorkingDirectory $bin -PassThru -RedirectStandardError $stderrLog
 try {
     Start-Sleep -Seconds $WaitSeconds
 

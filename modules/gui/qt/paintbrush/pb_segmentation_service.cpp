@@ -12,7 +12,7 @@
 #include <chrono>
 
 #ifdef HAVE_SAM3
-# include <sam3.h>
+# include "gpu/pb_sam3.h"
 #endif
 
 namespace paintbrush {
@@ -55,9 +55,9 @@ void SegmentationService::configure(vlc_object_t *obj)
     m_device = pbNormalizeSamDevice(
         pbConfigString(obj, "paintbrush-sam-device"));
     pbLogInfo(obj, "segmentation",
-              "configured model=%s device=%s gpuBackend=%s",
-              qUtf8Printable(m_modelPath), qUtf8Printable(m_device),
-              pbSamGpuBackendLinked() ? "linked" : "missing");
+              "configured model=%s requested=%s (runtime backend is verified "
+              "when the model loads)",
+              qUtf8Printable(m_modelPath), qUtf8Printable(m_device));
 
     if (m_modelPath.isEmpty())
     {
@@ -202,7 +202,14 @@ sam3_image toSamImage(const QImage &image)
     out.width = rgb.width();
     out.height = rgb.height();
     out.channels = 3;
-    out.data.assign(rgb.constBits(), rgb.constBits() + rgb.sizeInBytes());
+    /* Pack rows tightly: QImage rows are 4-byte aligned, while sam3_image
+     * expects width*height*3 with no padding. A flat sizeInBytes() copy
+     * shears the image whenever width*3 is not a multiple of 4. */
+    const size_t row_bytes = size_t(rgb.width()) * 3;
+    out.data.resize(row_bytes * size_t(rgb.height()));
+    for (int y = 0; y < rgb.height(); ++y)
+        memcpy(out.data.data() + size_t(y) * row_bytes,
+               rgb.constScanLine(y), row_bytes);
     return out;
 }
 
@@ -245,73 +252,68 @@ bool SegmentationService::ensureModelLoaded()
     sam3_params params;
     params.model_path = m_modelPath.toStdString();
     params.n_threads = static_cast<int>(std::thread::hardware_concurrency());
-    /* Device tier ladder. sam3_params exposes only `use_gpu` (no adapter
-     * index, no VRAM query), so NAI cannot pick the dGPU by name — the
-     * backend/OS chooses the adapter. We can still honour a tier and fall
-     * back: "auto" (and any empty/unknown legacy value normalized to it)
-     * tries GPU and drops to CPU if the model fails to load; "cpu" never
-     * touches the GPU; "gpu" is GPU-only by explicit choice. */
-    const bool okCpu = (m_device.compare(QStringLiteral("cpu"),
-                                         Qt::CaseInsensitive) == 0);
-    const bool tiersAuto = (m_device != QStringLiteral("gpu")
-                            && !okCpu);
-    params.use_gpu = !okCpu;
     params.encode_img_size = 0;
-    if (params.use_gpu && !pbSamGpuBackendLinked())
-    {
-        /* The Windows contrib links libggml-cpu only. A "gpu" preference is
-         * still saved for a future GPU build, but it must not make Object
-         * Select unusable here: use the CPU backend and say so. */
-        pbLogWarn(m_obj, "segmentation",
-                  "device=%s requested, but this build links a CPU-only "
-                  "SAM3/ggml backend; using CPU",
-                  m_device.toUtf8().constData());
-        params.use_gpu = false;
-    }
+
+    /* Device tier is enforced by pb_sam3_cuda_shim: GPU requires a real CUDA
+     * backend (a CPU fallback is refused with a specific error), AUTO accepts
+     * a reported CPU fallback, CPU forces CPU. The actual backend/device are
+     * read back below instead of being inferred from the request. */
+    if (m_device.compare(QStringLiteral("cpu"), Qt::CaseInsensitive) == 0)
+        params.device_tier = SAM3_DEVICE_CPU;
+    else if (m_device.compare(QStringLiteral("gpu"), Qt::CaseInsensitive) == 0)
+        params.device_tier = SAM3_DEVICE_GPU;
+    else
+        params.device_tier = SAM3_DEVICE_AUTO;
+    params.use_gpu = params.device_tier != SAM3_DEVICE_CPU;
 
     /* The load is a single opaque C call with no progress callback, and it is
-     * the longest phase of the first job (706 MB). Without these markers a
-     * stalled load is indistinguishable from a crash. */
+     * the longest phase of the first job. Without these markers a stalled
+     * load is indistinguishable from a crash. */
     pbLogInfo(m_obj, "segmentation",
-              "model: load START '%s' (%lld bytes, device=%s, threads=%d)",
+              "model: load START '%s' (%lld bytes, requested=%s, threads=%d)",
               m_modelPath.toUtf8().constData(),
               (long long)QFileInfo(m_modelPath).size(),
               m_device.toUtf8().constData(),
               params.n_threads);
 
     auto model = sam3_load_model(params);
-    if (!model && params.use_gpu && tiersAuto)
-    {
-        pbLogWarn(m_obj, "segmentation",
-                  "model: GPU load failed, falling back to CPU");
-        params.use_gpu = false;
-        model = sam3_load_model(params);
-    }
-    pbLogInfo(m_obj, "segmentation",
-              "model: load %s (tier=%s use_gpu=%d)",
-              model ? "DONE" : "FAILED",
-              m_device.toUtf8().constData(), params.use_gpu ? 1 : 0);
     if (!model)
     {
-        m_lastError = QStringLiteral("model load failed");
+        const QString detail = QString::fromUtf8(sam3_last_error());
+        m_lastError = detail;
+        pbLogWarn(m_obj, "segmentation", "model: load FAILED: %s",
+                  qUtf8Printable(detail));
         setAvailability(false,
-                        QStringLiteral("Object Select is unavailable: failed to load "
-                                       "the SAM model from %1.").arg(m_modelPath));
+                        QStringLiteral("Object Select is unavailable: %1")
+                            .arg(detail));
         setState(STATE_FAILED);
-        emit errorOccurred(QStringLiteral("SAM model load failed"));
-        emit initialized(false, m_lastError);
+        emit errorOccurred(detail);
+        emit initialized(false, detail);
         return false;
     }
+
+    const QString actualBackend = QString::fromUtf8(sam3_backend_name(*model));
+    const QString actualDevice = QString::fromUtf8(sam3_device_name(*model));
+    const bool actualGpu = sam3_backend_is_gpu(*model);
+    m_backend = actualBackend;
+    m_deviceName = actualDevice;
+    m_usingGpu = actualGpu;
+    pbLogInfo(m_obj, "segmentation",
+              "model: load DONE backend=%s device='%s' gpu=%d",
+              qUtf8Printable(actualBackend), qUtf8Printable(actualDevice),
+              actualGpu ? 1 : 0);
 
     auto state = sam3_create_state(*model, params);
     if (!state)
     {
-        m_lastError = QStringLiteral("state creation failed");
+        m_lastError = QStringLiteral("state creation failed on %1")
+                          .arg(actualBackend);
         setAvailability(false,
                         QStringLiteral("Object Select is unavailable: failed to create "
-                                       "SAM inference state."));
+                                       "SAM inference state on %1.")
+                            .arg(actualBackend));
         setState(STATE_FAILED);
-        emit errorOccurred(QStringLiteral("SAM state creation failed"));
+        emit errorOccurred(m_lastError);
         emit initialized(false, m_lastError);
         return false;
     }

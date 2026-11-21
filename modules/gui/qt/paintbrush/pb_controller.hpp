@@ -630,10 +630,12 @@ public:
     Q_PROPERTY(QString settingsAssistantModel READ settingsAssistantModel NOTIFY settingsChanged FINAL)
     Q_PROPERTY(int settingsPtsToleranceMs READ settingsPtsToleranceMs NOTIFY settingsChanged FINAL)
     Q_PROPERTY(bool settingsSecretsPresent READ settingsSecretsPresent CONSTANT FINAL)
-    /* True when the linked SAM3/ggml build has a GPU backend. A CPU-only
-     * contrib cannot honour the GPU preference; Settings says so explicitly
-     * instead of letting the persisted value look broken. */
+    /* CUDA runtime DLL presence (LoadLibrary only, no CUDA init). The live
+     * adapter probe is refreshed when Settings opens so a missing DLL or a
+     * CUDA failure is reported before the user applies a GPU preference. */
     Q_PROPERTY(bool samGpuBackendLinked READ samGpuBackendLinked CONSTANT FINAL)
+    Q_PROPERTY(QString samGpuDeviceName READ samGpuDeviceName NOTIFY samGpuProbeChanged FINAL)
+    Q_PROPERTY(QString samGpuProbeError READ samGpuProbeError NOTIFY samGpuProbeChanged FINAL)
     /* Segmentation progress (model load + encode + inference). The service
      * already emits stateChanged/progressChanged; until now nothing forwarded
      * them, so the first job looked like a dead click. Both properties reuse
@@ -672,6 +674,14 @@ public:
                NOTIFY toolCapabilitiesChanged FINAL)
     Q_PROPERTY(bool isHarvestPresentation READ isHarvestPresentation
                NOTIFY presentationModeChanged FINAL)
+    Q_PROPERTY(bool powderToolIsGlue READ powderToolIsGlue
+               NOTIFY toolCapabilitiesChanged FINAL)
+    Q_PROPERTY(bool powderToolIsGlitter READ powderToolIsGlitter
+               NOTIFY toolCapabilitiesChanged FINAL)
+    Q_PROPERTY(bool powderToolIsPush READ powderToolIsPush
+               NOTIFY toolCapabilitiesChanged FINAL)
+    Q_PROPERTY(bool powderToolIsEraser READ powderToolIsEraser
+               NOTIFY toolCapabilitiesChanged FINAL)
     Q_PROPERTY(bool vectorEditActive READ vectorEditActive
                NOTIFY vectorEditChanged FINAL)
     Q_PROPERTY(QVariantList vectorEditNodes READ vectorEditNodes
@@ -689,6 +699,10 @@ public:
     bool toolHasBristleParameters() const;
     bool toolHasGlitterParameters() const;
     bool toolHasPowderParameters() const;
+    bool powderToolIsGlue() const;
+    bool powderToolIsGlitter() const;
+    bool powderToolIsPush() const;
+    bool powderToolIsEraser() const;
     bool isHarvestPresentation() const;
 
     /* In-canvas node editor for native LAYER_VECTOR layers. Double-clicking
@@ -704,8 +718,11 @@ public:
 
     bool segmentationBusy() const { return m_segBusy; }
     QString segmentationProgress() const { return m_segProgress; }
-    /* Linked-backend truth for the Settings capability row. */
-    bool samGpuBackendLinked() const { return pbSamGpuBackendLinked(); }
+    /* CUDA runtime DLL presence and the on-demand adapter probe. */
+    bool samGpuBackendLinked() const;
+    QString samGpuDeviceName() const;
+    QString samGpuProbeError() const;
+    Q_INVOKABLE void refreshSamGpuProbe();
     Q_PROPERTY(bool settingsRestartRequired READ settingsRestartRequired NOTIFY settingsChanged FINAL)
     QString settingsSamModel() const;
     QString settingsSamDevice() const;
@@ -804,6 +821,7 @@ signals:
     void statusMessageChanged();
     void projectChanged();
     void toolCapabilitiesChanged();
+    void samGpuProbeChanged();
     void vectorEditChanged();
     void vectorEditNodesChanged();
     void recentColorsChanged();
@@ -965,6 +983,9 @@ private:
      * request is tagged with `sessionId` so a stale async result (media/PTS
      * changed) is discarded. Never blocks the GUI. */
     void requestAsyncObjectFrame(const FrameRef &requested, const QString &sessionId);
+    /* Publish the selected video track's frame rate to the exact-frame
+     * providers so requests snap to real frame timestamps. */
+    void updateFrameDurationFromPlayer();
     /* Reset the whole live selection session (P0#7). Called on close video,
      * opening a different video, media replacement, seeking to another PTS
      * beyond the same-frame tolerance, playback resume when the selected
@@ -1033,6 +1054,10 @@ private:
      * playback player is the PlaybackSession (viewing only); every exact-
      * frame consumer decodes through this FrameProvider. */
     EditFrameSource m_editSource;
+    /* Dedicated decoder for interactive object selection + temporal tracking.
+     * Isolated from the media-drawer filmstrip thumbnails so a batch cannot
+     * starve or cancel an exact-frame request (shared-preparser P0). */
+    EditFrameSource m_selectionSource;
 
     QString m_statusMessage;
     QString m_projectName;

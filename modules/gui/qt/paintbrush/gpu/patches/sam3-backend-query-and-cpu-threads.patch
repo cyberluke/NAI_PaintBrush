@@ -1,0 +1,66 @@
+diff --git a/sam3.cpp b/sam3.cpp
+index 4d91d8a..4ddcc85 100644
+--- a/sam3.cpp
++++ b/sam3.cpp
+@@ -3380,6 +3380,25 @@ sam3_model_type sam3_get_model_type(const sam3_model& model) {
+     return model.hparams.model_type;
+ }
+ 
++const char * sam3_backend_name(const sam3_model& model) {
++    return model.backend ? ggml_backend_name(model.backend) : "none";
++}
++
++bool sam3_backend_is_gpu(const sam3_model& model) {
++    const char * name = sam3_backend_name(model);
++    return name && (std::strstr(name, "CUDA") != nullptr ||
++                    std::strstr(name, "Vulkan") != nullptr ||
++                    std::strstr(name, "Metal") != nullptr ||
++                    std::strstr(name, "SYCL") != nullptr);
++}
++
++/* The CPU backend's tracking graphs are not safe with >1 worker in this
++ * fork (access violation on the second propagation). CUDA is unaffected.
++ * Keep the GPU tracking graphs at 4 threads and the CPU path at 1. */
++static int sam3_track_threads(const sam3_model& model) {
++    return sam3_backend_is_gpu(model) ? 4 : 1;
++}
++
+ /*****************************************************************************
+ ** Inference state
+ *****************************************************************************/
+@@ -11511,7 +11530,7 @@ static sam3_prop_output sam3_propagate_single(
+         ggml_backend_tensor_set(trk_s1, s1.data(), 0, D * H1 * H1 * sizeof(float));
+     }
+ 
+-    if (!sam3_graph_compute(model.backend, graph, 4)) {
++    if (!sam3_graph_compute(model.backend, graph, sam3_track_threads(model))) {
+         ggml_gallocr_free(galloc);
+         ggml_free(ctx0);
+         return output;
+@@ -11756,7 +11775,7 @@ static bool sam3_encode_memory(
+         ggml_backend_tensor_get(state.neck_trk[2], pix_data.data(), 0, D * H * H * sizeof(float));
+         ggml_backend_tensor_set(pix_in_raw, pix_data.data(), 0, D * H * H * sizeof(float));
+     }
+-    if (!sam3_graph_compute(model.backend, g, 4)) {
++    if (!sam3_graph_compute(model.backend, g, sam3_track_threads(model))) {
+         ggml_gallocr_free(ga);
+         ggml_free(ctx0);
+         return false;
+diff --git a/sam3.h b/sam3.h
+index 62940f4..57c6fcd 100644
+--- a/sam3.h
++++ b/sam3.h
+@@ -193,6 +193,13 @@ bool sam3_is_visual_only(const sam3_model & model);
+ /* Returns the model type (SAM2 or SAM3). */
+ sam3_model_type sam3_get_model_type(const sam3_model & model);
+ 
++/* Execution backend actually selected by sam3_load_model(). Returns the
++** ggml backend name ("CUDA", "CPU", ...). Never infer GPU execution from
++** sam3_params::use_gpu alone: the loader initializes CUDA when available
++** and otherwise falls back to the CPU backend. */
++const char * sam3_backend_name(const sam3_model & model);
++bool sam3_backend_is_gpu(const sam3_model & model);
++
+ /*
+ ** ── Inference State ──────────────────────────────────────────────────────
+ */

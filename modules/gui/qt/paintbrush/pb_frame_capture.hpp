@@ -100,6 +100,12 @@ public:
      * vlc_object_t (the qt interface). */
     void configure(vlc_object_t *obj);
 
+    /* Snap exact-frame requests to the video's frame timestamps. Requests
+     * between frames otherwise make the preparser's precise seek wait for a
+     * PTS that never arrives. num/den is the selected video track's frame
+     * rate (e.g. 30000/1001); 0/0 disables snapping. */
+    void setFrameRate(int num, int den);
+
     /* Tear down the preparser and drop caches. Safe to call even with no
      * request in flight; must be called from the same thread that issues
      * request() calls (the GUI thread). */
@@ -182,6 +188,9 @@ private:
     vlc_object_t *m_obj = nullptr;
     vlc_preparser_t *m_preparser = nullptr;
     qint64 m_ptsToleranceMs = 250;
+    int m_frameRateNum = 0;
+    int m_frameRateDen = 0;
+    qint64 snapPts(qint64 ptsMs) const;
     int m_hwdecPolicy = 0; /* 0 Auto, 1 Disabled(SW), 2 Required */
 
     mutable QMutex m_mutex;

@@ -573,6 +573,9 @@ qt_plugin_sources = files(
     'paintbrush/pb_frame_capture.cpp',
     'paintbrush/pb_segmentation_service.cpp',
     'paintbrush/pb_tracking_service.cpp',
+    'paintbrush/gpu/pb_sam3_cuda_shim.cpp',
+    'paintbrush/gpu/pb_sam3.h',
+    'paintbrush/gpu/sam3_cuda_api.h',
     'paintbrush/pb_vision_service.cpp',
     'paintbrush/pb_generation_service.cpp',
     'paintbrush/pb_assistant_service.cpp',
@@ -1357,38 +1360,14 @@ if qt6_dep.found()
         'enabled': xcb_dep.found() and xcb_render_dep.found() and xcb_xfixes_dep.found(),
     }
 
-    # NAI Paintbrush: optional SAM3 inference backend. When the contrib is
-    # available the segmentation/tracking services compile against the real
-    # sam3 API; otherwise they report an explicit "not compiled in" state.
-    paintbrush_sam3_dep = dependency('sam3', required: false)
-    paintbrush_extra_cppargs = []
-    paintbrush_extra_deps = []
-    if paintbrush_sam3_dep.found()
-        paintbrush_extra_cppargs += '-DHAVE_SAM3'
-        paintbrush_extra_deps += paintbrush_sam3_dep
-        # Capability truth for NAI Settings: a CPU-only contrib links only
-        # libggml-cpu, so a saved "gpu" preference cannot run on the GPU.
-        # Probe the real sam3/ggml link set for a backend initializer instead
-        # of promising a backend that is absent. This is a configure-time link
-        # test (MinGW cannot resolve weak undefined symbols at runtime).
-        paintbrush_sam_gpu = false
-        pb_gpu_probe = 'extern "C" void @0@(); int main() { @0@(); return 0; }'
-        foreach pb_gpu_sym : ['ggml_backend_cuda_init',
-                              'ggml_backend_vk_init',
-                              'ggml_backend_d3d12_init',
-                              'ggml_backend_metal_init',
-                              'ggml_backend_sycl_init']
-            if cpp.links(pb_gpu_probe.format(pb_gpu_sym),
-                         dependencies: paintbrush_sam3_dep,
-                         name: 'SAM3 GPU backend ' + pb_gpu_sym)
-                paintbrush_sam_gpu = true
-                break
-            endif
-        endforeach
-        if paintbrush_sam_gpu
-            paintbrush_extra_cppargs += '-DPB_SAM_GPU_BACKEND'
-        endif
-    endif
+# NAI Paintbrush: SAM3 runs through the native CUDA bridge. The MinGW
+# plugin compiles pb_sam3_cuda_shim.cpp and loads sam3_cuda.dll (MSVC +
+# CUDA) at runtime; no sam3/ggml static library is linked into VLC.
+    paintbrush_extra_cppargs = ['-DHAVE_SAM3']
+    # D3D12MemAlloc.h lives in contrib; the removed SAM3 pkg-config used to
+    # leak this include path into the plugin. Depend on contrib explicitly.
+    paintbrush_extra_deps = [contrib_dep]
+
     # NAI Paintbrush: build identity (P0.1, acceptance Gate A) — the running
     # binary must be able to prove which source tree it was built from. The
     # SHA is captured at meson configure time; combined with the compile-time

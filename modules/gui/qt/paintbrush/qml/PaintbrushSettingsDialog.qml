@@ -80,7 +80,10 @@ Dialog {
         return true
     }
 
-    onOpened: resetDraft()
+    onOpened: {
+        resetDraft()
+        PaintbrushCtx.refreshSamGpuProbe()
+    }
     /* Escape/titlebar close must discard the draft exactly like Cancel. */
     onClosed: resetDraft()
 
@@ -197,9 +200,15 @@ Dialog {
                     }
                     Widgets.LabelExt {
                         Layout.fillWidth: true
-                        visible: !PaintbrushCtx.samGpuBackendLinked
-                        text: qsTr("GPU is the default preference, but this VLC build links a CPU-only SAM3/ggml backend. The choice is saved for a GPU build; SAM runs on CPU here.")
-                        color: theme.accent
+                        text: !PaintbrushCtx.samGpuBackendLinked
+                              ? qsTr("CUDA runtime (sam3_cuda.dll) is not available. GPU mode will fail with a specific error; choose CPU.")
+                              : (PaintbrushCtx.samGpuProbeError.length > 0
+                                 ? qsTr("CUDA runtime present, but no usable GPU: %1").arg(PaintbrushCtx.samGpuProbeError)
+                                 : qsTr("Requested: %1 · CUDA runtime ready · detected: %2. The actual backend is verified when the model loads.")
+                                   .arg(root.draftSamDevice).arg(PaintbrushCtx.samGpuDeviceName))
+                        color: (!PaintbrushCtx.samGpuBackendLinked
+                                || PaintbrushCtx.samGpuProbeError.length > 0)
+                               ? theme.accent : theme.fg.secondary
                         font.pixelSize: VLCStyle.fontSize_xsmall
                         wrapMode: Text.WordWrap
                     }

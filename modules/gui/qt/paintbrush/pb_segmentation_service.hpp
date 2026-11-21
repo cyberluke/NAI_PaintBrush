@@ -37,7 +37,7 @@
 /* The sam3.h header defines the complete deleters required by the
  * unique_ptr-based state handles; the real header is tiny (declarations
  * only) so including it here is cheap and keeps the member types valid. */
-# include <sam3.h>
+# include "gpu/pb_sam3.h"
 #endif
 
 namespace paintbrush {
@@ -73,6 +73,10 @@ public:
     QString unavailableReason() const { return m_unavailableReason; }
     QString modelPath() const { return m_modelPath; }
     QString device() const { return m_device; }
+    /* Actual execution backend reported by the SAM runtime after load. */
+    QString backend() const { return m_backend; }
+    QString deviceName() const { return m_deviceName; }
+    bool usingGpu() const { return m_usingGpu; }
     int state() const { return m_state; }
     bool busy() const { return m_state == STATE_BUSY || m_state == STATE_INITIALIZING; }
     QString lastError() const { return m_lastError; }
@@ -122,6 +126,9 @@ private:
     QString m_device;
     QString m_unavailableReason;
     QString m_lastError;
+    QString m_backend;
+    QString m_deviceName;
+    bool m_usingGpu = false;
     qint64 m_lastInferenceLatencyMs = -1;
     State m_state = STATE_UNAVAILABLE;
 

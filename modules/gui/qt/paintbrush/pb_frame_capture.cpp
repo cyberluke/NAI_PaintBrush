@@ -274,6 +274,20 @@ void EditFrameSource::configure(vlc_object_t *obj)
               m_hwdecPolicy == 1 ? "(software)" : "(auto/hardware)");
 }
 
+void EditFrameSource::setFrameRate(int num, int den)
+{
+    m_frameRateNum = qMax(0, num);
+    m_frameRateDen = qMax(0, den);
+}
+
+qint64 EditFrameSource::snapPts(qint64 ptsMs) const
+{
+    if (m_frameRateNum <= 0 || m_frameRateDen <= 0 || ptsMs <= 0)
+        return ptsMs;
+    const double fps = double(m_frameRateNum) / double(m_frameRateDen);
+    const qint64 frame = qRound64(double(ptsMs) * fps / 1000.0);
+    return qRound64(double(frame) * 1000.0 / fps);
+}
 void EditFrameSource::shutdown()
 {
     QMutexLocker lock(&m_mutex);
@@ -329,11 +343,12 @@ void EditFrameSource::cancelInFlight()
 DecodedFrame EditFrameSource::request(const FrameRef &ref) const
 {
     DecodedFrame out;
-    out.requestedMs = ref.ptsMs;
+    const qint64 reqMs = snapPts(ref.ptsMs);
+    out.requestedMs = reqMs;
     if (!ref.isValid())
         return out;
 
-    const QString key = ref.mrl + QLatin1Char('|') + QString::number(ref.ptsMs);
+    const QString key = ref.mrl + QLatin1Char('|') + QString::number(reqMs);
 
     /* Serialize the whole request: cache access and the decode wait share
      * one mutex. The thumbnailer callback takes the same mutex to publish
@@ -343,7 +358,7 @@ DecodedFrame EditFrameSource::request(const FrameRef &ref) const
     if (m_cache.contains(key))
     {
         out = m_cache.get(key);
-        out.requestedMs = ref.ptsMs;
+        out.requestedMs = reqMs;
         if (out.ok())
         {
             m_last = FrameRef{ref.mrl, ref.title, out.ptsMs,
@@ -356,7 +371,7 @@ DecodedFrame EditFrameSource::request(const FrameRef &ref) const
         return out;
 
     RequestCtx ctx;
-    ctx.requestedMs = ref.ptsMs;
+    ctx.requestedMs = reqMs;
     ctx.mrl = ref.mrl;
     ctx.startMs = steadyNowMs();
     ctx.self = const_cast<EditFrameSource *>(this);
@@ -372,16 +387,19 @@ DecodedFrame EditFrameSource::request(const FrameRef &ref) const
      * pipeline itself. */
     {
         char opt[32];
-        snprintf(opt, sizeof(opt), ":avcodec-hwdec=%d", m_hwdecPolicy);
+        snprintf(opt, sizeof(opt), ":avcodec-hwdec=%d", 1); /* exact frame: software */
         input_item_AddOption(item, opt, VLC_INPUT_OPTION_TRUSTED);
     }
 
     struct vlc_thumbnailer_arg arg;
     memset(&arg, 0, sizeof(arg));
     arg.seek.type = vlc_thumbnailer_arg::seek::VLC_THUMBNAILER_SEEK_TIME;
-    arg.seek.time = VLC_TICK_FROM_MS(qMax<qint64>(0, ref.ptsMs));
+    arg.seek.time = VLC_TICK_FROM_MS(qMax<qint64>(0, snapPts(ref.ptsMs)));
     arg.seek.speed = vlc_thumbnailer_arg::seek::VLC_THUMBNAILER_SEEK_PRECISE;
-    arg.hw_dec = (m_hwdecPolicy != 1); /* Disabled -> software; else allow HW */
+    /* Exact-frame selection/capture must be deterministic. The preparser's
+     * hardware decode can hang on the same GPU the main player is using;
+     * software decode is fast at these resolutions and always returns. */
+    arg.hw_dec = false; /* Disabled -> software; else allow HW */
 
     static const struct vlc_thumbnailer_cbs cbs = {
         .on_ended = EditFrameSource::onThumbnailEnded,
@@ -505,7 +523,7 @@ bool EditFrameSource::requestAsync(const FrameRef &ref, const QString &token)
     ctx->async = true;
     ctx->token = token;
     ctx->mrl = ref.mrl;
-    ctx->requestedMs = ref.ptsMs;
+    ctx->requestedMs = snapPts(ref.ptsMs);
     ctx->startMs = steadyNowMs();
     ctx->logObj = m_obj;
     ctx->toleranceMs = m_ptsToleranceMs;
@@ -520,16 +538,19 @@ bool EditFrameSource::requestAsync(const FrameRef &ref, const QString &token)
     }
     {
         char opt[32];
-        snprintf(opt, sizeof(opt), ":avcodec-hwdec=%d", m_hwdecPolicy);
+        snprintf(opt, sizeof(opt), ":avcodec-hwdec=%d", 1); /* exact frame: software */
         input_item_AddOption(item, opt, VLC_INPUT_OPTION_TRUSTED);
     }
 
     struct vlc_thumbnailer_arg arg;
     memset(&arg, 0, sizeof(arg));
     arg.seek.type = vlc_thumbnailer_arg::seek::VLC_THUMBNAILER_SEEK_TIME;
-    arg.seek.time = VLC_TICK_FROM_MS(qMax<qint64>(0, ref.ptsMs));
+    arg.seek.time = VLC_TICK_FROM_MS(qMax<qint64>(0, snapPts(ref.ptsMs)));
     arg.seek.speed = vlc_thumbnailer_arg::seek::VLC_THUMBNAILER_SEEK_PRECISE;
-    arg.hw_dec = (m_hwdecPolicy != 1);
+    /* Exact-frame selection/capture must be deterministic. The preparser's
+     * hardware decode can hang on the same GPU the main player is using;
+     * software decode is fast at these resolutions and always returns. */
+    arg.hw_dec = false;
 
     static const struct vlc_thumbnailer_cbs cbs = {
         .on_ended = EditFrameSource::onThumbnailEnded,

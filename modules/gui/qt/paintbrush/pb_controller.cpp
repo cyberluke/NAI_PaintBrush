@@ -11,6 +11,7 @@
 #include "pb_frame_capture.hpp"
 #include "pb_export.hpp"
 #include "pb_common.hpp"
+#include "gpu/pb_sam3.h"
 
 #include <QQuickItem>
 #include <QImage>
@@ -234,6 +235,7 @@ PaintbrushController::~PaintbrushController()
     m_segmentation.shutdown();
     m_tracking.shutdown();
     m_editSource.shutdown();
+    m_selectionSource.shutdown();
     m_vision.cancelAll();
     m_generation.cancelAll();
     m_assistant.cancelAll();
@@ -252,11 +254,13 @@ void PaintbrushController::configureServices()
     /* the edit decode source: dedicated exact-frame decoder for the
      * edit/AI pipeline (thumbnails, tracking, sticker export, crops) */
     m_editSource.configure(VLC_OBJECT(m_intf));
-    /* async exact-frame delivery (P0#4): the interactive Object Select seed
-     * decodes asynchronously and never blocks the GUI. */
-    connect(&m_editSource, &EditFrameSource::frameDecoded,
+    /* Interactive Object Select and tracking get their OWN preparser. The
+     * media-drawer filmstrip uses m_editSource; sharing one thumbnailer
+     * caused an exact-frame request to be cancelled/starved by a batch. */
+    m_selectionSource.configure(VLC_OBJECT(m_intf));
+    connect(&m_selectionSource, &EditFrameSource::frameDecoded,
             this, &PaintbrushController::onAsyncObjectFrameDecoded);
-    connect(&m_editSource, &EditFrameSource::frameDecodeFailed,
+    connect(&m_selectionSource, &EditFrameSource::frameDecodeFailed,
             this, &PaintbrushController::onAsyncObjectFrameDecodeFailed);
     /* async "Add frame to canvas" (P0.4) */
     connect(&m_editSource, &EditFrameSource::frameDecoded,
@@ -448,6 +452,26 @@ bool PaintbrushController::toolHasPowderParameters() const
     return m_canvas && m_canvas->tool() == TOOL_GLITTER_POWDER;
 }
 
+bool PaintbrushController::powderToolIsGlue() const
+{
+    return m_canvas && m_canvas->powderTool() == POWDER_GLUE;
+}
+
+bool PaintbrushController::powderToolIsGlitter() const
+{
+    return m_canvas && m_canvas->powderTool() == POWDER_GLITTER;
+}
+
+bool PaintbrushController::powderToolIsPush() const
+{
+    return m_canvas && m_canvas->powderTool() == POWDER_PUSH;
+}
+
+bool PaintbrushController::powderToolIsEraser() const
+{
+    return m_canvas && m_canvas->powderTool() == POWDER_ERASER;
+}
+
 bool PaintbrushController::isHarvestPresentation() const
 {
     return m_presentationMode == PresentationMode::HarvestVideo;
@@ -634,6 +658,8 @@ void PaintbrushController::setCanvasItem(QQuickItem *item)
             this, &PaintbrushController::beginVectorEdit);
     connect(m_canvas, &PaintbrushCanvasItem::toolChanged, this,
             [this](int) { endVectorEdit(); });
+    connect(m_canvas, &PaintbrushCanvasItem::powderToolChanged, this,
+            [this](int) { emit toolCapabilitiesChanged(); });
     connect(m_canvas, &PaintbrushCanvasItem::zoomChanged,
             this, &PaintbrushController::vectorEditNodesChanged);
     connect(m_canvas, &PaintbrushCanvasItem::panOffsetChanged,
@@ -949,6 +975,7 @@ void PaintbrushController::captureVideoFrame()
     if (m_addFrameBusy)
         return; /* one async decode at a time */
 
+    updateFrameDurationFromPlayer();
     const QString mrl = currentMediaMRL();
     const qint64 pts = playerTimeMs();
     if (mrl.isEmpty())
@@ -1888,11 +1915,55 @@ QString PaintbrushController::visionStatusText() const
 
 QString PaintbrushController::segmentationStatusText() const
 {
+    /* A failed load (GPU missing, DLL missing, model/CUDA error) must win
+     * over "configured": the model path can be configured while the actual
+     * backend is unavailable. */
+    if (!m_segmentation.unavailableReason().isEmpty())
+        return m_segmentation.unavailableReason();
     if (m_segmentation.isConfigured())
+    {
+        if (!m_segmentation.backend().isEmpty())
+            return QStringLiteral("Ready · %1 · %2")
+                .arg(m_segmentation.backend(), m_segmentation.deviceName());
         return QStringLiteral("Ready");
-    return m_segmentation.unavailableReason().isEmpty()
-               ? QStringLiteral("Unavailable")
-               : m_segmentation.unavailableReason();
+    }
+    return QStringLiteral("Unavailable");
+}
+
+bool PaintbrushController::samGpuBackendLinked() const
+{
+#ifdef HAVE_SAM3
+    return pbSamGpuDllPresent();
+#else
+    return false;
+#endif
+}
+
+QString PaintbrushController::samGpuDeviceName() const
+{
+#ifdef HAVE_SAM3
+    return QString::fromUtf8(pbSamGpuDllDeviceName());
+#else
+    return {};
+#endif
+}
+
+QString PaintbrushController::samGpuProbeError() const
+{
+#ifdef HAVE_SAM3
+    return QString::fromUtf8(pbSamGpuDllProbeError());
+#else
+    return QStringLiteral("SAM3 is not compiled into this build.");
+#endif
+}
+
+void PaintbrushController::refreshSamGpuProbe()
+{
+#ifdef HAVE_SAM3
+    pbSamGpuProbeReset();
+    pbSamGpuDllAvailable();
+#endif
+    emit samGpuProbeChanged();
 }
 
 /* ------------------------------------------------------ object selection */
@@ -1900,7 +1971,6 @@ QString PaintbrushController::segmentationStatusText() const
 void PaintbrushController::onCanvasObjectClick(QPointF canvasPos, bool positive,
                                               QPointF itemPos)
 {
-    Q_UNUSED(canvasPos);
     const QSize viewport = liveViewportSize();   /* resolved early for diagnosis */
     vlc_object_t *debugObj = VLC_OBJECT(m_intf);
     pbLogInfo(debugObj, "objectselect",
@@ -1955,6 +2025,7 @@ void PaintbrushController::onCanvasObjectClick(QPointF canvasPos, bool positive,
                                      "or capture a frame to canvas first)."));
             return;
         }
+        updateFrameDurationFromPlayer();
         const qint64 pts = playerTimeMs();
         const FrameRef shot{mrl, currentMediaTitle(), pts};
 
@@ -2883,15 +2954,15 @@ void PaintbrushController::drainPendingItemPoints()
 void PaintbrushController::requestAsyncObjectFrame(const FrameRef &requested,
                                                    const QString &sessionId)
 {
-    if (m_editSource.canDecode())
+    if (m_selectionSource.canDecode())
     {
-        /* P0.15/P0.11: an interactive request wins the single thumbnailer
-         * thread — supersede any in-flight (thumbnail-batch) decode first. */
-        m_editSource.cancelInFlight();
+        /* P0.15/P0.11: an interactive request wins its own thumbnailer
+         * thread — supersede any in-flight object decode first. */
+        m_selectionSource.cancelInFlight();
         m_asyncInFlight = true;
         m_asyncRequestRef = requested;
         m_asyncRequestSessionId = sessionId;
-        if (!m_editSource.requestAsync(requested, sessionId))
+        if (!m_selectionSource.requestAsync(requested, sessionId))
         {
             /* Submission failed synchronously — no frameDecoded signal will
              * ever arrive, so release the in-flight bookkeeping and the busy
@@ -3499,7 +3570,8 @@ void PaintbrushController::trackObject(int direction, int frames)
 
     /* the seed frame is decoded through the edit frame source (exact
      * PTS); tracking never steps or snapshots the playback player */
-    m_tracking.startTrack(&m_editSource, track.sourceMRL,
+    updateFrameDurationFromPlayer();
+    m_tracking.startTrack(&m_selectionSource, track.sourceMRL,
                           seedFrame, seedMask,
                           positivePointsForTracking(), direction, frames,
                           seedPts);
@@ -4864,6 +4936,32 @@ QString PaintbrushController::currentMediaMRL() const
     return FrameCaptureService::currentMRL(m_intf->p_mainPlayerController->getPlayer());
 }
 
+void PaintbrushController::updateFrameDurationFromPlayer()
+{
+    int num = 0;
+    int den = 0;
+    if (m_intf && m_intf->p_mainPlayerController)
+    {
+        vlc_player_t *player = m_intf->p_mainPlayerController->getPlayer();
+        if (player)
+        {
+            /* vlc_player_GetVideoTrackAt() requires the player lock; the
+             * returned track pointer is only valid while it is held. */
+            vlc_player_Lock(player);
+            const struct vlc_player_track *track =
+                vlc_player_GetVideoTrackAt(player, 0);
+            if (track && track->fmt.video.i_frame_rate > 0 &&
+                track->fmt.video.i_frame_rate_base > 0)
+            {
+                num = int(track->fmt.video.i_frame_rate);
+                den = int(track->fmt.video.i_frame_rate_base);
+            }
+            vlc_player_Unlock(player);
+        }
+    }
+    m_editSource.setFrameRate(num, den);
+    m_selectionSource.setFrameRate(num, den);
+}
 qint64 PaintbrushController::playerTimeMs() const
 {
     return FrameCaptureService::currentTimeMs(
@@ -5268,6 +5366,7 @@ void PaintbrushController::clearAiCache()
     m_segmentation.clearCache();
     m_thumbnails.cancel();
     m_editSource.clearCache();
+    m_selectionSource.clearCache();
     setStatus(QStringLiteral("AI caches cleared"));
     emit serviceAvailabilityChanged();
 }
@@ -5321,6 +5420,7 @@ void PaintbrushController::closeVideo()
     /* cancel in-flight decode/thumbnail work against the outgoing media */
     m_thumbnails.cancel();
     m_editSource.clearCache();
+    m_selectionSource.clearCache();
 
     /* stop playback: with no video output attached, playerHasVideo() becomes
      * false and the media drawer + canvas video surface hide themselves. */

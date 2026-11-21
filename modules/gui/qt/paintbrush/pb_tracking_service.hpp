@@ -36,7 +36,7 @@
 #ifdef HAVE_SAM3
 /* The sam3.h header defines the complete deleters required by the
  * unique_ptr-based state/tracker handles. */
-# include <sam3.h>
+# include "gpu/pb_sam3.h"
 #endif
 
 namespace paintbrush {
