@@ -398,40 +398,29 @@ Item {
             anchors.fill: parent
             spacing: 0
 
-            /* ONE strip: tool options + palette share a single surface, a
-             * single edge and a constant height. Children keep their own
-             * layout so a tool switch never reflows the canvas. */
-            Rectangle {
-                id: bottomStrip
+            /* Two rows, ONE visual surface. Both bars are direct children of
+             * bottomChrome, share the same margins and the palette paints no
+             * seam border. The previous Rectangle wrapper created a sizing
+             * loop (implicitHeight <- ColumnLayout <- anchors.fill) and pushed
+             * the colour controls outside the surface. */
+            PaintbrushToolOptionsBar {
+                id: toolOptionsBar
                 Layout.fillWidth: true
+                Layout.preferredHeight: bottomChrome.optionsRow
                 Layout.leftMargin: VLCStyle.margin_small
                 Layout.rightMargin: VLCStyle.margin_small
-                Layout.bottomMargin: VLCStyle.margin_xxxsmall
-                implicitHeight: stripColumn.implicitHeight
-                radius: VLCStyle.margin_small
-                color: theme.bg.primary
-
-                ColumnLayout {
-                    id: stripColumn
-                    anchors.fill: parent
-                    spacing: 0
-
-                    PaintbrushToolOptionsBar {
-                        id: toolOptionsBar
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: bottomChrome.optionsRow
-                        canvas: paintbrushCanvas
-                    }
-
-                    PaintbrushPaletteBar {
-                        id: paletteBar
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: VLCStyle.dp(64, VLCStyle.scale)
-                        canvas: paintbrushCanvas
-                    }
-                }
+                canvas: paintbrushCanvas
+                z: 7
             }
-        }
+
+            PaintbrushPaletteBar {
+                id: paletteBar
+                Layout.fillWidth: true
+                Layout.preferredHeight: VLCStyle.dp(64, VLCStyle.scale)
+                Layout.leftMargin: VLCStyle.margin_small
+                Layout.rightMargin: VLCStyle.margin_small
+                canvas: paintbrushCanvas
+            }        }
     }
 
     /* center: canvas with tool rail; the inspector drawer and the companion
