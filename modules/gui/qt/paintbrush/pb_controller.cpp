@@ -779,6 +779,10 @@ void PaintbrushController::captureVideoFrame()
                           .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)
                                    .left(8));
     m_addFrameRequest = FrameRef{mrl, currentMediaTitle(), pts};
+    pbLogInfo(VLC_OBJECT(m_intf), "capture",
+              "request mrl=%s pts=%lld title=%s",
+              qUtf8Printable(mrl), (long long)pts,
+              qUtf8Printable(currentMediaTitle()));
 
     if (!m_editSource.canDecode())
     {
@@ -812,21 +816,33 @@ void PaintbrushController::onAddFrameDecoded(const QString &token,
     m_addFrameToken.clear();
     const FrameRef req = m_addFrameRequest;
 
-    if (!frame.ok() || frame.image.isNull())
+    /* DecodedFrame::ok() requires ptsVerified, which is intentionally too
+     * strict for the capture path: the shared thumbnailer can only return the
+     * nearest keyframe. Require an actual image here, then let the
+     * unverified-PTS branch below keep it with its real PTS. */
+    if (frame.image.isNull())
     {
         onAddFrameDecodeFailed(token, QStringLiteral("exact frame decode failed"));
         return;
     }
 
-    /* P1 provenance: the VERIFIED decoder PTS is authoritative; a frame
-     * beyond the configured tolerance is a visually different frame and must
-     * be rejected, never silently added. */
+    pbLogInfo(VLC_OBJECT(m_intf), "capture",
+              "decoded requested=%lld actual=%lld verified=%d size=%dx%d "
+              "format=%d",
+              (long long)req.ptsMs, (long long)frame.ptsMs,
+              frame.ptsVerified ? 1 : 0,
+              frame.image.width(), frame.image.height(),
+              int(frame.image.format()));
+
+    /* The shared thumbnailer can only return the nearest keyframe. Rejecting
+     * a valid unverified keyframe made "Add frame" fall through to the
+     * viewer snapshot, which can be black on the native DComp/Win7 vout.
+     * Keep the decoded image with its REAL PTS and label it unverified; the
+     * AI/crop provenance still re-decodes that exact PTS. */
     if (!frame.ptsVerified)
     {
-        setStatus(QStringLiteral("Could not decode frame: PTS mismatch "
-                                 "(%1 ms requested, %2 ms decoded).")
-                      .arg(req.ptsMs)
-                      .arg(frame.ptsMs));
+        insertCapturedFrame(frame.image, frame.ptsMs, req.mrl, req.title,
+                            req.ptsMs, false);
         return;
     }
 
@@ -844,19 +860,14 @@ void PaintbrushController::onAddFrameDecodeFailed(const QString &token,
     m_addFrameToken.clear();
     const FrameRef req = m_addFrameRequest;
 
-    /* Last-resort viewer snapshot — ONLY when the exact decoder genuinely
-     * cannot service the source AND a vout is attached (P0.4). */
-    if (playerHasVideo())
-    {
-        vlc_player_t *player = m_intf->p_mainPlayerController->getPlayer();
-        QImage shot = FrameCaptureService::captureCurrentFrame(player);
-        if (!shot.isNull())
-        {
-            insertCapturedFrame(shot, req.ptsMs, req.mrl, req.title,
-                                req.ptsMs, false);
-            return;
-        }
-    }
+    /* Never insert the viewer snapshot here. On the native Windows vout it
+     * can be a black frame; presenting that as the captured canvas is worse
+     * than reporting the failure. Stay in HarvestVideo so the live video is
+     * still visible and the user can retry at a decodable position. */
+    pbLogWarn(VLC_OBJECT(m_intf), "capture",
+              "decode failed requested=%lld mrl=%s: %s",
+              (long long)req.ptsMs, qUtf8Printable(req.mrl),
+              qUtf8Printable(message));
     setStatus(message.isEmpty()
                   ? QStringLiteral("Could not decode frame.")
                   : QStringLiteral("Could not decode frame: %1").arg(message));
@@ -877,22 +888,37 @@ void PaintbrushController::insertCapturedFrame(const QImage &frame,
         emit welcomeChanged();
     }
 
+    /* Video frames are opaque. Force RGB32 before the layer conversion so a
+     * decoder/snapshot path that leaves alpha=0 cannot create an invisible
+     * frame over the paper. */
+    const QImage frameImage = frame.convertToFormat(QImage::Format_RGB32);
+
     /* store the exact frame identity (A19): AI/crop paths re-decode THIS
      * frame through the FrameProvider instead of scanning layers; actualPts
-     * is the VERIFIED decoder PTS, never a guess */
+     * is the decoder PTS (verified or the real keyframe PTS), never a guess */
     m_document.setSourceFrame(FrameRef{mrl, title, actualPts,
-                                       frame.width(), frame.height()});
+                                       frameImage.width(), frameImage.height()});
 
     /* adopt the frame size on a blank canvas */
     const bool blank = (m_document.layerCount() <= 1 &&
                         m_document.currentLayer() &&
                         m_document.currentLayer()->isEmpty());
     if (blank)
-        m_document.resetDocument(frame.size());
+        m_document.resetDocument(frameImage.size());
 
-    addImageLayer(frame, QPointF(0, 0),
+    addImageLayer(frameImage, QPointF(0, 0),
                   title.isEmpty() ? QStringLiteral("Video frame") : title,
                   LAYER_REFERENCE);
+
+    pbLogInfo(VLC_OBJECT(m_intf), "capture",
+              "inserted size=%dx%d format=%d blank=%d layers=%d "
+              "canvas=%dx%d verified=%d",
+              frameImage.width(), frameImage.height(),
+              int(frameImage.format()), blank ? 1 : 0,
+              m_document.layerCount(),
+              m_document.canvasSize().width(),
+              m_document.canvasSize().height(),
+              ptsVerified ? 1 : 0);
 
     /* For an EXISTING composition (P1#9): the source raster stays at its
      * native decoded size — the fit/center is done through the layer
@@ -901,13 +927,13 @@ void PaintbrushController::insertCapturedFrame(const QImage &frame,
      * frame's display size and the frame is inserted 1:1. (P0.5: the layer
      * transform functions accept LAYER_REFERENCE so this is live, not dead
      * code.) */
-    if (!blank && !frame.size().isEmpty())
+    if (!blank && !frameImage.size().isEmpty())
     {
         const QSize canvas = m_document.canvasSize();
         if (!canvas.isEmpty())
         {
-            const qreal scale = qMin(canvas.width() / qreal(frame.width()),
-                                     canvas.height() / qreal(frame.height()));
+            const qreal scale = qMin(canvas.width() / qreal(frameImage.width()),
+                                     canvas.height() / qreal(frameImage.height()));
             const int idx = m_document.layerCount() - 1;
             if (idx >= 0)
             {
@@ -921,8 +947,8 @@ void PaintbrushController::insertCapturedFrame(const QImage &frame,
                  * c*(1-scale) — the "added frame is not positioned
                  * correctly" bug. */
                 moveImageLayer(idx, QPointF(
-                    (canvas.width() - frame.width()) / 2.0,
-                    (canvas.height() - frame.height()) / 2.0));
+                    (canvas.width() - frameImage.width()) / 2.0,
+                    (canvas.height() - frameImage.height()) / 2.0));
                 transformLayer(idx, qBound(0.01, scale, 100.0), 0.0);
             }
         }
