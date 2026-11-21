@@ -287,4 +287,14 @@ void PaintbrushController::syncInstanceTransforms()
     }
 }
 
+void PaintbrushController::beginTransaction(const QString &description)
+{
+    m_undoStack.beginComposite(description);
+}
+
+void PaintbrushController::endTransaction()
+{
+    m_undoStack.endComposite();
+}
+
 } // namespace paintbrush

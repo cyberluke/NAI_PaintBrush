@@ -692,6 +692,9 @@ public:
      * shared asset is never touched, so two instances stay independent. */
     Q_INVOKABLE int restoreCompositionInstances(const QString &compositionId);
     void syncInstanceTransforms();
+    /* One undo entry spanning several document mutations. */
+    Q_INVOKABLE void beginTransaction(const QString &description);
+    Q_INVOKABLE void endTransaction();
     Q_INVOKABLE QString updateInstanceTransform(const QString &instanceId,
                                                 double x, double y,
                                                 double scale, double rotation);

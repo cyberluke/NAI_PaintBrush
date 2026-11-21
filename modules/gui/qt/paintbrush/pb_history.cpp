@@ -472,10 +472,33 @@ void UndoStack::setByteBudget(qint64 bytes)
     enforceBounds();
 }
 
+void UndoStack::beginComposite(const QString &description)
+{
+    if (m_composite)
+        return;                     /* flat groups only: no nesting */
+    m_composite = std::make_unique<CompositeCommand>();
+    m_composite->desc = description;
+}
+
+void UndoStack::endComposite()
+{
+    if (!m_composite)
+        return;
+    std::unique_ptr<CompositeCommand> group = std::move(m_composite);
+    if (group->children.empty())
+        return;                     /* nothing pushed: no empty undo step */
+    pushCommand(std::move(group));
+}
 void UndoStack::pushCommand(std::unique_ptr<UndoCommand> command)
 {
     if (!command)
         return;
+
+    if (m_composite)
+    {
+        m_composite->children.push_back(std::move(command));
+        return;
+    }
 
     /* drop any redo entries past the current position */
     while (m_entries.size() > m_undoIndex)

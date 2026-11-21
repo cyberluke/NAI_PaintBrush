@@ -403,6 +403,11 @@ public:
 
     /* Generic typed-command push (takes ownership). */
     void pushCommand(std::unique_ptr<UndoCommand> command);
+
+    /* Group every command pushed between beginComposite/endComposite into ONE
+     * undo entry. Nested begins are ignored; an empty group pushes nothing. */
+    void beginComposite(const QString &description);
+    void endComposite();
     void pushStroke(const StrokeCommand &cmd);
     void pushSetTransform(const SetTransformCommand &cmd);
     void pushReorder(const ReorderCommand &cmd);
@@ -450,6 +455,7 @@ private:
     void dropOldest();
 
     QList<Entry> m_entries;
+    std::unique_ptr<CompositeCommand> m_composite;
     int m_undoIndex = 0;
     int m_maxEntries = 50;
     qint64 m_byteBudget = 384 * 1024 * 1024; /* 384 MiB */
