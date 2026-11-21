@@ -9,7 +9,6 @@ import QtQuick.Layouts
 import QtQuick.Controls
 
 import VLC.MainInterface
-import VLC.Widgets as Widgets
 import VLC.Style
 import VLC.Paintbrush
 
@@ -33,12 +32,6 @@ Item {
     required property PaintbrushCanvas canvas
 
     Component.onCompleted: rebuild()
-
-    ColorContext {
-        palette: VLCStyle.palette
-        id: theme
-        colorSet: ColorContext.View
-    }
 
     /* one control row: the strip supplies the surrounding padding */
     implicitHeight: VLCStyle.dp(32, VLCStyle.scale)

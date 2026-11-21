@@ -44,6 +44,17 @@ Item {
     readonly property bool hasPrimaryAction: PaintbrushCtx.toolHasPrimaryAction
     readonly property bool showIdentity: width >= VLCStyle.dp(640, VLCStyle.scale)
 
+    /* Saved palettes are REAL buttons in this strip, not only a popover:
+     * the active palette renders as direct swatch buttons, and the library
+     * popover switches which palette is active. */
+    property int activePaletteIndex: 0
+    readonly property var palettes: PaintbrushCtx.paletteList()
+    readonly property var activePalette:
+        palettes && palettes.length > 0
+            ? palettes[Math.max(0, Math.min(activePaletteIndex,
+                                            palettes.length - 1))]
+            : null
+
     /* The M shortcut routes here so the popover keeps one owner. */
     function toggleMoodPicker() {
         if (moodPicker.opened)
@@ -183,12 +194,57 @@ Item {
                 }
             }
 
+            /* active palette: real palette buttons in the toolbar. Click a
+             * swatch to paint with it; the Palettes popover switches the
+             * active palette. */
+            Rectangle {
+                Layout.preferredWidth: 1
+                Layout.preferredHeight: VLCStyle.dp(18, VLCStyle.scale)
+                Layout.alignment: Qt.AlignVCenter
+                visible: root.activePalette !== null
+                color: theme.border
+                opacity: 0.6
+            }
+            Repeater {
+                model: root.activePalette
+                       ? root.activePalette.colors.slice(0, 10) : []
+                delegate: Button {
+                    id: paletteSwatch
+                    Layout.preferredWidth: VLCStyle.dp(18, VLCStyle.scale)
+                    Layout.preferredHeight: VLCStyle.dp(18, VLCStyle.scale)
+                    padding: 0
+                    focusPolicy: Qt.StrongFocus
+                    Accessible.role: Accessible.Button
+                    Accessible.name: qsTr("%1 palette colour %2")
+                                        .arg(root.activePalette
+                                             ? root.activePalette.name : "")
+                                        .arg(modelData)
+                    onClicked: if (root.canvas) root.canvas.fgColor = modelData
+                    background: Rectangle {
+                        radius: 3
+                        color: modelData
+                        border.width: paletteSwatch.activeFocus ? 2 : 1
+                        border.color: paletteSwatch.activeFocus
+                                      ? theme.accent : theme.border
+                    }
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 700
+                    ToolTip.text: qsTr("%1 — click to paint").arg(modelData)
+                }
+            }
+
             Widgets.ButtonExt {
                 id: paletteButton
                 text: qsTr("Palettes")
                 Layout.preferredHeight: root._control
                 font.pixelSize: VLCStyle.fontSize_xsmall
                 Accessible.name: qsTr("Open saved palettes")
+                ToolTip.visible: hovered
+                ToolTip.delay: 600
+                ToolTip.text: root.activePalette
+                              ? qsTr("Saved palettes — active: %1")
+                                .arg(root.activePalette.name)
+                              : qsTr("Saved palettes")
                 onClicked: palettePopup.open()
             }
         }
@@ -318,18 +374,48 @@ Item {
             spacing: VLCStyle.margin_xsmall
 
             delegate: ColumnLayout {
+                id: paletteRow
                 width: ListView.view.width
                 spacing: 2
+                required property int index
+                required property var modelData
 
-                Widgets.LabelExt {
-                    text: modelData.name
-                    color: theme.fg.primary
-                    font.pixelSize: VLCStyle.fontSize_xsmall
+                /* selecting a palette here makes it the active palette whose
+                 * swatches are directly available in the bottom strip */
+                Button {
+                    id: paletteHeader
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: VLCStyle.dp(24, VLCStyle.scale)
+                    padding: 0
+                    focusPolicy: Qt.StrongFocus
+                    Accessible.role: Accessible.Button
+                    Accessible.name: qsTr("Use palette %1")
+                                        .arg(paletteRow.modelData.name)
+                    onClicked: {
+                        root.activePaletteIndex = paletteRow.index
+                        palettePopup.close()
+                    }
+                    background: Rectangle {
+                        radius: 4
+                        color: paletteHeader.hovered ? theme.bg.secondary
+                                                     : "transparent"
+                        border.width: paletteRow.index === root.activePaletteIndex
+                                      ? 1 : 0
+                        border.color: theme.accent
+                    }
+                    contentItem: Widgets.LabelExt {
+                        leftPadding: VLCStyle.margin_xxsmall
+                        text: paletteRow.modelData.name
+                        color: paletteRow.index === root.activePaletteIndex
+                               ? theme.accent : theme.fg.primary
+                        font.pixelSize: VLCStyle.fontSize_xsmall
+                        verticalAlignment: Text.AlignVCenter
+                    }
                 }
                 RowLayout {
                     spacing: 2
                     Repeater {
-                        model: modelData.colors
+                        model: paletteRow.modelData.colors
                         delegate: Button {
                             Layout.preferredWidth: VLCStyle.dp(20, VLCStyle.scale)
                             Layout.preferredHeight: VLCStyle.dp(20, VLCStyle.scale)
@@ -339,6 +425,7 @@ Item {
                             Accessible.name: qsTr("Use colour %1").arg(modelData)
                             onClicked: {
                                 if (root.canvas) {
+                                    root.activePaletteIndex = paletteRow.index
                                     root.canvas.fgColor = modelData
                                     palettePopup.close()
                                 }
