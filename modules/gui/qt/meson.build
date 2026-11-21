@@ -564,6 +564,7 @@ qt_plugin_sources = files(
     'paintbrush/pb_controller_palettes.cpp',
     'paintbrush/pb_taskbar.cpp',
     'paintbrush/pb_subject_store.cpp',
+    'paintbrush/pb_artwork_store.cpp',
     'paintbrush/pb_layer.cpp',
     'paintbrush/pb_document.cpp',
     'paintbrush/pb_history.cpp',

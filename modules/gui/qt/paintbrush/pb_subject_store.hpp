@@ -48,6 +48,30 @@ struct SubjectInstance
     static SubjectInstance fromVariantMap(const QVariantMap &map);
 };
 
+/* DerivedArtwork (ADR 1.3): an editable artistic representation of a subject.
+ * Holds REAL layer references, never a flattened image pretending to be vector:
+ * `mode` states what the layers actually are, and `provenanceId` +
+ * `sourceRevisionId` make regeneration auditable and non-destructive. */
+struct DerivedArtwork
+{
+    QString id;
+    QString sourceSubjectId;
+    QString sourceRevisionId;       /* asset revision it was generated from  */
+    QString mode;                   /* "raster" | "vector" | "hybrid"        */
+    QString styleRecipeId;
+    QStringList contourLayerIds;
+    QStringList fillLayerIds;
+    QStringList shadingLayerIds;
+    QStringList textureLayerIds;
+    QString editableStrokeSetId;
+    QString regionMapId;
+    QString provenanceId;
+    QString createdUtc;
+
+    QVariantMap toVariantMap() const;
+    static DerivedArtwork fromVariantMap(const QVariantMap &map);
+};
+
 class SubjectStore
 {
 public:
@@ -65,6 +89,14 @@ public:
     bool saveInstance(const SubjectInstance &instance, QString *error = nullptr);
     bool removeInstance(const QString &id, QString *error = nullptr);
 
+    QVector<DerivedArtwork> artworks(const QString &sourceSubjectId) const;
+    const DerivedArtwork *findArtwork(const QString &id) const;
+    bool saveArtwork(const DerivedArtwork &artwork, QString *error = nullptr);
+    bool removeArtwork(const QString &id, QString *error = nullptr);
+    static bool validateArtwork(const DerivedArtwork &artwork,
+                                const SubjectAsset *subject,
+                                QString *error);
+
     QString userDir() const;
     static bool validate(const SubjectAsset &asset, QString *error);
     static bool validateInstance(const SubjectInstance &instance,
@@ -77,9 +109,13 @@ private:
     bool writeInstanceFile(const SubjectInstance &instance, QString *error) const;
     QString instanceDir() const;
     void reloadInstances();
+    void reloadArtworks();
+    bool writeArtworkFile(const DerivedArtwork &artwork, QString *error) const;
+    QString artworkDir() const;
 
     QVector<SubjectAsset> m_assets;
     QVector<SubjectInstance> m_instances;
+    QVector<DerivedArtwork> m_artworks;
 };
 
 } // namespace paintbrush

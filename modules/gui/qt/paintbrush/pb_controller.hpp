@@ -688,6 +688,10 @@ public:
     Q_INVOKABLE QVariantList instanceList(const QString &compositionId) const;
     Q_INVOKABLE QString saveInstance(const QVariantMap &instance);
     Q_INVOKABLE QString deleteInstance(const QString &id);
+    /* Editable artistic representations of a subject (ADR 1.3). */
+    Q_INVOKABLE QVariantList artworkList(const QString &sourceSubjectId) const;
+    Q_INVOKABLE QString saveArtwork(const QVariantMap &artwork);
+    Q_INVOKABLE QString deleteArtwork(const QString &id);
     /* Current capability status text for the NAI Settings status rows; used
      * to show POSITIVE text when a capability is green (P1#12). */
     QString trackingStatusText() const;

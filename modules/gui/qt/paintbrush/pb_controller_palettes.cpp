@@ -118,4 +118,29 @@ QString PaintbrushController::deleteInstance(const QString &id)
     return QString();
 }
 
+QVariantList PaintbrushController::artworkList(const QString &sourceSubjectId) const
+{
+    QVariantList out;
+    const QVector<DerivedArtwork> all = subjectStore().artworks(sourceSubjectId);
+    for (const DerivedArtwork &a : all)
+        out.append(a.toVariantMap());
+    return out;
+}
+
+QString PaintbrushController::saveArtwork(const QVariantMap &artwork)
+{
+    QString error;
+    if (!subjectStore().saveArtwork(DerivedArtwork::fromVariantMap(artwork), &error))
+        return error;
+    return QString();
+}
+
+QString PaintbrushController::deleteArtwork(const QString &id)
+{
+    QString error;
+    if (!subjectStore().removeArtwork(id, &error))
+        return error;
+    return QString();
+}
+
 } // namespace paintbrush

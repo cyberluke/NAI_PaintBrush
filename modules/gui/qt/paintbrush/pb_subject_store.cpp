@@ -50,6 +50,7 @@ SubjectStore::SubjectStore()
 {
     reload();
     reloadInstances();
+    reloadArtworks();
 }
 
 QString SubjectStore::userDir() const
