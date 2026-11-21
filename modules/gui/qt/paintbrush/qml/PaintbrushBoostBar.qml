@@ -36,7 +36,7 @@ Item {
             ? qsTr("Object Select is not available — check Settings → Diagnostics.")
             : (PaintbrushCtx.objectSelected
                    ? ""
-                   : (canvas.tool === 3 /* Object Select (AI) */
+                   : (PaintbrushCtx.toolIsObjectSelect
                           ? qsTr("Click the person or object you want to cut out.")
                           : qsTr("Pick the Object Select tool (the scan icon), then click the person you want.")))
     readonly property string boostDisabledReason:

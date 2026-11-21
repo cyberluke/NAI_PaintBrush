@@ -114,7 +114,7 @@ Item {
         RowLayout {
             id: swatchRow
             spacing: VLCStyle.margin_xxxsmall
-            visible: canvas.tool !== 3 && !PaintbrushCtx.segmentationBusy
+            visible: PaintbrushCtx.toolUsesColor
 
             Repeater {
                 model: ["#000000", "#7f7f7f", "#880015", "#ed1c24", "#ff7f27",

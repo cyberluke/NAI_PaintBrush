@@ -398,7 +398,7 @@ void PaintbrushController::configureServices()
 
 bool PaintbrushController::toolUsesColor() const
 {
-    return m_canvas && m_canvas->tool() != 3 /* Object Select */ && !m_segBusy;
+    return m_canvas && !toolIsObjectSelect() && !m_segBusy;
 }
 
 bool PaintbrushController::toolHasPrimaryAction() const
@@ -407,12 +407,50 @@ bool PaintbrushController::toolHasPrimaryAction() const
      * its apply verb in the contextual strip. Whether the verb is enabled is
      * separately reported by canKeep(), so refining a mask never makes the
      * control disappear from under the pointer. */
-    return m_canvas && m_canvas->tool() == TOOL_OBJECT_SELECT;
+    return toolIsObjectSelect();
 }
 
 bool PaintbrushController::toolIsBusy() const
 {
     return m_segBusy;
+}
+
+bool PaintbrushController::toolIsObjectSelect() const
+{
+    return m_canvas && m_canvas->tool() == TOOL_OBJECT_SELECT;
+}
+
+bool PaintbrushController::toolHasSizeParameter() const
+{
+    const int tool = m_canvas ? m_canvas->tool() : TOOL_NONE;
+    /* pencil/brush/eraser + line/rectangle/rounded-rectangle/ellipse */
+    return (tool >= TOOL_PENCIL && tool <= TOOL_ERASER)
+        || (tool >= TOOL_LINE && tool <= TOOL_ELLIPSE);
+}
+
+bool PaintbrushController::toolHasFlowParameter() const
+{
+    return m_canvas && m_canvas->tool() == TOOL_SPRAY;
+}
+
+bool PaintbrushController::toolHasBristleParameters() const
+{
+    return m_canvas && m_canvas->tool() == TOOL_BRISTLE;
+}
+
+bool PaintbrushController::toolHasGlitterParameters() const
+{
+    return m_canvas && m_canvas->tool() == TOOL_GLITTER;
+}
+
+bool PaintbrushController::toolHasPowderParameters() const
+{
+    return m_canvas && m_canvas->tool() == TOOL_GLITTER_POWDER;
+}
+
+bool PaintbrushController::isHarvestPresentation() const
+{
+    return m_presentationMode == PresentationMode::HarvestVideo;
 }
 bool PaintbrushController::paintbrushEnabled() const
 {

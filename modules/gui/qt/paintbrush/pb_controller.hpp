@@ -654,6 +654,20 @@ public:
                NOTIFY toolCapabilitiesChanged FINAL)
     Q_PROPERTY(bool toolIsBusy READ toolIsBusy
                NOTIFY toolCapabilitiesChanged FINAL)
+    Q_PROPERTY(bool toolIsObjectSelect READ toolIsObjectSelect
+               NOTIFY toolCapabilitiesChanged FINAL)
+    Q_PROPERTY(bool toolHasSizeParameter READ toolHasSizeParameter
+               NOTIFY toolCapabilitiesChanged FINAL)
+    Q_PROPERTY(bool toolHasFlowParameter READ toolHasFlowParameter
+               NOTIFY toolCapabilitiesChanged FINAL)
+    Q_PROPERTY(bool toolHasBristleParameters READ toolHasBristleParameters
+               NOTIFY toolCapabilitiesChanged FINAL)
+    Q_PROPERTY(bool toolHasGlitterParameters READ toolHasGlitterParameters
+               NOTIFY toolCapabilitiesChanged FINAL)
+    Q_PROPERTY(bool toolHasPowderParameters READ toolHasPowderParameters
+               NOTIFY toolCapabilitiesChanged FINAL)
+    Q_PROPERTY(bool isHarvestPresentation READ isHarvestPresentation
+               NOTIFY presentationModeChanged FINAL)
 
     /* Bodies live in pb_controller.cpp: PaintbrushCanvasItem is only
      * forward-declared here, so inline accessors would be instantiated in TUs
@@ -661,6 +675,13 @@ public:
     bool toolUsesColor() const;
     bool toolHasPrimaryAction() const;
     bool toolIsBusy() const;
+    bool toolIsObjectSelect() const;
+    bool toolHasSizeParameter() const;
+    bool toolHasFlowParameter() const;
+    bool toolHasBristleParameters() const;
+    bool toolHasGlitterParameters() const;
+    bool toolHasPowderParameters() const;
+    bool isHarvestPresentation() const;
 
     bool segmentationBusy() const { return m_segBusy; }
     QString segmentationProgress() const { return m_segProgress; }

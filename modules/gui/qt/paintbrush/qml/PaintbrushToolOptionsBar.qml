@@ -87,20 +87,19 @@ Item {
         }
 
         /* -------- shape/draw tools: shared Size ------------------------ */
-        if (canvas.tool >= 4 && canvas.tool <= 6
-                || canvas.tool >= 10 && canvas.tool <= 13)
+        if (PaintbrushCtx.toolHasSizeParameter)
             out.push({ kind: "slider", label: qsTr("Size"), from: 1, to: 64, stepSize: 1,
                        value: canvas.brushSize,
                        onChange: (v) => canvas.brushSize = v })
 
         /* -------- Spray (9): flow -------------------------------------- */
-        if (canvas.tool === 9)
+        if (PaintbrushCtx.toolHasFlowParameter)
             out.push({ kind: "slider", label: qsTr("Flow"), from: 0.1, to: 4, stepSize: 0.1,
                        value: canvas.sprayFlow,
                        onChange: (v) => canvas.sprayFlow = v })
 
         /* -------- Bristle (16): size + flow + pigment ------------------- */
-        if (canvas.tool === 16)
+        if (PaintbrushCtx.toolHasBristleParameters)
         {
             out.push({ kind: "slider", label: qsTr("Size"), from: 1, to: 160, stepSize: 1,
                        value: canvas.brushSize, onChange: (v) => canvas.brushSize = v })
@@ -112,7 +111,7 @@ Item {
         }
 
         /* -------- Glitter (17): size amount flake shimmer glue ----------- */
-        if (canvas.tool === 17)
+        if (PaintbrushCtx.toolHasGlitterParameters)
         {
             out.push({ kind: "slider", label: qsTr("Size"), from: 1, to: 160, stepSize: 1,
                        value: canvas.brushSize, onChange: (v) => canvas.brushSize = v })
@@ -127,7 +126,7 @@ Item {
         }
 
         /* -------- Glitter Powder (18): workbench ------------------------ */
-        if (canvas.tool === 18)
+        if (PaintbrushCtx.toolHasPowderParameters)
         {
             /* leading subtool group: Glue / Glitter / Push / Eraser are
              * mutually-exclusive checkable modes; Pour / Blow are momentary

@@ -113,8 +113,26 @@ foreach ($f in $files) {
     $results.Add("")
 }
 
+# ---- standalone C++ media-logic harness (pure Qt, no VLC) ------------------
+$mediaRaw = & (Join-Path $PSScriptRoot "run-media-logic-tests.ps1") 2>&1 | Out-String
+$mediaCode = $LASTEXITCODE
+$results.Add(("{0,-28} {1}" -f "MediaLogicTests", $(if ($mediaCode -eq 0) { "PASS" } else { "FAIL" })))
+foreach ($line in ($mediaRaw -split "`r?`n")) {
+    if ($line -match '^ASSERT\.') { $results.Add("    " + $line.Trim()) }
+}
+if ($mediaCode -ne 0) {
+    $failed++
+    $mediaAsserts = @($mediaRaw -split "`r?`n" | Where-Object { $_ -match '^ASSERT\.' })
+    if ($mediaAsserts.Count -eq 0) {
+        foreach ($errLine in (($mediaRaw -split "`r?`n") | Select-Object -First 6)) {
+            $results.Add("    " + $errLine.Trim())
+        }
+    }
+}
+
 $results | ForEach-Object { Write-Output $_ }
 
-$total = @($files).Count
+# 2 QML probes + 2 static checks + 1 C++ media-logic harness
+$total = @($files).Count + 3
 Write-Output ("{0}/{1} probes passed" -f ($total - $failed), $total)
 exit ([int]($failed -gt 0))

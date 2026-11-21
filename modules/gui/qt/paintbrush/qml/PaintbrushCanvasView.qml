@@ -168,7 +168,7 @@ import VLC.Paintbrush
             id: checkerGrid
 
             visible: !(PaintbrushCtx.playerHasVideo
-                       && PaintbrushCtx.presentationMode === 0) /* HarvestVideo */
+                       && PaintbrushCtx.isHarvestPresentation)
 
             readonly property int cellSize: 16
             readonly property int cols: Math.max(1, Math.ceil(parent.width / cellSize))
