@@ -402,24 +402,38 @@ Item {
              * PaintbrushToolbar cell delegate as the vertical rail, one row,
              * clip:true, horizontal scroll. Never wraps, never overlaps the
              * palette. */
-            PaintbrushToolOptionsBar {
-                id: toolOptionsBar
+            /* ONE strip: tool options + palette share a single surface, a
+             * single edge and a constant height. Children keep their own
+             * layout so a tool switch never reflows the canvas. */
+            Rectangle {
+                id: bottomStrip
                 Layout.fillWidth: true
-                Layout.preferredHeight: bottomChrome.optionsRow
                 Layout.leftMargin: VLCStyle.margin_small
                 Layout.rightMargin: VLCStyle.margin_small
                 Layout.bottomMargin: VLCStyle.margin_xxxsmall
-                canvas: paintbrushCanvas
-                z: 7
-            }
+                implicitHeight: stripColumn.implicitHeight
+                radius: VLCStyle.margin_small
+                color: theme.bg.primary
 
-            /* palette bar — a completely separate 64dp colour surface (FG/BG +
-             * swatches + picker). Never holds icons/sliders. */
-            PaintbrushPaletteBar {
-                id: paletteBar
-                Layout.fillWidth: true
-                Layout.preferredHeight: VLCStyle.dp(64, VLCStyle.scale)
-                canvas: paintbrushCanvas
+                ColumnLayout {
+                    id: stripColumn
+                    anchors.fill: parent
+                    spacing: 0
+
+                    PaintbrushToolOptionsBar {
+                        id: toolOptionsBar
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: bottomChrome.optionsRow
+                        canvas: paintbrushCanvas
+                    }
+
+                    PaintbrushPaletteBar {
+                        id: paletteBar
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: VLCStyle.dp(64, VLCStyle.scale)
+                        canvas: paintbrushCanvas
+                    }
+                }
             }
         }
     }
