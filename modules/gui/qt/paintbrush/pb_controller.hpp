@@ -683,6 +683,11 @@ public:
     Q_INVOKABLE QVariantList subjectList() const;
     Q_INVOKABLE QString saveSubject(const QVariantMap &subject);
     Q_INVOKABLE QString deleteSubject(const QString &id);
+    /* Composition-facing instances: independent transforms/effects per
+     * placement of one shared asset. */
+    Q_INVOKABLE QVariantList instanceList(const QString &compositionId) const;
+    Q_INVOKABLE QString saveInstance(const QVariantMap &instance);
+    Q_INVOKABLE QString deleteInstance(const QString &id);
     /* Current capability status text for the NAI Settings status rows; used
      * to show POSITIVE text when a capability is green (P1#12). */
     QString trackingStatusText() const;

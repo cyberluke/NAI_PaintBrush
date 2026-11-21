@@ -94,4 +94,29 @@ QString PaintbrushController::deleteSubject(const QString &id)
     return QString();
 }
 
+QVariantList PaintbrushController::instanceList(const QString &compositionId) const
+{
+    QVariantList out;
+    const QVector<SubjectInstance> all = subjectStore().instances(compositionId);
+    for (const SubjectInstance &i : all)
+        out.append(i.toVariantMap());
+    return out;
+}
+
+QString PaintbrushController::saveInstance(const QVariantMap &instance)
+{
+    QString error;
+    if (!subjectStore().saveInstance(SubjectInstance::fromVariantMap(instance), &error))
+        return error;
+    return QString();
+}
+
+QString PaintbrushController::deleteInstance(const QString &id)
+{
+    QString error;
+    if (!subjectStore().removeInstance(id, &error))
+        return error;
+    return QString();
+}
+
 } // namespace paintbrush

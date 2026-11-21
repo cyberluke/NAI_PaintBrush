@@ -49,6 +49,7 @@ SubjectAsset SubjectAsset::fromVariantMap(const QVariantMap &m)
 SubjectStore::SubjectStore()
 {
     reload();
+    reloadInstances();
 }
 
 QString SubjectStore::userDir() const
@@ -168,6 +169,165 @@ bool SubjectStore::writeFile(const SubjectAsset &asset, QString *error) const
     {
         if (error)
             *error = QStringLiteral("Could not write the subject file.");
+        return false;
+    }
+    f.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+    return true;
+}
+
+QVariantMap SubjectInstance::toVariantMap() const
+{
+    QVariantMap m;
+    m.insert(QStringLiteral("id"), id);
+    m.insert(QStringLiteral("subjectAssetId"), subjectAssetId);
+    m.insert(QStringLiteral("compositionId"), compositionId);
+    m.insert(QStringLiteral("sourceStartMs"), sourceStartMs);
+    m.insert(QStringLiteral("sourceDurationMs"), sourceDurationMs);
+    m.insert(QStringLiteral("x"), x);
+    m.insert(QStringLiteral("y"), y);
+    m.insert(QStringLiteral("scale"), scale);
+    m.insert(QStringLiteral("rotation"), rotation);
+    m.insert(QStringLiteral("zIndex"), zIndex);
+    m.insert(QStringLiteral("visible"), visible);
+    m.insert(QStringLiteral("instanceEffectsTrackId"), instanceEffectsTrackId);
+    return m;
+}
+
+SubjectInstance SubjectInstance::fromVariantMap(const QVariantMap &m)
+{
+    SubjectInstance i;
+    i.id = m.value(QStringLiteral("id")).toString().trimmed();
+    i.subjectAssetId = m.value(QStringLiteral("subjectAssetId")).toString();
+    i.compositionId = m.value(QStringLiteral("compositionId")).toString();
+    i.sourceStartMs = m.value(QStringLiteral("sourceStartMs")).toLongLong();
+    i.sourceDurationMs = m.value(QStringLiteral("sourceDurationMs")).toLongLong();
+    i.x = m.value(QStringLiteral("x")).toDouble();
+    i.y = m.value(QStringLiteral("y")).toDouble();
+    i.scale = m.value(QStringLiteral("scale"), 1.0).toDouble();
+    i.rotation = m.value(QStringLiteral("rotation")).toDouble();
+    i.zIndex = m.value(QStringLiteral("zIndex")).toInt();
+    i.visible = m.value(QStringLiteral("visible"), true).toBool();
+    i.instanceEffectsTrackId = m.value(QStringLiteral("instanceEffectsTrackId")).toString();
+    return i;
+}
+
+QString SubjectStore::instanceDir() const
+{
+    return userDir() + QStringLiteral("/instances");
+}
+
+bool SubjectStore::validateInstance(const SubjectInstance &i,
+                                    const SubjectAsset *asset,
+                                    QString *error)
+{
+    const auto fail = [error](const QString &why) {
+        if (error)
+            *error = why;
+        return false;
+    };
+    if (i.id.isEmpty())
+        return fail(QStringLiteral("Instance id is required."));
+    if (i.compositionId.isEmpty())
+        return fail(QStringLiteral("Instance needs a composition."));
+    if (!asset)
+        return fail(QStringLiteral("Instance references an unknown subject."));
+    if (i.scale <= 0.0)
+        return fail(QStringLiteral("Instance scale must be positive."));
+    if (error)
+        error->clear();
+    return true;
+}
+
+QVector<SubjectInstance> SubjectStore::instances(const QString &compositionId) const
+{
+    QVector<SubjectInstance> out;
+    for (const SubjectInstance &i : m_instances)
+        if (i.compositionId == compositionId)
+            out.append(i);
+    return out;
+}
+
+const SubjectInstance *SubjectStore::findInstance(const QString &id) const
+{
+    for (const SubjectInstance &i : m_instances)
+        if (i.id == id)
+            return &i;
+    return nullptr;
+}
+
+bool SubjectStore::saveInstance(const SubjectInstance &instance, QString *error)
+{
+    if (!validateInstance(instance, find(instance.subjectAssetId), error))
+        return false;
+    if (!writeInstanceFile(instance, error))
+        return false;
+    reloadInstances();
+    return true;
+}
+
+bool SubjectStore::removeInstance(const QString &id, QString *error)
+{
+    if (!findInstance(id))
+    {
+        if (error)
+            *error = QStringLiteral("Instance not found.");
+        return false;
+    }
+    QFile f(instanceDir() + QLatin1Char('/') + id + QStringLiteral(".json"));
+    if (!f.remove())
+    {
+        if (error)
+            *error = QStringLiteral("Could not delete the instance file.");
+        return false;
+    }
+    reloadInstances();
+    return true;
+}
+
+void SubjectStore::reloadInstances()
+{
+    m_instances.clear();
+    QDir dir(instanceDir());
+    if (!dir.exists())
+        return;
+    const QFileInfoList files =
+        dir.entryInfoList({QStringLiteral("*.json")}, QDir::Files, QDir::Name);
+    for (const QFileInfo &fi : files)
+    {
+        QFile f(fi.absoluteFilePath());
+        if (!f.open(QIODevice::ReadOnly))
+            continue;
+        const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+        if (!doc.isObject())
+            continue;
+        const SubjectInstance i =
+            SubjectInstance::fromVariantMap(doc.object().toVariantMap());
+        if (validateInstance(i, find(i.subjectAssetId), nullptr))
+            m_instances.append(i);
+    }
+}
+
+bool SubjectStore::writeInstanceFile(const SubjectInstance &instance, QString *error) const
+{
+    QDir dir(instanceDir());
+    if (!dir.exists() && !dir.mkpath(QStringLiteral(".")))
+    {
+        if (error)
+            *error = QStringLiteral("Could not create the instance folder.");
+        return false;
+    }
+    QJsonObject root;
+    root.insert(QStringLiteral("$schema"), QStringLiteral("nai-paintbrush/subject-instance/v1"));
+    root.insert(QStringLiteral("version"), 1);
+    const QVariantMap map = instance.toVariantMap();
+    for (auto it = map.cbegin(); it != map.cend(); ++it)
+        root.insert(it.key(), QJsonValue::fromVariant(it.value()));
+
+    QFile f(instanceDir() + QLatin1Char('/') + instance.id + QStringLiteral(".json"));
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+    {
+        if (error)
+            *error = QStringLiteral("Could not write the instance file.");
         return false;
     }
     f.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
