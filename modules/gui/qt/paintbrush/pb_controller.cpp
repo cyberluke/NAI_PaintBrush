@@ -43,6 +43,7 @@ extern "C" __declspec(dllimport) HRESULT WINAPI
 #include "qt.hpp"
 #include "maininterface/mainctx.hpp"
 #include "player/player_controller.hpp"
+#include "player/input_models.hpp"
 #include "playlist/playlist_controller.hpp"
 #include <vlc_player.h>
 #include <vlc_configuration.h>
@@ -70,6 +71,38 @@ PaintbrushController::PaintbrushController(qt_intf_t *intf, QObject *parent)
             this, &PaintbrushController::refreshLivingClock);
 
     configureServices();
+
+    /* The QML video gate is playerHasVideo() =
+     * mediaHasVideoTrack() && videoOutputAttached(). openVideoFile() emits
+     * mediaStateChanged() immediately, before the input is parsed and before
+     * the vout starts, so a one-shot emission leaves the QML VideoSurface
+     * hidden forever even though playback continues. Re-emit when the real
+     * track list or vout state changes; the QML binding then makes the
+     * surface visible and it reports its geometry to the compositor. */
+    if (PlayerController *playerController = m_intf->p_mainPlayerController)
+    {
+        connect(playerController, &PlayerController::hasVideoOutputChanged,
+                this, [this](bool hasVideo) {
+                    pbLogInfo(VLC_OBJECT(m_intf), "presentation",
+                              "player video state: hasVideoOutput=%d "
+                              "playerHasVideo=%d",
+                              hasVideo ? 1 : 0, playerHasVideo() ? 1 : 0);
+                    emit mediaStateChanged();
+                });
+        connect(playerController, &PlayerController::voutListChanged,
+                this, [this](vout_thread_t **, int) { emit mediaStateChanged(); });
+        if (TrackListModel *videoTracks = playerController->getVideoTracks())
+        {
+            connect(videoTracks, &TrackListModel::countChanged,
+                    this, [this, videoTracks]() {
+                        pbLogInfo(VLC_OBJECT(m_intf), "presentation",
+                                  "video track count=%d playerHasVideo=%d",
+                                  videoTracks->getCount(),
+                                  playerHasVideo() ? 1 : 0);
+                        emit mediaStateChanged();
+                    });
+        }
+    }
 
     connect(&m_segmentation, &SegmentationService::maskReady,
             this, &PaintbrushController::onSegmentationMaskReady);
