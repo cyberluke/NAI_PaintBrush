@@ -15,26 +15,20 @@
 - Build dir: `win64-meson` (native MSYS2/MINGW64 Meson build).
 - **Code commits:** `453f11e913` — settings persistence/Apply, subject
   place/delete undo, QML contract guard. `c03ecc0bd1` — video presentation
-  state (vout/track subscriptions). This lamp is the docs commit that contains
-  this file.
-- **Verified build (2026-11-21 10:30):**
+  state (vout/track subscriptions). `317ca0ad1b` — toolbar theme resolution,
+  VLCIcons glyph fallback, and capability refresh. This lamp is the docs commit
+  that contains this file.
+- **Verified build (2026-11-21 10:49):**
   `ninja -C win64-meson modules/libqt_plugin.dll` → `EXIT=0` (incremental:
-  controller object + link). Artifact:
-  `win64-meson/modules/libqt_plugin.dll`, `21.11.2026 10:30:51`,
-  417,223,436 bytes.
-- **Provenance caveat:** the build ran against `453f11e913` + `c03ecc0bd1`
-  **plus** concurrent uncommitted toolbar/canvas work in the same worktree
-  (`pb_canvas_item.hpp`, `PaintbrushToolbar.qml`,
-  `PaintbrushToolOptionsBar.qml`, `PaintbrushStrip.qml`,
-  `PaintbrushWorkspace.qml`, and untracked `scripts/pb-capture-window.ps1`).
-  That worktree also contains a temporary
-  `PaintbrushCanvasView.visible: false` and a red geometry probe in
-  `PaintbrushWorkspace.qml`, plus an uncommitted `toolCapabilitiesChanged`
-  emission in `pb_controller.cpp` from the concurrent toolbar session. Those
-  probes hide the canvas (and the `VideoSurface` inside it) in the built DLL.
-  They are not part of this fix and were not staged. The DLL is a worktree
-  build, **not** a clean-HEAD artifact; once the concurrent work is committed
-  and the probe removed, rebuild.
+  QML resource + dependent objects + link). Artifact:
+  `win64-meson/modules/libqt_plugin.dll`, `21.11.2026 10:49:49`,
+  417,223,436 bytes. QML resource `paintbrush_assets.cpp` regenerated
+  `10:49:02`.
+- **Provenance:** the app worktree is clean at `317ca0ad1b`; the only untracked
+  file is `scripts/pb-capture-window.ps1` (diagnostic, not compiled; its
+  `PrintWindow` import is incomplete, so it cannot produce a screenshot). The
+  DLL was linked from that app code; the docs commit after it does not change
+  the plugin.
 - Running VLC from `C:\Program Files\VideoLAN` does not lock the build tree.
   Only a VLC/Paintbrush launched from `win64-meson` locks its DLLs.
 
@@ -122,8 +116,8 @@ paintbrush: player video state: hasVideoOutput=1 playerHasVideo=1
 ```
 
 The first line is the old failure state (track known, gate still false); the
-second proves the new vout notification flips the gate. Visual acceptance still
-depends on the concurrent `visible:false` probe being removed (§5).
+second proves the new vout notification flips the gate. The temp canvas probe
+is gone from the committed worktree; **visual native acceptance is pending**.
 
 Code-level compositor notes (the existing infrastructure this uses):
 
@@ -187,9 +181,8 @@ Render/interaction contract for that future preview:
 - leaving/entering playback hides/shows the surface and checkerboard coherently;
 - no GUI stall from video-state updates;
 - Object Select mapping is untouched (same `buildSelectionTransforms` path);
-- **the concurrent `PaintbrushCanvasView.visible: false` temp probe must be
-  removed by its owner first** (see §5); otherwise the canvas and the
-  `VideoSurface` inside it are hidden in the built DLL.
+- the committed worktree no longer contains the temporary
+  `PaintbrushCanvasView.visible: false` / geometry probe; the canvas is visible.
 
 ## 3. Delivered and committed
 
@@ -199,7 +192,8 @@ Render/interaction contract for that future preview:
 | **Subject transactions (repaired)** — `placeSubject`/`deleteInstance` are one `CompositeCommand` covering both the layer command and the persisted `SubjectInstance` record; the instance id is captured in the `InsertLayerCommand` payload before it is pushed; deleting the only layer is refused instead of orphaning the record | `pb_controller_palettes.cpp`, `pb_history.hpp`, `pb_controller.{hpp,cpp}`; `453f11e913` |
 | **QML contract guard (repaired)** — legitimate JS members such as `model.indexOf` are allowed; delegate `model.<role>` misuse is still flagged; actual gate 2/2 PASS | `probes/check-qml-contracts.ps1`; `453f11e913` |
 | **Video presentation (native, fixed)** — root cause: one-shot `mediaStateChanged` before parsing, with no vout/track subscriptions; the controller now re-emits on `hasVideoOutputChanged`, `voutListChanged` and video track `countChanged`, logs the real state, and the QML `VideoSurface` becomes visible and reports geometry to the existing compositor. No renderer rewrite. | `pb_controller.cpp`; `c03ecc0bd1` |
-| Adaptive strip baseline (one 64dp surface, RowLayout, flex sliders, intrinsic icons, clipping) | `PaintbrushStrip.qml`, `PaintbrushToolbar.qml`, `PaintbrushToolOptionsBar.qml`, `PaintbrushWorkspace.qml`; commits `57469a8b71`…`7e8faff59e`. **A further implicit-width/toolbar refactor is currently uncommitted and not part of this lamp.** |
+| Adaptive strip baseline (one 64dp surface, RowLayout, flex sliders, intrinsic icons, clipping) | `PaintbrushStrip.qml`, `PaintbrushToolbar.qml`, `PaintbrushToolOptionsBar.qml`, `PaintbrushWorkspace.qml`; commits `57469a8b71`…`7e8faff59e`; the one-surface/implicit-width refactor is committed at `317ca0ad1b`. |
+| **Toolbar theme/icon repair** — explicit `VLCStyle.palette` on all 15 paintbrush `ColorContext`s; `Widgets.IconLabel` for VLCIcons glyph fallback (sets the icon font family); options bar refreshes on `toolCapabilitiesChanged`; canvas `toolName` + attach-time capability emission | `PaintbrushToolbar.qml`, `PaintbrushToolOptionsBar.qml`, all paintbrush `ColorContext` QML, `pb_canvas_item.hpp`, `pb_controller.cpp`; `317ca0ad1b` |
 | Compact colour group: FG/BG chips, 8 recent selected colours, palette popover over all 27 persisted palettes | `PaintbrushStrip.qml`, `b971b9f847`, `7a38f8dd63` |
 | Semantic capabilities: `toolUsesColor`, `toolHasPrimaryAction`, `toolIsBusy` (+ `toolCapabilitiesChanged`) | `pb_controller.{hpp,cpp}`, `43a8edc285` |
 | Honest history semantics: `recentSelectedColors` | `pb_controller.{hpp,cpp}` |
@@ -264,12 +258,13 @@ Render/interaction contract for that future preview:
   Runtime smoke on the built app (10:38) confirmed
   `video track count=1 playerHasVideo=0` followed by
   `player video state: hasVideoOutput=1 playerHasVideo=1`.
-  **Visual native acceptance pending** — the current worktree contains the
-  concurrent temp probe `PaintbrushCanvasView.visible: false` (+ red geometry
-  rectangle) in `PaintbrushWorkspace.qml`; until its owner removes it, the
-  canvas and the `VideoSurface` inside it are hidden in the DLL. The
-  decoded-frame preview is not implemented and is only needed if painting over
-  live video requires a QImage.
+  **Visual native acceptance pending** — the temp canvas probe is gone from the
+  committed worktree; the canvas view is visible. The decoded-frame preview is
+  not implemented and is only needed if painting over live video requires a
+  QImage.
+- **Toolbar theme/icons**: repaired at `317ca0ad1b`; build green. **Visual
+  native acceptance pending** (magenta `ColorContext` fallback, hollow VLCIcons
+  glyphs, capability-driven colour/Keep group).
 - **Video compositor evidence**: the fix was derived from the QML/provider
   signal graph (common to DComp/Win7); the actual runtime mode/rects were not
   captured in this session. If acceptance still fails, capture the §2.1
@@ -277,14 +272,10 @@ Render/interaction contract for that future preview:
 - **Invariant 8**: the numeric-id checks listed in §4.8 remain.
 - **Probe coverage**: 2 QML probes + 2 static checks. `pb_media_logic.hpp` has
   no standalone C++ harness; settings/undo paths are not probe-covered.
-- **Concurrent worktree**: a toolbar/canvas workstream is editing
-  `pb_canvas_item.hpp` and several QML files (`PaintbrushToolbar.qml`,
-  `PaintbrushToolOptionsBar.qml`, `PaintbrushStrip.qml`,
-  `PaintbrushWorkspace.qml`) plus untracked `scripts/pb-capture-window.ps1`.
-  `PaintbrushWorkspace.qml` currently contains the temporary
-  `PaintbrushCanvasView.visible: false` and red geometry probe. `git status` is
-  authoritative. Those changes are not part of this lamp and were not staged;
-  the built DLL may lag the newest QML edits.
+- **Worktree**: no app changes remain uncommitted at `317ca0ad1b`; only the
+  untracked `scripts/pb-capture-window.ps1` diagnostic remains. The capture
+  helper is incomplete (`PbWin32` has no `PrintWindow`), so it is not a UI
+  gate; verify in the app.
 - **Store/document atomicity**: the composite makes undo/redo coherent across
   the layer and the store, but they are separate files with no cross-file crash
   journal. A process crash between the two writes can leave a mismatch; store
@@ -296,8 +287,8 @@ Render/interaction contract for that future preview:
   confirmation. If it fails, the `layers` log line
   `setLayerVisible: index=… currentBefore=…` distinguishes a wrong row index
   from a toggle that never reaches the controller.
-- **Strip appearance**: baseline structurally complete; a concurrent
-  implicit-width refactor is uncommitted. **Visual acceptance pending.**
+- **Strip appearance**: baseline structurally complete; the implicit-width
+  refactor is committed at `317ca0ad1b`. **Visual acceptance pending.**
 - **`sam3_params` has only `use_gpu`** — no adapter index, no VRAM query. NAI
   cannot choose the dGPU by name; a per-application driver preference is still
   required.
@@ -310,33 +301,29 @@ Render/interaction contract for that future preview:
 ## 6. Uncommitted work / next owner
 
 - **The audit repair is committed at `453f11e913`; the video-state fix is
-  committed at `c03ecc0bd1`. No files from this task are left uncommitted.**
-- The only uncommitted work is the separate toolbar/canvas workstream listed in
-  §5, including the `visible:false` temp probe and red geometry rectangle.
-  Coordinate with its owner; do not fold it into this fix.
-- **Before native acceptance**, that probe must be removed/reverted; otherwise
-  the canvas is hidden independently of the video-state fix.
+  committed at `c03ecc0bd1`; the toolbar theme/icon fix is committed at
+  `317ca0ad1b`. No app files are left uncommitted.**
+- The only untracked file is `scripts/pb-capture-window.ps1` (diagnostic,
+  incomplete `PrintWindow` import; not part of the app and not a UI gate).
 - **Do not** add a plaintext API-key field or a `var_SetString`-based setter.
   The supported secret path is the environment, read by `pbApiKey()`.
-- If the toolbar work is completed and committed, remove the probe, rebuild the
-  DLL, and update §1/§9 so the artifact is reproducible from HEAD.
+- For native verification, use the built app and a screenshot; the capture
+  helper needs its missing `PrintWindow`/`GetWindowDC` imports fixed first.
 
 ## 7. Next actions, in order
 
-1. **Remove/coordinate the concurrent `visible:false` probe**, then native
-   acceptance of video presentation, settings persistence/Apply, and subject
-   undo/redo.
-2. If the video still fails after the probe is gone, capture the §2.1 runtime
-   evidence (mode, native rect, surface geometry, `hasEmbededVideo`); do not
-   start with a renderer rewrite.
+1. **Native visual acceptance** of the toolbar, video presentation, settings
+   persistence/Apply, and subject undo/redo in the built app.
+2. If the video still fails, capture the §2.1 runtime evidence (mode, native
+   rect, surface geometry, `hasEmbededVideo`); do not start with a renderer
+   rewrite.
 3. Implement a decoded-frame preview only if painting/tracking over live video
    requires a QImage; use `requestAsync` + token + cancellation.
-4. Commit/coordinate the concurrent toolbar work; rebuild a clean-HEAD artifact.
-5. Migrate the remaining numeric tool-id checks (§4.8).
-6. Add a C++ harness for `pb_media_logic.hpp` and probe the settings Apply /
+4. Migrate the remaining numeric tool-id checks (§4.8).
+5. Add a C++ harness for `pb_media_logic.hpp` and probe the settings Apply /
    subject undo contracts.
-7. Runtime-confirm layer show/hide and strip visuals.
-8. Remaining ADR ambitions: native `LAYER_VECTOR` in-canvas node editing
+6. Runtime-confirm layer show/hide and strip visuals.
+7. Remaining ADR ambitions: native `LAYER_VECTOR` in-canvas node editing
    (re-count the call sites before scoping; the old “15 call sites” figure is
    not reproducible from the current tree) and true stylus pressure feeding
    `pressureFactor()`.
@@ -358,21 +345,23 @@ Render/interaction contract for that future preview:
 ## 9. Build / most-recent evidence
 
 ```
-ninja -C win64-meson modules/libqt_plugin.dll   EXIT=0 (incremental, link 10:30:51)
-modules/libqt_plugin.dll                        21.11.2026 10:30:51, 417,223,436 bytes
+ninja -C win64-meson modules/libqt_plugin.dll   EXIT=0 (incremental: QML resource +
+                                                objects + link 10:49:49)
+modules/libqt_plugin.dll                        21.11.2026 10:49:49, 417,223,436 bytes
+QML resource paintbrush_assets.cpp              regenerated 10:49:02
 probes                                          check-qml-contracts PASS (264),
                                                 check-palettes PASS (27),
                                                 2/2 probes passed, EXIT=0
-                                                (re-run after c03ecc0bd1)
+                                                (after 317ca0ad1b)
 code repair commit                              453f11e913
 video-state commit                              c03ecc0bd1
+toolbar theme/icon commit                       317ca0ad1b
 runtime smoke (built app, 1.mp4, 10:38)         video track count=1 playerHasVideo=0
                                                 player video state: hasVideoOutput=1
                                                 playerHasVideo=1
 HEAD                                            this docs commit
-worktree caveat                                 concurrent toolbar/canvas changes,
-                                                including PaintbrushCanvasView.visible:false
-                                                temp probe (see §1/§5)
+worktree                                        only untracked scripts/pb-capture-window.ps1
+                                                (incomplete PrintWindow; not an app/UI gate)
 ```
 
 ## 10. Superseded documents
