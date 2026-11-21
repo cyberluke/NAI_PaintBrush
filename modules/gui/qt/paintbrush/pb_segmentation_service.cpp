@@ -169,9 +169,10 @@ void SegmentationService::cancel()
 
 void SegmentationService::workerLoop()
 {
-    /* Eager, off-GUI-thread preload: the model is ready before the first
-     * click. Failure is non-fatal (each job retries) and already reported. */
-    ensureModelLoaded();
+    /* Lazy load: the 706 MB SAM model is loaded by runJob() on the first
+     * actual segmentation request. Loading it here made every paintbrush
+     * startup pay the full CPU/model load before the workspace could paint
+     * the canvas or run QML timers. */
     for (;;)
     {
         Job job;
