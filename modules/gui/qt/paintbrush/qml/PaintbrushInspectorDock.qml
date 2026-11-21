@@ -515,6 +515,20 @@ Item {
                             console.log("PB_QML derive failed: " + err)
                     }
                 }
+                Widgets.ActionButtonPrimary {
+                    Layout.fillWidth: true
+                    text: qsTr("Derive contour — vector")
+                    onClicked: {
+                        const list = PaintbrushCtx.subjectList()
+                        if (list.length === 0) {
+                            console.log("PB_QML contour: no subjects")
+                            return
+                        }
+                        const err = PaintbrushCtx.deriveContour(list[list.length - 1].id)
+                        if (err.length > 0)
+                            console.log("PB_QML contour failed: " + err)
+                    }
+                }
             }
 
             /* Legacy voice/generation actions are collapsed by default so the

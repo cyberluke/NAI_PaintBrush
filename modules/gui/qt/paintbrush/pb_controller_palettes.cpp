@@ -10,8 +10,14 @@
 #include "pb_layer.hpp"
 #include "pb_history.hpp"
 #include "art/finish/effects.hpp"
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QPainterPath>
 #include <QDateTime>
 #include <QUuid>
+#include <QPainterPath>
 #include "pb_canvas_item.hpp"
 #include "qt.hpp"
 
@@ -473,6 +479,73 @@ QString PaintbrushController::deriveArtwork(const QString &subjectId,
 
     emit objectSelectionChanged();
     setStatus(QStringLiteral("Derived %1 artwork").arg(recipeId));
+    return QString();
+}
+
+QString PaintbrushController::deriveContour(const QString &subjectId)
+{
+    SubjectStore &store = subjectStore();
+    const SubjectAsset *asset = store.find(subjectId);
+    if (!asset)
+        return QStringLiteral("Subject not found.");
+
+    QImage cutout(store.assetImagePath(subjectId));
+    if (cutout.isNull())
+        return QStringLiteral("This subject has no stored cut-out yet.");
+    if (!m_canvas)
+        return QStringLiteral("Canvas is not ready.");
+
+    /* Real VECTOR derivation: the cut-out alpha becomes the document selection,
+     * which is a QPainterPath — editable geometry the existing selection tools
+     * (grow/shrink/feather/invert) and Fill/Stroke operate on. The path is
+     * persisted alongside the DerivedArtwork so it survives reopen. */
+    const QImage alpha = cutout.convertToFormat(QImage::Format_Alpha8);
+    m_canvas->setSelectionFromMask(alpha);
+
+    const QPainterPath path = m_document.selectionPath();
+
+    DerivedArtwork art;
+    art.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    art.sourceSubjectId = subjectId;
+    art.sourceRevisionId = asset->createdUtc;
+    art.mode = QStringLiteral("vector");
+    art.styleRecipeId = QStringLiteral("contour");
+    art.editableStrokeSetId = art.id;
+    art.provenanceId = QStringLiteral("derive:contour-v1");
+    art.createdUtc = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+
+    QJsonArray elements;
+    for (int i = 0; i < path.elementCount(); ++i)
+    {
+        const QPainterPath::Element e = path.elementAt(i);
+        QJsonObject o;
+        o.insert(QStringLiteral("t"), int(e.type));
+        o.insert(QStringLiteral("x"), e.x);
+        o.insert(QStringLiteral("y"), e.y);
+        elements.append(o);
+    }
+    QJsonObject root;
+    root.insert(QStringLiteral("$schema"),
+                QStringLiteral("nai-paintbrush/contour/v1"));
+    root.insert(QStringLiteral("sourceSubjectId"), subjectId);
+    root.insert(QStringLiteral("elements"), elements);
+
+    QFile f(store.artworkImagePath(art.id) + QStringLiteral(".path.json"));
+    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        f.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+
+    QString error;
+    if (!store.saveArtwork(art, &error))
+        return error;
+
+    SubjectAsset updated = *asset;
+    if (!updated.derivedArtworkIds.contains(art.id))
+        updated.derivedArtworkIds.append(art.id);
+    store.save(updated, &error);
+
+    emit documentChanged();
+    emit objectSelectionChanged();
+    setStatus(QStringLiteral("Derived vector contour (%1 points)").arg(path.elementCount()));
     return QString();
 }
 
