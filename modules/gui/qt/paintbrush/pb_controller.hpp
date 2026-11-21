@@ -683,6 +683,11 @@ public:
     Q_INVOKABLE QVariantList subjectList() const;
     Q_INVOKABLE QString saveSubject(const QVariantMap &subject);
     Q_INVOKABLE QString deleteSubject(const QString &id);
+    /* Insert the subject's stored cut-out as a real canvas layer AND persist
+     * its SubjectInstance. Rolls the layer back if persistence fails, so a
+     * persisted instance can never point at a missing insertion. */
+    Q_INVOKABLE QString placeSubject(const QString &subjectId,
+                                     const QString &compositionId);
     /* Composition-facing instances: independent transforms/effects per
      * placement of one shared asset. */
     Q_INVOKABLE QVariantList instanceList(const QString &compositionId) const;

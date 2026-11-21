@@ -143,4 +143,49 @@ QString PaintbrushController::deleteArtwork(const QString &id)
     return QString();
 }
 
+QString PaintbrushController::placeSubject(const QString &subjectId,
+                                           const QString &compositionId)
+{
+    SubjectStore &store = subjectStore();
+    const SubjectAsset *asset = store.find(subjectId);
+    if (!asset)
+        return QStringLiteral("Subject not found.");
+
+    const QString comp = compositionId.isEmpty()
+                             ? QStringLiteral("main") : compositionId;
+
+    QImage cutout(store.assetImagePath(subjectId));
+    if (cutout.isNull())
+        return QStringLiteral("This subject has no stored cut-out yet.");
+
+    const QPointF pos((m_document.canvasWidth() - cutout.width()) / 2.0,
+                      (m_document.canvasHeight() - cutout.height()) / 2.0);
+    const int zBefore = m_document.layerCount();
+
+    insertStickerLayer(cutout, pos, asset->name, asset->sourceMediaId,
+                       asset->name, asset->sourcePtsMs, QImage());
+
+    SubjectInstance inst;
+    inst.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    inst.subjectAssetId = subjectId;
+    inst.compositionId = comp;
+    inst.sourceStartMs = asset->sourcePtsMs;
+    inst.x = pos.x();
+    inst.y = pos.y();
+    inst.zIndex = zBefore;
+
+    QString error;
+    if (!store.saveInstance(inst, &error))
+    {
+        /* Roll back the visual insertion: never leave a stray layer behind a
+         * failed instance save. */
+        undo();
+        return error;
+    }
+
+    emit objectSelectionChanged();
+    setStatus(QStringLiteral("Placed subject \"%1\"").arg(asset->name));
+    return QString();
+}
+
 } // namespace paintbrush

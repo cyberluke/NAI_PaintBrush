@@ -466,6 +466,25 @@ Item {
                         canvas.tool = 3 /* Object Select (AI) */
                     }
                 }
+                /* Place the most recently extracted Subject as a real canvas
+                 * layer + persisted SubjectInstance. Reachable from the same
+                 * first-step surface as extraction, so the workflow is
+                 * select -> (auto-extract) -> place without hunting a menu. */
+                Widgets.ActionButtonPrimary {
+                    Layout.fillWidth: true
+                    text: qsTr("Place subject on canvas")
+                    onClicked: {
+                        const list = PaintbrushCtx.subjectList()
+                        if (list.length === 0) {
+                            console.log("PB_QML place: no subjects in the library")
+                            return
+                        }
+                        const err = PaintbrushCtx.placeSubject(list[list.length - 1].id,
+                                                               "main")
+                        if (err.length > 0)
+                            console.log("PB_QML place failed: " + err)
+                    }
+                }
             }
 
             /* Legacy voice/generation actions are collapsed by default so the
