@@ -6,10 +6,11 @@ DerivedArtwork stores and placements; layer-space Object Select; transactional
 undo for layer edits plus subject place/delete; adaptive strip baseline;
 settings persistence through the VLC config; native video presentation in
 HarvestVideo (vout/track state fix, `c03ecc0bd1`); toolbar theme/icon resolution
-(`317ca0ad1b`). **Pending:** decoded-frame preview for painting over live video
-(async plan in `docs/HANDOFF.md` §2.2, not implemented); full invariant-8
+(`317ca0ad1b`); capture/compose keyframe instead of black viewer snapshot
+(`b11892c597`). **Pending:** decoded-frame preview for painting over live video
+(async plan in `docs/HANDOFF.md` §2.3, not implemented); full invariant-8
 capability migration; native `LAYER_VECTOR`; true stylus pressure; native visual
-acceptance of toolbar, video, settings, undo and strip.
+acceptance of toolbar, video, capture/compose, settings, undo and strip.
 
 **Target:** `modules/gui/qt/paintbrush/docs/ADAPTIVE_UI_AND_SUBJECTS.md`
 

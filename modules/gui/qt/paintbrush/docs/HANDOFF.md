@@ -16,19 +16,18 @@
 - **Code commits:** `453f11e913` — settings persistence/Apply, subject
   place/delete undo, QML contract guard. `c03ecc0bd1` — video presentation
   state (vout/track subscriptions). `317ca0ad1b` — toolbar theme resolution,
-  VLCIcons glyph fallback, and capability refresh. This lamp is the docs commit
-  that contains this file.
-- **Verified build (2026-11-21 10:49):**
+  VLCIcons glyph fallback, and capability refresh. `b11892c597` — capture/
+  compose keeps the decoded keyframe instead of the black viewer snapshot.
+  This lamp is the docs commit that contains this file.
+- **Verified build (2026-11-21 15:29):**
   `ninja -C win64-meson modules/libqt_plugin.dll` → `EXIT=0` (incremental:
-  QML resource + dependent objects + link). Artifact:
-  `win64-meson/modules/libqt_plugin.dll`, `21.11.2026 10:49:49`,
-  417,223,436 bytes. QML resource `paintbrush_assets.cpp` regenerated
-  `10:49:02`.
-- **Provenance:** the app worktree is clean at `317ca0ad1b`; the only untracked
-  file is `scripts/pb-capture-window.ps1` (diagnostic, not compiled; its
-  `PrintWindow` import is incomplete, so it cannot produce a screenshot). The
-  DLL was linked from that app code; the docs commit after it does not change
-  the plugin.
+  controller object + link). Artifact:
+  `win64-meson/modules/libqt_plugin.dll`, `21.11.2026 15:29:59`,
+  417,229,068 bytes. QML resource remains the 10:49:02 build; the capture fix
+  is C++.
+- **Provenance:** the app worktree is clean at `b11892c597`; no untracked app
+  files. The DLL was linked from that app code; the docs commit after it does
+  not change the plugin.
 - Running VLC from `C:\Program Files\VideoLAN` does not lock the build tree.
   Only a VLC/Paintbrush launched from `win64-meson` locks its DLLs.
 
@@ -138,7 +137,38 @@ native vout window/visual rect and visibility, `VideoSurface` geometry
 colour. The fix above is upstream of the compositor and is common to both
 Windows paths.
 
-### 2.2 If a decoded-frame preview is required later
+### 2.2 Capture/compose path (fixed `b11892c597`)
+
+The live surface was not the only failure. “Add frame to canvas” still produced
+a dark canvas because:
+
+- `DecodedFrame::ok()` requires `ptsVerified`;
+- the shared thumbnailer can only return the nearest keyframe, so the capture
+  path discarded a valid keyframe;
+- it then fell through to `FrameCaptureService::captureCurrentFrame()`, which
+  returns a black image on the native Windows vout;
+- `insertCapturedFrame()` entered Compose and stopped playback around that
+  black frame.
+
+Fix:
+
+- require only a non-null image in `onAddFrameDecoded()`;
+- insert an unverified keyframe with its REAL PTS and mark it unverified in the
+  status/provenance;
+- force the frame to `QImage::Format_RGB32` before the layer conversion so an
+  alpha channel cannot make it invisible;
+- remove the black viewer-snapshot fallback; a genuine decode failure keeps
+  `HarvestVideo` alive and reports the error instead of presenting a black
+  canvas;
+- logs: `capture: request ...`, `capture: decoded requested=... actual=...
+  verified=...`, `capture: inserted size=... format=... blank=... layers=...
+  canvas=... verified=...`, `capture: decode failed ...`.
+
+The exact-frame trade-off: a keyframe may be visually different from the
+requested PTS; it is inserted with its actual PTS and marked unverified. The
+strict `DecodedFrame::ok()` remains for thumbnail/tracking/export paths.
+
+### 2.3 If a decoded-frame preview is required later
 
 The native surface shows the video but is not a paintable QImage. Only if the
 product needs painting/tracking over live video inside the document (not just
@@ -174,12 +204,15 @@ Render/interaction contract for that future preview:
   defensible when paused and PTS-verified (`DecodedFrame::ok()`). While playing,
   the edit decoder is a separate software-only input and lags.
 
-### 2.3 Acceptance
+### 2.4 Acceptance
 
 - the native video appears in the canvas after opening a video, at 100% and
   after zoom/pan (the surface rect is the canvas view);
 - leaving/entering playback hides/shows the surface and checkerboard coherently;
 - no GUI stall from video-state updates;
+- “Add frame to canvas” inserts a visible decoded frame/keyframe; if the exact
+  decoder genuinely fails, the live video remains and the status reports the
+  error;
 - Object Select mapping is untouched (same `buildSelectionTransforms` path);
 - the committed worktree no longer contains the temporary
   `PaintbrushCanvasView.visible: false` / geometry probe; the canvas is visible.
@@ -192,6 +225,7 @@ Render/interaction contract for that future preview:
 | **Subject transactions (repaired)** — `placeSubject`/`deleteInstance` are one `CompositeCommand` covering both the layer command and the persisted `SubjectInstance` record; the instance id is captured in the `InsertLayerCommand` payload before it is pushed; deleting the only layer is refused instead of orphaning the record | `pb_controller_palettes.cpp`, `pb_history.hpp`, `pb_controller.{hpp,cpp}`; `453f11e913` |
 | **QML contract guard (repaired)** — legitimate JS members such as `model.indexOf` are allowed; delegate `model.<role>` misuse is still flagged; actual gate 2/2 PASS | `probes/check-qml-contracts.ps1`; `453f11e913` |
 | **Video presentation (native, fixed)** — root cause: one-shot `mediaStateChanged` before parsing, with no vout/track subscriptions; the controller now re-emits on `hasVideoOutputChanged`, `voutListChanged` and video track `countChanged`, logs the real state, and the QML `VideoSurface` becomes visible and reports geometry to the existing compositor. No renderer rewrite. | `pb_controller.cpp`; `c03ecc0bd1` |
+| **Capture/compose (fixed)** — keep the nearest decoded keyframe when the exact PTS is unverified, with its real PTS; force RGB32; remove the black viewer-snapshot fallback; a genuine decode failure keeps HarvestVideo alive and reports the error. | `pb_controller.cpp`; `b11892c597` |
 | Adaptive strip baseline (one 64dp surface, RowLayout, flex sliders, intrinsic icons, clipping) | `PaintbrushStrip.qml`, `PaintbrushToolbar.qml`, `PaintbrushToolOptionsBar.qml`, `PaintbrushWorkspace.qml`; commits `57469a8b71`…`7e8faff59e`; the one-surface/implicit-width refactor is committed at `317ca0ad1b`. |
 | **Toolbar theme/icon repair** — explicit `VLCStyle.palette` on all 15 paintbrush `ColorContext`s; `Widgets.IconLabel` for VLCIcons glyph fallback (sets the icon font family); options bar refreshes on `toolCapabilitiesChanged`; canvas `toolName` + attach-time capability emission | `PaintbrushToolbar.qml`, `PaintbrushToolOptionsBar.qml`, all paintbrush `ColorContext` QML, `pb_canvas_item.hpp`, `pb_controller.cpp`; `317ca0ad1b` |
 | Compact colour group: FG/BG chips, 8 recent selected colours, palette popover over all 27 persisted palettes | `PaintbrushStrip.qml`, `b971b9f847`, `7a38f8dd63` |
@@ -245,6 +279,10 @@ Render/interaction contract for that future preview:
     open call alone. `playerHasVideo` must be re-evaluated when
     `hasVideoOutputChanged`, `voutListChanged` or the video track count changes;
     a one-shot `mediaStateChanged()` is not enough.
+12. A captured frame is never silently replaced by an unverified viewer
+    snapshot. Use the decoded keyframe with its REAL PTS and label it
+    unverified; a real decode failure leaves the live video visible and reports
+    the error.
 
 ## 5. Known limitations / unverified
 
@@ -265,6 +303,11 @@ Render/interaction contract for that future preview:
 - **Toolbar theme/icons**: repaired at `317ca0ad1b`; build green. **Visual
   native acceptance pending** (magenta `ColorContext` fallback, hollow VLCIcons
   glyphs, capability-driven colour/Keep group).
+- **Capture/compose**: fixed at `b11892c597`; build green. The exact decoder’s
+  nearest keyframe is inserted with its real PTS and marked unverified; the
+  black viewer-snapshot fallback is gone. **Native visual acceptance pending**:
+  “Add frame” should show a frame; if the decode genuinely fails,
+  `capture: decode failed` is logged and the live video remains.
 - **Video compositor evidence**: the fix was derived from the QML/provider
   signal graph (common to DComp/Win7); the actual runtime mode/rects were not
   captured in this session. If acceptance still fails, capture the §2.1
@@ -272,10 +315,8 @@ Render/interaction contract for that future preview:
 - **Invariant 8**: the numeric-id checks listed in §4.8 remain.
 - **Probe coverage**: 2 QML probes + 2 static checks. `pb_media_logic.hpp` has
   no standalone C++ harness; settings/undo paths are not probe-covered.
-- **Worktree**: no app changes remain uncommitted at `317ca0ad1b`; only the
-  untracked `scripts/pb-capture-window.ps1` diagnostic remains. The capture
-  helper is incomplete (`PbWin32` has no `PrintWindow`), so it is not a UI
-  gate; verify in the app.
+- **Worktree**: clean at `b11892c597`; no untracked app files. Verify in the
+  built app.
 - **Store/document atomicity**: the composite makes undo/redo coherent across
   the layer and the store, but they are separate files with no cross-file crash
   journal. A process crash between the two writes can leave a mismatch; store
@@ -302,21 +343,22 @@ Render/interaction contract for that future preview:
 
 - **The audit repair is committed at `453f11e913`; the video-state fix is
   committed at `c03ecc0bd1`; the toolbar theme/icon fix is committed at
-  `317ca0ad1b`. No app files are left uncommitted.**
-- The only untracked file is `scripts/pb-capture-window.ps1` (diagnostic,
-  incomplete `PrintWindow` import; not part of the app and not a UI gate).
+  `317ca0ad1b`; the capture keyframe fix is committed at `b11892c597`.**
+- No app files are left uncommitted; the worktree is clean at `b11892c597`.
 - **Do not** add a plaintext API-key field or a `var_SetString`-based setter.
   The supported secret path is the environment, read by `pbApiKey()`.
-- For native verification, use the built app and a screenshot; the capture
-  helper needs its missing `PrintWindow`/`GetWindowDC` imports fixed first.
+- For native verification, use the built app; the app is the UI gate.
 
 ## 7. Next actions, in order
 
-1. **Native visual acceptance** of the toolbar, video presentation, settings
-   persistence/Apply, and subject undo/redo in the built app.
-2. If the video still fails, capture the §2.1 runtime evidence (mode, native
+1. **Native visual acceptance** of the toolbar, live video presentation,
+   “Add frame”/compose, settings persistence/Apply, and subject undo/redo in
+   the built app.
+2. If live video still fails, capture the §2.1 runtime evidence (mode, native
    rect, surface geometry, `hasEmbededVideo`); do not start with a renderer
-   rewrite.
+   rewrite. If “Add frame” fails, read `capture: decoded/inserted/decode failed`
+   before changing anything; a nearest keyframe with its real PTS is an
+   acceptable unverified capture.
 3. Implement a decoded-frame preview only if painting/tracking over live video
    requires a QImage; use `requestAsync` + token + cancellation.
 4. Migrate the remaining numeric tool-id checks (§4.8).
@@ -340,28 +382,33 @@ Render/interaction contract for that future preview:
 - `presentation`: `setCanvasItem: attached WxH, harvestMode=…`, mode switches,
   `player video state: hasVideoOutput=… playerHasVideo=…`,
   `video track count=… playerHasVideo=…`
+- `capture`: request mrl/pts, decoded requested/actual/verified/size/format,
+  inserted size/format/blank/layers/canvas/verified, decode failed
 - `PB_QML`: attachCheck geometry, statusText, place/style/derive errors
 
 ## 9. Build / most-recent evidence
 
 ```
-ninja -C win64-meson modules/libqt_plugin.dll   EXIT=0 (incremental: QML resource +
-                                                objects + link 10:49:49)
-modules/libqt_plugin.dll                        21.11.2026 10:49:49, 417,223,436 bytes
-QML resource paintbrush_assets.cpp              regenerated 10:49:02
+ninja -C win64-meson modules/libqt_plugin.dll   EXIT=0 (incremental: controller + link
+                                                15:29:59)
+modules/libqt_plugin.dll                        21.11.2026 15:29:59, 417,229,068 bytes
+QML resource paintbrush_assets.cpp              10:49:02 (unchanged by the C++ capture fix)
 probes                                          check-qml-contracts PASS (264),
                                                 check-palettes PASS (27),
                                                 2/2 probes passed, EXIT=0
-                                                (after 317ca0ad1b)
+                                                (after b11892c597)
 code repair commit                              453f11e913
 video-state commit                              c03ecc0bd1
 toolbar theme/icon commit                       317ca0ad1b
+capture keyframe commit                         b11892c597
 runtime smoke (built app, 1.mp4, 10:38)         video track count=1 playerHasVideo=0
                                                 player video state: hasVideoOutput=1
                                                 playerHasVideo=1
+capture UI smoke                                not automatable from the CLI this
+                                                session (launched Player view);
+                                                native acceptance pending
 HEAD                                            this docs commit
-worktree                                        only untracked scripts/pb-capture-window.ps1
-                                                (incomplete PrintWindow; not an app/UI gate)
+worktree                                        clean at b11892c597
 ```
 
 ## 10. Superseded documents
