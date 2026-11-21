@@ -87,7 +87,8 @@ public:
         SetMaterialState,    /* per-layer art-material physical state */
         AddHarvest,
         SetPuppet,
-        AddPuppet
+        AddPuppet,
+        SubjectInstance
     };
     virtual Kind kind() const = 0;
 };
@@ -408,6 +409,9 @@ public:
      * undo entry. Nested begins are ignored; an empty group pushes nothing. */
     void beginComposite(const QString &description);
     void endComposite();
+    /* True while a composite is open. Callers that may run inside an outer
+     * transaction use this to avoid closing somebody else's group. */
+    bool hasComposite() const { return m_composite != nullptr; }
     void pushStroke(const StrokeCommand &cmd);
     void pushSetTransform(const SetTransformCommand &cmd);
     void pushReorder(const ReorderCommand &cmd);

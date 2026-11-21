@@ -187,6 +187,10 @@ QString pbConfigString(vlc_object_t *obj, const char *name);
 bool pbConfigBool(vlc_object_t *obj, const char *name);
 /* Read a VLC config integer option. */
 int pbConfigInt(vlc_object_t *obj, const char *name);
+/* Normalize the SAM device tier. The supported tiers are auto/gpu/cpu; any
+ * empty or unknown value becomes "auto" so it can never act as an implicit
+ * GPU-only request. */
+QString pbNormalizeSamDevice(const QString &value);
 /* Read an API key from the environment or VLC config (never logged). */
 QString pbApiKey(vlc_object_t *obj, const char *envVar, const char *configName);
 

@@ -361,6 +361,14 @@ int pbConfigInt(vlc_object_t *obj, const char *name)
     return var_InheritInteger(obj, name);
 }
 
+QString pbNormalizeSamDevice(const QString &value)
+{
+    const QString tier = value.trimmed().toLower();
+    if (tier == QStringLiteral("gpu") || tier == QStringLiteral("cpu"))
+        return tier;
+    return QStringLiteral("auto");
+}
+
 QString pbApiKey(vlc_object_t *obj, const char *envVar, const char *configName)
 {
     /* Environment takes precedence over config so keys never need to be

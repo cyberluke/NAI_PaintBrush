@@ -17,6 +17,7 @@
 #include <QPainterPath>
 #include <QDateTime>
 #include <QUuid>
+#include <QDebug>
 #include <QPainterPath>
 #include "pb_canvas_item.hpp"
 #include "qt.hpp"
@@ -81,6 +82,56 @@ static SubjectStore &subjectStore()
     return sharedSubjectStore();
 }
 
+namespace {
+
+/* A SubjectInstance record lives in the persistent subject store, not in
+ * PaintbrushDocument. This command makes the store half of a placement or
+ * deletion participate in the SAME CompositeCommand as its layer half, so
+ * undo/redo cannot restore only one side of the operation. */
+class SubjectInstanceCommand final : public UndoCommand
+{
+public:
+    SubjectInstanceCommand(const SubjectInstance &instance, bool presentAfter,
+                           const QString &description)
+        : m_instance(instance), m_presentAfter(presentAfter),
+          m_description(description)
+    {
+    }
+
+    Kind kind() const override { return Kind::SubjectInstance; }
+    QString description() const override { return m_description; }
+
+    void apply(PaintbrushDocument &) override
+    {
+        applyPresence(m_presentAfter);
+    }
+    void revert(PaintbrushDocument &) override
+    {
+        applyPresence(!m_presentAfter);
+    }
+
+private:
+    void applyPresence(bool present)
+    {
+        QString error;
+        const bool ok = present
+            ? subjectStore().saveInstance(m_instance, &error)
+            : subjectStore().removeInstance(m_instance.id, &error);
+        if (!ok)
+        {
+            qWarning() << "paintbrush: subject instance"
+                       << (present ? "save" : "remove")
+                       << "failed:" << error;
+        }
+    }
+
+    SubjectInstance m_instance;
+    bool m_presentAfter = true;
+    QString m_description;
+};
+
+} // namespace
+
 QVariantList PaintbrushController::subjectList() const
 {
     QVariantList out;
@@ -126,8 +177,10 @@ QString PaintbrushController::saveInstance(const QVariantMap &instance)
 QString PaintbrushController::deleteInstance(const QString &id)
 {
     SubjectStore &store = subjectStore();
-    if (!store.findInstance(id))
+    const SubjectInstance *found = store.findInstance(id);
+    if (!found)
         return QStringLiteral("Instance not found.");
+    const SubjectInstance inst = *found;
 
     /* Find the layer this instance materializes BEFORE removing the record, so
      * a failed removal can never leave an orphaned layer behind. */
@@ -142,18 +195,48 @@ QString PaintbrushController::deleteInstance(const QString &id)
         }
     }
 
+    /* deleteLayer() refuses to delete the last layer. Refuse the whole
+     * operation first rather than removing the record and leaving the layer
+     * behind with a dangling subjectInstanceId. */
+    if (layerIndex >= 0 && m_document.layerCount() <= 1)
+        return QStringLiteral(
+            "This subject is the only layer; add another layer before "
+            "deleting it.");
+
     QString error;
     if (!store.removeInstance(id, &error))
         return error;
 
+    const bool ownsComposite = !m_undoStack.hasComposite();
+    if (ownsComposite)
+        m_undoStack.beginComposite(QStringLiteral("Delete subject instance"));
+
+    const int layersBefore = m_document.layerCount();
     if (layerIndex >= 0)
-    {
-        /* Layer removal is itself an undoable command; the transaction keeps
-         * the pair (layer + instance record) as one coherent step. */
-        beginTransaction(QStringLiteral("Delete subject instance"));
         deleteLayer(layerIndex);
-        endTransaction();
+
+    if (layerIndex >= 0 && m_document.layerCount() == layersBefore)
+    {
+        /* deleteLayer() refused; put the record back and leave the document
+         * untouched. No command was pushed, so the empty group is discarded. */
+        QString rollbackError;
+        if (!store.saveInstance(inst, &rollbackError))
+        {
+            qWarning() << "paintbrush: subject instance rollback failed:"
+                       << rollbackError;
+        }
+        if (ownsComposite)
+            m_undoStack.endComposite();
+        return QStringLiteral("Could not remove the subject layer.");
     }
+
+    /* The layer command (if any) is already in the composite; this command
+     * removes/restores the store record in the same undo step. */
+    m_undoStack.pushCommand(std::make_unique<SubjectInstanceCommand>(
+        inst, false, QStringLiteral("Delete subject instance")));
+    if (ownsComposite)
+        m_undoStack.endComposite();
+
     emit objectSelectionChanged();
     return QString();
 }
@@ -206,9 +289,6 @@ QString PaintbrushController::placeSubject(const QString &subjectId,
                       (m_document.canvasHeight() - cutout.height()) / 2.0 + cascade);
     const int zBefore = m_document.layerCount();
 
-    insertStickerLayer(cutout, pos, asset->name, asset->sourceMediaId,
-                       asset->name, asset->sourcePtsMs, QImage());
-
     SubjectInstance inst;
     inst.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     inst.subjectAssetId = subjectId;
@@ -217,17 +297,36 @@ QString PaintbrushController::placeSubject(const QString &subjectId,
     inst.x = pos.x();
     inst.y = pos.y();
     inst.zIndex = zBefore;
-    if (m_document.layerCount() > zBefore)
-        m_document.layerAt(zBefore)->subjectInstanceId = inst.id;
 
+    /* Persist the instance first: the id must exist before
+     * insertStickerLayer() captures the InsertLayerCommand, otherwise redo
+     * restores a layer whose subjectInstanceId was set after the push. */
     QString error;
     if (!store.saveInstance(inst, &error))
-    {
-        /* Roll back the visual insertion: never leave a stray layer behind a
-         * failed instance save. */
-        undo();
         return error;
+
+    const bool ownsComposite = !m_undoStack.hasComposite();
+    if (ownsComposite)
+        m_undoStack.beginComposite(QStringLiteral("Place subject"));
+
+    insertStickerLayer(cutout, pos, asset->name, asset->sourceMediaId,
+                       asset->name, asset->sourcePtsMs, QImage(), inst.id);
+
+    if (m_document.layerCount() <= zBefore)
+    {
+        /* Nothing was inserted; drop the record and the empty group. */
+        if (ownsComposite)
+            m_undoStack.endComposite();
+        store.removeInstance(inst.id, nullptr);
+        return QStringLiteral("Could not insert the subject layer.");
     }
+
+    /* One undo step now covers both sides: the layer command already sits in
+     * the composite, and this command removes/restores the store record. */
+    m_undoStack.pushCommand(std::make_unique<SubjectInstanceCommand>(
+        inst, true, QStringLiteral("Place subject")));
+    if (ownsComposite)
+        m_undoStack.endComposite();
 
     emit objectSelectionChanged();
     setStatus(QStringLiteral("Placed subject \"%1\"").arg(asset->name));

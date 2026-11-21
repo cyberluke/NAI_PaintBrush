@@ -36,9 +36,8 @@ void TrackingService::configure(vlc_object_t *obj)
 {
     m_obj = obj;
     m_modelPath = pbConfigString(obj, "paintbrush-sam-model").trimmed();
-    m_device = pbConfigString(obj, "paintbrush-sam-device").trimmed();
-    if (m_device.isEmpty())
-        m_device = QStringLiteral("auto");
+    m_device = pbNormalizeSamDevice(
+        pbConfigString(obj, "paintbrush-sam-device"));
     m_stepMs = qBound<qint64>(
         qint64(5), qint64(pbConfigInt(obj, "paintbrush-tracking-step-ms")),
         qint64(1000));
@@ -449,6 +448,16 @@ void TrackingService::runWorkerJob(const WorkerJob &job)
             params.encode_img_size = 0;
 
             auto model = sam3_load_model(params);
+            if (!model && params.use_gpu
+                && m_device != QStringLiteral("gpu"))
+            {
+                /* "auto" means GPU first with a CPU fallback; only an explicit
+                 * "gpu" tier is allowed to fail without trying the CPU. */
+                pbLogWarn(m_obj, "tracking",
+                          "model: GPU load failed, falling back to CPU");
+                params.use_gpu = false;
+                model = sam3_load_model(params);
+            }
             if (!model)
             {
                 emit workerError(QStringLiteral("Tracking: failed to load the SAM model."));

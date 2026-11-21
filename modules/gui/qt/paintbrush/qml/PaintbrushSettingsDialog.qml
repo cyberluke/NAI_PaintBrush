@@ -19,8 +19,10 @@ import VLC.Paintbrush
  *  - The dialog edits a DRAFT. Nothing is persisted until Apply.
  *  - Cancel (and closing the dialog) discards the draft and restores the
  *    controller's current values, so the two buttons always mean something.
- *  - Apply calls PaintbrushCtx.applyNaiSettings(...) exactly once, reports the
- *    controller's answer inline, and closes only when it applied cleanly.
+ *  - Apply calls PaintbrushCtx.applyNaiSettings(...) exactly once. The
+ *    controller returns EMPTY on success (including when a restart is
+ *    required), so the dialog closes; a non-empty answer is a real failure and
+ *    stays inline. Restart-required is shown as state, not as an error.
  *  - Every row states what the capability actually is; green rows show
  *    positive text, never an "unavailable reason".
  *
@@ -79,10 +81,22 @@ Dialog {
     }
 
     onOpened: resetDraft()
+    /* Escape/titlebar close must discard the draft exactly like Cancel. */
+    onClosed: resetDraft()
 
-    ColorContext {
+    /* VLC4-neutral palette as literals: ColorContext does not resolve inside
+     * this Dialog's own scopes and produced magenta "unresolved" markers. */
+    QtObject {
         id: theme
-        colorSet: ColorContext.View
+        readonly property QtObject fg: QtObject {
+            readonly property color primary: "#e8e8e8"
+            readonly property color secondary: "#a8a8a8"
+        }
+        readonly property color accent: "#4ea1d3"
+        readonly property color border: "#2c2c2c"
+        readonly property QtObject bg: QtObject {
+            readonly property color primary: "#121212"
+        }
     }
 
     /* NOTE: do NOT override `background` with theme.* here. A Dialog's
@@ -160,13 +174,26 @@ Dialog {
                         placeholder: qsTr("Path to the SAM model (.ggml)")
                         onTextEdited: root.draftSamModel = text
                     }
-                    SettingsRow {
-                        label: qsTr("Device")
-                        status: PaintbrushCtx.segmentationStatusText
-                        ok: PaintbrushCtx.segmentationAvailable
-                        fieldText: root.draftSamDevice
-                        placeholder: qsTr("cpu or gpu")
-                        onTextEdited: root.draftSamDevice = text
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: VLCStyle.margin_xsmall
+                        Widgets.LabelExt {
+                            text: qsTr("Device")
+                            color: theme.fg.primary
+                            font.pixelSize: VLCStyle.fontSize_small
+                            Layout.fillWidth: true
+                        }
+                        Widgets.LabelExt {
+                            text: PaintbrushCtx.segmentationStatusText
+                            color: theme.fg.secondary
+                            font.pixelSize: VLCStyle.fontSize_xsmall
+                        }
+                        ComboBox {
+                            model: ["auto", "gpu", "cpu"]
+                            currentIndex: Math.max(0, model.indexOf(root.draftSamDevice))
+                            onActivated: root.draftSamDevice = model[currentIndex]
+                            Layout.preferredWidth: VLCStyle.dp(140, VLCStyle.scale)
+                        }
                     }
                     SettingsRow {
                         label: qsTr("Ask — vision model")
@@ -211,8 +238,8 @@ Dialog {
                     Widgets.LabelExt {
                         Layout.fillWidth: true
                         text: PaintbrushCtx.settingsSecretsPresent
-                              ? qsTr("API keys are configured.")
-                              : qsTr("No API keys configured — the local endpoints above need none.")
+                              ? qsTr("API keys are configured. Keys are read from the environment (PAINTBRUSH_*_API_KEY); this dialog never stores or displays them.")
+                              : qsTr("No API keys configured — the local endpoints above need none. Persistent keys belong in PAINTBRUSH_VLM_API_KEY / PAINTBRUSH_ASSISTANT_API_KEY, not in this dialog.")
                         color: theme.fg.secondary
                         font.pixelSize: VLCStyle.fontSize_xsmall
                         wrapMode: Text.WordWrap
@@ -254,9 +281,10 @@ Dialog {
                             Layout.fillWidth: true
                         }
                         SpinBox {
-                            from: 0
-                            to: 5000
-                            stepSize: 50
+                            /* the controller/config range is 20..2000 ms */
+                            from: 20
+                            to: 2000
+                            stepSize: 10
                             value: root.draftPtsToleranceMs
                             editable: true
                             onValueModified: root.draftPtsToleranceMs = value

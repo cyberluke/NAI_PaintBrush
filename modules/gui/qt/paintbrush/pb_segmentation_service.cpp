@@ -52,12 +52,11 @@ void SegmentationService::configure(vlc_object_t *obj)
 {
     m_obj = obj;
     m_modelPath = pbConfigString(obj, "paintbrush-sam-model").trimmed();
-    m_device = pbConfigString(obj, "paintbrush-sam-device").trimmed();
+    m_device = pbNormalizeSamDevice(
+        pbConfigString(obj, "paintbrush-sam-device"));
     pbLogInfo(obj, "segmentation",
               "configured model=%s device=%s",
               qUtf8Printable(m_modelPath), qUtf8Printable(m_device));
-    if (m_device.isEmpty())
-        m_device = QStringLiteral("auto");
 
     if (m_modelPath.isEmpty())
     {
@@ -247,12 +246,13 @@ bool SegmentationService::ensureModelLoaded()
     /* Device tier ladder. sam3_params exposes only `use_gpu` (no adapter
      * index, no VRAM query), so NAI cannot pick the dGPU by name — the
      * backend/OS chooses the adapter. We can still honour a tier and fall
-     * back: "auto" tries GPU and drops to CPU if the model fails to load;
-     * "cpu" never touches the GPU; anything else is treated as GPU-only. */
-    const bool tiersAuto = (m_device.compare(QStringLiteral("auto"),
-                                             Qt::CaseInsensitive) == 0);
+     * back: "auto" (and any empty/unknown legacy value normalized to it)
+     * tries GPU and drops to CPU if the model fails to load; "cpu" never
+     * touches the GPU; "gpu" is GPU-only by explicit choice. */
     const bool okCpu = (m_device.compare(QStringLiteral("cpu"),
                                          Qt::CaseInsensitive) == 0);
+    const bool tiersAuto = (m_device != QStringLiteral("gpu")
+                            && !okCpu);
     params.use_gpu = !okCpu;
     params.encode_img_size = 0;
 

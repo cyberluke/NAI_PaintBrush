@@ -36,6 +36,7 @@ extern "C" __declspec(dllimport) HRESULT WINAPI
 #include <QDateTime>
 #include <QUuid>
 #include <QVariantMap>
+#include <cstdlib>
 #include <QWindow>
 #include <QScreen>
 
@@ -369,7 +370,11 @@ bool PaintbrushController::toolUsesColor() const
 
 bool PaintbrushController::toolHasPrimaryAction() const
 {
-    return m_canvas && m_canvas->tool() == 3 && canKeep();
+    /* A TOOL CAPABILITY, not an enabled state: Object Select always exposes
+     * its apply verb in the contextual strip. Whether the verb is enabled is
+     * separately reported by canKeep(), so refining a mask never makes the
+     * control disappear from under the pointer. */
+    return m_canvas && m_canvas->tool() == TOOL_OBJECT_SELECT;
 }
 
 bool PaintbrushController::toolIsBusy() const
@@ -3642,12 +3647,17 @@ void PaintbrushController::insertStickerLayer(const QImage &raster,
                                               const QString &sourceMRL,
                                               const QString &sourceTitle,
                                               qint64 sourceTimeMs,
-                                              const QImage &seedMask)
+                                              const QImage &seedMask,
+                                              const QString &subjectInstanceId)
 {
     if (raster.isNull())
         return;
     CanvasLayer layer = CanvasLayer::createImage(raster, position, name);
     layer.type = LAYER_STICKER;
+    /* The instance linkage must be part of the layer payload captured by the
+     * InsertLayerCommand below, otherwise redo restores a layer whose
+     * subjectInstanceId was set after the command was pushed. */
+    layer.subjectInstanceId = subjectInstanceId;
     if (!sourceMRL.isEmpty())
     {
         layer.metadata[QStringLiteral("sourceMRL")] = sourceMRL;
@@ -4816,13 +4826,18 @@ void PaintbrushController::cancelThumbnails()
 
 /* ---- NAI Settings (P1#12) ------------------------------------------- */
 
+/* The SAM device tier is a closed set: auto/gpu/cpu. An empty or unknown
+ * stored value must behave as "auto" (GPU first, CPU fallback); it must never
+ * become an implicit GPU-only request (the old service ladder treated
+ * anything except "cpu" as GPU-only and only fell back for "auto"). */
 QString PaintbrushController::settingsSamModel() const
 {
     return pbConfigString(VLC_OBJECT(m_intf), "paintbrush-sam-model");
 }
 QString PaintbrushController::settingsSamDevice() const
 {
-    return pbConfigString(VLC_OBJECT(m_intf), "paintbrush-sam-device");
+    return pbNormalizeSamDevice(
+        pbConfigString(VLC_OBJECT(m_intf), "paintbrush-sam-device"));
 }
 QString PaintbrushController::settingsVlmUrl() const
 {
@@ -4842,7 +4857,10 @@ QString PaintbrushController::settingsAssistantModel() const
 }
 int PaintbrushController::settingsPtsToleranceMs() const
 {
-    return pbConfigInt(VLC_OBJECT(m_intf), "paintbrush-edit-pts-tolerance-ms");
+    return qBound(20,
+                  int(pbConfigInt(VLC_OBJECT(m_intf),
+                                  "paintbrush-edit-pts-tolerance-ms")),
+                  2000);
 }
 
 QString PaintbrushController::trackingStatusText() const
@@ -4861,47 +4879,88 @@ QString PaintbrushController::applyNaiSettings(const QString &samModel,
                                                const QString &assistantModel,
                                                int ptsToleranceMs)
 {
-    /* Persist into the Paintbrush/VLC configuration layer (source of truth —
-     * never a second settings store). Secret values are never read or shown;
-     * changing them is out of scope here (the user sets them via env/VLC
-     * preferences). */
-    vlc_object_t *obj = VLC_OBJECT(m_intf);
-    auto setStr = [obj](const char *name, const QString &value) {
-        var_SetString(obj, name, value.toUtf8().constData());
-    };
-    auto setInt = [obj](const char *name, int value) {
-        var_SetInteger(obj, name, value);
+    /* Persist into the VLC configuration layer (source of truth — never a
+     * second settings store). config_Put*() is the persistent API: var_Set*()
+     * only mutates a runtime variable and never marks the config dirty, so it
+     * silently did nothing here. Secret values are never read or shown;
+     * changing them is out of scope (the user sets them via environment
+     * variables, which pbApiKey() prefers over the config file). */
+    const QString model = samModel.trimmed();
+    const QString device = pbNormalizeSamDevice(samDevice);
+    const QString vlmBase = vlmUrl.trimmed();
+    const QString vlmName = vlmModel.trimmed();
+    const QString assistantBase = assistantUrl.trimmed();
+    const QString assistantName = assistantModel.trimmed();
+    const int ptsTolerance = qBound(20, ptsToleranceMs, 2000);
+
+    const bool changedModel = model != settingsSamModel()
+        || device != settingsSamDevice()
+        || vlmBase != settingsVlmUrl()
+        || vlmName != settingsVlmModel()
+        || assistantBase != settingsAssistantUrl()
+        || assistantName != settingsAssistantModel();
+
+    config_PutPsz("paintbrush-sam-model", model.toUtf8().constData());
+    config_PutPsz("paintbrush-sam-device", device.toUtf8().constData());
+    config_PutPsz("paintbrush-vlm-base-url", vlmBase.toUtf8().constData());
+    config_PutPsz("paintbrush-vlm-model", vlmName.toUtf8().constData());
+    config_PutPsz("paintbrush-assistant-base-url",
+                  assistantBase.toUtf8().constData());
+    config_PutPsz("paintbrush-assistant-model",
+                  assistantName.toUtf8().constData());
+    config_PutInt("paintbrush-edit-pts-tolerance-ms", ptsTolerance);
+
+    /* config_PutPsz() has no error return and silently does nothing when the
+     * configuration item is missing. Read back the exact values so a typo or a
+     * build without the option cannot be reported as "Applied". */
+    auto readStr = [](const char *name) {
+        char *value = config_GetPsz(name);
+        const QString result = value ? QString::fromUtf8(value) : QString();
+        free(value);
+        return result;
     };
 
-    bool changedModel = samModel != settingsSamModel()
-        || samDevice != settingsSamDevice()
-        || vlmUrl != settingsVlmUrl()
-        || vlmModel != settingsVlmModel()
-        || assistantUrl != settingsAssistantUrl()
-        || assistantModel != settingsAssistantModel();
+    if (readStr("paintbrush-sam-model") != model
+        || pbNormalizeSamDevice(readStr("paintbrush-sam-device")) != device
+        || readStr("paintbrush-vlm-base-url") != vlmBase
+        || readStr("paintbrush-vlm-model") != vlmName
+        || readStr("paintbrush-assistant-base-url") != assistantBase
+        || readStr("paintbrush-assistant-model") != assistantName
+        || int(config_GetInt("paintbrush-edit-pts-tolerance-ms"))
+               != ptsTolerance)
+    {
+        return QStringLiteral(
+            "The settings could not be written to the VLC configuration.");
+    }
 
-    setStr("paintbrush-sam-model", samModel.trimmed());
-    setStr("paintbrush-sam-device", samDevice.trimmed());
-    setStr("paintbrush-vlm-base-url", vlmUrl.trimmed());
-    setStr("paintbrush-vlm-model", vlmModel.trimmed());
-    setStr("paintbrush-assistant-base-url", assistantUrl.trimmed());
-    setStr("paintbrush-assistant-model", assistantModel.trimmed());
-    setInt("paintbrush-edit-pts-tolerance-ms",
-           qBound(20, ptsToleranceMs, 2000));
+    /* config_Put*() marks the config dirty and VLC saves it on exit. Save now
+     * as well so the values survive a crash/restart immediately; a save
+     * failure is a real failure, not a restart notice. */
+    if (config_SaveConfigFile(m_intf) != 0)
+    {
+        return QStringLiteral(
+            "The settings were applied but the VLC configuration file "
+            "could not be saved.");
+    }
 
     /* The exact-frame PTS tolerance is safe to hot-apply to the edit decoder
-     * (it is only read at decode time); mark it applied immediately. */
-    m_thumbnails.setPtsToleranceMs(qMax<qint64>(
-        20, int(pbConfigInt(obj, "paintbrush-edit-pts-tolerance-ms"))));
+     * (it is only read at decode time). Use the value we wrote, never a
+     * re-read of a possibly stale config item. */
+    m_thumbnails.setPtsToleranceMs(ptsTolerance);
 
     /* Model/endpoint changes require a service re-configure to take effect,
-     * which cannot be done safely mid-session; those need a restart. */
-    m_settingsRestartRequired = changedModel;
-    emit settingsChanged();
-
+     * which cannot be done safely mid-session. Keep this flag sticky until a
+     * restart (or an explicit clear), so a later PTS-only Apply cannot erase
+     * an earlier model-change notice. */
     if (changedModel)
-        return QStringLiteral("Model and endpoint changes take effect after restart.");
-    return QStringLiteral("Applied.");
+        m_settingsRestartRequired = true;
+
+    emit settingsChanged();
+    setStatus(changedModel
+        ? QStringLiteral("Settings saved — restart VLC to apply model and "
+                         "endpoint changes.")
+        : QStringLiteral("Settings saved."));
+    return QString();               /* empty = applied cleanly */
 }
 
 void PaintbrushController::clearRestartRequired()

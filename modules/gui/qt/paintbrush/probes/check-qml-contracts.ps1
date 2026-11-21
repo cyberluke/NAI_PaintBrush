@@ -27,6 +27,12 @@ $hpp = Join-Path $root "pb_controller.hpp"
 $violations = New-Object System.Collections.Generic.List[string]
 
 # ---- 1. model.<role> misuse ------------------------------------------------
+# `model` is a QML property in several non-delegate contexts too (for example
+# a ComboBox model array). Ignore the standard JS Array/Object members; real
+# delegate role names are not in this list, so `model.timeMs` is still caught.
+$jsModelMembers = 'indexOf|lastIndexOf|length|push|pop|shift|unshift|slice|splice|concat|join|map|filter|forEach|some|every|find|findIndex|includes|reduce|reduceRight|sort|reverse|keys|values|entries|toString|valueOf|hasOwnProperty'
+$modelRoleRe = "(?<![\w.])model\.(?!($jsModelMembers)\b)[A-Za-z_]"
+
 Get-ChildItem -LiteralPath $qmlDir -Filter *.qml | ForEach-Object {
     $lines = Get-Content -LiteralPath $_.FullName
     for ($i = 0; $i -lt $lines.Count; $i++) {
@@ -34,7 +40,7 @@ Get-ChildItem -LiteralPath $qmlDir -Filter *.qml | ForEach-Object {
         if ($line -match '^\s*(//|\*|/\*)') { continue }
         # ignore comments on the same line
         $code = ($line -split '//')[0]
-        if ($code -match '(?<![\w.])model\.[A-Za-z_]') {
+        if ($code -match $modelRoleRe) {
             $violations.Add("$($_.Name):$($i + 1): model.<role> — use modelData.<role> :: $($line.Trim())")
         }
     }

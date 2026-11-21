@@ -676,10 +676,12 @@ public:
      * "configured" placeholder instead of ever displaying the value. */
     bool settingsSecretsPresent() const { return m_settingsSecretsPresent; }
     bool settingsRestartRequired() const { return m_settingsRestartRequired; }
-    /* Apply NAI settings. Persists into the Paintbrush/VLC config layer;
-     * hot-reconfigures what is safe and reports restart-required for the
-     * rest. Never displays stored secrets in clear text. Returns a status
-     * string (empty = applied cleanly). */
+    /* Apply NAI settings. Persists into the VLC config layer with config_Put*
+     * (and saves the file immediately), hot-applies what is safe, and sets
+     * settingsRestartRequired for model/endpoint changes. Never displays
+     * stored secrets in clear text. Returns a failure message, or an EMPTY
+     * string on success — a restart notice is a separate state, not a
+     * failure. */
     Q_INVOKABLE QString applyNaiSettings(const QString &samModel,
                                          const QString &samDevice,
                                          const QString &vlmUrl,
@@ -843,7 +845,8 @@ private:
     void insertStickerLayer(const QImage &raster, const QPointF &position,
                             const QString &name, const QString &sourceMRL,
                             const QString &sourceTitle, qint64 sourceTimeMs,
-                            const QImage &seedMask);
+                            const QImage &seedMask,
+                            const QString &subjectInstanceId = QString());
     /* Real source pixels for a track keyframe (A16): bounded LRU cache
      * first, then ONE verified seek+capture through the existing
      * FrameCaptureService bridge. No UI-thread sleep-polling (A17); the
