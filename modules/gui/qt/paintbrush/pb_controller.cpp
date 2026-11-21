@@ -1418,7 +1418,15 @@ void PaintbrushController::setLayerVisible(int index, bool visible)
     layer->visible = visible;
     m_undoStack.pushSetVisibility(cmd);
     if (m_canvas)
+    {
         m_canvas->markCanvasDirty();
+        /* A visibility change is not a stroke: do not rely on the coalesced
+         * repaint timer alone; force the scene-graph update. */
+        m_canvas->update();
+    }
+    /* The delegate binds checked to the model role; reload so undo/redo
+     * cannot leave a stale checkbox. */
+    m_layerModel->reload();
     emit documentChanged();
 }
 
