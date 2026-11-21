@@ -244,7 +244,16 @@ bool SegmentationService::ensureModelLoaded()
     sam3_params params;
     params.model_path = m_modelPath.toStdString();
     params.n_threads = static_cast<int>(std::thread::hardware_concurrency());
-    params.use_gpu = (m_device != QStringLiteral("cpu"));
+    /* Device tier ladder. sam3_params exposes only `use_gpu` (no adapter
+     * index, no VRAM query), so NAI cannot pick the dGPU by name — the
+     * backend/OS chooses the adapter. We can still honour a tier and fall
+     * back: "auto" tries GPU and drops to CPU if the model fails to load;
+     * "cpu" never touches the GPU; anything else is treated as GPU-only. */
+    const bool tiersAuto = (m_device.compare(QStringLiteral("auto"),
+                                             Qt::CaseInsensitive) == 0);
+    const bool okCpu = (m_device.compare(QStringLiteral("cpu"),
+                                         Qt::CaseInsensitive) == 0);
+    params.use_gpu = !okCpu;
     params.encode_img_size = 0;
 
     /* The load is a single opaque C call with no progress callback, and it is
@@ -258,8 +267,17 @@ bool SegmentationService::ensureModelLoaded()
               params.n_threads);
 
     auto model = sam3_load_model(params);
+    if (!model && params.use_gpu && tiersAuto)
+    {
+        pbLogWarn(m_obj, "segmentation",
+                  "model: GPU load failed, falling back to CPU");
+        params.use_gpu = false;
+        model = sam3_load_model(params);
+    }
     pbLogInfo(m_obj, "segmentation",
-              "model: load %s", model ? "DONE" : "FAILED");
+              "model: load %s (tier=%s use_gpu=%d)",
+              model ? "DONE" : "FAILED",
+              m_device.toUtf8().constData(), params.use_gpu ? 1 : 0);
     if (!model)
     {
         m_lastError = QStringLiteral("model load failed");
