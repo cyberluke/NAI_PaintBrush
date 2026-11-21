@@ -33,6 +33,7 @@ Rectangle {
     z: 4
 
     ColorContext {
+        palette: VLCStyle.palette
         id: theme
         colorSet: ColorContext.View
     }

@@ -13,78 +13,46 @@ import VLC.Widgets as Widgets
 import VLC.Style
 import VLC.Paintbrush
 
-/* The real second toolbar: a HORIZONTAL per-tool context bar rendered by the
- * SAME unified PaintbrushToolbar cell delegate as the vertical tool rail.
- * It floats above the bottom of the canvas and shows, for the active tool,
- * its option sliders (Size / Amount / Flake / Glue / Loose / Shimmer etc.) plus
- * the precision toggles (Grid / Rulers / Snap / Pen) as iconic cells.
+/* The per-tool horizontal options rendered by the SAME unified
+ * PaintbrushToolbar cell delegate as the vertical tool rail. It is the middle
+ * section of the single bottom strip and owns NO background, border or radius
+ * of its own: the strip is one surface, so nesting a second bordered card here
+ * produced the "empty field inside a giant frame" the user saw.
  *
- * The horizontal bar is a ONE-ROW Flickable (P1, reviewer #2): fixed one-cell
- * height, clip:true, horizontal scroll when controls exceed the width — it
- * NEVER wraps vertically, so no option control can leak outside this bar's own
- * rectangle. The host height is a single fixed row (one cell + margins),
- * decoupled from any wrapped-row assumption. The palette below is a completely
- * separate 64dp colour surface (this bar holds no colour swatches).
- *
- * Because it is a distinct bar the option sliders are NEVER crowded out by the
- * grid/ruler controls — the palette bar below keeps only colour swatches.
- * Only the four precision cells are always present; slider cells appear
- * on-demand (their `visible` is bound to the active tool), so the bar grows
- * and shrinks with the tool. Cells are rebuilt when the tool changes so the
- * grid/snap active states and the slider positions always mirror the canvas. */
-Rectangle {
+ * Shows, for the active tool, its option sliders (Size / Amount / Flake /
+ * Glue / Loose / Shimmer etc.) plus precision toggles (Grid / Rulers / Snap /
+ * Pen). Object Select exposes its own mask controls (size, hard/soft edge)
+ * through the semantic `toolHasPrimaryAction` capability instead of a tool-id
+ * table. Only the four precision cells are always present; slider cells appear
+ * on-demand, and the whole section flexes inside the strip. Cells are rebuilt
+ * when the relevant canvas state changes so active states and slider positions
+ * always mirror the canvas. */
+Item {
     id: root
 
     required property PaintbrushCanvas canvas
 
-    /* TEMP-PROOF (reviewer qrc/qmlcache check): a unique build marker + a
-     * startup geometry log prove the running app is loading THIS qml (not a
-     * stale qrc/qmlcache copy). Remove after the GUI gate is accepted. */
-    objectName: "PaintbrushToolOptionsBar_marker_e48-toolbar-v2"
-    Component.onCompleted: {
-        /* existing initial rebuild of the toolbar cells */
-        rebuild()
-        /* TEMP-PROOF (reviewer qrc/qmlcache check): log the geometry + build
-         * marker so we can prove the running app loads THIS qml, not stale. */
-        console.log("PB_QML ToolOptionsBar onCompleted x=" + x + " y=" + y
-                    + " w=" + width + " h=" + height + " z=" + z
-                    + " marker=" + objectName)
-    }
-    onWidthChanged: logGeom()
-    onHeightChanged: logGeom()
-    onYChanged: logGeom()
-    function logGeom() {
-        console.log("PB_QML ToolOptionsBar geom x=" + x + " y=" + y
-                    + " w=" + width + " h=" + height + " z=" + z)
-    }
+    Component.onCompleted: rebuild()
 
     ColorContext {
+        palette: VLCStyle.palette
         id: theme
         colorSet: ColorContext.View
     }
 
-    /* fixed ONE-ROW height: one cell + the surrounding margins. Decoupled from
-     * any wrapped-contentHeight so the bar can never grow into the palette. */
-    readonly property real _oneRow: VLCStyle.dp(32, VLCStyle.scale)
-                                   + VLCStyle.margin_xsmall
-    /* implicitHeight, not height: the bar is a Layout item inside the strip,
-     * and a bound height fights the layout. */
-    implicitHeight: _oneRow + VLCStyle.margin_xsmall * 2
+    /* one control row: the strip supplies the surrounding padding */
+    implicitHeight: VLCStyle.dp(32, VLCStyle.scale)
     /* Overflow clips inside the strip instead of drawing over the canvas. */
     clip: true
-    color: theme.bg.primary
-    border.width: 1
-    border.color: theme.border
-    radius: VLCStyle.margin_xsmall
 
     PaintbrushToolbar {
         id: optionBar
         orientation: Qt.Horizontal
         anchors.fill: parent
-        anchors.margins: VLCStyle.margin_xsmall
         cell: VLCStyle.dp(32, VLCStyle.scale)
         spacing: VLCStyle.margin_xsmall
     }
+
 
     function rebuild()
     {
@@ -103,6 +71,27 @@ Rectangle {
         out.push({ kind: "icon", iconGlyph: VLCIcons.active_indicator, tip: qsTr("Pen pressure"),
                    checkable: true, checked: canvas.pressureEnabled,
                    onTriggered: () => canvas.pressureEnabled = !canvas.pressureEnabled })
+
+        /* -------- Object Select: mask brush size + edge mode ----------- *
+         * Driven by the semantic tool capability, not a numeric tool id:
+         * the mask is painted with the normal brush size, and the edge mode
+         * decides whether the cut-out is crisp or feathered. */
+        if (PaintbrushCtx.toolHasPrimaryAction)
+        {
+            out.push({ kind: "slider", label: qsTr("Mask"), from: 1, to: 64, stepSize: 1,
+                       value: canvas.brushSize,
+                       onChange: (v) => canvas.brushSize = v })
+            out.push({ kind: "icon",
+                       iconGlyph: PaintbrushCtx.objectMaskSoftEdge
+                                  ? VLCIcons.ic_fluent_arrow_sync_24_regular
+                                  : VLCIcons.fullscreen,
+                       tip: PaintbrushCtx.objectMaskSoftEdge
+                            ? qsTr("Soft edge — click for a crisp boundary")
+                            : qsTr("Hard edge — click for a feathered boundary"),
+                       checkable: true,
+                       checked: PaintbrushCtx.objectMaskSoftEdge,
+                       action: "objectMaskEdgeToggle" })
+        }
 
         /* -------- shape/draw tools: shared Size ------------------------ */
         if (canvas.tool >= 4 && canvas.tool <= 6
@@ -202,28 +191,29 @@ Rectangle {
 
     /* Declarative action dispatch (P0.3): the toolbar emits triggered(action,
      * value) — one observable path, no JS callbacks in the item model. */
-    function dispatchPowderAction(action, value) {
+    function dispatchAction(action, value) {
         switch (action) {
         case "powderTool":
-            const names = ["Glue", "Glitter", "Push", "Eraser"]
-            console.log("powder UI action:", (value >= 0 && value < names.length) ? names[value] : String(value))
-            console.log("powder tool changed:", canvas.powderTool, "->", value)
             canvas.powderTool = value
             break
         case "powderPour":
-            console.log("powder UI action: Pour")
             canvas.pourPowderNow()
             break
         case "powderBlow":
-            console.log("powder UI action: Blow")
             canvas.blowPowderNow()
+            break
+        case "objectMaskEdgeToggle":
+            if (PaintbrushCtx.objectMaskSoftEdge)
+                PaintbrushCtx.setObjectMaskEdgeHard()
+            else
+                PaintbrushCtx.setObjectMaskEdgeSoft()
             break
         }
     }
 
     Connections {
         target: optionBar
-        function onTriggered(action, value) { dispatchPowderAction(action, value) }
+        function onTriggered(action, value) { dispatchAction(action, value) }
     }
 
     /* precision toggles + sliders mirror the canvas, so any of these state
@@ -237,5 +227,15 @@ Rectangle {
         function onRulersVisibleChanged() { rebuild() }
         function onSnapToGridChanged() { rebuild() }
         function onPressureEnabledChanged() { rebuild() }
+    }
+
+    Connections {
+        target: PaintbrushCtx
+        /* The controller emits this once a real canvas is attached and the
+         * semantic capability properties are valid. Without it, Object Select
+         * controls built at Component.onCompleted can miss the capability
+         * change and never appear. */
+        function onToolCapabilitiesChanged() { rebuild() }
+        function onObjectMaskEdgeChanged() { rebuild() }
     }
 }

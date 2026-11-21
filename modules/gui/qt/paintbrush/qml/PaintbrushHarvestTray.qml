@@ -29,6 +29,7 @@ Item {
     visible: hasItems
 
     ColorContext {
+        palette: VLCStyle.palette
         id: theme
         colorSet: ColorContext.View
     }

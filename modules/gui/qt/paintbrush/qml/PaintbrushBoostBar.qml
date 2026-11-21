@@ -43,6 +43,7 @@ Item {
         qsTr("Drop a sticker or image on the canvas first — Boost needs source art.")
 
     ColorContext {
+        palette: VLCStyle.palette
         id: theme
         colorSet: ColorContext.View
     }

@@ -470,6 +470,14 @@ void PaintbrushController::setCanvasItem(QQuickItem *item)
     connect(m_canvas, &PaintbrushCanvasItem::toolChanged,
             this, [this]() { emit toolCapabilitiesChanged(); });
 
+    /* Attach order: QML evaluates capability bindings (toolUsesColor,
+     * toolHasPrimaryAction) while the strip is being created, which happens
+     * BEFORE this canvas item's Component.onCompleted calls setCanvasItem().
+     * Without this emission those bindings stay at their pre-attach value for
+     * the whole session — the colour group and the primary action never
+     * appear. Emit once now that a real canvas exists. */
+    emit toolCapabilitiesChanged();
+
     /* Apply the CURRENT presentation state to the newly attached canvas.
      * setPresentationMode() early-returns when the mode did not change, so a
      * canvas that registers after a video opened would never learn it must

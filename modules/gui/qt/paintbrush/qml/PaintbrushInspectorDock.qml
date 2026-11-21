@@ -30,6 +30,7 @@ Item {
     required property PaintbrushCanvas canvas
 
     ColorContext {
+        palette: VLCStyle.palette
         id: theme
         colorSet: ColorContext.View
     }

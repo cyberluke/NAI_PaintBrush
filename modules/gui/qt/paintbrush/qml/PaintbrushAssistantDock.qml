@@ -24,6 +24,7 @@ Item {
     id: root
 
     ColorContext {
+        palette: VLCStyle.palette
         id: theme
         colorSet: ColorContext.View
     }

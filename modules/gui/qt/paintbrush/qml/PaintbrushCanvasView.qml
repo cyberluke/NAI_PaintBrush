@@ -49,6 +49,7 @@ import VLC.Paintbrush
         }
 
         ColorContext {
+            palette: VLCStyle.palette
             id: theme
             colorSet: ColorContext.View
         }

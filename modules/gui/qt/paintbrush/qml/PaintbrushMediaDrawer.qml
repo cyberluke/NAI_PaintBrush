@@ -27,6 +27,7 @@ Item {
     implicitHeight: contentColumn.implicitHeight
 
     ColorContext {
+        palette: VLCStyle.palette
         id: theme
         colorSet: ColorContext.View
     }

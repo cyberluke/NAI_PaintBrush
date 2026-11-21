@@ -33,6 +33,7 @@ Item {
     Accessible.name: qsTr("NAI Paintbrush")
 
     ColorContext {
+        palette: VLCStyle.palette
         id: theme
         colorSet: ColorContext.View
     }
@@ -364,51 +365,30 @@ Item {
     }
 
     /* ---- BOTTOM CHROME -------------------------------------------------
-     * One explicit layout container owns the bottom bar ordering, so the tool
-     * options and colour palette are NEVER cross-anchored to each other as
-     * independent siblings (which could interleave/overlap). Layout:
+     * ONE surface, owned by PaintbrushStrip. The container is exactly as tall
+     * as the strip's real control row, so the canvas ends where the chrome
+     * starts and no empty band is reserved under it.
      *     canvas / mainRow  { bottom = bottomChrome.top }
      *     ---------------
-     *     tool options      { directly above the palette }
+     *     the adaptive strip { at the window bottom }
      *     ---------------
-     *     colour palette    { at the window bottom }
-     *     ---------------
-     *      window bottom
-     * Invariant (checked at runtime, debug): optionsBar.bottom <= paletteBar.top
-     * and the two rectangles never intersect. */
+     *      window bottom */
     Item {
         id: bottomChrome
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        /* options (a fixed one row) above the palette (a fixed 64dp colour
-         * surface) + the gap between them; the layout owns this ordering. */
-        height: optionsRow
-                + VLCStyle.margin_xxxsmall   /* gap between the two bars */
-                + VLCStyle.dp(64, VLCStyle.scale)
+        height: bottomStrip.implicitHeight
 
-        /* the one-row options toolbar height (fixed, decoupled from any
-         * wrapped row); matches PaintbrushToolOptionsBar's own height so the
-         * layout allocates exactly one cell row + the vertical margins.
-         * NOTE: VLCStyle has NO margin_medium — use margin_xsmall. */
-        readonly property real optionsRow: VLCStyle.dp(32, VLCStyle.scale)
-                                           + VLCStyle.margin_xsmall * 3
-
-        ColumnLayout {
+        /* Parameters flex, colour is intrinsic and collapses entirely for
+         * colour-independent tools, and Keep appears only for tools that own
+         * a primary action. The constant height means tool switching cannot
+         * reflow the canvas. */
+        PaintbrushStrip {
+            id: bottomStrip
             anchors.fill: parent
-            spacing: 0
-
-            /* ONE adaptive strip: parameters flex, colour is intrinsic and
-             * collapses entirely for colour-independent tools. The strip owns
-             * a fixed height, so switching tools cannot reflow the canvas. */
-            PaintbrushStrip {
-                id: bottomStrip
-                Layout.fillWidth: true
-                Layout.preferredHeight: VLCStyle.dp(64, VLCStyle.scale)
-                Layout.leftMargin: VLCStyle.margin_small
-                Layout.rightMargin: VLCStyle.margin_small
-                canvas: paintbrushCanvas
-            }        }
+            canvas: paintbrushCanvas
+        }
     }
 
     /* center: canvas with tool rail; the inspector drawer and the companion
@@ -443,35 +423,10 @@ Item {
                 canvas: paintbrushCanvas
             }
 
-            /* Keep + Boost: the two product verbs float bottom-left over the
-             * canvas (spec §5, §24); the mood popover opens from here too */
-            PaintbrushBoostBar {
-                id: boostBar
-                anchors.left: parent.left
-                anchors.bottom: parent.bottom
-                anchors.leftMargin: VLCStyle.margin_normal
-                anchors.bottomMargin: VLCStyle.margin_normal
-                canvas: paintbrushCanvas
-                z: 4
-            }
-            Button {
-                id: moodBtn
-                anchors.left: boostBar.right
-                anchors.leftMargin: VLCStyle.margin_small
-                anchors.verticalCenter: boostBar.verticalCenter
-                text: qsTr("Mood")
-                z: 4
-                onClicked: moodPicker.opened ? moodPicker.close() : moodPicker.open()
-                ToolTip.visible: hovered
-                ToolTip.delay: 600
-                ToolTip.text: qsTr("Paper, light, palette, type and badges — one coherent look")
-            }
-            PaintbrushMoodPicker {
-                id: moodPicker
-                canvas: paintbrushCanvas
-                x: moodBtn.x
-                y: moodBtn.y - height - VLCStyle.margin_small
-            }
+            /* No floating product verbs over the canvas: Keep, Mood, Boost,
+             * Undo Boost and Cancel live in the bottom strip, which is the
+             * single contextual surface. The canvas stays fully visible and
+             * pointer-transparent except for the artwork itself. */
         }
     }
 
@@ -620,7 +575,7 @@ Item {
     Shortcut { sequence: "L"; onActivated: paintbrushCanvas.tool = 17 }
     Shortcut { sequence: "K"; onActivated: PaintbrushCtx.keepSelection() }
     Shortcut { sequence: "Ctrl+B"; onActivated: PaintbrushCtx.boost() }
-    Shortcut { sequence: "M"; onActivated: moodPicker.opened ? moodPicker.close() : moodPicker.open() }
+    Shortcut { sequence: "M"; onActivated: bottomStrip.toggleMoodPicker() }
     Shortcut { sequence: "G"; onActivated: paintbrushCanvas.gridVisible = !paintbrushCanvas.gridVisible }
     Shortcut { sequence: "R"; onActivated: paintbrushCanvas.rulersVisible = !paintbrushCanvas.rulersVisible }
     Shortcut { sequence: "Shift+G"; onActivated: paintbrushCanvas.snapToGrid = !paintbrushCanvas.snapToGrid }
@@ -647,31 +602,5 @@ Item {
             MainCtx.intfMainWindow.title = qsTr("NAI PaintBrush")
         })
         PaintbrushCtx.fitInterfaceToDesktop()
-        /* TEMP-PROOF (reviewer qrc/qmlcache + bottom-chrome): the debug build
-         * asserts the options bar sits entirely ABOVE the palette and the two
-         * rectangles never intersect. Delete after the GUI gate. */
-        Qt.callLater(() => {
-            if (toolOptionsBar && paletteBar) {
-                /* both bars live inside bottomChrome's ColumnLayout, so their
-                 * positions are comparable in bottomChrome coordinates */
-                const oTop = toolOptionsBar.mapToItem(bottomChrome, 0, 0).y
-                const pTop = paletteBar.mapToItem(bottomChrome, 0, 0).y
-                const oBottom = oTop + toolOptionsBar.height
-                const ok = (oBottom <= pTop + 0.5)
-                console.log("PB_QML containment options.bottom=" + oBottom
-                            + " palette.top=" + pTop
-                            + " intersect=" + (oBottom > pTop)
-                            + " OK=" + ok
-                            + " bg.height=" + bottomChrome.height
-                            + " bg.optionsRow=" + bottomChrome.optionsRow
-                            + " options.h=" + toolOptionsBar.height
-                            + " options.impH=" + toolOptionsBar.implicitHeight
-                            + " palette.h=" + paletteBar.height
-                            + " bg.y=" + bottomChrome.y
-                            + " bg.map=" + bottomChrome.mapToItem(bottomChrome.parent, 0, 0).y)
-                /* assert hard containment (options entirely above palette) */
-                console.assert(ok, "PB_QML options bar overlaps palette!")
-            }
-        })
     }
 }

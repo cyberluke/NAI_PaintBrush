@@ -51,6 +51,9 @@ class PaintbrushCanvasItem : public QQuickItem
     Q_OBJECT
 
     Q_PROPERTY(int tool READ tool WRITE setTool NOTIFY toolChanged FINAL)
+    /* Human-readable identity of the active tool. The bottom strip names the
+     * tool from this, instead of duplicating the tool-id table in QML. */
+    Q_PROPERTY(QString toolName READ toolName NOTIFY toolChanged FINAL)
     Q_PROPERTY(QColor fgColor READ fgColor WRITE setFgColor NOTIFY fgColorChanged FINAL)
     Q_PROPERTY(QColor bgColor READ bgColor WRITE setBgColor NOTIFY bgColorChanged FINAL)
     Q_PROPERTY(qreal brushSize READ brushSize WRITE setBrushSize NOTIFY brushSizeChanged FINAL)

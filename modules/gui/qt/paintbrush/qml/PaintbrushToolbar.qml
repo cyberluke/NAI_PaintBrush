@@ -28,12 +28,10 @@ import VLC.Paintbrush
  *   - Qt.Vertical (PaintbrushToolRail)   -> a Flow that wraps items into
  *     `columns` columns (row-major two-column rail). Height grows with the
  *     wrapped rows (fixed width = columns * cell).
- *   - Qt.Horizontal (PaintbrushToolOptionsBar) -> a ONE-ROW Flickable/Row
- *     that does NOT wrap vertically. Fixed one-cell height, `clip:true`, and
- *     horizontal scrolling when controls exceed the available width. No content
- *     ever draws outside its host rectangle, and no slider is clipped — it can
- *     be scrolled into view instead. Palette stays a completely separate 64dp
- *     colour surface (this component never renders colour swatches).
+ *   - Qt.Horizontal (PaintbrushToolOptionsBar) -> a ONE-ROW RowLayout. Icon
+ *     and spacer cells are intrinsic; sliders flex between a real minimum and
+ *     maximum. No cell is ever clipped or stretched into a fixed-width shelf,
+ *     and the layout never wraps vertically.
  *
  * The owner rebuilds `items` when `checked`/`value` must change (plain JS
  * cells cannot bind reactively), then triggers `triggered(action,value)` for
@@ -72,9 +70,9 @@ Item {
      * spacers are a fraction (so no item is silently clipped — P1 layout) */
     function _itemW(d) {
         if (d) {
-            if (d.kind === "spacer") return root.cell * 0.4
+            if (d.kind === "spacer") return root.cell * (root._isHoriz ? 1.0 : 0.4)
             if (d.kind === "slider" || d.kind === "option")
-                return (root.orientation === Qt.Horizontal ? root.cell * 5 : root.cell)
+                return (root._isHoriz ? root.cell * 8 : root.cell)
         }
         return root.cell
     }
@@ -92,16 +90,16 @@ Item {
     readonly property real _rows: Math.ceil(items.length / Math.max(1, columns))
     readonly property real _hCellW: columns * cell + (columns - 1) * spacing
 
-    /* ONE-CELL content height. The horizontal bar NEVER wraps vertically; the
-     * host bar is exactly one row tall and the Flickable scrolls horizontally.
-     * contentHeight is therefore just the single cell row, decoupled from any
-     * wrapped-row assumption (this decoupling is the P1 toolbar fix). */
-    readonly property real contentHeight: _isHoriz ? (cell + spacing) : _rows * (cell + spacing)
+    /* ONE-CELL content height. The horizontal bar NEVER wraps vertically; its
+     * host is exactly one row tall. contentHeight is therefore just the single
+     * cell row, decoupled from any wrapped-row assumption. */
+    readonly property real contentHeight: _isHoriz ? cell : _rows * (cell + spacing)
 
     implicitWidth: _isHoriz ? _allWidth : _hCellW
     implicitHeight: contentHeight
 
     ColorContext {
+        palette: VLCStyle.palette
         id: theme
         colorSet: ColorContext.View
     }
@@ -120,18 +118,18 @@ Item {
             && modelData.kind === "spacer"
 
         visible: modelData ? (modelData.visible !== false) : true
-        /* Set by a Layout wrapper in the horizontal strip; -1 means the cell
-         * sizes itself (vertical rail and legacy paths). */
-        property real explicitWidth: -1
-        /* Horizontal (the adaptive strip) gets roomier sliders and a real gap
-         * for spacers: the vertical rail must stay narrow, the strip must not
-         * look like a fixed-cell hardware shelf. Intrinsic icon cells keep one
-         * cell; only sliders widen. */
-        width: isSpacer
-               ? (root.cell * (root._isHoriz ? 1.0 : 0.4))
-               : (isSlider
-                  ? (root.cell * (root._isHoriz ? 9 : 5)) : root.cell)
-        height: root.cell
+        /* Intrinsic width, consumed by the owning container. The delegate must
+         * NOT bind its own width: a Layout child's width binding is overwritten
+         * by the layout (and a required `modelData` on a nested delegate is not
+         * auto-populated), which is exactly why the old horizontal wrapper
+         * produced a strip of failed delegates. Own the size here, let the
+         * container choose how to apply it. */
+        readonly property real intrinsicWidth:
+            isSpacer ? (root.cell * (root._isHoriz ? 1.0 : 0.4))
+                     : (isSlider ? (root.cell * (root._isHoriz ? 8 : 5))
+                                 : root.cell)
+        implicitWidth: intrinsicWidth
+        implicitHeight: root.cell
 
         /* ---------- iconic action cell ------------------------- */
         Rectangle {
@@ -162,7 +160,11 @@ Item {
                              : cell.modelData.iconSource + ".svg")
                         : ""
             }
-            Widgets.LabelExt {
+            /* VLCIcons glyphs are private-use codepoints: they only render
+             * with the icon font family. IconLabel sets
+             * font.family: VLCIcons.fontFamily; LabelExt does not, which is
+             * why the glyph cells showed as hollow tofu boxes. */
+            Widgets.IconLabel {
                 text: (modelData && modelData.iconGlyph) || ""
                 anchors.centerIn: parent
                 font.pixelSize: VLCStyle.fontSize_xxlarge
@@ -240,17 +242,22 @@ Item {
 
         Repeater {
             model: root.items
-            delegate: ToolCellDelegate {}
+            delegate: ToolCellDelegate {
+                width: intrinsicWidth
+                height: root.cell
+            }
         }
     }
 
-    /* Horizontal options: ONE-ROW Flickable with a Row of cells. clip:true so
-     * no control, tooltip body or child may draw outside this bar's own
-     * rectangle; horizontal contentWidth scrolls when wider than the host. */
     /* Horizontal options: a responsive RowLayout, separate from the vertical
      * rail. Slider cells FLEX between a real minimum and maximum; icon and
      * spacer cells stay intrinsic. The vertical Flow is unchanged, so no
-     * horizontal assumption leaks into the tool rail. */
+     * horizontal assumption leaks into the tool rail.
+     *
+     * The delegate IS the Repeater delegate root here (no nested wrapper):
+     * that is what lets the Repeater populate its required `modelData`. The
+     * previous nested wrapper left every cell uncreated, so the bar painted
+     * as an empty box in the real application. */
     RowLayout {
         id: hstrip
         x: 0
@@ -263,29 +270,12 @@ Item {
         Repeater {
             model: root.items
 
-            delegate: Item {
-                id: hwrap
-                readonly property bool sliderCell: modelData
-                    && (modelData.kind === "slider" || modelData.kind === "option")
-                readonly property bool spacerCell: modelData
-                    && modelData.kind === "spacer"
-
-                implicitHeight: root.cell
-                implicitWidth: sliderCell ? (root.cell * 8)
-                                          : (spacerCell ? (root.cell * 0.4)
-                                                        : root.cell)
+            delegate: ToolCellDelegate {
                 Layout.preferredHeight: root.cell
-                Layout.preferredWidth: implicitWidth
-                Layout.fillWidth: sliderCell
-                Layout.minimumWidth: sliderCell ? (root.cell * 5) : implicitWidth
-                Layout.maximumWidth: sliderCell ? (root.cell * 16) : implicitWidth
-
-                ToolCellDelegate {
-                    x: 0
-                    y: 0
-                    height: root.cell
-                    explicitWidth: hwrap.width
-                }
+                Layout.preferredWidth: intrinsicWidth
+                Layout.fillWidth: isSlider
+                Layout.minimumWidth: isSlider ? (root.cell * 5) : intrinsicWidth
+                Layout.maximumWidth: isSlider ? (root.cell * 12) : intrinsicWidth
             }
         }
     }
