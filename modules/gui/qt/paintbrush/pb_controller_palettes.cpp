@@ -179,6 +179,8 @@ QString PaintbrushController::placeSubject(const QString &subjectId,
     inst.x = pos.x();
     inst.y = pos.y();
     inst.zIndex = zBefore;
+    if (m_document.layerCount() > zBefore)
+        m_document.layerAt(zBefore)->subjectInstanceId = inst.id;
 
     QString error;
     if (!store.saveInstance(inst, &error))
@@ -245,6 +247,8 @@ int PaintbrushController::restoreCompositionInstances(const QString &composition
         insertStickerLayer(cutout, QPointF(inst.x, inst.y), asset->name,
                            asset->sourceMediaId, asset->name,
                            inst.sourceStartMs, QImage());
+        if (m_document.layerCount() > 0)
+            m_document.layerAt(m_document.layerCount() - 1)->subjectInstanceId = inst.id;
         ++restored;
     }
 
@@ -256,6 +260,31 @@ int PaintbrushController::restoreCompositionInstances(const QString &composition
               "restore: %d/%d instances materialized for '%s'",
               restored, int(list.size()), compositionId.toUtf8().constData());
     return restored;
+}
+
+void PaintbrushController::syncInstanceTransforms()
+{
+    SubjectStore &store = subjectStore();
+    for (int i = 0; i < m_document.layerCount(); ++i)
+    {
+        const CanvasLayer *layer = m_document.layerAt(i);
+        if (!layer || layer->subjectInstanceId.isEmpty())
+            continue;
+        const SubjectInstance *found = store.findInstance(layer->subjectInstanceId);
+        if (!found)
+            continue;
+        SubjectInstance inst = *found;
+        if (qAbs(inst.x - layer->position.x()) < 0.01
+            && qAbs(inst.y - layer->position.y()) < 0.01
+            && qAbs(inst.scale - double(layer->scale)) < 0.001)
+            continue;
+        inst.x = layer->position.x();
+        inst.y = layer->position.y();
+        inst.scale = double(layer->scale);
+        inst.rotation = double(layer->rotation);
+        QString error;
+        store.saveInstance(inst, &error);
+    }
 }
 
 } // namespace paintbrush

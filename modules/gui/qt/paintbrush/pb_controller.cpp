@@ -5011,6 +5011,7 @@ void PaintbrushController::onCanvasModified()
 {
     emit documentChanged();
     m_document.setDirty(true);
+    syncInstanceTransforms();
 }
 
 void PaintbrushController::onLayerDrop(const QUrl &url, const QPointF &pos)

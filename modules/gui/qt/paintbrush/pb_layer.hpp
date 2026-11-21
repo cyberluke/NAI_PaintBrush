@@ -92,6 +92,11 @@ public:
      * rendering (the cutout alpha already encodes the mask). */
     QVariantMap metadata;
 
+    /* Composition link: the SubjectInstance this layer materializes, or empty
+     * for ordinary layers. Set when a subject is placed; used to write the
+     * layer's transform back to the instance so the two never diverge. */
+    QString subjectInstanceId;
+
     /* -- Paintbrush 2.0 product layer ----------------------------------- */
     /* Non-destructive finish chain (spec §39): applied by the canonical
      * renderer at composite time; `raster` is never modified by an effect. */

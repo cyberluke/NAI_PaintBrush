@@ -691,6 +691,7 @@ public:
     /* Write composition-side transform back to the persisted instance. The
      * shared asset is never touched, so two instances stay independent. */
     Q_INVOKABLE int restoreCompositionInstances(const QString &compositionId);
+    void syncInstanceTransforms();
     Q_INVOKABLE QString updateInstanceTransform(const QString &instanceId,
                                                 double x, double y,
                                                 double scale, double rotation);
