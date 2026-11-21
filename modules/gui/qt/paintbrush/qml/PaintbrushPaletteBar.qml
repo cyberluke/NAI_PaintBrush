@@ -57,8 +57,8 @@ Item {
 
     RowLayout {
         anchors.fill: parent
-        anchors.leftMargin: VLCStyle.margin_normal
-        anchors.rightMargin: VLCStyle.margin_normal
+        anchors.leftMargin: VLCStyle.margin_small
+        anchors.rightMargin: VLCStyle.margin_small
         spacing: VLCStyle.margin_normal
 
         /* foreground / background */
@@ -104,9 +104,14 @@ Item {
             }
         }
 
-        /* classic swatches */
+        /* classic swatches — contextual. The ADR requires swatches to collapse
+         * completely outside colour workflows: during Object Select (tool 3)
+         * and while segmentation is running the row takes ZERO width, so the
+         * strip's height never changes and the canvas never reflows. */
         RowLayout {
+            id: swatchRow
             spacing: VLCStyle.margin_xxxsmall
+            visible: canvas.tool !== 3 && !PaintbrushCtx.segmentationBusy
 
             Repeater {
                 model: ["#000000", "#7f7f7f", "#880015", "#ed1c24", "#ff7f27",

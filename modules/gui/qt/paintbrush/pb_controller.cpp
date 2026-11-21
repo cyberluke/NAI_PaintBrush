@@ -6,6 +6,7 @@
 
 #include "pb_controller.hpp"
 #include "pb_canvas_item.hpp"
+#include "pb_taskbar.hpp"
 #include "pb_frame_capture.hpp"
 #include "pb_export.hpp"
 #include "pb_common.hpp"
@@ -332,6 +333,20 @@ void PaintbrushController::configureServices()
                     if (busy == m_segBusy)
                         return;
                     m_segBusy = busy;
+                    /* Taskbar progress: this signal arrives on the WORKER
+                     * thread, and ITaskbarList3 is a COM object owned by the
+                     * GUI thread. Marshal with a queued invocation so COM is
+                     * never touched off-thread. */
+                    QMetaObject::invokeMethod(this, [this, busy]() {
+                        static paintbrush::TaskbarProgress s_taskbar;
+                        if (!m_canvas || !m_canvas->window())
+                            return;
+                        const quintptr h = quintptr(m_canvas->window()->winId());
+                        if (busy)
+                            s_taskbar.setIndeterminate(h);
+                        else
+                            s_taskbar.clear(h);
+                    }, Qt::QueuedConnection);
                     emit objectSelectionChanged();
                 });
         connect(&m_segmentation, &SegmentationService::progressChanged,

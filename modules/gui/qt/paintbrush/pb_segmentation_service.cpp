@@ -170,6 +170,9 @@ void SegmentationService::cancel()
 
 void SegmentationService::workerLoop()
 {
+    /* Eager, off-GUI-thread preload: the model is ready before the first
+     * click. Failure is non-fatal (each job retries) and already reported. */
+    ensureModelLoaded();
     for (;;)
     {
         Job job;
@@ -216,6 +219,71 @@ QImage maskFromSam(const sam3_mask &mask)
 
 } // namespace
 
+/* Load the SAM model/state if not already loaded for the current path.
+ * Idempotent and cheap when cached. Runs on the WORKER thread only (called
+ * from workerLoop's prologue and from runJob), never on the GUI thread.
+ * Returns false when the model or its inference state could not be built;
+ * availability and error signals are published here so both callers behave
+ * identically. */
+bool SegmentationService::ensureModelLoaded()
+{
+    if (m_model && m_loadedModelPath == m_modelPath)
+        return true;
+
+    setState(STATE_INITIALIZING);
+    emit progressChanged(QStringLiteral("Loading SAM model…"));
+
+    sam3_params params;
+    params.model_path = m_modelPath.toStdString();
+    params.n_threads = static_cast<int>(std::thread::hardware_concurrency());
+    params.use_gpu = (m_device != QStringLiteral("cpu"));
+    params.encode_img_size = 0;
+
+    /* The load is a single opaque C call with no progress callback, and it is
+     * the longest phase of the first job (706 MB). Without these markers a
+     * stalled load is indistinguishable from a crash. */
+    pbLogInfo(m_obj, "segmentation",
+              "model: load START '%s' (%lld bytes, device=%s, threads=%d)",
+              m_modelPath.toUtf8().constData(),
+              (long long)QFileInfo(m_modelPath).size(),
+              m_device.toUtf8().constData(),
+              params.n_threads);
+
+    auto model = sam3_load_model(params);
+    pbLogInfo(m_obj, "segmentation",
+              "model: load %s", model ? "DONE" : "FAILED");
+    if (!model)
+    {
+        m_lastError = QStringLiteral("model load failed");
+        setAvailability(false,
+                        QStringLiteral("Object Select is unavailable: failed to load "
+                                       "the SAM model from %1.").arg(m_modelPath));
+        setState(STATE_FAILED);
+        emit errorOccurred(QStringLiteral("SAM model load failed"));
+        emit initialized(false, m_lastError);
+        return false;
+    }
+
+    auto state = sam3_create_state(*model, params);
+    if (!state)
+    {
+        m_lastError = QStringLiteral("state creation failed");
+        setAvailability(false,
+                        QStringLiteral("Object Select is unavailable: failed to create "
+                                       "SAM inference state."));
+        setState(STATE_FAILED);
+        emit errorOccurred(QStringLiteral("SAM state creation failed"));
+        emit initialized(false, m_lastError);
+        return false;
+    }
+
+    m_model = model;
+    m_stateSam = std::move(state);
+    m_loadedModelPath = m_modelPath;
+    emit initialized(true, {});
+    return true;
+}
+
 void SegmentationService::runJob(Job job)
 {
     if (m_cancelPending)
@@ -229,60 +297,15 @@ void SegmentationService::runJob(Job job)
 
     try
     {
-        /* lazily load the model once per model path */
-        if (!m_model || m_loadedModelPath != m_modelPath)
-        {
-            setState(STATE_INITIALIZING);
-            emit progressChanged(QStringLiteral("Loading SAM model…"));
+        /* Model loading is idempotent and is also called eagerly from the
+         * worker prologue, so the first click never pays the 706 MB load. */
+        if (!ensureModelLoaded())
+            return;
 
-            sam3_params params;
-            params.model_path = m_modelPath.toStdString();
-            params.n_threads = static_cast<int>(std::thread::hardware_concurrency());
-            params.use_gpu = (m_device != QStringLiteral("cpu"));
-            params.encode_img_size = 0;
-
-            /* The load is a single opaque C call with no progress callback, and
-             * it is the longest phase of the FIRST job (706 MB). Without these
-             * markers a stalled load is indistinguishable from a crash, which
-             * is exactly how "Object Select never works" was experienced. */
-            pbLogInfo(m_obj, "segmentation",
-                      "model: load START '%s' (%lld bytes, device=%s, threads=%d)",
-                      m_modelPath.toUtf8().constData(),
-                      (long long)QFileInfo(m_modelPath).size(),
-                      m_device.toUtf8().constData(),
-                      params.n_threads);
-
-            auto model = sam3_load_model(params);
-            pbLogInfo(m_obj, "segmentation",
-                      "model: load %s", model ? "DONE" : "FAILED");
-            if (!model)
-            {
-                m_lastError = QStringLiteral("model load failed");
-                setAvailability(false,
-                                QStringLiteral("Object Select is unavailable: failed to load "
-                                               "the SAM model from %1.").arg(m_modelPath));
-                setState(STATE_FAILED);
-                emit errorOccurred(QStringLiteral("SAM model load failed"));
-                emit initialized(false, m_lastError);
-                return;
-            }
-            auto state = sam3_create_state(*model, params);
-            if (!state)
-            {
-                m_lastError = QStringLiteral("state creation failed");
-                setAvailability(false,
-                                QStringLiteral("Object Select is unavailable: failed to create "
-                                               "SAM inference state."));
-                setState(STATE_FAILED);
-                emit errorOccurred(QStringLiteral("SAM state creation failed"));
-                emit initialized(false, m_lastError);
-                return;
-            }
-            m_model = model;
-            m_stateSam = std::move(state);
-            m_loadedModelPath = m_modelPath;
-            emit initialized(true, {});
-        }
+        /* Back to BUSY: ensureModelLoaded() may have moved the state to
+         * INITIALIZING (fresh load) or left it untouched (cached). */
+        setState(STATE_BUSY);
+        emit progressChanged(QStringLiteral("Segmenting…"));
 
         /* Encode at a BOUNDED resolution. SAM's visual encoder cost scales
          * with pixel count, and a CPU ViT encode of a 570x1080 frame takes

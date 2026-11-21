@@ -113,6 +113,7 @@ private:
 
     void workerLoop();
     void runJob(Job job);
+    bool ensureModelLoaded();
     void setState(State state);
     void setAvailability(bool available, const QString &reason);
 
