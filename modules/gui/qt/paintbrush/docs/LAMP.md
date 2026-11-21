@@ -93,6 +93,14 @@ Start here: `pb_layer.hpp` (enum + fields) -> `pb_document.cpp` compositeLayer -
 - deleteInstance removes the record and its layer atomically.
 - One bottom strip surface (options + palette, constant height).
 
+### Brush engine — narrower than assumed
+
+Pressure infrastructure already exists in `pb_canvas_item`: pressureEnabled,
+pressureToOpacity, pressureMin/Max, pressureFactor() and their Q_PROPERTY
+notifiers. The real delta is true STYLUS pressure feeding pressureFactor() (the
+current factor is derived rather than taken from a tablet point) plus per-brush
+preset data. Do not rebuild what is already there.
+
 ## Known issues / evidence
 
 - Settings magenta was fixed (Dialog `background` must not resolve `theme.*`
