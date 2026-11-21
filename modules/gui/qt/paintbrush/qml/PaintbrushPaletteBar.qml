@@ -51,8 +51,10 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: theme.bg.primary
-        border.width: 1
-        border.color: theme.border
+        /* No internal border: the palette is the lower half of ONE strip whose
+         * upper half is the tool-options bar. A seam here made them read as two
+         * glued panels. */
+        border.width: 0
     }
 
     RowLayout {
