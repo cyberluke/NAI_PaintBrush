@@ -1,5 +1,10 @@
 # NAI Paintbrush — Handoff Document (Phase 5: decoder policy + polish)
 
+> **SUPERSEDED (2026-11-21): historical only.**
+> The authoritative continuation document is `docs/HANDOFF.md`. Do not act on
+> this file. See the lamp for the current commit/build state and the corrected
+> video-preview plan. Kept for history only.
+
 **Date:** 2026-10-22
 **Author:** implementation agent (handoff to maintainer)
 **Spec source:** `C:\Users\lukes.COREI9\Downloads\NAI_Paintbrush_VLC4_Full_Scope_One_Run_Spec (1).md` (Phase 1) + Phase 2 One-Run Implementation Spec

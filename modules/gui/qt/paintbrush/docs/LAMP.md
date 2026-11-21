@@ -1,5 +1,11 @@
 # LAMP — NAI Paintbrush continuation state
 
+> **SUPERSEDED (2026-11-21): historical only.**
+> The authoritative continuation document is `docs/HANDOFF.md`. Do not act on
+> this file. Its last verified commit was `8e2a6eadc5` (more than 30 commits
+> behind the repair commit), and its "settings rewritten" / `var_SetString` claims were
+> contradicted by the source audit. Kept for history only.
+>
 > The lamp is durable state, not a report. Read this first after a context
 > reset. The ADR (`docs/ADAPTIVE_UI_AND_SUBJECTS.md`) is the contract; this
 > file is the position on the map.

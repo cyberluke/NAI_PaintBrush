@@ -1,6 +1,13 @@
 # NAI Paintbrush: Adaptive Creative Workspace & Subject Architecture
 
-**Status:** Accepted product direction, revised architectural contract. Not yet implemented.
+**Status:** Accepted product direction, revised architectural contract.
+**Partially implemented (2026-11-21):** SubjectAsset / SubjectInstance /
+DerivedArtwork stores and placements; layer-space Object Select; transactional
+undo for layer edits plus subject place/delete; adaptive strip baseline;
+settings persistence through the VLC config. **Pending:** video-into-canvas
+preview (plan corrected in `docs/HANDOFF.md` §2, not implemented); full
+invariant-8 capability migration; native `LAYER_VECTOR`; true stylus pressure;
+native acceptance of settings, undo and strip.
 
 **Target:** `modules/gui/qt/paintbrush/docs/ADAPTIVE_UI_AND_SUBJECTS.md`
 

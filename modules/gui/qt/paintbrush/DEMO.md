@@ -2,7 +2,7 @@
 
 A human-driven walkthrough of the Phase 3 feature set against a real video + SAM3
 model (Phase 4 additions noted inline). The implementation agent validated every step's
-underlying service path (see `HANDOFF.md` §5); the live clicks below need a human
+underlying service path (see `docs/HANDOFF.md`; historical details remain in the superseded root `HANDOFF.md` §5); the live clicks below need a human
 because video/AI output grading requires eyes and because the offscreen-automation harness cannot judge vision.
 
 **Setup (once):**
