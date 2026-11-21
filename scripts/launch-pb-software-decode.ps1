@@ -11,7 +11,6 @@ $env:PATH = "$bin;C:\msys64\mingw64\bin;$(Join-Path $root 'win64-meson\lib');$(J
 
 & $vlc `
   "--paintbrush" "--no-media-library" "--no-qt-privacy-ask" "--no-qt-updates-notif" `
-  "--paintbrush-sam-model=D:\_SATIN_AI\models\sam3-q4_0.ggml" "--paintbrush-sam-device=cpu" `
   "--avcodec-hw=none" `
   "--verbose=2" "--file-logging" "--logmode=text" "--logfile=D:\_SATIN_AI\NAI-OS\vlc\pb_sw.log" "--log-verbose=2" `
   "-I" "qt"

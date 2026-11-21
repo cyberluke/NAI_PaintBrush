@@ -17,8 +17,6 @@ $env:PATH = "$bin;$mingw;$(Join-Path $build 'lib');$(Join-Path $build 'src');" +
   "--no-media-library" `
   "--no-qt-privacy-ask" `
   "--no-qt-updates-notif" `
-  "--paintbrush-sam-model=D:\_SATIN_AI\models\sam3-q4_0.ggml" `
-  "--paintbrush-sam-device=cpu" `
   "--verbose=2" `
   "--file-logging" `
   "--logmode=text" `

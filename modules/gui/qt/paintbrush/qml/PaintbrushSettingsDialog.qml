@@ -189,11 +189,19 @@ Dialog {
                             font.pixelSize: VLCStyle.fontSize_xsmall
                         }
                         ComboBox {
-                            model: ["auto", "gpu", "cpu"]
+                            model: ["gpu", "auto", "cpu"]
                             currentIndex: Math.max(0, model.indexOf(root.draftSamDevice))
                             onActivated: root.draftSamDevice = model[currentIndex]
                             Layout.preferredWidth: VLCStyle.dp(140, VLCStyle.scale)
                         }
+                    }
+                    Widgets.LabelExt {
+                        Layout.fillWidth: true
+                        visible: !PaintbrushCtx.samGpuBackendLinked
+                        text: qsTr("GPU is the default preference, but this VLC build links a CPU-only SAM3/ggml backend. The choice is saved for a GPU build; SAM runs on CPU here.")
+                        color: theme.accent
+                        font.pixelSize: VLCStyle.fontSize_xsmall
+                        wrapMode: Text.WordWrap
                     }
                     SettingsRow {
                         label: qsTr("Ask — vision model")

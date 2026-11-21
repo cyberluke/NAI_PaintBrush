@@ -41,8 +41,10 @@ void TrackingService::configure(vlc_object_t *obj)
     m_stepMs = qBound<qint64>(
         qint64(5), qint64(pbConfigInt(obj, "paintbrush-tracking-step-ms")),
         qint64(1000));
-    pbLogInfo(obj, "tracking", "configured model=%s device=%s step=%lld ms",
+    pbLogInfo(obj, "tracking",
+              "configured model=%s device=%s gpuBackend=%s step=%lld ms",
               qUtf8Printable(m_modelPath), qUtf8Printable(m_device),
+              pbSamGpuBackendLinked() ? "linked" : "missing",
               (long long)m_stepMs);
 
     if (m_modelPath.isEmpty())
@@ -445,6 +447,14 @@ void TrackingService::runWorkerJob(const WorkerJob &job)
             params.model_path = m_modelPath.toStdString();
             params.n_threads = static_cast<int>(std::thread::hardware_concurrency());
             params.use_gpu = (m_device != QStringLiteral("cpu"));
+            if (params.use_gpu && !pbSamGpuBackendLinked())
+            {
+                pbLogWarn(m_obj, "tracking",
+                          "device=%s requested, but this build links a CPU-only "
+                          "SAM3/ggml backend; using CPU",
+                          m_device.toUtf8().constData());
+                params.use_gpu = false;
+            }
             params.encode_img_size = 0;
 
             auto model = sam3_load_model(params);

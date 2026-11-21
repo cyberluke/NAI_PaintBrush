@@ -12,24 +12,34 @@
     -Demo           use the Phase 3 release/demo profile (-Demo profile; see
                     -ReleaseProfile and the --paintbrush-demo-mode flag)
     -Extra <args>   additional VLC argument string passed through verbatim
-    -SamModel <p>   path to the SAM3 model (default D:\_SATIN_AI\models\sam3-q4_0.ggml)
-    -SamDevice <d>  SAM3 device: cpu (default)
+    -SamModel <p>   optional SAM3 model override; OMIT to use the saved
+                    NAI Settings value (paintbrush-sam-model in vlcrc)
+    -SamDevice <d>  optional SAM3 device override: auto/gpu/cpu; OMIT to use
+                    the saved NAI Settings value (paintbrush-sam-device)
     -NoSam          don't pass the SAM model/device args (e.g. model missing)
     -NoLaunch       only set the environment and print the command (no run)
     -VerboseLog     pass --verbose=2 -I qt
 
+.NOTES
+  NAI Settings persists into VLC's config file (vlcrc). A command-line
+  --paintbrush-sam-device/--paintbrush-sam-model overrides that file for the
+  whole run, so the defaults here are EMPTY on purpose: a normal restart must
+  honour what the user chose in NAI Settings. Pass -SamDevice/-SamModel only
+  for a deliberate one-off override.
+
 .EXAMPLE
-  .\scripts\run-paintbrush.ps1                       # basic launch
+  .\scripts\run-paintbrush.ps1                       # uses saved NAI Settings
   .\scripts\run-paintbrush.ps1 -Media "D:\clip.mp4"
   .\scripts\run-paintbrush.ps1 -Demo                 # release/demo profile
   .\scripts\run-paintbrush.ps1 -Extra "--no-video-title-show"
+  .\scripts\run-paintbrush.ps1 -SamDevice cpu        # one-off CPU override
 #>
 [CmdletBinding()]
 param(
     [string]$Media,
     [switch]$Demo,
-    [string]$SamModel = "D:\_SATIN_AI\models\sam3-q4_0.ggml",
-    [string]$SamDevice = "cpu",
+    [string]$SamModel = "",
+    [string]$SamDevice = "",
     [switch]$NoSam,
     [switch]$NoLaunch,
     [switch]$VerboseLog,
@@ -60,8 +70,15 @@ $env:PATH = "$bin;$mingw;$(Join-Path $build 'lib');$(Join-Path $build 'src');" +
 # --- arguments ------------------------------------------------------------
 $args = @("--paintbrush", "--no-media-library", "--no-qt-privacy-ask", "--no-qt-updates-notif")
 if (-not $NoSam) {
-    $args += "--paintbrush-sam-model=$SamModel"
-    $args += "--paintbrush-sam-device=$SamDevice"
+    # Only pass an explicit override. With no flag VLC reads the persistent
+    # NAI Settings value from vlcrc; pinning "cpu" here made every restart
+    # ignore the user's GPU choice.
+    if ($SamModel) {
+        $args += "--paintbrush-sam-model=$SamModel"
+    }
+    if ($SamDevice) {
+        $args += "--paintbrush-sam-device=$SamDevice"
+    }
 }
 if ($VerboseLog) {
     $args += "--verbose=2"

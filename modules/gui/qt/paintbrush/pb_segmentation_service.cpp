@@ -55,8 +55,9 @@ void SegmentationService::configure(vlc_object_t *obj)
     m_device = pbNormalizeSamDevice(
         pbConfigString(obj, "paintbrush-sam-device"));
     pbLogInfo(obj, "segmentation",
-              "configured model=%s device=%s",
-              qUtf8Printable(m_modelPath), qUtf8Printable(m_device));
+              "configured model=%s device=%s gpuBackend=%s",
+              qUtf8Printable(m_modelPath), qUtf8Printable(m_device),
+              pbSamGpuBackendLinked() ? "linked" : "missing");
 
     if (m_modelPath.isEmpty())
     {
@@ -256,6 +257,17 @@ bool SegmentationService::ensureModelLoaded()
                             && !okCpu);
     params.use_gpu = !okCpu;
     params.encode_img_size = 0;
+    if (params.use_gpu && !pbSamGpuBackendLinked())
+    {
+        /* The Windows contrib links libggml-cpu only. A "gpu" preference is
+         * still saved for a future GPU build, but it must not make Object
+         * Select unusable here: use the CPU backend and say so. */
+        pbLogWarn(m_obj, "segmentation",
+                  "device=%s requested, but this build links a CPU-only "
+                  "SAM3/ggml backend; using CPU",
+                  m_device.toUtf8().constData());
+        params.use_gpu = false;
+    }
 
     /* The load is a single opaque C call with no progress callback, and it is
      * the longest phase of the first job (706 MB). Without these markers a

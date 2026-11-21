@@ -630,6 +630,10 @@ public:
     Q_PROPERTY(QString settingsAssistantModel READ settingsAssistantModel NOTIFY settingsChanged FINAL)
     Q_PROPERTY(int settingsPtsToleranceMs READ settingsPtsToleranceMs NOTIFY settingsChanged FINAL)
     Q_PROPERTY(bool settingsSecretsPresent READ settingsSecretsPresent CONSTANT FINAL)
+    /* True when the linked SAM3/ggml build has a GPU backend. A CPU-only
+     * contrib cannot honour the GPU preference; Settings says so explicitly
+     * instead of letting the persisted value look broken. */
+    Q_PROPERTY(bool samGpuBackendLinked READ samGpuBackendLinked CONSTANT FINAL)
     /* Segmentation progress (model load + encode + inference). The service
      * already emits stateChanged/progressChanged; until now nothing forwarded
      * them, so the first job looked like a dead click. Both properties reuse
@@ -685,6 +689,8 @@ public:
 
     bool segmentationBusy() const { return m_segBusy; }
     QString segmentationProgress() const { return m_segProgress; }
+    /* Linked-backend truth for the Settings capability row. */
+    bool samGpuBackendLinked() const { return pbSamGpuBackendLinked(); }
     Q_PROPERTY(bool settingsRestartRequired READ settingsRestartRequired NOTIFY settingsChanged FINAL)
     QString settingsSamModel() const;
     QString settingsSamDevice() const;

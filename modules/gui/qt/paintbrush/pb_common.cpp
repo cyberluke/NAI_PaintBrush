@@ -369,6 +369,19 @@ QString pbNormalizeSamDevice(const QString &value)
     return QStringLiteral("auto");
 }
 
+bool pbSamGpuBackendLinked()
+{
+#ifdef PB_SAM_GPU_BACKEND
+    /* meson probed the sam3/ggml link set at configure time and found a GPU
+     * backend initializer. The preference can actually execute on the GPU. */
+    return true;
+#else
+    /* The contrib links libggml-cpu only (or the symbol probe failed), so a
+     * GPU preference falls back to CPU with an explicit warning. */
+    return false;
+#endif
+}
+
 QString pbApiKey(vlc_object_t *obj, const char *envVar, const char *configName)
 {
     /* Environment takes precedence over config so keys never need to be

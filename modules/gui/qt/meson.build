@@ -1366,6 +1366,28 @@ if qt6_dep.found()
     if paintbrush_sam3_dep.found()
         paintbrush_extra_cppargs += '-DHAVE_SAM3'
         paintbrush_extra_deps += paintbrush_sam3_dep
+        # Capability truth for NAI Settings: a CPU-only contrib links only
+        # libggml-cpu, so a saved "gpu" preference cannot run on the GPU.
+        # Probe the real sam3/ggml link set for a backend initializer instead
+        # of promising a backend that is absent. This is a configure-time link
+        # test (MinGW cannot resolve weak undefined symbols at runtime).
+        paintbrush_sam_gpu = false
+        pb_gpu_probe = 'extern "C" void @0@(); int main() { @0@(); return 0; }'
+        foreach pb_gpu_sym : ['ggml_backend_cuda_init',
+                              'ggml_backend_vk_init',
+                              'ggml_backend_d3d12_init',
+                              'ggml_backend_metal_init',
+                              'ggml_backend_sycl_init']
+            if cpp.links(pb_gpu_probe.format(pb_gpu_sym),
+                         dependencies: paintbrush_sam3_dep,
+                         name: 'SAM3 GPU backend ' + pb_gpu_sym)
+                paintbrush_sam_gpu = true
+                break
+            endif
+        endforeach
+        if paintbrush_sam_gpu
+            paintbrush_extra_cppargs += '-DPB_SAM_GPU_BACKEND'
+        endif
     endif
     # NAI Paintbrush: build identity (P0.1, acceptance Gate A) — the running
     # binary must be able to prove which source tree it was built from. The

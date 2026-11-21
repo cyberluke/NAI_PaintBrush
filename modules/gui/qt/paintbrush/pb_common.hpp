@@ -191,6 +191,11 @@ int pbConfigInt(vlc_object_t *obj, const char *name);
  * empty or unknown value becomes "auto" so it can never act as an implicit
  * GPU-only request. */
 QString pbNormalizeSamDevice(const QString &value);
+/* True when the linked ggml/SAM3 build contains a GPU backend initializer.
+ * A CPU-only contrib exposes only ggml_backend_cpu_init; in that case a "gpu"
+ * preference cannot execute on the GPU and the services fall back to CPU with
+ * an explicit warning instead of pretending the preference worked. */
+bool pbSamGpuBackendLinked();
 /* Read an API key from the environment or VLC config (never logged). */
 QString pbApiKey(vlc_object_t *obj, const char *envVar, const char *configName);
 

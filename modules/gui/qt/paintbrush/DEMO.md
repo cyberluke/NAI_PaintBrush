@@ -9,7 +9,8 @@ because video/AI output grading requires eyes and because the offscreen-automati
 - Build: `cd win64-meson && export PATH=/mingw64/bin:/usr/bin:<contrib>/bin && ninja modules/libqt_plugin.dll`
 - Regenerate plugin cache: full PATH incl. `win64-meson\bin;lib;src;modules`, then `bin\vlc-cache-gen.exe ./modules`.
 - Launch: `scripts\run-paintbrush.ps1 -Media "C:\Users\lukes.COREI9\Videos\aespa-supernova.mp4"`
-  (adds `--paintbrush-sam-model=D:\_SATIN_AI\models\sam3-q4_0.ggml --paintbrush-sam-device=cpu`).
+  (SAM model/device come from NAI Settings in `vlcrc`; pass
+  `--paintbrush-sam-device=cpu` only for a deliberate one-off CPU run).
   Expect ~595 modules loaded and the Paintbrush workspace (15 tools) + media drawer.
   Note: CPU SAM encode is ~75 s/frame at 2190×1262 → each click below that triggers SAM is slow.
 

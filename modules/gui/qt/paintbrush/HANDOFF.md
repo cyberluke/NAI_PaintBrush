@@ -166,7 +166,10 @@ D3D11VA while `avcodec-hwdec=1` uses `yuv420p`.
 ## 5. Verification performed (Phase 2 + Phase 3)
 
 - **Builds:** `ninja modules/libqt_plugin.dll` — clean (only pre-existing `-Wsfinae-incomplete` warning). Plugin cache regenerated with `vlc-cache-gen.exe` (after each Phase 3 rebuild).
-- **Runtime smoke (real launch):** `vlc.exe --paintbrush --no-media-library --no-qt-privacy-ask --no-qt-updates-notif --paintbrush-sam-model=D:\_SATIN_AI\models\sam3-q4_0.ggml --paintbrush-sam-device=cpu --verbose=2 -I qt`
+- **Runtime smoke (real launch):** `vlc.exe --paintbrush --no-media-library --no-qt-privacy-ask --no-qt-updates-notif --verbose=2 -I qt`
+  SAM model/device come from NAI Settings (persisted in `vlcrc`). Do NOT add
+  `--paintbrush-sam-device=` to a normal launch: a command-line value overrides
+  the saved setting for the whole run, which made GPU selections look lost.
   - Process alive, no assertions, no crashes; UI Automation tree shows all 15 tools + new controls instantiated.
   - **Zero QML errors**: no `TypeError`, `Cannot read property`, `Unable to assign`, or `ReferenceError` (all new UI — thumbnail strip, collage dialog, recovery banner, refine buttons, talk-level selector, project info, diagnostics actions, Open video, Extract object, mask-refine hint — instantiated cleanly).
 - **Phase 3 real-video validation (4K desktop, real video + SAM3 model):**

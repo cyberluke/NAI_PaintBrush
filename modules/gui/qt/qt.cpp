@@ -376,9 +376,9 @@ static const int i_raise_list[] =
 static const char *const psz_raise_list_text[] =
     { N_( "Never" ), N_( "Video" ), N_( "Audio" ), _( "Audio/Video" ) };
 
-static const char *const psz_sam_devices[] = { "auto", "cpu", "gpu" };
+static const char *const psz_sam_devices[] = { "gpu", "auto", "cpu" };
 static const char *const psz_sam_devices_text[] =
-    { N_( "Automatic" ), N_( "CPU" ), N_( "GPU" ) };
+    { N_( "GPU" ), N_( "Automatic" ), N_( "CPU" ) };
 
 static const char *const compositor_vlc[] = {
     "auto",
@@ -432,7 +432,7 @@ vlc_module_begin ()
     add_integer_with_range( "paintbrush-autosave-interval", 120, 10, 3600,
                             PB_AUTOSAVE_INTERVAL_TEXT, nullptr )
     add_string( "paintbrush-sam-model", NULL, PB_SAM_MODEL_TEXT, PB_SAM_MODEL_LONGTEXT )
-    add_string( "paintbrush-sam-device", "auto", PB_SAM_DEVICE_TEXT, PB_SAM_DEVICE_LONGTEXT )
+    add_string( "paintbrush-sam-device", "gpu", PB_SAM_DEVICE_TEXT, PB_SAM_DEVICE_LONGTEXT )
             change_string_list( psz_sam_devices, psz_sam_devices_text )
     add_string( "paintbrush-vlm-base-url", NULL, PB_VLM_BASE_TEXT, PB_VLM_BASE_LONGTEXT )
     add_string( "paintbrush-vlm-model", NULL, PB_VLM_MODEL_TEXT, nullptr )
