@@ -120,10 +120,14 @@ Item {
             && modelData.kind === "spacer"
 
         visible: modelData ? (modelData.visible !== false) : true
+        /* Horizontal (the adaptive strip) gets roomier sliders and a real gap
+         * for spacers: the vertical rail must stay narrow, the strip must not
+         * look like a fixed-cell hardware shelf. Intrinsic icon cells keep one
+         * cell; only sliders widen. */
         width: isSpacer
-               ? (root.cell * 0.4)
+               ? (root.cell * (root._isHoriz ? 1.0 : 0.4))
                : (isSlider
-                  ? (root.cell * 5) : root.cell)
+                  ? (root.cell * (root._isHoriz ? 9 : 5)) : root.cell)
         height: root.cell
 
         /* ---------- iconic action cell ------------------------- */
