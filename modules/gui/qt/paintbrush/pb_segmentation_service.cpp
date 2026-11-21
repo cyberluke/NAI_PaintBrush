@@ -211,9 +211,17 @@ QImage maskFromSam(const sam3_mask &mask)
     if (mask.width <= 0 || mask.height <= 0 || mask.data.empty())
         return {};
     QImage out(mask.width, mask.height, QImage::Format_Grayscale8);
-    /* mask.data is 0/255 binary; copy directly (row-major) */
-    memcpy(out.bits(), mask.data.data(),
-           size_t(mask.width) * size_t(mask.height));
+    /* mask.data is 0/255 binary, packed row-major with NO padding. QImage rows
+     * ARE 4-byte aligned (bytesPerLine >= width), so a single flat memcpy
+     * shears every row once the width is not a multiple of 4 — which is what
+     * produced diagonal stripes after the encode width became 338/340. Copy
+     * row by row into the image's own stride instead. */
+    for (int y = 0; y < mask.height; ++y)
+    {
+        memcpy(out.scanLine(y),
+               mask.data.data() + size_t(y) * size_t(mask.width),
+               size_t(mask.width));
+    }
     return out;
 }
 
