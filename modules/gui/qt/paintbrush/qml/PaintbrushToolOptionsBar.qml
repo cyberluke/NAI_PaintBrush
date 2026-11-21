@@ -67,7 +67,9 @@ Rectangle {
      * any wrapped-contentHeight so the bar can never grow into the palette. */
     readonly property real _oneRow: VLCStyle.dp(32, VLCStyle.scale)
                                    + VLCStyle.margin_xsmall
-    height: _oneRow + VLCStyle.margin_xsmall * 2
+    /* implicitHeight, not height: the bar is a Layout item inside the strip,
+     * and a bound height fights the layout. */
+    implicitHeight: _oneRow + VLCStyle.margin_xsmall * 2
     /* Overflow clips inside the strip instead of drawing over the canvas. */
     clip: true
     color: theme.bg.primary
