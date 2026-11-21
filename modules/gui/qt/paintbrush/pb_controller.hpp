@@ -688,6 +688,11 @@ public:
      * persisted instance can never point at a missing insertion. */
     Q_INVOKABLE QString placeSubject(const QString &subjectId,
                                      const QString &compositionId);
+    /* Write composition-side transform back to the persisted instance. The
+     * shared asset is never touched, so two instances stay independent. */
+    Q_INVOKABLE QString updateInstanceTransform(const QString &instanceId,
+                                                double x, double y,
+                                                double scale, double rotation);
     /* Composition-facing instances: independent transforms/effects per
      * placement of one shared asset. */
     Q_INVOKABLE QVariantList instanceList(const QString &compositionId) const;

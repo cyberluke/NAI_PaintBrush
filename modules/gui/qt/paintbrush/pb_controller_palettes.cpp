@@ -188,4 +188,27 @@ QString PaintbrushController::placeSubject(const QString &subjectId,
     return QString();
 }
 
+QString PaintbrushController::updateInstanceTransform(const QString &instanceId,
+                                                      double x, double y,
+                                                      double scale,
+                                                      double rotation)
+{
+    SubjectStore &store = subjectStore();
+    const SubjectInstance *found = store.findInstance(instanceId);
+    if (!found)
+        return QStringLiteral("Instance not found.");
+
+    SubjectInstance inst = *found;
+    inst.x = x;
+    inst.y = y;
+    inst.scale = scale;
+    inst.rotation = rotation;
+
+    QString error;
+    if (!store.saveInstance(inst, &error))
+        return error;
+    emit objectSelectionChanged();
+    return QString();
+}
+
 } // namespace paintbrush
