@@ -98,6 +98,8 @@ public:
                                 QString *error);
 
     QString userDir() const;
+    /* PNG cutout stored next to the asset, used to place it on a canvas. */
+    QString assetImagePath(const QString &id) const;
     static bool validate(const SubjectAsset &asset, QString *error);
     static bool validateInstance(const SubjectInstance &instance,
                                  const SubjectAsset *asset,

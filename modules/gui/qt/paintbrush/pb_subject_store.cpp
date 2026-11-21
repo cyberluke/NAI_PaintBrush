@@ -341,4 +341,9 @@ SubjectStore &sharedSubjectStore()
     return store;
 }
 
+QString SubjectStore::assetImagePath(const QString &id) const
+{
+    return userDir() + QLatin1Char('/') + id + QStringLiteral(".png");
+}
+
 } // namespace paintbrush

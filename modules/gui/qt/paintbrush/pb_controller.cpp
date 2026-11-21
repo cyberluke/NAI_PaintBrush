@@ -2028,12 +2028,23 @@ void PaintbrushController::onSegmentationMaskReady(const QImage &mask, double sc
         asset.segmentationTrackId = asset.id + QStringLiteral("-segmentation");
         QString subjectError;
         if (sharedSubjectStore().save(asset, &subjectError))
+        {
+            /* Persist the cut-out pixels next to the asset so an instance can
+             * be PLACED on a canvas later. The asset keeps only provenance;
+             * the PNG is content, not identity. */
+            const QImage subjectPixels = objectCrop();
+            if (!subjectPixels.isNull())
+            {
+                QDir().mkpath(sharedSubjectStore().userDir());
+                subjectPixels.save(sharedSubjectStore().assetImagePath(asset.id));
+            }
             pbLogInfo(VLC_OBJECT(m_intf), "segmentation",
                       "subject: created %s '%s' (media=%s pts=%lld)",
                       asset.id.toUtf8().constData(),
                       asset.name.toUtf8().constData(),
                       asset.sourceMediaId.toUtf8().constData(),
                       (long long)asset.sourcePtsMs);
+        }
         else
             pbLogWarn(VLC_OBJECT(m_intf), "segmentation",
                       "subject: save failed: %s",
