@@ -7,6 +7,9 @@
 #include "pb_controller.hpp"
 #include "pb_palette_store.hpp"
 #include "pb_subject_store.hpp"
+#include "pb_layer.hpp"
+#include "pb_history.hpp"
+#include "art/finish/effects.hpp"
 #include "pb_canvas_item.hpp"
 #include "qt.hpp"
 
@@ -322,6 +325,83 @@ void PaintbrushController::beginTransaction(const QString &description)
 void PaintbrushController::endTransaction()
 {
     m_undoStack.endComposite();
+}
+
+QString PaintbrushController::applySubjectStyle(const QString &instanceId,
+                                                const QString &recipeId)
+{
+    SubjectStore &store = subjectStore();
+    if (!store.findInstance(instanceId))
+        return QStringLiteral("Instance not found.");
+
+    CanvasLayer *layer = nullptr;
+    for (int i = 0; i < m_document.layerCount(); ++i)
+    {
+        CanvasLayer *candidate = m_document.layerAt(i);
+        if (candidate && candidate->subjectInstanceId == instanceId)
+        {
+            layer = candidate;
+            break;
+        }
+    }
+    if (!layer)
+        return QStringLiteral("This instance has no layer on the canvas.");
+
+    art::EffectNode node;
+    if (recipeId == QStringLiteral("ink"))
+    {
+        node.type = art::EffectNode::Outline;
+        node.color = QColor(0x1B, 0x2A, 0x33);
+        node.width = 3.5f;
+        node.softness = 0.15f;
+    }
+    else if (recipeId == QStringLiteral("glow"))
+    {
+        node.type = art::EffectNode::Glow;
+        node.color = QColor(0xFF, 0x6B, 0xD6);
+        node.radius = 24.0f;
+        node.intensity = 1.2f;
+        node.threshold = 0.2f;
+    }
+    else if (recipeId == QStringLiteral("ghost"))
+    {
+        node.type = art::EffectNode::Ghost;
+        node.desaturate = 0.6f;
+        node.opacity = 0.35f;
+        node.tint = QColor(0xFF, 0xFF, 0xFF, 90);
+    }
+    else
+    {
+        return QStringLiteral("Unknown style recipe.");
+    }
+
+    QVector<art::EffectNode> after = layer->effects;
+    bool replaced = false;
+    for (art::EffectNode &existing : after)
+    {
+        if (existing.type == node.type)
+        {
+            existing = node;        /* same recipe twice = idempotent */
+            replaced = true;
+            break;
+        }
+    }
+    if (!replaced)
+        after.append(node);
+
+    SetEffectsCommand cmd;
+    cmd.layerId = layer->id;
+    cmd.before = layer->effects;
+    cmd.after = after;
+    cmd.desc = QStringLiteral("Apply %1 style").arg(recipeId);
+
+    layer->effects = after;
+    m_undoStack.pushCommand(std::make_unique<SetEffectsCommand>(cmd));
+    if (m_canvas)
+        m_canvas->markCanvasDirty();
+    emit documentChanged();
+    setStatus(QStringLiteral("Applied style: %1").arg(recipeId));
+    return QString();
 }
 
 } // namespace paintbrush

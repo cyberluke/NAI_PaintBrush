@@ -695,6 +695,10 @@ public:
     /* One undo entry spanning several document mutations. */
     Q_INVOKABLE void beginTransaction(const QString &description);
     Q_INVOKABLE void endTransaction();
+    /* Non-destructive style on a placed subject: appends/updates an effect on
+     * the LINKED layer only; the subject mask and source are untouched. */
+    Q_INVOKABLE QString applySubjectStyle(const QString &instanceId,
+                                          const QString &recipeId);
     Q_INVOKABLE QString updateInstanceTransform(const QString &instanceId,
                                                 double x, double y,
                                                 double scale, double rotation);

@@ -485,6 +485,21 @@ Item {
                             console.log("PB_QML place failed: " + err)
                     }
                 }
+                Widgets.ActionButtonPrimary {
+                    Layout.fillWidth: true
+                    text: qsTr("Style last subject — Ink")
+                    onClicked: {
+                        const list = PaintbrushCtx.instanceList("main")
+                        if (list.length === 0) {
+                            console.log("PB_QML style: no instances")
+                            return
+                        }
+                        const err = PaintbrushCtx.applySubjectStyle(
+                                        list[list.length - 1].id, "ink")
+                        if (err.length > 0)
+                            console.log("PB_QML style failed: " + err)
+                    }
+                }
             }
 
             /* Legacy voice/generation actions are collapsed by default so the
