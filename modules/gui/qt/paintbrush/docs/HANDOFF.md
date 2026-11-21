@@ -18,16 +18,19 @@
   state (vout/track subscriptions). `317ca0ad1b` — toolbar theme resolution,
   VLCIcons glyph fallback, and capability refresh. `b11892c597` — capture/
   compose keeps the decoded keyframe instead of the black viewer snapshot.
-  This lamp is the docs commit that contains this file.
-- **Verified build (2026-11-21 15:29):**
-  `ninja -C win64-meson modules/libqt_plugin.dll` → `EXIT=0` (incremental:
-  controller object + link). Artifact:
-  `win64-meson/modules/libqt_plugin.dll`, `21.11.2026 15:29:59`,
-  417,229,068 bytes. QML resource remains the 10:49:02 build; the capture fix
-  is C++.
-- **Provenance:** the app worktree is clean at `b11892c597`; no untracked app
-  files. The DLL was linked from that app code; the docs commit after it does
-  not change the plugin.
+  `452ac7e835` — lazy SAM load on first segmentation (no 706 MB startup
+  stall). This lamp is the docs commit that contains this file.
+- **Verified build (2026-11-21 16:42):**
+  `ninja -C win64-meson modules/libqt_plugin.dll` → `EXIT=0` (clean workspace
+  rebuild). Artifact: `win64-meson/modules/libqt_plugin.dll`,
+  `21.11.2026 16:42:57`, 417,229,068 bytes. QML resource
+  `paintbrush_assets.cpp` regenerated `16:42:51`.
+- **Provenance:** app code is committed at `452ac7e835`; the temporary
+  end-to-end QML probe was removed before the build. Four launch helper scripts
+  (`scripts/launch-pb-noskip.ps1`, `launch-pb-sam.ps1`,
+  `launch-pb-software-decode.ps1`, `run-paintbrush.ps1`) are modified by
+  another workstream and remain uncommitted/not staged. The DLL was linked from
+  the committed app code; the docs commit after it does not change the plugin.
 - Running VLC from `C:\Program Files\VideoLAN` does not lock the build tree.
   Only a VLC/Paintbrush launched from `win64-meson` locks its DLLs.
 
@@ -235,7 +238,7 @@ Render/interaction contract for that future preview:
 | Palette store: 27 locked built-ins incl. Art Studio paper/stocks/18 directions, user palettes as JSON, import/export | `pb_palette_store.{hpp,cpp}`, `pb_controller_palettes.cpp`, `palettes/builtin-palettes.json`, `probes/sync-builtin-palettes.ps1` |
 | Subject model: `SubjectAsset` / `SubjectInstance` / `DerivedArtwork`, JSON persistence, cut-out PNG | `pb_subject_store.{hpp,cpp}` |
 | Object Select: layer-space segmentation (`SourceCanvasLayer`), mask baked to document space, Keep/cut-out use layer pixels | `pb_selection.hpp`, `pb_controller.cpp` |
-| SAM: eager preload, bounded 640px encode with mapped prompt points, encode-keyed cache, phase markers, **row-stride mask fix**, device ladder **auto/gpu/cpu with CPU fallback**; tracking now normalizes empty/unknown to auto and falls back to CPU for auto | `pb_segmentation_service.{hpp,cpp}`, `pb_tracking_service.cpp` |
+| SAM: **lazy model load on first segmentation** (`452ac7e835`; worker idle at startup, no 706 MB eager launch stall), bounded 640px encode with mapped prompt points, encode-keyed cache, phase markers, **row-stride mask fix**, device ladder **auto/gpu/cpu with CPU fallback**; tracking now normalizes empty/unknown to auto and falls back to CPU for auto | `pb_segmentation_service.{hpp,cpp}`, `pb_tracking_service.cpp` |
 | Progress: service `busyChanged`/`progressChanged` forwarded to QML, 3dp indeterminate rail + phase text; Windows taskbar progress via pimpl `ITaskbarList3`, queued to the GUI thread | `pb_controller.cpp`, `pb_taskbar.{hpp,cpp}`, `PaintbrushCanvasView.qml` |
 | Placements: cut-out → persisted instance + real layer in one undo step, cascade offset, layer↔instance link, transform sync, restore on project open | `pb_controller_palettes.cpp`, `pb_controller.cpp`, `pb_layer.hpp` |
 | Styling: `applySubjectStyle` (Outline/Glow/Ghost on the linked layer), `deriveArtwork` (`mode=raster`), `deriveContour` (selection `QPainterPath`, path persisted as `nai-paintbrush/contour/v1`, `mode=vector`) | `pb_controller_palettes.cpp` |
@@ -315,8 +318,13 @@ Render/interaction contract for that future preview:
 - **Invariant 8**: the numeric-id checks listed in §4.8 remain.
 - **Probe coverage**: 2 QML probes + 2 static checks. `pb_media_logic.hpp` has
   no standalone C++ harness; settings/undo paths are not probe-covered.
-- **Worktree**: clean at `b11892c597`; no untracked app files. Verify in the
-  built app.
+- **Startup responsiveness**: the eager SAM preload was removed in
+  `452ac7e835`; the worker waits idle and the 706 MB model loads on the first
+  segmentation request. This removes the startup “Loading SAM model…” stall
+  that starved the workspace. **Native acceptance pending.**
+- **Worktree**: app code committed at `452ac7e835`; four launch helper scripts
+  are modified by another workstream and uncommitted (not staged). Verify in
+  the built app.
 - **Store/document atomicity**: the composite makes undo/redo coherent across
   the layer and the store, but they are separate files with no cross-file crash
   journal. A process crash between the two writes can leave a mismatch; store
@@ -344,7 +352,9 @@ Render/interaction contract for that future preview:
 - **The audit repair is committed at `453f11e913`; the video-state fix is
   committed at `c03ecc0bd1`; the toolbar theme/icon fix is committed at
   `317ca0ad1b`; the capture keyframe fix is committed at `b11892c597`.**
-- No app files are left uncommitted; the worktree is clean at `b11892c597`.
+- No app files from this work are left uncommitted; app code is at
+  `452ac7e835`. The four modified launch helper scripts belong to another
+  workstream and are not staged.
 - **Do not** add a plaintext API-key field or a `var_SetString`-based setter.
   The supported secret path is the environment, read by `pbApiKey()`.
 - For native verification, use the built app; the app is the UI gate.
@@ -375,7 +385,8 @@ Render/interaction contract for that future preview:
 `pb_noskip.log` categories:
 
 - `segmentation`: `queued`, `encode START/DONE/FAILED/reused`, `mask ready`,
-  `error`, `model: load START/DONE/FAILED (tier=… use_gpu=…)`
+  `error`, `model: load START/DONE/FAILED (tier=… use_gpu=…)` — the model load
+  now starts on the first segmentation request, not at launch.
 - `objectselect`: click route, `layer route`, `compose route`
 - `layers`: `setLayerVisible: index=… visible=… currentBefore=…`
 - `media`: thumbnail slot latency / nearest-keyframe delta
@@ -389,26 +400,29 @@ Render/interaction contract for that future preview:
 ## 9. Build / most-recent evidence
 
 ```
-ninja -C win64-meson modules/libqt_plugin.dll   EXIT=0 (incremental: controller + link
-                                                15:29:59)
-modules/libqt_plugin.dll                        21.11.2026 15:29:59, 417,229,068 bytes
-QML resource paintbrush_assets.cpp              10:49:02 (unchanged by the C++ capture fix)
+ninja -C win64-meson modules/libqt_plugin.dll   EXIT=0 (clean workspace rebuild 16:42:57)
+modules/libqt_plugin.dll                        21.11.2026 16:42:57, 417,229,068 bytes
+QML resource paintbrush_assets.cpp              regenerated 16:42:51
 probes                                          check-qml-contracts PASS (264),
                                                 check-palettes PASS (27),
                                                 2/2 probes passed, EXIT=0
-                                                (after b11892c597)
+                                                (after 452ac7e835)
 code repair commit                              453f11e913
 video-state commit                              c03ecc0bd1
 toolbar theme/icon commit                       317ca0ad1b
 capture keyframe commit                         b11892c597
+lazy SAM commit                                 452ac7e835
 runtime smoke (built app, 1.mp4, 10:38)         video track count=1 playerHasVideo=0
                                                 player video state: hasVideoOutput=1
                                                 playerHasVideo=1
-capture UI smoke                                not automatable from the CLI this
-                                                session (launched Player view);
-                                                native acceptance pending
+capture UI smoke                                temporary QML timer probe did not
+                                                fire in the automated workspace;
+                                                probe removed; native UI acceptance
+                                                pending
 HEAD                                            this docs commit
-worktree                                        clean at b11892c597
+worktree                                        app code 452ac7e835; four launch
+                                                scripts modified by another
+                                                workstream (not staged)
 ```
 
 ## 10. Superseded documents
