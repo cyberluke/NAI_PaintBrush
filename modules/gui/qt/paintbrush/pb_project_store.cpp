@@ -69,7 +69,16 @@ static QString layerToJson(const CanvasLayer &layer)
                 meta[it.key()] = v.toLongLong();
                 break;
             default:
+            {
+                /* Structured values (the vector path is a QVariantList of
+                 * QVariantMap elements) must round-trip too; the scalar-only
+                 * switch silently dropped them and would have lost the
+                 * editable geometry on save. */
+                const QJsonValue jv = QJsonValue::fromVariant(v);
+                if (!jv.isNull() && !jv.isUndefined())
+                    meta[it.key()] = jv;
                 break;
+            }
             }
         }
         if (!meta.isEmpty())
