@@ -7,6 +7,7 @@
 #include "pb_controller.hpp"
 #include "pb_canvas_item.hpp"
 #include "pb_taskbar.hpp"
+#include "pb_subject_store.hpp"
 #include "pb_frame_capture.hpp"
 #include "pb_export.hpp"
 #include "pb_common.hpp"
@@ -2011,6 +2012,34 @@ void PaintbrushController::onSegmentationMaskReady(const QImage &mask, double sc
               "mask ready: %dx%d score=%.3f method=%s sourceKind=%d",
               mask.width(), mask.height(), score, method.toUtf8().constData(),
               int(m_selection.sourceKind));
+    /* ADR 4.1 step 7: only now, with a materialized mask, does the click
+     * become a persistent Subject. The transient ObjectSelectionContext is
+     * never persisted; the asset carries source identity and track ids only,
+     * so composition transforms cannot leak onto it. */
+    if (m_selection.sourceKind == ObjectSelectionContext::SourceCanvasLayer)
+    {
+        SubjectAsset asset;
+        asset.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        asset.name = QStringLiteral("Subject %1")
+                         .arg(sharedSubjectStore().all().size() + 1);
+        asset.sourceMediaId = m_selection.ref.mrl;
+        asset.sourcePtsMs = m_selection.ref.ptsMs;
+        asset.identityTrackId = asset.id + QStringLiteral("-identity");
+        asset.segmentationTrackId = asset.id + QStringLiteral("-segmentation");
+        QString subjectError;
+        if (sharedSubjectStore().save(asset, &subjectError))
+            pbLogInfo(VLC_OBJECT(m_intf), "segmentation",
+                      "subject: created %s '%s' (media=%s pts=%lld)",
+                      asset.id.toUtf8().constData(),
+                      asset.name.toUtf8().constData(),
+                      asset.sourceMediaId.toUtf8().constData(),
+                      (long long)asset.sourcePtsMs);
+        else
+            pbLogWarn(VLC_OBJECT(m_intf), "segmentation",
+                      "subject: save failed: %s",
+                      subjectError.toUtf8().constData());
+    }
+
     setStatus(QStringLiteral("Object selected (confidence %.0f%%)").arg(score * 100.0));
 }
 

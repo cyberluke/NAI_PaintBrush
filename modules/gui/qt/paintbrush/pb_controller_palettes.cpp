@@ -65,8 +65,7 @@ QString PaintbrushController::importPalette(const QString &filePath)
 
 static SubjectStore &subjectStore()
 {
-    static SubjectStore store;
-    return store;
+    return sharedSubjectStore();
 }
 
 QVariantList PaintbrushController::subjectList() const

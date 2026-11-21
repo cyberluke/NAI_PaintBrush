@@ -84,4 +84,6 @@ private:
 
 } // namespace paintbrush
 
+namespace paintbrush { SubjectStore &sharedSubjectStore(); }
+
 #endif

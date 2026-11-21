@@ -334,4 +334,10 @@ bool SubjectStore::writeInstanceFile(const SubjectInstance &instance, QString *e
     return true;
 }
 
+SubjectStore &sharedSubjectStore()
+{
+    static SubjectStore store;
+    return store;
+}
+
 } // namespace paintbrush
