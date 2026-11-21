@@ -7,6 +7,7 @@
 #include "pb_layer.hpp"
 
 #include <QtMath>
+#include <QPainter>
 
 namespace paintbrush {
 
@@ -107,6 +108,14 @@ CanvasLayer CanvasLayer::createReference(const QImage &image, const QString &nam
 
 QRect CanvasLayer::contentBounds() const
 {
+    if (type == LAYER_VECTOR)
+    {
+        if (vectorPath.isEmpty())
+            return {};
+        const QRectF b = transform().mapRect(vectorPath.boundingRect());
+        const qreal pad = qMax<qreal>(0.0, vectorStrokeWidth * 0.5 + 1.0);
+        return b.adjusted(-pad, -pad, pad, pad).toAlignedRect();
+    }
     if (raster.isNull())
         return {};
     if (type == LAYER_IMAGE || type == LAYER_REFERENCE || type == LAYER_TEXT
@@ -150,8 +159,26 @@ QRect CanvasLayer::contentBounds() const
     return QRect(minX, minY, maxX - minX + 1, maxY - minY + 1);
 }
 
+void CanvasLayer::refreshVectorPreview()
+{
+    if (type != LAYER_VECTOR || raster.isNull())
+        return;
+    raster.fill(Qt::transparent);
+    QPainter p(&raster);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    QPen pen(vectorStroke.isValid() ? vectorStroke : QColor(Qt::black));
+    pen.setWidthF(qMax<qreal>(0.0, vectorStrokeWidth));
+    pen.setJoinStyle(Qt::RoundJoin);
+    pen.setCapStyle(Qt::RoundCap);
+    p.setPen(pen);
+    p.setBrush(vectorFill.isValid() ? QBrush(vectorFill) : QBrush(Qt::NoBrush));
+    p.drawPath(vectorPath);
+}
+
 bool CanvasLayer::isEmpty() const
 {
+    if (type == LAYER_VECTOR)
+        return vectorPath.isEmpty();
     return raster.isNull() || contentBounds().isEmpty();
 }
 

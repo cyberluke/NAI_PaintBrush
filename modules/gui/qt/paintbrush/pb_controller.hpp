@@ -672,6 +672,10 @@ public:
                NOTIFY toolCapabilitiesChanged FINAL)
     Q_PROPERTY(bool isHarvestPresentation READ isHarvestPresentation
                NOTIFY presentationModeChanged FINAL)
+    Q_PROPERTY(bool vectorEditActive READ vectorEditActive
+               NOTIFY vectorEditChanged FINAL)
+    Q_PROPERTY(QVariantList vectorEditNodes READ vectorEditNodes
+               NOTIFY vectorEditNodesChanged FINAL)
 
     /* Bodies live in pb_controller.cpp: PaintbrushCanvasItem is only
      * forward-declared here, so inline accessors would be instantiated in TUs
@@ -686,6 +690,17 @@ public:
     bool toolHasGlitterParameters() const;
     bool toolHasPowderParameters() const;
     bool isHarvestPresentation() const;
+
+    /* In-canvas node editor for native LAYER_VECTOR layers. Double-clicking
+     * a vector path arms it; the QML overlay drags nodes through these
+     * invokables, and each drag becomes one VectorPathCommand. */
+    bool vectorEditActive() const { return m_vectorEditLayerId >= 0; }
+    QVariantList vectorEditNodes() const;
+    Q_INVOKABLE void beginVectorEdit(int layerId);
+    Q_INVOKABLE void endVectorEdit();
+    Q_INVOKABLE void beginVectorNodeDrag(int nodeIndex);
+    Q_INVOKABLE void moveVectorNode(int nodeIndex, qreal itemX, qreal itemY);
+    Q_INVOKABLE void endVectorNodeDrag();
 
     bool segmentationBusy() const { return m_segBusy; }
     QString segmentationProgress() const { return m_segProgress; }
@@ -789,6 +804,8 @@ signals:
     void statusMessageChanged();
     void projectChanged();
     void toolCapabilitiesChanged();
+    void vectorEditChanged();
+    void vectorEditNodesChanged();
     void recentColorsChanged();
     void documentChanged();
     void serviceAvailabilityChanged();
@@ -874,6 +891,12 @@ private:
                             const QString &sourceTitle, qint64 sourceTimeMs,
                             const QImage &seedMask,
                             const QString &subjectInstanceId = QString());
+    /* Insert a native LAYER_VECTOR. `localPath` is layer-local geometry;
+     * `preview` is only the layer thumbnail (the renderer draws the path). */
+    void insertVectorLayer(const QPainterPath &localPath,
+                           const QPointF &position, const QImage &preview,
+                           const QColor &stroke, qreal strokeWidth,
+                           const QString &name);
     /* Real source pixels for a track keyframe (A16): bounded LRU cache
      * first, then ONE verified seek+capture through the existing
      * FrameCaptureService bridge. No UI-thread sleep-polling (A17); the
@@ -1026,6 +1049,10 @@ private:
     QImage m_maskUndoBefore;   /* mask captured when a refine stroke arms */
     bool m_objectMaskSoftEdge = false;
     PresentationMode m_presentationMode = PresentationMode::ComposeCanvas;
+    int m_vectorEditLayerId = -1;
+    int m_vectorDragNode = -1;
+    bool m_vectorDragMoved = false;
+    QPainterPath m_vectorEditBefore;
 
     QString m_visionConversationId;
     QString m_visionAnswer;

@@ -21,6 +21,7 @@
 #include <QDropEvent>
 #include <QMimeData>
 #include <QPainter>
+#include <QPainterPathStroker>
 #include <QDateTime>
 #include <QQueue>
 #include <QRandomGenerator>
@@ -4304,6 +4305,26 @@ void PaintbrushCanvasItem::mouseDoubleClickEvent(QMouseEvent *event)
     const QPointF canvasPos = canvasFromItem(event->position());
     if (m_doc && event->button() == Qt::LeftButton)
     {
+        /* Native vector layers: double-click on the stroked path arms the
+         * node editor. Checked before text so a vector artwork can be edited
+         * straight from the canvas. */
+        for (int i = m_doc->layerCount() - 1; i >= 0; --i)
+        {
+            const CanvasLayer *l = m_doc->layerAt(i);
+            if (!l || !l->visible || l->type != LAYER_VECTOR)
+                continue;
+            const QPointF local = l->mapCanvasToLocal(canvasPos);
+            QPainterPathStroker stroker;
+            stroker.setWidth(qMax<qreal>(10.0, l->vectorStrokeWidth + 8.0));
+            if (stroker.createStroke(l->vectorPath).contains(local))
+            {
+                m_doc->setCurrentLayerIndex(i);
+                emit vectorEditRequested(l->id);
+                event->accept();
+                return;
+            }
+        }
+
         for (int i = m_doc->layerCount() - 1; i >= 0; --i)
         {
             const CanvasLayer &l = *m_doc->layerAt(i);

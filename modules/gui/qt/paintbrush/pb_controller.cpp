@@ -452,6 +452,147 @@ bool PaintbrushController::isHarvestPresentation() const
 {
     return m_presentationMode == PresentationMode::HarvestVideo;
 }
+
+QVariantList PaintbrushController::vectorEditNodes() const
+{
+    QVariantList nodes;
+    if (!m_canvas || m_vectorEditLayerId < 0)
+        return nodes;
+    const CanvasLayer *layer = nullptr;
+    for (int i = 0; i < m_document.layerCount(); ++i)
+    {
+        const CanvasLayer *candidate = m_document.layerAt(i);
+        if (candidate && candidate->id == m_vectorEditLayerId)
+        {
+            layer = candidate;
+            break;
+        }
+    }
+    if (!layer || layer->type != LAYER_VECTOR)
+        return nodes;
+
+    const QTransform tf = layer->transform();
+    for (int i = 0; i < layer->vectorPath.elementCount(); ++i)
+    {
+        const QPainterPath::Element e = layer->vectorPath.elementAt(i);
+        const QPointF item = m_canvas->itemFromCanvas(
+            tf.map(QPointF(e.x, e.y)));
+        QVariantMap node;
+        node.insert(QStringLiteral("x"), item.x());
+        node.insert(QStringLiteral("y"), item.y());
+        node.insert(QStringLiteral("curve"),
+                    e.type == QPainterPath::CurveToElement);
+        nodes.append(node);
+    }
+    return nodes;
+}
+
+void PaintbrushController::beginVectorEdit(int layerId)
+{
+    QList<CanvasLayer> &layers = m_document.layersRef();
+    for (int i = 0; i < layers.size(); ++i)
+    {
+        if (layers[i].id != layerId)
+            continue;
+        if (layers[i].type != LAYER_VECTOR)
+            return;
+        m_vectorEditLayerId = layerId;
+        m_vectorDragNode = -1;
+        m_vectorDragMoved = false;
+        m_vectorEditBefore = layers[i].vectorPath;
+        m_document.setCurrentLayerIndex(i);
+        emit vectorEditChanged();
+        emit vectorEditNodesChanged();
+        return;
+    }
+}
+
+void PaintbrushController::endVectorEdit()
+{
+    if (m_vectorDragNode >= 0)
+        endVectorNodeDrag();
+    if (m_vectorEditLayerId < 0)
+        return;
+    m_vectorEditLayerId = -1;
+    m_vectorDragNode = -1;
+    m_vectorDragMoved = false;
+    m_vectorEditBefore = QPainterPath();
+    emit vectorEditChanged();
+    emit vectorEditNodesChanged();
+}
+
+void PaintbrushController::beginVectorNodeDrag(int nodeIndex)
+{
+    if (m_vectorEditLayerId < 0 || nodeIndex < 0)
+        return;
+    for (CanvasLayer &layer : m_document.layersRef())
+    {
+        if (layer.id != m_vectorEditLayerId)
+            continue;
+        if (layer.type != LAYER_VECTOR
+            || nodeIndex >= layer.vectorPath.elementCount())
+            return;
+        m_vectorDragNode = nodeIndex;
+        m_vectorDragMoved = false;
+        m_vectorEditBefore = layer.vectorPath;
+        return;
+    }
+}
+
+void PaintbrushController::moveVectorNode(int nodeIndex, qreal itemX,
+                                          qreal itemY)
+{
+    if (!m_canvas || m_vectorEditLayerId < 0 || nodeIndex < 0)
+        return;
+    for (CanvasLayer &layer : m_document.layersRef())
+    {
+        if (layer.id != m_vectorEditLayerId)
+            continue;
+        if (layer.type != LAYER_VECTOR
+            || nodeIndex >= layer.vectorPath.elementCount())
+            return;
+        if (m_vectorDragNode < 0)
+            beginVectorNodeDrag(nodeIndex);
+        const QPointF canvasPos = m_canvas->canvasFromItem(QPointF(itemX, itemY));
+        const QPointF local = layer.mapCanvasToLocal(canvasPos);
+        layer.vectorPath.setElementPositionAt(nodeIndex, local.x(), local.y());
+        layer.refreshVectorPreview();
+        m_vectorDragMoved = true;
+        m_document.setDirty(true);
+        m_canvas->markCanvasDirty();
+        return;
+    }
+}
+
+void PaintbrushController::endVectorNodeDrag()
+{
+    if (m_vectorDragNode < 0)
+        return;
+    for (CanvasLayer &layer : m_document.layersRef())
+    {
+        if (layer.id != m_vectorEditLayerId)
+            continue;
+        if (m_vectorDragMoved && !(layer.vectorPath == m_vectorEditBefore))
+        {
+            auto cmd = std::make_unique<VectorPathCommand>();
+            cmd->layerId = m_vectorEditLayerId;
+            cmd->before = m_vectorEditBefore;
+            cmd->after = layer.vectorPath;
+            cmd->desc = QStringLiteral("Edit vector node");
+            m_undoStack.pushCommand(std::move(cmd));
+            m_document.setDirty(true);
+            emit documentChanged();
+        }
+        m_vectorEditBefore = layer.vectorPath;
+        break;
+    }
+    m_vectorDragNode = -1;
+    m_vectorDragMoved = false;
+    if (m_canvas)
+        m_canvas->markCanvasDirty();
+    emit vectorEditNodesChanged();
+}
+
 bool PaintbrushController::paintbrushEnabled() const
 {
     return var_InheritBool(m_intf, "paintbrush-enabled");
@@ -462,6 +603,7 @@ void PaintbrushController::setCanvasItem(QQuickItem *item)
     auto *canvas = qobject_cast<PaintbrushCanvasItem *>(item);
     if (m_canvas == canvas)
         return;
+    endVectorEdit();
     if (m_canvas)
     {
         disconnect(m_canvas, nullptr, this, nullptr);
@@ -488,6 +630,14 @@ void PaintbrushController::setCanvasItem(QQuickItem *item)
             this, &PaintbrushController::onCanvasModified);
     connect(m_canvas, &PaintbrushCanvasItem::imageDropped,
             this, &PaintbrushController::onLayerDrop);
+    connect(m_canvas, &PaintbrushCanvasItem::vectorEditRequested,
+            this, &PaintbrushController::beginVectorEdit);
+    connect(m_canvas, &PaintbrushCanvasItem::toolChanged, this,
+            [this](int) { endVectorEdit(); });
+    connect(m_canvas, &PaintbrushCanvasItem::zoomChanged,
+            this, &PaintbrushController::vectorEditNodesChanged);
+    connect(m_canvas, &PaintbrushCanvasItem::panOffsetChanged,
+            this, &PaintbrushController::vectorEditNodesChanged);
 
     /* Track the eight most recently USED colours (history, not palette
      * content). */
@@ -3784,6 +3934,35 @@ void PaintbrushController::insertStickerLayer(const QImage &raster,
      * into the EXISTING document — undoable (undo removes the sticker),
      * transformable (SetTransformCommand), persisted (project store) and
      * rendered by the canonical DocumentRenderer like any other layer. */
+    InsertLayerCommand cmd;
+    cmd.desc = QStringLiteral("Add %1").arg(name);
+    QList<CanvasLayer> layers = m_document.layers();
+    layers.append(std::move(layer));
+    cmd.index = layers.size() - 1;
+    cmd.prevCurrentIndex = m_document.currentLayerIndex();
+    m_document.setLayers(layers);
+    m_document.setCurrentLayerIndex(cmd.index);
+    cmd.layer = m_document.layerAt(cmd.index) ? *m_document.layerAt(cmd.index)
+                                              : CanvasLayer();
+    m_undoStack.pushInsertLayer(cmd);
+}
+
+void PaintbrushController::insertVectorLayer(const QPainterPath &localPath,
+                                             const QPointF &position,
+                                             const QImage &preview,
+                                             const QColor &stroke,
+                                             qreal strokeWidth,
+                                             const QString &name)
+{
+    CanvasLayer layer;
+    layer.name = name;
+    layer.type = LAYER_VECTOR;
+    layer.raster = preview.convertToFormat(QImage::Format_ARGB32);
+    layer.position = position;
+    layer.vectorPath = localPath;
+    layer.vectorStroke = stroke.isValid() ? stroke : QColor(Qt::black);
+    layer.vectorStrokeWidth = qMax<qreal>(0.0, strokeWidth);
+
     InsertLayerCommand cmd;
     cmd.desc = QStringLiteral("Add %1").arg(name);
     QList<CanvasLayer> layers = m_document.layers();

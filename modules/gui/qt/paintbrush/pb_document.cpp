@@ -408,6 +408,32 @@ std::unique_ptr<UndoCommand> PaintbrushDocument::makeCropCommand(const QRect &re
 static void compositeLayerRaw(QImage &target, const QRect &region,
                               const CanvasLayer &layer)
 {
+    /* Native vector layers are drawn from their path, never from the preview
+     * raster. Node edits therefore stay resolution-independent and are
+     * visible immediately without re-rendering a cached image. */
+    if (layer.type == LAYER_VECTOR)
+    {
+        if (layer.visible && !layer.vectorPath.isEmpty())
+        {
+            QPainterPath path = layer.transform().map(layer.vectorPath);
+            path.translate(-region.x(), -region.y());
+            QPainter p(&target);
+            p.setRenderHint(QPainter::Antialiasing, true);
+            p.setOpacity(layer.opacity);
+            p.setCompositionMode(toCompositionMode(layer.blendMode));
+            QPen pen(layer.vectorStroke.isValid() ? layer.vectorStroke
+                                                  : QColor(Qt::black));
+            pen.setWidthF(qMax<qreal>(0.0, layer.vectorStrokeWidth));
+            pen.setJoinStyle(Qt::RoundJoin);
+            pen.setCapStyle(Qt::RoundCap);
+            p.setPen(pen);
+            p.setBrush(layer.vectorFill.isValid() ? QBrush(layer.vectorFill)
+                                                  : QBrush(Qt::NoBrush));
+            p.drawPath(path);
+            p.end();
+        }
+        return;
+    }
     if (layer.raster.isNull() || !layer.visible)
         return;
 
@@ -657,6 +683,11 @@ QImage DocumentRenderer::effectiveSourceAt(const CanvasLayer &layer, const Conte
 void DocumentRenderer::compositeLayer(QImage &target, const QRect &region,
                                       const CanvasLayer &layer, const Context &ctx)
 {
+    if (layer.type == LAYER_VECTOR)
+    {
+        compositeLayerRaw(target, region, layer);
+        return;
+    }
     if (layer.raster.isNull() || !layer.visible)
         return;
     if (!layer.hasEnabledEffects())
@@ -692,6 +723,11 @@ void DocumentRenderer::compositeLayerAt(QImage &target, const QRect &region,
                                         const Context &ctx,
                                         const PaintbrushDocument &doc, qint64 timeMs)
 {
+    if (layer.type == LAYER_VECTOR)
+    {
+        compositeLayerRaw(target, region, layer);
+        return;
+    }
     if (layer.raster.isNull() || !layer.visible)
         return;
     if (!layer.hasEnabledEffects() && !layer.hasPuppet())

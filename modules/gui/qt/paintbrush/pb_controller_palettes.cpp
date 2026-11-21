@@ -674,30 +674,13 @@ QString PaintbrushController::addVectorLayerFromSelection()
         p.drawPath(path);
     }
 
-    QVariantList elements;
-    for (int i = 0; i < path.elementCount(); ++i)
-    {
-        const QPainterPath::Element e = path.elementAt(i);
-        QVariantMap m;
-        m.insert(QStringLiteral("t"), int(e.type));
-        m.insert(QStringLiteral("x"), e.x);
-        m.insert(QStringLiteral("y"), e.y);
-        elements.append(m);
-    }
+    const QPointF origin = bounds.topLeft();
+    const QPainterPath localPath = path.translated(-origin);
 
     beginTransaction(QStringLiteral("Add vector contour layer"));
-    insertStickerLayer(render, QPointF(bounds.topLeft()),
-                       QStringLiteral("Contour (vector)"), QString(), QString(),
-                       0, QImage());
-    CanvasLayer *layer = m_document.layerAt(m_document.layerCount() - 1);
-    if (layer)
-    {
-        layer->metadata[QStringLiteral("vectorPathSchema")] =
-            QStringLiteral("nai-paintbrush/vector-path/v1");
-        layer->metadata[QStringLiteral("vectorPath")] = elements;
-        layer->metadata[QStringLiteral("vectorOriginX")] = bounds.x();
-        layer->metadata[QStringLiteral("vectorOriginY")] = bounds.y();
-    }
+    insertVectorLayer(localPath, origin, render,
+                      m_canvas ? m_canvas->fgColor() : QColor(Qt::black),
+                      2.5, QStringLiteral("Contour (vector)"));
     endTransaction();
 
     if (m_canvas)

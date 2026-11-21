@@ -321,6 +321,8 @@ void fgColorChanged();
     void objectMaskEdited(const QImage &mask);
     void maskRefineStarted(const QImage &mask);
     void objectSelectClick(QPointF canvasPos, bool positive, QPointF itemPos);
+    /* Native vector layer double-click: arm the in-canvas node editor. */
+    void vectorEditRequested(int layerId);
     /* NAI Ask-anything tool: the user clicked a point on the canvas/frame
      * while the Ask tool is active; the controller decides the ask context
      * (object / selection / whole frame). */

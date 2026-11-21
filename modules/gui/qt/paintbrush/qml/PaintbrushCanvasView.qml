@@ -492,4 +492,65 @@ import VLC.Paintbrush
                 PaintbrushCtx.exportObjectPng(selectedFile)
         }
     }
+
+    /* Native LAYER_VECTOR node editor: double-click a vector path to arm it.
+     * The overlay sits above the reparented canvas item; node drags are one
+     * undoable VectorPathCommand. */
+    Item {
+        id: vectorEditOverlay
+        anchors.fill: parent
+        z: 1000
+        visible: PaintbrushCtx.vectorEditActive
+
+        MouseArea {
+            anchors.fill: parent
+            z: -1
+            onClicked: PaintbrushCtx.endVectorEdit()
+        }
+
+        Repeater {
+            model: PaintbrushCtx.vectorEditNodes
+            delegate: Rectangle {
+                id: vectorNode
+                width: 10
+                height: 10
+                radius: 2
+                color: modelData.curve ? "#FF8800" : "#FFFFFF"
+                border.width: 1
+                border.color: "#101010"
+                property real dragStartX: x
+                property real dragStartY: y
+
+                Binding on x {
+                    value: modelData.x - vectorNode.width / 2
+                    when: !vectorNodeDrag.active
+                }
+                Binding on y {
+                    value: modelData.y - vectorNode.height / 2
+                    when: !vectorNodeDrag.active
+                }
+
+                DragHandler {
+                    id: vectorNodeDrag
+                    target: null
+                    onActiveChanged: {
+                        if (active) {
+                            vectorNode.dragStartX = vectorNode.x
+                            vectorNode.dragStartY = vectorNode.y
+                            PaintbrushCtx.beginVectorNodeDrag(index)
+                        } else {
+                            PaintbrushCtx.endVectorNodeDrag()
+                        }
+                    }
+                    onTranslationChanged: {
+                        vectorNode.x = vectorNode.dragStartX + translation.x
+                        vectorNode.y = vectorNode.dragStartY + translation.y
+                        PaintbrushCtx.moveVectorNode(index,
+                            vectorNode.x + vectorNode.width / 2,
+                            vectorNode.y + vectorNode.height / 2)
+                    }
+                }
+            }
+        }
+    }
 }

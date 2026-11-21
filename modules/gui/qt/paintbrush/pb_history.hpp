@@ -88,7 +88,8 @@ public:
         AddHarvest,
         SetPuppet,
         AddPuppet,
-        SubjectInstance
+        SubjectInstance,
+        VectorPath
     };
     virtual Kind kind() const = 0;
 };
@@ -330,6 +331,21 @@ public:
     int prevCurrentIndex = -1;
     QString desc;
     Kind kind() const override { return Kind::InsertLayer; }
+    QString description() const override { return desc; }
+    void apply(PaintbrushDocument &doc) override;
+    void revert(PaintbrushDocument &doc) override;
+};
+
+/* Native LAYER_VECTOR node edit: apply/revert the layer-local path and refresh
+ * its thumbnail preview. The geometry itself is the undo payload. */
+class VectorPathCommand : public UndoCommand
+{
+public:
+    int layerId = -1;
+    QPainterPath before;
+    QPainterPath after;
+    QString desc;
+    Kind kind() const override { return Kind::VectorPath; }
     QString description() const override { return desc; }
     void apply(PaintbrushDocument &doc) override;
     void revert(PaintbrushDocument &doc) override;

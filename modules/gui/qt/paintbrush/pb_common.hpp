@@ -103,7 +103,8 @@ enum LayerType {
     LAYER_TEXT,         /* editable text layer                 */
     LAYER_REFERENCE,    /* media frame reference layer         */
     LAYER_GENERATED,    /* AI generated result layer           */
-    LAYER_STICKER       /* extracted/collage sticker asset      */
+    LAYER_STICKER,      /* extracted/collage sticker asset      */
+    LAYER_VECTOR        /* native editable vector path layer    */
 };
 
 enum BlendMode {

@@ -646,4 +646,29 @@ bool UndoStack::redo(PaintbrushDocument &doc)
     return true;
 }
 
+namespace {
+void setVectorPath(PaintbrushDocument &doc, int layerId,
+                   const QPainterPath &path)
+{
+    for (CanvasLayer &layer : doc.layersRef())
+    {
+        if (layer.id != layerId)
+            continue;
+        layer.vectorPath = path;
+        layer.refreshVectorPreview();
+        break;
+    }
+}
+} // namespace
+
+void VectorPathCommand::apply(PaintbrushDocument &doc)
+{
+    setVectorPath(doc, layerId, after);
+}
+
+void VectorPathCommand::revert(PaintbrushDocument &doc)
+{
+    setVectorPath(doc, layerId, before);
+}
+
 } // namespace paintbrush

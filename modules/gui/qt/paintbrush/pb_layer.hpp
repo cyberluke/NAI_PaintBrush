@@ -24,6 +24,8 @@
 #include <QVariantMap>
 #include <QVector>
 #include <QByteArray>
+#include <QPainterPath>
+#include <QColor>
 
 namespace paintbrush {
 
@@ -47,6 +49,10 @@ public:
     /* content bounds of non-empty pixels (for trimming stickers/cutouts) */
     QRect contentBounds() const;
     bool isEmpty() const;
+    /* Rebuild the thumbnail raster from the editable vector path (vector
+     * layers only). The canonical renderer draws the path; this preview is
+     * for the layer strip. */
+    void refreshVectorPreview();
 
     /* -- canonical placement transform ------------------------------------
      * transform() maps LOCAL raster coordinates to canvas coordinates as
@@ -77,6 +83,13 @@ public:
     QImage raster;          /* LOCAL-sized RGBA content (never canvas-resized) */
     QImage mask;            /* optional layer mask (gray, local space) */
     QString text;           /* text layer content */
+    /* Native vector layer: editable path in LOCAL coordinates. `raster` is a
+     * preview for the layer thumbnail only; the canonical renderer draws the
+     * path, so node edits are resolution-independent. */
+    QPainterPath vectorPath;
+    QColor vectorStroke = QColor(0, 0, 0, 255);
+    QColor vectorFill;      /* invalid = no fill */
+    qreal vectorStrokeWidth = 2.5;
     QPointF position;       /* image layer placement (see transform()) */
     /* image-layer transform (pivot at the layer content center) */
     float scale = 1.0f;     /* uniform scale factor */

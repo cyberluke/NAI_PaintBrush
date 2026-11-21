@@ -42,6 +42,31 @@ static QString layerToJson(const CanvasLayer &layer)
     obj[QStringLiteral("scale")] = layer.scale;
     obj[QStringLiteral("rotation")] = layer.rotation;
 
+    /* Native vector layer: editable local path + style. The preview raster is
+     * still written below for the layer thumbnail, but rendering/serialization
+     * are driven by this path. */
+    if (layer.type == LAYER_VECTOR)
+    {
+        QJsonArray elements;
+        for (int i = 0; i < layer.vectorPath.elementCount(); ++i)
+        {
+            const QPainterPath::Element e = layer.vectorPath.elementAt(i);
+            QJsonObject o;
+            o[QStringLiteral("t")] = int(e.type);
+            o[QStringLiteral("x")] = e.x;
+            o[QStringLiteral("y")] = e.y;
+            elements.append(o);
+        }
+        obj[QStringLiteral("vectorPath")] = elements;
+        obj[QStringLiteral("vectorStroke")] =
+            layer.vectorStroke.name(QColor::HexArgb);
+        obj[QStringLiteral("vectorFill")] =
+            layer.vectorFill.isValid()
+                ? layer.vectorFill.name(QColor::HexArgb)
+                : QString();
+        obj[QStringLiteral("vectorStrokeWidth")] = layer.vectorStrokeWidth;
+    }
+
     /* sticker provenance (FrameRef + seed mask). Only JSON-native values
      * are written; anything exotic is skipped. */
     if (!layer.metadata.isEmpty())
@@ -159,6 +184,45 @@ static QList<CanvasLayer> layersFromJson(const QJsonArray &array)
                                  obj[QStringLiteral("posY")].toDouble(0));
         layer.scale = float(obj[QStringLiteral("scale")].toDouble(1.0));
         layer.rotation = float(obj[QStringLiteral("rotation")].toDouble(0.0));
+
+        if (layer.type == LAYER_VECTOR)
+        {
+            const QJsonArray elems =
+                obj[QStringLiteral("vectorPath")].toArray();
+            QPainterPath path;
+            for (int i = 0; i < elems.size(); ++i)
+            {
+                const QJsonObject e = elems.at(i).toObject();
+                const int t = e[QStringLiteral("t")].toInt();
+                const qreal x = e[QStringLiteral("x")].toDouble();
+                const qreal y = e[QStringLiteral("y")].toDouble();
+                if (t == int(QPainterPath::MoveToElement))
+                    path.moveTo(x, y);
+                else if (t == int(QPainterPath::LineToElement))
+                    path.lineTo(x, y);
+                else if (t == int(QPainterPath::CurveToElement)
+                         && i + 2 < elems.size())
+                {
+                    const QJsonObject c1 = elems.at(i + 1).toObject();
+                    const QJsonObject c2 = elems.at(i + 2).toObject();
+                    path.cubicTo(x, y,
+                                 c1[QStringLiteral("x")].toDouble(),
+                                 c1[QStringLiteral("y")].toDouble(),
+                                 c2[QStringLiteral("x")].toDouble(),
+                                 c2[QStringLiteral("y")].toDouble());
+                    i += 2;
+                }
+            }
+            layer.vectorPath = path;
+            const QString stroke = obj[QStringLiteral("vectorStroke")].toString();
+            if (!stroke.isEmpty())
+                layer.vectorStroke = QColor(stroke);
+            const QString fill = obj[QStringLiteral("vectorFill")].toString();
+            if (!fill.isEmpty())
+                layer.vectorFill = QColor(fill);
+            layer.vectorStrokeWidth =
+                obj[QStringLiteral("vectorStrokeWidth")].toDouble(2.5);
+        }
 
         const QByteArray png = QByteArray::fromBase64(
             obj[QStringLiteral("image")].toString().toLatin1());
