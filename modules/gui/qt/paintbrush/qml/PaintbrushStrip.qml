@@ -102,19 +102,23 @@ Item {
                 }
             }
 
-            /* recent swatches from the active palette */
+            /* recent SELECTED colours (history, not palette content) */
             Repeater {
                 model: PaintbrushCtx.recentSelectedColors
-                Rectangle {
+                Button {
                     width: VLCStyle.dp(18, VLCStyle.scale)
                     height: width
-                    radius: 3
-                    color: modelData
-                    border.width: 1
-                    border.color: theme.border
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: if (root.canvas) root.canvas.fgColor = modelData
+                    padding: 0
+                    focusPolicy: Qt.StrongFocus
+                    Accessible.role: Accessible.Button
+                    Accessible.name: qsTr("Use colour %1").arg(modelData)
+                    onClicked: if (root.canvas) root.canvas.fgColor = modelData
+                    background: Rectangle {
+                        radius: 3
+                        color: modelData
+                        border.width: parent.activeFocus ? 2 : 1
+                        border.color: parent.activeFocus ? theme.accent
+                                                         : theme.border
                     }
                 }
             }
@@ -183,19 +187,25 @@ Item {
                     spacing: 2
                     Repeater {
                         model: modelData.colors
-                        Rectangle {
+                        Button {
                             width: VLCStyle.dp(20, VLCStyle.scale)
                             height: width
-                            radius: 3
-                            color: modelData
-                            border.width: 1
-                            border.color: theme.border
-                            MouseArea {
-                                anchors.fill: parent
-                                onClicked: if (root.canvas) {
+                            padding: 0
+                            focusPolicy: Qt.StrongFocus
+                            Accessible.role: Accessible.Button
+                            Accessible.name: qsTr("Use colour %1").arg(modelData)
+                            onClicked: {
+                                if (root.canvas) {
                                     root.canvas.fgColor = modelData
                                     palettePopup.close()
                                 }
+                            }
+                            background: Rectangle {
+                                radius: 3
+                                color: modelData
+                                border.width: parent.activeFocus ? 2 : 1
+                                border.color: parent.activeFocus ? theme.accent
+                                                                 : theme.border
                             }
                         }
                     }
