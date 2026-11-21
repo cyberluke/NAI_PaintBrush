@@ -28,7 +28,9 @@ Item {
 
     property var canvas: null
 
-    implicitHeight: VLCStyle.dp(72, VLCStyle.scale)
+    /* Sized to the tallest real control set (options row 32 + margins 16,
+     * colour chips 28), not an arbitrary round number. */
+    implicitHeight: VLCStyle.dp(64, VLCStyle.scale)
 
     /* Semantic capability: expand this table instead of testing tool numbers
      * at call sites. Object Select (3) is the only colour-free tool today. */

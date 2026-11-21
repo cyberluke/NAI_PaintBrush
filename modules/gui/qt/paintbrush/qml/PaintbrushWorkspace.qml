@@ -404,7 +404,7 @@ Item {
             PaintbrushStrip {
                 id: bottomStrip
                 Layout.fillWidth: true
-                Layout.preferredHeight: VLCStyle.dp(96, VLCStyle.scale)
+                Layout.preferredHeight: VLCStyle.dp(64, VLCStyle.scale)
                 Layout.leftMargin: VLCStyle.margin_small
                 Layout.rightMargin: VLCStyle.margin_small
                 canvas: paintbrushCanvas
