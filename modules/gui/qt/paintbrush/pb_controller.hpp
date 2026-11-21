@@ -384,6 +384,8 @@ public:
     Q_INVOKABLE void deleteLayer(int index);
     Q_INVOKABLE void duplicateLayer(int index);
     Q_INVOKABLE void moveLayer(int index, int delta);
+    /* Absolute reorder used by drag-to-reorder: moves row rom to row 	o.*/
+    Q_INVOKABLE void moveLayerTo(int from, int to);
     Q_INVOKABLE void setLayerVisible(int index, bool visible);
     Q_INVOKABLE void setCurrentLayer(int index);
     /* Layer opacity (0..1), one undoable typed command per change. */

@@ -202,6 +202,23 @@ Item {
                         font.pixelSize: VLCStyle.fontSize_small
                         elide: Text.ElideRight
                     }
+
+                    /* Drag-to-reorder: vertical drag of at least half a row
+                     * moves this row to the computed target row (absolute,
+                     * one undoable ReorderCommand). */
+                    DragHandler {
+                        id: layerDrag
+                        target: null
+                        xAxis.enabled: false
+                        onActiveChanged: if (!active) {
+                            const dy = Math.round(activeTranslation.y
+                                                   / Math.max(1, height))
+                            const to = Math.max(0, Math.min(layerList.count - 1,
+                                                           index + dy))
+                            if (to !== index)
+                                PaintbrushCtx.moveLayerTo(index, to)
+                        }
+                    }
                 }
             }
         }

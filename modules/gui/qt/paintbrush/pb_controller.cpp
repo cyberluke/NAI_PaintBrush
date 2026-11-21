@@ -1464,6 +1464,27 @@ void PaintbrushController::moveLayer(int index, int delta)
     emit documentChanged();
 }
 
+void PaintbrushController::moveLayerTo(int from, int to)
+{
+    QList<CanvasLayer> layers = m_document.layers();
+    if (from < 0 || to < 0 || from >= layers.size() || to >= layers.size())
+        return;
+    if (from == to)
+        return;
+
+    ReorderCommand cmd;
+    cmd.desc = QStringLiteral("Reorder layer");
+    cmd.index = from;
+    cmd.target = to;
+    cmd.prevCurrentIndex = m_document.currentLayerIndex();
+    layers.move(from, to);
+    m_document.setLayers(layers);
+    m_document.setCurrentLayerIndex(to);
+    m_undoStack.pushReorder(cmd);
+    if (m_canvas)
+        m_canvas->markCanvasDirty();
+    emit documentChanged();
+}
 void PaintbrushController::transformLayer(int index, double scale, double rotation)
 {
     CanvasLayer *layer = m_document.layerAt(index);
