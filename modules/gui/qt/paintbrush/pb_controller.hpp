@@ -628,6 +628,18 @@ public:
     Q_PROPERTY(QString settingsAssistantModel READ settingsAssistantModel NOTIFY settingsChanged FINAL)
     Q_PROPERTY(int settingsPtsToleranceMs READ settingsPtsToleranceMs NOTIFY settingsChanged FINAL)
     Q_PROPERTY(bool settingsSecretsPresent READ settingsSecretsPresent CONSTANT FINAL)
+    /* Segmentation progress (model load + encode + inference). The service
+     * already emits stateChanged/progressChanged; until now nothing forwarded
+     * them, so the first job looked like a dead click. Both properties reuse
+     * objectSelectionChanged as their notify signal (already emitted on every
+     * selection state change) to avoid a second signal contract. */
+    Q_PROPERTY(bool segmentationBusy READ segmentationBusy
+               NOTIFY objectSelectionChanged FINAL)
+    Q_PROPERTY(QString segmentationProgress READ segmentationProgress
+               NOTIFY objectSelectionChanged FINAL)
+
+    bool segmentationBusy() const { return m_segBusy; }
+    QString segmentationProgress() const { return m_segProgress; }
     Q_PROPERTY(bool settingsRestartRequired READ settingsRestartRequired NOTIFY settingsChanged FINAL)
     QString settingsSamModel() const;
     QString settingsSamDevice() const;
@@ -906,6 +918,10 @@ private:
     bool m_objectSelected = false;
     QString m_objectMaskBoundsText;
     bool m_objectSelectBusy = false;
+    /* forwarded segmentation state for the adaptive strip / taskbar */
+    bool m_segBusy = false;
+    QString m_segProgress;
+    bool m_segProgressConnected = false;
     QImage m_objectMask;
     double m_objectMaskScore = 0.0; /* confidence of the current object mask */
     QImage m_maskUndoBefore;   /* mask captured when a refine stroke arms */

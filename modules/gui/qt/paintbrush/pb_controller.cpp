@@ -319,6 +319,30 @@ void PaintbrushController::configureServices()
         || !pbApiKey(cfgObj, "PAINTBRUSH_ASSISTANT_API_KEY", "paintbrush-assistant-api-key").isEmpty();
     m_settingsSecretsPresent = hasSecret;
 
+    /* Forward the service's busy/progress state to QML. Until now these
+     * signals had no receiver at all, so the longest phase of the first
+     * Object Select job (a 706 MB model load) was completely invisible and
+     * read as a dead click. busyChanged() is emitted by setState() and covers
+     * INITIALIZING + BUSY; progressChanged() carries the phase text. */
+    if (!m_segProgressConnected)
+    {
+        m_segProgressConnected = true;
+        connect(&m_segmentation, &SegmentationService::busyChanged,
+                this, [this](bool busy) {
+                    if (busy == m_segBusy)
+                        return;
+                    m_segBusy = busy;
+                    emit objectSelectionChanged();
+                });
+        connect(&m_segmentation, &SegmentationService::progressChanged,
+                this, [this](const QString &text) {
+                    if (text == m_segProgress)
+                        return;
+                    m_segProgress = text;
+                    emit objectSelectionChanged();
+                });
+    }
+
     m_segmentation.initialize();
 }
 

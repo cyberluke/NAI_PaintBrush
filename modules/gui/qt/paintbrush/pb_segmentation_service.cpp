@@ -241,7 +241,20 @@ void SegmentationService::runJob(Job job)
             params.use_gpu = (m_device != QStringLiteral("cpu"));
             params.encode_img_size = 0;
 
+            /* The load is a single opaque C call with no progress callback, and
+             * it is the longest phase of the FIRST job (706 MB). Without these
+             * markers a stalled load is indistinguishable from a crash, which
+             * is exactly how "Object Select never works" was experienced. */
+            pbLogInfo(m_obj, "segmentation",
+                      "model: load START '%s' (%lld bytes, device=%s, threads=%d)",
+                      m_modelPath.toUtf8().constData(),
+                      (long long)QFileInfo(m_modelPath).size(),
+                      m_device.toUtf8().constData(),
+                      params.n_threads);
+
             auto model = sam3_load_model(params);
+            pbLogInfo(m_obj, "segmentation",
+                      "model: load %s", model ? "DONE" : "FAILED");
             if (!model)
             {
                 m_lastError = QStringLiteral("model load failed");

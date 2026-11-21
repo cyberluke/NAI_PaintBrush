@@ -102,6 +102,59 @@ import VLC.Paintbrush
             visible: renderingEnabled
         }
 
+        /* Slim AI progress rail. Object Select's first job loads a 706 MB
+         * model and then encodes a frame; both phases used to be invisible.
+         * Indeterminate by design: sam3_load_model() exposes no progress
+         * callback, so a percentage would be fiction. 3 px, top edge, never
+         * covers artwork and never reflows the canvas. */
+        Item {
+            id: segProgressRail
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            height: VLCStyle.dp(3, VLCStyle.scale)
+            visible: PaintbrushCtx.segmentationBusy
+            z: 60
+            clip: true
+
+            Rectangle {
+                anchors.fill: parent
+                color: Qt.rgba(theme.fg.primary.r, theme.fg.primary.g,
+                               theme.fg.primary.b, 0.10)
+            }
+            Rectangle {
+                id: segProgressBlob
+                height: parent.height
+                width: Math.max(VLCStyle.dp(60, VLCStyle.scale),
+                                segProgressRail.width * 0.22)
+                color: theme.accent
+
+                SequentialAnimation on x {
+                    running: segProgressRail.visible
+                    loops: Animation.Infinite
+                    NumberAnimation {
+                        from: -segProgressBlob.width
+                        to: segProgressRail.width
+                        duration: 1250
+                        easing.type: Easing.InOutQuad
+                    }
+                }
+            }
+        }
+
+        /* Phase text ("Loading SAM model…" / "Encoding frame…" / "Segmenting…")
+         * lives with the rail so the user knows WHY it is waiting. */
+        Widgets.LabelExt {
+            anchors.top: segProgressRail.bottom
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.topMargin: VLCStyle.margin_xxxsmall
+            visible: PaintbrushCtx.segmentationBusy
+            text: PaintbrushCtx.segmentationProgress
+            color: theme.fg.primary
+            font.pixelSize: VLCStyle.fontSize_xsmall
+            z: 60
+        }
+
         /* checkerboard behind transparent content; hidden when the live video
          * is the visual source (HarvestVideo) so the video picture serves as
          * the canvas backdrop. In ComposeCanvas mode the document canvas is
