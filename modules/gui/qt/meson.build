@@ -573,6 +573,8 @@ qt_plugin_sources = files(
     'paintbrush/pb_frame_capture.cpp',
     'paintbrush/pb_segmentation_service.cpp',
     'paintbrush/pb_tracking_service.cpp',
+    'paintbrush/pb_sequential_source.cpp',
+    'paintbrush/pb_sequential_source.hpp',
     'paintbrush/gpu/pb_sam3_cuda_shim.cpp',
     'paintbrush/gpu/pb_sam3.h',
     'paintbrush/gpu/sam3_cuda_api.h',
@@ -1366,7 +1368,7 @@ if qt6_dep.found()
     paintbrush_extra_cppargs = ['-DHAVE_SAM3']
     # D3D12MemAlloc.h lives in contrib; the removed SAM3 pkg-config used to
     # leak this include path into the plugin. Depend on contrib explicitly.
-    paintbrush_extra_deps = [contrib_dep]
+    paintbrush_extra_deps = [contrib_dep, dependency('libvlc')]
 
     # NAI Paintbrush: build identity (P0.1, acceptance Gate A) — the running
     # binary must be able to prove which source tree it was built from. The

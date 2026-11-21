@@ -98,6 +98,12 @@ public:
 
     /* Whether the source can currently decode (preparser alive, etc.). */
     virtual bool canDecode() const = 0;
+
+    /* Optional sequential-decoder lifecycle. prepare() is called once on the
+     * tracking worker with the seed frame before the first request; cancel()
+     * aborts a blocked decode. Random-access providers can ignore them. */
+    virtual bool prepare(const FrameRef &seed) { Q_UNUSED(seed); return true; }
+    virtual void cancel() {}
 };
 
 /* ------------------------------------------------------------ LruCache */

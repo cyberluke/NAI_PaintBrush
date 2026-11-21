@@ -23,6 +23,8 @@ TrackingService::TrackingService(QObject *parent)
             this, &TrackingService::onWorkerJobDone);
     connect(this, &TrackingService::workerInstanceReady,
             this, &TrackingService::onWorkerInstanceReady);
+    connect(this, &TrackingService::workerFetchEnded,
+            this, &TrackingService::onWorkerFetchEnded);
     connect(this, &TrackingService::workerError,
             this, &TrackingService::onWorkerError);
 }
@@ -162,11 +164,13 @@ void TrackingService::beginTracking()
     emit trackingStarted();
     setStatus(QStringLiteral("Seeding tracker…"));
 
-    /* step 0: add the tracked instance from the click prompts on the seed
-     * frame. The reverse pass re-adds the SAME instance from the same
-     * seed (beginReversePass). */
+    /* step 0: initialize the sequential decoder once, then add the tracked
+     * instance from the click prompts on the seed frame. The reverse pass
+     * re-adds the SAME instance from the same seed (beginReversePass). */
     {
         QMutexLocker lock(&m_mutex);
+        m_queue.push_back({WorkerJob::Type::Prepare, m_seed.frame,
+                           m_seed.points, {}, 0, m_seed.ptsMs});
         m_queue.push_back({WorkerJob::Type::AddInstance, m_seed.frame,
                            m_seed.points, {}, 0, m_seed.ptsMs});
         m_cond.wakeAll();
@@ -211,8 +215,8 @@ void TrackingService::stepNext()
     setStatus(m_pass.stepSign() > 0 ? QStringLiteral("Tracking forward…")
                                     : QStringLiteral("Tracking backward…"));
 
-    /* decode the next exact frame via the edit frame source (A14):
-     * concrete PTS, no player stepping, no vout snapshot races */
+    /* decode the next actual frame via the persistent sequential source:
+     * one decoder, concrete PTS, no playback-player stepping or snapshots */
     const qint64 nextPts = m_pass.nextPtsMs(m_lastPtsMs);
     if (nextPts < 0)
     {
@@ -227,29 +231,15 @@ void TrackingService::stepNext()
         return;
     }
 
-    const DecodedFrame frame =
-        m_provider->request(FrameRef{m_seed.mrl, {}, nextPts});
-    if (!frame.ok())
-    {
-        /* decode failure or PTS outside tolerance: the media ended in
-         * this direction, or the frame could not be verified. Never
-         * propagate "whatever the vout was showing". */
-        if (m_pass.direction() == TrackingPassState::TRACK_BOTH
-            && m_pass.bothPhase() == 0)
-        {
-            beginReversePass();
-            return;
-        }
-        finishTrack(true, false, {});
-        return;
-    }
-
+    /* Decode the next frame on the WORKER, never on the GUI. The worker's
+     * Fetch job calls the persistent sequential provider, then queues the
+     * Propagate job. This is the bounded-buffer/backpressure boundary. */
     {
         QMutexLocker lock(&m_mutex);
         if (m_cancelPending)
             return;
-        m_queue.push_back({WorkerJob::Type::Propagate, frame.image, {}, {},
-                           m_pass.done() + 1, frame.ptsMs});
+        m_queue.push_back({WorkerJob::Type::Fetch, QImage(), {}, {},
+                           m_pass.done() + 1, nextPts});
         m_cond.wakeAll();
     }
 }
@@ -284,6 +274,20 @@ void TrackingService::onWorkerJobDone(const QImage &mask, float confidence,
     stepNext();
 }
 
+void TrackingService::onWorkerFetchEnded(qint64 requestedPts)
+{
+    Q_UNUSED(requestedPts);
+    if (!m_tracking)
+        return;
+    if (m_pass.direction() == TrackingPassState::TRACK_BOTH
+        && m_pass.bothPhase() == 0)
+    {
+        beginReversePass();
+        return;
+    }
+    finishTrack(true, false, {});
+}
+
 void TrackingService::onWorkerError(const QString &error)
 {
     if (!m_tracking)
@@ -306,6 +310,8 @@ void TrackingService::refineCurrentFrame(const QVector<QPointF> &posPoints,
 void TrackingService::cancel()
 {
     m_cancelPending = true;
+    if (m_provider)
+        m_provider->cancel();
     if (m_tracking)
     {
         m_tracking = false;
@@ -450,8 +456,13 @@ void TrackingService::runWorkerJob(const WorkerJob &job)
 {
     try
     {
-        /* lazily load the model + visual tracker */
-        if (!m_model || m_loadedModelPath != m_modelPath)
+        /* lazily load the model + visual tracker (inference jobs only;
+         * Prepare/Fetch are pure decoder lifecycle jobs) */
+        const bool needsModel =
+            job.type == WorkerJob::Type::AddInstance ||
+            job.type == WorkerJob::Type::Propagate ||
+            job.type == WorkerJob::Type::Refine;
+        if (needsModel && (!m_model || m_loadedModelPath != m_modelPath))
         {
             sam3_params params;
             params.model_path = m_modelPath.toStdString();
@@ -512,6 +523,45 @@ void TrackingService::runWorkerJob(const WorkerJob &job)
 
         switch (job.type)
         {
+        case WorkerJob::Type::Prepare:
+        {
+            const FrameRef seed{m_seed.mrl, {}, m_seed.ptsMs,
+                                m_seed.frame.width(), m_seed.frame.height()};
+            if (!m_provider || !m_provider->prepare(seed))
+            {
+                emit workerError(QStringLiteral(
+                    "Tracking: could not initialize the sequential decoder."));
+                return;
+            }
+            break;
+        }
+
+        case WorkerJob::Type::Fetch:
+        {
+            const DecodedFrame frame =
+                m_provider->request(FrameRef{m_seed.mrl, {}, job.ptsMs});
+            if (!frame.ok())
+            {
+                emit workerFetchEnded(job.ptsMs);
+                return;
+            }
+            if (m_pass.stepSign() < 0 && frame.ptsMs >= m_lastPtsMs)
+            {
+                /* the persistent decoder is forward-only; a backward pass
+                 * cannot step it and must end instead of emitting frames
+                 * that move in the wrong temporal direction. */
+                emit workerFetchEnded(job.ptsMs);
+                return;
+            }
+            QMutexLocker lock(&m_mutex);
+            if (m_cancelPending)
+                return;
+            m_queue.push_back({WorkerJob::Type::Propagate, frame.image, {}, {},
+                               job.stepIndex, frame.ptsMs});
+            m_cond.wakeAll();
+            break;
+        }
+
         case WorkerJob::Type::AddInstance:
         {
             /* encode the seed frame and add the clicked instance. Called

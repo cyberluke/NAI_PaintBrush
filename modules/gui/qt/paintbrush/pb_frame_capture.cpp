@@ -265,7 +265,9 @@ void EditFrameSource::configure(vlc_object_t *obj)
     cfg.max_parser_threads = 0;
     cfg.max_thumbnailer_threads = 1; /* serialize exact-frame decodes */
     cfg.timeout = VLC_TICK_FROM_MS(REQUEST_TIMEOUT_MS);
-    cfg.external_process = false;
+    /* Exact-frame decodes run in VLC's external preparser process. The
+     * in-process thumbnailer can deadlock in input_Stop when an input stalls. */
+    cfg.external_process = true;
 
     m_preparser = vlc_preparser_New(VLC_OBJECT(obj), &cfg);
     pbLogInfo(obj, "media", "edit frame source ready (pts tolerance %lld ms, "

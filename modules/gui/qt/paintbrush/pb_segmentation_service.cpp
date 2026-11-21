@@ -151,6 +151,9 @@ void SegmentationService::segment(const QImage &frame,
     if (!m_running)
         return;
 
+    /* A fresh request supersedes a cancellation aimed at the previous job. */
+    m_cancelPending = false;
+
     /* one heavy local inference job at a time: keep at most one pending */
     if (m_queue.size() >= 1)
         m_queue.pop_front();

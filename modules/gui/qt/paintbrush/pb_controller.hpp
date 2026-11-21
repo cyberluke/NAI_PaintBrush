@@ -28,6 +28,7 @@
 #include "pb_thumbnail_service.hpp"
 #include "pb_lookup_service.hpp"
 #include "pb_frame_capture.hpp"
+#include "pb_sequential_source.hpp"
 #include "pb_harvest.hpp"
 #include "pb_boost.hpp"
 
@@ -1058,6 +1059,9 @@ private:
      * Isolated from the media-drawer filmstrip thumbnails so a batch cannot
      * starve or cancel an exact-frame request (shared-preparser P0). */
     EditFrameSource m_selectionSource;
+    /* Persistent sequential libvlc decoder for temporal tracking. One player,
+     * one seek, actual-frame stepping; independent of playback. */
+    SequentialVideoSource m_sequentialSource;
 
     QString m_statusMessage;
     QString m_projectName;

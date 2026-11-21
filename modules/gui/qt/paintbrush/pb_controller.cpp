@@ -236,6 +236,7 @@ PaintbrushController::~PaintbrushController()
     m_tracking.shutdown();
     m_editSource.shutdown();
     m_selectionSource.shutdown();
+    m_sequentialSource.shutdown();
     m_vision.cancelAll();
     m_generation.cancelAll();
     m_assistant.cancelAll();
@@ -2051,6 +2052,44 @@ void PaintbrushController::onCanvasObjectClick(QPointF canvasPos, bool positive,
                 m_intf->p_mainPlaylistController->togglePlayPause();
         }
 
+        /* PRIMARY interactive path: the displayed video frame is already
+         * decoded. Capture it directly (FrameCaptureService) and segment it
+         * without reopening the media or seeking the preparser. The captured
+         * ref carries the real media MRL/PTS and the displayed geometry, and
+         * the SAM embedding cache is keyed on the frame content so prompt
+         * refinements on this same frame reuse the encoding. */
+        const ObjectSelectionContext liveCtx = captureLiveFrameContext(viewport);
+                if (liveCtx.validFrame())
+        {
+            const FrameRef captured = liveCtx.ref;
+            if (m_liveSessionRef.mrl != captured.mrl ||
+                m_liveSessionRef.ptsMs != captured.ptsMs)
+            {
+                resetLiveSelectionSession();
+                m_liveSessionRef = captured;
+                m_selectionFrozen = true;
+                m_frozenPtsMs = captured.ptsMs;
+            }
+            m_selection = liveCtx;
+            m_liveSessionRef = captured;
+            m_selectionFrozen = true;
+            m_frozenPtsMs = captured.ptsMs;
+            if (positive)
+                m_posItemPoints.append(itemPos);
+            else
+                m_negItemPoints.append(itemPos);
+            m_objectSelectBusy = true;
+            emit objectSelectionChanged();
+            if (m_canvas)
+                m_canvas->setObjectSelectBusy(true);
+            drainPendingItemPoints();
+            runSegmentationForPendingPoints(captured);
+            return;
+        }
+
+        /* Fallback only when the vout snapshot is unavailable (e.g. no
+         * output yet): queue the click as a viewport point; it is mapped into
+         * frame space once the exact frame arrives. */
         /* Queue the click as a viewport point; it is mapped into frame space
          * once the exact frame arrives (the mapping depends on the decoded
          * frame size, and decode is async so the GUI never blocks — P0#4). */
@@ -2720,19 +2759,25 @@ ObjectSelectionContext PaintbrushController::captureLiveFrameContext(const QSize
     ctx.itemToFrame = QTransform();
     ctx.frameToItem = QTransform();
 
-    /* Live harvest: decode the CURRENT player PTS into an ephemeral frame —
-     * always fresh, never a stale earlier frame. We do NOT touch the
-     * document's mutable sourceFrame (that is captured-frame/composition
-     * provenance, not the live player cursor). */
-    const QString mrl = currentMediaMRL();
-    if (liveMediaReady())
+    /* PRIMARY live seed: the displayed video frame is already decoded. Use
+     * the existing vout snapshot path (FrameCaptureService) instead of
+     * reopening the media and seeking the preparser to reconstruct a frame
+     * the app already has on screen. The snapshot is the video surface,
+     * before any Paintbrush QML overlay/mask/annotation. Its real media
+     * identity/PTS come from the player under the player lock; its geometry
+     * is the displayed geometry (crop/orientation applied). */
+    if (liveMediaReady() && m_intf && m_intf->p_mainPlayerController)
     {
-        const DecodedFrame f = requestFrame(mrl, playerTimeMs());
-        if (f.ok() && !f.image.isNull())
+        vlc_player_t *player = m_intf->p_mainPlayerController->getPlayer();
+        const QImage displayed = FrameCaptureService::captureCurrentFrame(player);
+                if (!displayed.isNull())
         {
-            ctx.ref = FrameRef{mrl, currentMediaTitle(), f.ptsMs,
-                               f.image.width(), f.image.height()};
-            ctx.frame = f.image;
+            FrameRef media = FrameCaptureService::currentMediaRef(player);
+            if (media.mrl.isEmpty())
+                media.mrl = currentMediaMRL();
+            ctx.ref = FrameRef{media.mrl, media.title, media.ptsMs,
+                               displayed.width(), displayed.height()};
+            ctx.frame = displayed;
             ctx.sourceKind = ObjectSelectionContext::SourceLiveVideo;
             if (m_welcomeVisible)
             {
@@ -3075,7 +3120,7 @@ void PaintbrushController::onAsyncObjectFrameDecodeFailed(const QString &token,
 
 void PaintbrushController::runSegmentationForPendingPoints(const FrameRef &shot)
 {
-    if (!m_selection.validFrame() || !m_segmentation.isConfigured())
+        if (!m_selection.validFrame() || !m_segmentation.isConfigured())
         return;
     m_segmentTargetRef = shot;
     m_segmentInFlight = true;
@@ -3089,6 +3134,12 @@ void PaintbrushController::runSegmentationForPendingPoints(const FrameRef &shot)
 
 void PaintbrushController::resetLiveSelectionSession()
 {
+    /* A media/frame change ends any active tracking and its sequential
+     * decoder before the selection state is cleared. Stale sequential
+     * callbacks must never publish a mask on the next media. */
+    if (m_tracking.isTracking())
+        m_tracking.cancel();
+    m_sequentialSource.cancel();
     /* P0.15: supersede any in-flight decoder request (e.g. a thumbnail batch
      * or a stale interactive decode) so the next interactive request wins. */
     m_editSource.cancelInFlight();
@@ -3122,7 +3173,11 @@ void PaintbrushController::resetLiveSelectionSession()
     m_visionEvidence.clear();
     m_visionUncertainty.clear();
     m_visionConversationId.clear();
-    m_segmentation.cancel();
+    /* Do not cancel the segmentation worker here. A new live session is
+     * created immediately before queueing the next request; cancelling the
+     * service at session reset races that request (the worker can observe
+     * the cancel flag after the new request cleared it). Stale results are
+     * already discarded by m_objectSessionId/m_segmentTargetRef. */
     if (m_canvas)
     {
         m_canvas->clearObjectMask();
@@ -3570,8 +3625,8 @@ void PaintbrushController::trackObject(int direction, int frames)
 
     /* the seed frame is decoded through the edit frame source (exact
      * PTS); tracking never steps or snapshots the playback player */
-    updateFrameDurationFromPlayer();
-    m_tracking.startTrack(&m_selectionSource, track.sourceMRL,
+        updateFrameDurationFromPlayer();
+    m_tracking.startTrack(&m_sequentialSource, track.sourceMRL,
                           seedFrame, seedMask,
                           positivePointsForTracking(), direction, frames,
                           seedPts);
@@ -5421,6 +5476,7 @@ void PaintbrushController::closeVideo()
     m_thumbnails.cancel();
     m_editSource.clearCache();
     m_selectionSource.clearCache();
+    m_sequentialSource.shutdown();
 
     /* stop playback: with no video output attached, playerHasVideo() becomes
      * false and the media drawer + canvas video surface hide themselves. */
@@ -5472,7 +5528,7 @@ void PaintbrushController::onMediaTimer()
      * the configured tolerance while paused. A mask must never float over a
      * different player frame. */
     if (m_selectionFrozen
-        && (playerIsPlaying() || !liveSelectionStillMatchesPlayer()))
+        && !liveSelectionStillMatchesPlayer())
         resetLiveSelectionSession();
 
     /* A batch suspended by a paused scrub resumes as soon as playback

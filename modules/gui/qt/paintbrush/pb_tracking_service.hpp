@@ -119,6 +119,7 @@ signals:
     void workerJobDone(const QImage &mask, float confidence, int stepIndex,
                        qint64 ptsMs);
     void workerInstanceReady(int instanceId);
+    void workerFetchEnded(qint64 requestedPts);
     void workerError(const QString &error);
 
 private slots:
@@ -126,6 +127,7 @@ private slots:
     void onWorkerJobDone(const QImage &mask, float confidence, int stepIndex,
                          qint64 ptsMs);
     void onWorkerInstanceReady(int instanceId);
+    void onWorkerFetchEnded(qint64 requestedPts);
     void onWorkerError(const QString &error);
 
 private:
@@ -155,7 +157,7 @@ private:
     void workerLoop();
     struct WorkerJob
     {
-        enum class Type { AddInstance, Propagate, Refine, Reset };
+        enum class Type { Prepare, Fetch, AddInstance, Propagate, Refine, Reset };
         Type type = Type::Reset;
         QImage frame;
         QVector<QPointF> posPoints;
