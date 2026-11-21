@@ -71,6 +71,19 @@ modules\gui\qt\paintbrush\probes\run-probes.ps1
 5. **Single-surface adaptive strip** — the two bottom bars are still two
    components; contextual collapse and margins are done.
 
+### Vector/hybrid DerivedArtwork — measured scope
+
+A vector layer type is required; Paintbrush has raster/text/image/sticker only.
+`LAYER_STICKER` alone is handled in 15 call sites across pb_boost, pb_controller,
+pb_controller_art, pb_layer, plus project serialization and the QML tool rail.
+Adding LAYER_VECTOR therefore means: enum + CanvasLayer path/stroke fields +
+compositor render + project-store serialize/load + delete/duplicate/reorder
+handling + contour extraction (Moore boundary trace over the alpha) + editing
+UI. This is a subsystem; tracing contours into a raster and labelling it vector
+is explicitly forbidden by the ADR.
+
+Start here: `pb_layer.hpp` (enum + fields) -> `pb_document.cpp` compositeLayer ->
+`pb_project_store.cpp` serialization -> `pb_controller::deriveArtwork`.
 ## Known issues / evidence
 
 - Settings magenta was fixed (Dialog `background` must not resolve `theme.*`
