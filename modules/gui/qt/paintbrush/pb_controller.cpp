@@ -358,6 +358,19 @@ void PaintbrushController::setCanvasItem(QQuickItem *item)
             this, &PaintbrushController::onCanvasModified);
     connect(m_canvas, &PaintbrushCanvasItem::imageDropped,
             this, &PaintbrushController::onLayerDrop);
+
+    /* Apply the CURRENT presentation state to the newly attached canvas.
+     * setPresentationMode() early-returns when the mode did not change, so a
+     * canvas that registers after a video opened would never learn it must
+     * stop painting opaque document tiles — the live video stayed hidden
+     * behind the editor canvas. Idempotent and independent of attach order. */
+    m_canvas->setVideoHarvestMode(
+        m_presentationMode == PresentationMode::HarvestVideo);
+    pbLogInfo(VLC_OBJECT(m_intf), "presentation",
+              "setCanvasItem: attached %dx%d, harvestMode=%d",
+              int(m_canvas->width()), int(m_canvas->height()),
+              m_canvas->videoHarvestMode() ? 1 : 0);
+
     refreshLivingClock();
 
     /* First attach: fit the initial document into the view so the paper
@@ -779,9 +792,18 @@ void PaintbrushController::insertCapturedFrame(const QImage &frame,
             const int idx = m_document.layerCount() - 1;
             if (idx >= 0)
             {
+                /* CanvasLayer::transform() scales about the raster CENTRE
+                 * (translate(position+c) * scale * translate(-c)), so
+                 * `position` is the pre-pivot translation, NOT the visual
+                 * top-left. Centering the UNSCALED raster is therefore the
+                 * exact answer:  top-left = position + c*(1-scale) reduces to
+                 * (canvas - size*scale)/2. The old code centered the SCALED
+                 * rect into `position`, which shifted the frame by
+                 * c*(1-scale) — the "added frame is not positioned
+                 * correctly" bug. */
                 moveImageLayer(idx, QPointF(
-                    (canvas.width() - frame.width() * scale) / 2.0,
-                    (canvas.height() - frame.height() * scale) / 2.0));
+                    (canvas.width() - frame.width()) / 2.0,
+                    (canvas.height() - frame.height()) / 2.0));
                 transformLayer(idx, qBound(0.01, scale, 100.0), 0.0);
             }
         }
@@ -801,6 +823,11 @@ void PaintbrushController::insertCapturedFrame(const QImage &frame,
     resetLiveSelectionSession();          /* no mask floats over the new canvas */
     cancelAddFrame();                     /* clear any residual add-frame busy */
     enterComposePresentation();           /* composition is the visual source   */
+    /* Kid-simple flow: once a frame is on the canvas the only useful next
+     * action is selecting the subject, so arm Object Select for the user
+     * instead of making them discover the scan icon. */
+    if (m_canvas && m_canvas->tool() != 3 /* Object Select (AI) */)
+        m_canvas->setTool(3);
     emit mediaStateChanged();
     if (m_intf && m_intf->p_mainPlaylistController)
         m_intf->p_mainPlaylistController->stop(); /* hide the video surface/drawer */
@@ -1517,8 +1544,8 @@ void PaintbrushController::onCanvasObjectClick(QPointF canvasPos, bool positive,
               "segmentationConfigured=%d layerCount=%d sourceFrameValid=%d",
               positive, itemPos.x(), itemPos.y(),
               viewport.width(), viewport.height(),
-              m_canvas ? m_canvas->width() : -1,
-              m_canvas ? m_canvas->height() : -1,
+              m_canvas ? int(m_canvas->width()) : -1,
+              m_canvas ? int(m_canvas->height()) : -1,
               liveMediaReady(), int(m_presentationMode),
               m_segmentation.isConfigured(),
               (int)m_document.layerCount(),
@@ -1642,12 +1669,13 @@ void PaintbrushController::onCanvasObjectClick(QPointF canvasPos, bool positive,
     }
 
     /* ---- still / compose seed -------------------------------------- */
-    ObjectSelectionContext ctx = composeFrameContext(viewport);
+    ObjectSelectionContext ctx = composeFrameContext(viewport, canvasPos);
     pbLogInfo(VLC_OBJECT(m_intf), "objectselect",
               "compose route: validFrame=%d frame=%dx%d viewport=%dx%d "
-              "itemPos=(%g,%g)",
+              "itemPos=(%g,%g) canvasPos=(%g,%g) sourceKind=%d",
               ctx.validFrame(), ctx.frame.width(), ctx.frame.height(),
-              viewport.width(), viewport.height(), itemPos.x(), itemPos.y());
+              viewport.width(), viewport.height(), itemPos.x(), itemPos.y(),
+              canvasPos.x(), canvasPos.y(), int(ctx.sourceKind));
     if (!ctx.validFrame())
     {
         setStatus(QStringLiteral("No video frame to select from (open a video "
@@ -1796,9 +1824,25 @@ void PaintbrushController::onObjectMaskEdited(const QImage &mask)
     m_maskUndoBefore = QImage();
     m_objectMask = mask;
     m_objectSelected = !mask.isNull();
-    /* keep the authoritative native mask in the selection context too */
+    /* keep the authoritative native mask in the selection context too.
+     * The canvas reports edits in DOCUMENT space; that is only interchangeable
+     * with the context's native/layer mask when the sizes agree. A refined
+     * layer-space selection therefore degrades to a document-space selection
+     * (display, Keep and cut-out stay consistent) instead of holding a
+     * canvas-sized image labelled as a layer mask. */
     if (m_objectSelected)
-        m_selection.mask = mask;
+    {
+        if (mask.size() == m_selection.frame.size())
+            m_selection.mask = mask;
+        else if (m_selection.sourceKind
+                 == ObjectSelectionContext::SourceCanvasLayer)
+        {
+            m_selection.mask = QImage();
+            m_selection.sourceKind = ObjectSelectionContext::SourceStills;
+        }
+        else
+            m_selection.mask = mask;
+    }
     updateObjectSelection();
     emit objectSelectionChanged();
     /* one mask-refine stroke == one undoable operation */
@@ -1898,6 +1942,24 @@ void PaintbrushController::onSegmentationMaskReady(const QImage &mask, double sc
             m_canvas->setLiveHarvestOverlay(mask, m_selection.contentRect,
                                             m_selection.frameToItem);
         }
+        else if (m_selection.sourceKind == ObjectSelectionContext::SourceCanvasLayer
+                 && mask.size() == m_selection.frame.size())
+        {
+            /* Layer-space mask: bake it through the LAYER TRANSFORM into
+             * document space once. The canvas paints document-space masks
+             * 1:1, so zoom/pan/resize never invalidate the overlay (the
+             * viewport letterbox path above would aspect-fit it to the whole
+             * window and draw it in the wrong place). */
+            QImage canvasMask(m_document.canvasSize(), QImage::Format_Grayscale8);
+            canvasMask.fill(0);
+            QPainter p(&canvasMask);
+            p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+            p.setTransform(m_selection.frameToCanvas);
+            p.drawImage(QPointF(0, 0),
+                        mask.convertToFormat(QImage::Format_Grayscale8));
+            p.end();
+            m_canvas->setObjectMask(canvasMask, score);
+        }
         else
         {
             m_canvas->setObjectMask(mask, score);
@@ -1906,11 +1968,17 @@ void PaintbrushController::onSegmentationMaskReady(const QImage &mask, double sc
     }
     updateObjectSelection();
     emit objectSelectionChanged();
+    pbLogInfo(VLC_OBJECT(m_intf), "segmentation",
+              "mask ready: %dx%d score=%.3f method=%s sourceKind=%d",
+              mask.width(), mask.height(), score, method.toUtf8().constData(),
+              int(m_selection.sourceKind));
     setStatus(QStringLiteral("Object selected (confidence %.0f%%)").arg(score * 100.0));
 }
 
 void PaintbrushController::onSegmentationError(const QString &message)
 {
+    pbLogInfo(VLC_OBJECT(m_intf), "segmentation", "error: %s",
+              message.toUtf8().constData());
     if (m_boostAwaitingMask)
     {
         m_boostAwaitingMask = false;
@@ -2237,10 +2305,61 @@ QSize PaintbrushController::liveViewportSize() const
     return m_document.canvasSize();
 }
 
-ObjectSelectionContext PaintbrushController::composeFrameContext(const QSize &viewportSize) const
+ObjectSelectionContext PaintbrushController::composeFrameContext(const QSize &viewportSize,
+                                                                const QPointF &canvasPos) const
 {
     ObjectSelectionContext ctx;
     ctx.viewportSize = viewportSize;
+
+    /* ---- 1. LAYER-FIRST ------------------------------------------------
+     * The user clicks what they SEE: a canvas layer. Segmenting the
+     * remembered source frame with a full-viewport letterbox transform is
+     * wrong as soon as the frame is a layer with its own position/scale —
+     * clicks map to the wrong pixels and "Object Select needs a point inside
+     * the video" appears even while clicking the subject.
+     *
+     * So: walk topmost→bottom, take the first visible raster layer whose
+     * local pixel is non-transparent under the cursor, and segment THAT
+     * raster in ITS OWN pixel space. The transform chain is
+     *   layer-local -> canvas (layer.transform()) -> item (zoom/pan)
+     * which makes the returned mask land exactly over the visible object. */
+    if (m_canvas)
+    {
+        const qreal z = m_canvas->zoom();
+        const QPointF pan = m_canvas->panOffset();
+        const QTransform canvasToItem(z, 0, 0, z, pan.x(), pan.y());
+
+        for (int i = m_document.layerCount() - 1; i >= 0; --i)
+        {
+            const CanvasLayer *layer = m_document.layerAt(i);
+            if (!layer || !layer->visible || layer->raster.isNull())
+                continue;
+
+            const QPointF local = layer->mapCanvasToLocal(canvasPos);
+            if (local.x() < 0.0 || local.y() < 0.0 ||
+                local.x() >= double(layer->raster.width()) ||
+                local.y() >= double(layer->raster.height()))
+                continue;
+            if (layer->raster.hasAlphaChannel() &&
+                layer->raster.pixelColor(int(local.x()), int(local.y())).alpha() < 8)
+                continue; /* transparent: fall through to the layer below */
+
+            ctx.sourceKind = ObjectSelectionContext::SourceCanvasLayer;
+            ctx.frame = layer->raster;
+            ctx.ref = m_document.sourceFrame();
+            ctx.contentRect = QRectF(QPointF(0, 0), QSizeF(layer->raster.size()));
+            ctx.frameToCanvas = layer->transform();
+            ctx.frameToItem = layer->transform() * canvasToItem;
+            ctx.itemToFrame = ctx.frameToItem.inverted();
+            pbLogInfo(VLC_OBJECT(m_intf), "objectselect",
+                      "layer route: layer=%d %dx%d scale=%g local=(%g,%g)",
+                      i, layer->raster.width(), layer->raster.height(),
+                      double(layer->scale), local.x(), local.y());
+            return ctx;
+        }
+    }
+
+    /* ---- 2. Fallback: the remembered exact source frame ---------------- */
     ctx.sourceKind = ObjectSelectionContext::SourceStills;
     ctx.itemToFrame = QTransform();
     ctx.frameToItem = QTransform();
@@ -2545,7 +2664,8 @@ QImage PaintbrushController::objectCrop() const
      * ObjectSelectionContext (native frame space) — crop directly from them,
      * never rescaling the native mask. For a compose/stills selection fall
      * back to the document/canvas-space path. */
-    if (m_selection.sourceKind == ObjectSelectionContext::SourceLiveVideo
+    if ((m_selection.sourceKind == ObjectSelectionContext::SourceLiveVideo
+         || m_selection.sourceKind == ObjectSelectionContext::SourceCanvasLayer)
         && !m_selection.mask.isNull() && !m_selection.frame.isNull())
     {
         /* native mask bounds in frame coordinates */
@@ -2635,13 +2755,21 @@ void PaintbrushController::addObjectToCanvas()
         return;
     }
     const bool live = m_selection.sourceKind == ObjectSelectionContext::SourceLiveVideo;
+    const bool layerSpace =
+        m_selection.sourceKind == ObjectSelectionContext::SourceCanvasLayer;
     /* Placement: for a compose/stills selection the sticker lands where the
      * object was in the frame; for a LIVE selection we center it on the
-     * canvas (the native bounds are frame coords, not canvas coords). */
+     * canvas (the native bounds are frame coords, not canvas coords). A
+     * layer-space selection reports DOCUMENT-space bounds (the mask was baked
+     * through the layer transform), so its top-left is directly usable. */
     QPointF place = m_canvas ? m_canvas->objectMaskBounds().topLeft() : QPointF();
     if (live || place.isNull())
         place = QPointF((m_document.canvasWidth() - cutout.width()) / 2.0,
                         (m_document.canvasHeight() - cutout.height()) / 2.0);
+    /* trimOffset is LAYER-LOCAL pixels; convert to canvas units for a scaled
+     * layer so the trimmed content still lands on the object. */
+    const qreal layerScale = layerSpace
+        ? qMax<qreal>(0.01, qAbs(m_selection.frameToCanvas.m11())) : 1.0;
     QPoint trimOffset;
     const QImage trimmed = trimToContent(cutout, &trimOffset);
     if (trimmed.isNull())
@@ -2655,7 +2783,7 @@ void PaintbrushController::addObjectToCanvas()
      * selection context ref, never the document's mutable sourceFrame. */
     const QImage seedMask = trimmed.convertToFormat(QImage::Format_Alpha8);
     const FrameRef sref = selectionFrameRef();
-    insertStickerLayer(trimmed, place + QPointF(trimOffset),
+    insertStickerLayer(trimmed, place + QPointF(trimOffset) * layerScale,
                        QStringLiteral("Cutout"), sref.mrl,
                        sref.title.isEmpty() ? m_document.sourceMediaTitle()
                                             : sref.title,
@@ -4334,8 +4462,8 @@ void PaintbrushController::setPresentationMode(int mode)
               "playerHasVideo=%d, videoOutputAttached=%d)",
               newMode == PresentationMode::HarvestVideo ? "HarvestVideo"
                                                         : "ComposeCanvas",
-              m_canvas ? m_canvas->size().width() : -1,
-              m_canvas ? m_canvas->size().height() : -1,
+              m_canvas ? int(m_canvas->size().width()) : -1,
+              m_canvas ? int(m_canvas->size().height()) : -1,
               playerHasVideo() ? 1 : 0,
               videoOutputAttached() ? 1 : 0);
     emit presentationModeChanged();

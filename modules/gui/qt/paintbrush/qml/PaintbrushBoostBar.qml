@@ -25,13 +25,20 @@ Item {
     implicitWidth: row.implicitWidth + 2 * VLCStyle.margin_small
     implicitHeight: VLCStyle.dp(44, VLCStyle.scale)
 
-    /* concrete reason for the disabled primary verb, shown in the UI */
+    /* concrete reason for the disabled primary verb, shown in the UI.
+     * NOTE the branch order: the `objectSelected` case is the SUCCESS state
+     * (a mask exists, canKeep is true), so it must not produce a "select
+     * something first" sentence. The previous ternary was inverted and told
+     * the user to select an object *while an object was selected* — the
+     * "it keeps telling me to click even though I'm clicking" loop. */
     readonly property string keepDisabledReason:
         !PaintbrushCtx.segmentationAvailable
-            ? qsTr("Object Select model is not configured (see diagnostics).")
+            ? qsTr("Object Select is not available — check Settings → Diagnostics.")
             : (PaintbrushCtx.objectSelected
-                   ? qsTr("Select an object with Object Select first.")
-                   : qsTr("Select an object on the frame first (Object Select)."))
+                   ? ""
+                   : (canvas.tool === 3 /* Object Select (AI) */
+                          ? qsTr("Click the person or object you want to cut out.")
+                          : qsTr("Pick the Object Select tool (the scan icon), then click the person you want.")))
     readonly property string boostDisabledReason:
         qsTr("Drop a sticker or image on the canvas first — Boost needs source art.")
 
@@ -78,8 +85,7 @@ Item {
                           ? qsTr("Applying the art direction…")
                           : (PaintbrushCtx.canBoost
                              ? qsTr("Art-direct the composition: hierarchy, depth, motion. One undo.")
-                             : qsTr("Drop a sticker or image onto the canvas first — Boost needs source art."))
-        }
+                             : qsTr("Drop a sticker or image onto the canvas first — Boost needs source art."))        }
 
         Button {
             text: qsTr("Undo Boost")

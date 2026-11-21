@@ -111,6 +111,18 @@ onMoved: {
                     value: PaintbrushCtx.playerTimeMs
                     when: !seekSlider.pressed
                 }
+
+                /* The player reports time in discrete steps (poll interval),
+                 * which makes the handle jump. SmoothedAnimation glides
+                 * between reports; it is suspended while dragging so the
+                 * handle still tracks the finger 1:1. */
+                Behavior on value {
+                    enabled: !seekSlider.pressed
+                    SmoothedAnimation {
+                        velocity: 3000
+                        duration: 160
+                    }
+                }
             }
 
             Widgets.ActionButtonPrimary {
@@ -332,16 +344,25 @@ onMoved: {
                         width: VLCStyle.dp(86, VLCStyle.scale)
                         height: thumbStrip.height
                         radius: VLCStyle.margin_xxxsmall
-                        color: model.failed ? Qt.rgba(0.8, 0.2, 0.2, 0.15)
-                                            : Qt.rgba(theme.fg.primary.r, theme.fg.primary.g,
-                                                      theme.fg.primary.b, 0.06)
-                        border.width: model.timeMs === PaintbrushCtx.playerTimeMs ? 2 : 0
+                        /* `thumbnailList` is a QVariantList of QVariantMap, so
+                         * the delegate data is `modelData.<role>` — NOT
+                         * `model.<role>`. `model.timeMs` / `model.hasImage`
+                         * evaluate to undefined for JS-array models (proven by
+                         * probes/qml/ProbeModelBinding.qml), which made
+                         * `source` permanently "" and left the timeline as
+                         * empty boxes. Same pattern as the track lane above. */
+                        color: modelData.failed ? Qt.rgba(0.8, 0.2, 0.2, 0.15)
+                                                : Qt.rgba(theme.fg.primary.r, theme.fg.primary.g,
+                                                          theme.fg.primary.b, 0.06)
+                        border.width: modelData.timeMs === PaintbrushCtx.playerTimeMs ? 2 : 0
                         border.color: theme.accent
 
                         Image {
                             anchors.fill: parent
                             anchors.margins: 1
-                            source: model.hasImage ? PaintbrushCtx.thumbnailDataUrl(index) : ""
+                            source: modelData.hasImage
+                                    ? PaintbrushCtx.thumbnailDataUrl(index)
+                                    : ""
                             fillMode: Image.PreserveAspectFit
                             /* NOTE: do NOT set asynchronous:true here — these
                              * thumbnails are small data: URLs and Qt's async
@@ -353,8 +374,8 @@ onMoved: {
                             anchors.left: parent.left
                             anchors.bottom: parent.bottom
                             anchors.margins: 2
-                            text: model.hasImage || model.failed
-                                  ? root.formatTime(model.timeMs)
+                            text: modelData.hasImage || modelData.failed
+                                  ? root.formatTime(modelData.timeMs)
                                   : ""
                             color: theme.fg.primary
                             font.pixelSize: VLCStyle.fontSize_xsmall
@@ -363,8 +384,8 @@ onMoved: {
                         MouseArea {
                             anchors.fill: parent
                             onClicked: {
-                                if (model.hasImage)
-                                    PaintbrushCtx.playerSeek(model.timeMs)
+                                if (modelData.hasImage)
+                                    PaintbrushCtx.playerSeek(modelData.timeMs)
                             }
                         }
                     }

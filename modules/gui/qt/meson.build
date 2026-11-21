@@ -560,6 +560,8 @@ qt_plugin_sources = files(
     'widgets/native/viewblockingrectangle.hpp',
     'widgets/native/doubleclickignoringitem.hpp',
     'paintbrush/pb_common.cpp',
+    'paintbrush/pb_palette_store.cpp',
+    'paintbrush/pb_controller_palettes.cpp',
     'paintbrush/pb_layer.cpp',
     'paintbrush/pb_document.cpp',
     'paintbrush/pb_history.cpp',

@@ -169,25 +169,30 @@ void ThumbnailService::onTick()
                                                             targetMs})
                              : DecodedFrame();
     const qint64 latency = QDateTime::currentMSecsSinceEpoch() - t0;
-    if (frame.image.isNull() || !frame.ptsVerified)
+    if (frame.image.isNull())
     {
-        /* correctness gate (A11): never publish a frame whose actual PTS
-         * is not within tolerance of the requested timestamp */
+        /* A NULL image is a real failure. A PTS mismatch is NOT: the VLC
+         * thumbnailer only ever returns keyframes, so demanding an exact PTS
+         * inside the 250 ms tolerance rejected every slot between keyframes
+         * and left the timeline with 2 of 24 images ("only some thumbnails
+         * generated"). A filmstrip cell needs pixels, not frame-exact
+         * provenance — the AI/crop paths keep the strict gate. */
         for (Thumbnail &th : m_thumbnails)
         {
             if (th.timeMs == targetMs)
                 th.failed = true;
         }
         pbLogWarn(m_logObj, "media",
-                  "thumbnail slot %lld ms: decode %s%s (latency %lld ms, "
-                  "VERIFIED PTS %lld ms, %lldx%lld)",
-                  (long long)targetMs,
-                  frame.image.isNull() ? "null" : "frame",
-                  frame.ptsVerified ? "" : ", PTS outside tolerance",
-                  (long long)latency, (long long)frame.ptsMs,
-                  frame.image.width(), frame.image.height());
+                  "thumbnail slot %lld ms: decode failed (latency %lld ms)",
+                  (long long)targetMs, (long long)latency);
         return; /* continue with the next slot on the next tick */
     }
+    if (!frame.ptsVerified)
+        pbLogInfo(m_logObj, "media",
+                  "thumbnail slot %lld ms: nearest keyframe at %lld ms "
+                  "(delta %lld ms, latency %lld ms)",
+                  (long long)targetMs, (long long)frame.ptsMs,
+                  (long long)(frame.ptsMs - targetMs), (long long)latency);
 
     const QImage thumb = downscale(frame.image, THUMB_WIDTH);
     const QString key = m_mediaKey + QStringLiteral("|") +

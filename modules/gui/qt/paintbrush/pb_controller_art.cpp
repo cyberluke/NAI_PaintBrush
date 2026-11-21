@@ -54,7 +54,8 @@ void PaintbrushController::keepSelection()
     FrameRef ref;
     QImage frame;
     QImage mask = m_objectMask;
-    if (m_selection.sourceKind == ObjectSelectionContext::SourceLiveVideo
+    if ((m_selection.sourceKind == ObjectSelectionContext::SourceLiveVideo
+         || m_selection.sourceKind == ObjectSelectionContext::SourceCanvasLayer)
         && !m_selection.frame.isNull())
     {
         ref = m_selection.ref;

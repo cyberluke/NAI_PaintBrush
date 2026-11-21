@@ -155,6 +155,10 @@ void SegmentationService::segment(const QImage &frame,
     if (m_queue.size() >= 1)
         m_queue.pop_front();
     m_queue.push_back({frame, posPoints, negPoints, textPrompt});
+    pbLogInfo(m_obj, "segmentation",
+              "segment: queued %dx%d pos=%d neg=%d (pending=%d)",
+              frame.width(), frame.height(), int(posPoints.size()),
+              int(negPoints.size()), int(m_queue.size()));
     m_cond.wakeAll();
 }
 
@@ -267,19 +271,47 @@ void SegmentationService::runJob(Job job)
             emit initialized(true, {});
         }
 
+        /* Encode at a BOUNDED resolution. SAM's visual encoder cost scales
+         * with pixel count, and a CPU ViT encode of a 570x1080 frame takes
+         * minutes — the request looked like a silent hang. The mask is
+         * upscaled back to the frame size below, and prompt points are
+         * mapped into the encoded space, so accuracy is retained. */
+        constexpr int kMaxEncodeSide = 640;
+        QImage encodeFrame = job.frame;
+        qreal encodeScale = 1.0;
+        if (qMax(job.frame.width(), job.frame.height()) > kMaxEncodeSide)
+        {
+            encodeFrame = job.frame.scaled(kMaxEncodeSide, kMaxEncodeSide,
+                                           Qt::KeepAspectRatio,
+                                           Qt::SmoothTransformation);
+            encodeScale = qreal(encodeFrame.width()) / qreal(job.frame.width());
+        }
+
         /* encode the frame once; reuse the cached embedding on refinement */
-        const quint64 hash = fnvImageHash(job.frame);
+        const quint64 hash = fnvImageHash(encodeFrame);
         if (hash != m_encodedHash)
         {
             emit progressChanged(QStringLiteral("Encoding frame…"));
-            const sam3_image img = toSamImage(job.frame);
+            pbLogInfo(m_obj, "segmentation",
+                      "segment: encode START %dx%d (frame %dx%d, scale %.3f)",
+                      encodeFrame.width(), encodeFrame.height(),
+                      job.frame.width(), job.frame.height(),
+                      double(encodeScale));
+            const sam3_image img = toSamImage(encodeFrame);
             if (!sam3_encode_image(*m_stateSam, *m_model, img))
             {
+                pbLogWarn(m_obj, "segmentation", "segment: encode FAILED");
                 emit errorOccurred(QStringLiteral("SAM frame encoding failed"));
                 setState(STATE_READY);
                 return;
             }
+            pbLogInfo(m_obj, "segmentation", "segment: encode DONE");
             m_encodedHash = hash;
+        }
+        else
+        {
+            pbLogInfo(m_obj, "segmentation",
+                      "segment: encode reused (cached embedding)");
         }
 
         sam3_result result;
@@ -304,9 +336,11 @@ void SegmentationService::runJob(Job job)
             sam3_pvs_params params;
             params.multimask = true;
             for (const QPointF &pt : job.posPoints)
-                params.pos_points.push_back({float(pt.x()), float(pt.y())});
+                params.pos_points.push_back({float(pt.x() * encodeScale),
+                                             float(pt.y() * encodeScale)});
             for (const QPointF &pt : job.negPoints)
-                params.neg_points.push_back({float(pt.x()), float(pt.y())});
+                params.neg_points.push_back({float(pt.x() * encodeScale),
+                                             float(pt.y() * encodeScale)});
             result = sam3_segment_pvs(*m_stateSam, *m_model, params);
             method = QStringLiteral("points");
         }

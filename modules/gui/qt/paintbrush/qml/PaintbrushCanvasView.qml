@@ -57,6 +57,30 @@ import VLC.Paintbrush
             canvas.parent = root
             canvas.anchors.fill = root
             canvas.visible = true
+            /* Post-layout contract check (Gate: canvas geometry). The runtime
+             * log showed the canvas staying 0x0 forever, which silently broke
+             * frame placement and video layering. This asserts, after the
+             * layout has settled, that the attach actually took. */
+            attachCheck.start()
+        }
+
+        Timer {
+            id: attachCheck
+            interval: 700
+            onTriggered: console.log("PB_QML attachCheck root=" + root.width + "x" + root.height
+                                     + " canvas=" + canvas.width + "x" + canvas.height
+                                     + " parentIsRoot=" + (canvas.parent === root)
+                                     + " visible=" + canvas.visible)
+        }
+
+        /* Evidence for the reported "[object Object]" in the canvas status
+         * line: log the exact string the label receives, so a non-string
+         * coercion is identifiable from the run log instead of guessed. */
+        Connections {
+            target: canvas
+            function onStatusTextChanged() {
+                console.log("PB_QML statusText='" + canvas.statusText + "'")
+            }
         }
 
         /* anchors the native video window to the canvas area. The LIVE video
@@ -68,10 +92,14 @@ import VLC.Paintbrush
         VideoSurface {
             id: videoSurface
             anchors.fill: parent
-            renderingEnabled: true
+            /* Rendering follows VISIBILITY: the native vout must stop painting
+             * whenever the compose canvas owns the screen. A permanently-true
+             * renderingEnabled kept the video window alive under the chrome,
+             * so it bled through seams around the toolbar/canvas border. */
+            renderingEnabled: PaintbrushCtx.playerHasVideo
+                              && PaintbrushCtx.presentationMode === 0 /* HarvestVideo */
             videoSurfaceProvider: MainCtx.videoSurfaceProvider
-            visible: PaintbrushCtx.playerHasVideo
-                     && PaintbrushCtx.presentationMode === 0 /* HarvestVideo */
+            visible: renderingEnabled
         }
 
         /* checkerboard behind transparent content; hidden when the live video
@@ -203,8 +231,12 @@ import VLC.Paintbrush
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.margins: VLCStyle.margin_small
         height: askRow.height + VLCStyle.margin_small * 2
+        /* Bounded width, NOT derived from askRow.width: askRow anchors
+         * left+right to this rectangle, so reading its width here created a
+         * "Binding loop detected for property width" (spammed the runtime log
+         * on every relayout). The row fills whatever width we choose. */
         width: Math.min(parent.width - VLCStyle.margin_normal * 4,
-                        askRow.width + VLCStyle.margin_normal * 2)
+                        VLCStyle.dp(520, VLCStyle.scale))
         radius: VLCStyle.margin_small
         color: theme.bg.primary
         border.width: 1

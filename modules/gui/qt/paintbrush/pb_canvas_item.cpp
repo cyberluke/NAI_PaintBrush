@@ -2170,6 +2170,19 @@ void PaintbrushCanvasItem::geometryChange(const QRectF &newGeometry,
     QQuickItem::geometryChange(newGeometry, oldGeometry);
     if (newGeometry.size() != oldGeometry.size())
     {
+        /* Geometry evidence: the item reported 0x0 forever after the runtime
+         * reparent + anchors.fill attach, which silently broke frame
+         * placement and video layering. Log the first few real transitions so
+         * the attach contract is observable instead of inferred. */
+        static int s_geomLogCount = 0;
+        if (s_geomLogCount < 8)
+        {
+            ++s_geomLogCount;
+            qDebug("PB_CANVAS geom %dx%d -> %dx%d parent=%s",
+                   int(oldGeometry.width()), int(oldGeometry.height()),
+                   int(newGeometry.width()), int(newGeometry.height()),
+                   parentItem() ? "yes" : "no");
+        }
         /* The live harvest overlay is item-sized AND its letterbox transform
          * depends on the viewport size. Rebuild it from the authoritative
          * native mask against the new size (P0#3); on failure fall back to

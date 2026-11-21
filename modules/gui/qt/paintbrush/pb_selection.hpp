@@ -54,6 +54,7 @@ struct ObjectSelectionContext
         SourceNone = 0,
         SourceLiveVideo,  /* live media playing; media-backed native frame */
         SourceStills,     /* captured reference / compose canvas          */
+        SourceCanvasLayer,/* a composited canvas LAYER's own pixels       */
     };
 
     SourceKind sourceKind = SourceNone; /* what produced this selection       */
@@ -64,6 +65,10 @@ struct ObjectSelectionContext
     QRectF contentRect;           /* aspect-fit rect inside the viewport       */
     QTransform frameToItem;       /* native frame pixel -> viewport point      */
     QTransform itemToFrame;       /* viewport point -> native frame pixel      */
+    /* Layer-space selections only: layer-local pixel -> DOCUMENT canvas. The
+     * mask is baked through this into document space for display and for
+     * placement of the cut-out, so zoom/pan never invalidate it. */
+    QTransform frameToCanvas;
     QString sessionId;            /* opaque, unique per selection session      */
     double score = 0.0;           /* SAM confidence of the mask                */
 

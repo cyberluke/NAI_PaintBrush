@@ -652,6 +652,17 @@ public:
                                          const QString &assistantModel,
                                          int ptsToleranceMs);
     Q_INVOKABLE void clearRestartRequired();
+
+    /* -- art-direction palettes -----------------------------------------
+     * Backed by pb_palette_store (built-in locked presets + user palettes
+     * persisted under the app data dir). Every mutator returns an EMPTY
+     * string on success or a human-readable reason on failure. */
+    Q_INVOKABLE QVariantList paletteList() const;
+    Q_INVOKABLE QString saveCustomPalette(const QVariantMap &palette);
+    Q_INVOKABLE QString deleteCustomPalette(const QString &id);
+    Q_INVOKABLE QString exportPalette(const QString &id,
+                                      const QString &filePath);
+    Q_INVOKABLE QString importPalette(const QString &filePath);
     /* Current capability status text for the NAI Settings status rows; used
      * to show POSITIVE text when a capability is green (P1#12). */
     QString trackingStatusText() const;
@@ -809,7 +820,12 @@ private:
     QSize liveViewportSize() const;
     /* Map the document/source frame used for a compose-mode SAM/Keep onto
      * the given viewport size (1:1 when the canvas matches the frame). */
-    ObjectSelectionContext composeFrameContext(const QSize &viewportSize) const;
+    /* Build the segmentation context for a compose click. LAYER-FIRST: the
+     * topmost visible raster layer under `canvasPos` is segmented in its own
+     * pixel space (so layer position/scale/rotation are honoured); the
+     * remembered source frame is only the fallback. */
+    ObjectSelectionContext composeFrameContext(const QSize &viewportSize,
+                                               const QPointF &canvasPos) const;
     /* Kick off an ASYNC exact-frame decode for an interactive Object Select
      * seed click (P0#4). Returns immediately; onArrayFrameRequested fires
      * once the decoded frame is ready (or the request is known stale). The
