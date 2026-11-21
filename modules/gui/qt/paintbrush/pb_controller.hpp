@@ -639,11 +639,28 @@ public:
                NOTIFY objectSelectionChanged FINAL)
     Q_PROPERTY(QString segmentationProgress READ segmentationProgress
                NOTIFY objectSelectionChanged FINAL)
-    /* The eight most recently USED colours (not palette swatches). */
-    Q_PROPERTY(QVariantList recentColors READ recentColors
+    /* History of recently SELECTED foreground colours. Deliberately named for
+     * what it is: selection history, not palette content and not "colours that
+     * were painted with". */
+    Q_PROPERTY(QVariantList recentSelectedColors READ recentSelectedColors
                NOTIFY recentColorsChanged FINAL)
 
-    QVariantList recentColors() const { return m_recentColors; }
+    QVariantList recentSelectedColors() const { return m_recentColors; }
+
+    /* Semantic tool capabilities. QML must not test magic tool numbers. */
+    Q_PROPERTY(bool toolUsesColor READ toolUsesColor
+               NOTIFY toolCapabilitiesChanged FINAL)
+    Q_PROPERTY(bool toolHasPrimaryAction READ toolHasPrimaryAction
+               NOTIFY toolCapabilitiesChanged FINAL)
+    Q_PROPERTY(bool toolIsBusy READ toolIsBusy
+               NOTIFY toolCapabilitiesChanged FINAL)
+
+    /* Bodies live in pb_controller.cpp: PaintbrushCanvasItem is only
+     * forward-declared here, so inline accessors would be instantiated in TUs
+     * that do not have the complete type (moc, other controller units). */
+    bool toolUsesColor() const;
+    bool toolHasPrimaryAction() const;
+    bool toolIsBusy() const;
 
     bool segmentationBusy() const { return m_segBusy; }
     QString segmentationProgress() const { return m_segProgress; }
@@ -742,6 +759,7 @@ signals:
     void canRedoChanged();
     void statusMessageChanged();
     void projectChanged();
+    void toolCapabilitiesChanged();
     void recentColorsChanged();
     void documentChanged();
     void serviceAvailabilityChanged();

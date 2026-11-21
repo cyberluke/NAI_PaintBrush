@@ -362,6 +362,20 @@ void PaintbrushController::configureServices()
     m_segmentation.initialize();
 }
 
+bool PaintbrushController::toolUsesColor() const
+{
+    return m_canvas && m_canvas->tool() != 3 /* Object Select */ && !m_segBusy;
+}
+
+bool PaintbrushController::toolHasPrimaryAction() const
+{
+    return m_canvas && m_canvas->tool() == 3 && canKeep();
+}
+
+bool PaintbrushController::toolIsBusy() const
+{
+    return m_segBusy;
+}
 bool PaintbrushController::paintbrushEnabled() const
 {
     return var_InheritBool(m_intf, "paintbrush-enabled");
@@ -412,6 +426,11 @@ void PaintbrushController::setCanvasItem(QQuickItem *item)
                     m_recentColors.removeLast();
                 emit recentColorsChanged();
             });
+
+    /* Tool changes alter which controls are relevant; QML consumes the
+     * semantic capability properties, not tool ids. */
+    connect(m_canvas, &PaintbrushCanvasItem::toolChanged,
+            this, [this]() { emit toolCapabilitiesChanged(); });
 
     /* Apply the CURRENT presentation state to the newly attached canvas.
      * setPresentationMode() early-returns when the mode did not change, so a

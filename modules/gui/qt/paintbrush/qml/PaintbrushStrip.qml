@@ -32,11 +32,8 @@ Item {
 
     /* Semantic capability: expand this table instead of testing tool numbers
      * at call sites. Object Select (3) is the only colour-free tool today. */
-    readonly property bool colourCapable:
-        canvas !== null
-        && canvas.tool !== 3
-        && !PaintbrushCtx.segmentationBusy
-    readonly property bool selecting: canvas !== null && canvas.tool === 3
+    readonly property bool colourCapable: PaintbrushCtx.toolUsesColor
+    readonly property bool selecting: PaintbrushCtx.toolHasPrimaryAction
 
     ColorContext {
         id: theme
@@ -105,7 +102,7 @@ Item {
 
             /* recent swatches from the active palette */
             Repeater {
-                model: PaintbrushCtx.recentColors
+                model: PaintbrushCtx.recentSelectedColors
                 Rectangle {
                     width: VLCStyle.dp(18, VLCStyle.scale)
                     height: width
