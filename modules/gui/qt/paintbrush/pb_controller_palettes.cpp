@@ -160,8 +160,12 @@ QString PaintbrushController::placeSubject(const QString &subjectId,
     if (cutout.isNull())
         return QStringLiteral("This subject has no stored cut-out yet.");
 
-    const QPointF pos((m_document.canvasWidth() - cutout.width()) / 2.0,
-                      (m_document.canvasHeight() - cutout.height()) / 2.0);
+    /* Cascade repeated placements so every instance is visibly independent —
+     * placing twice at the same centre would look like a single subject. */
+    const int placed = int(store.instances(comp).size());
+    const double cascade = 36.0 * double(placed % 6);
+    const QPointF pos((m_document.canvasWidth() - cutout.width()) / 2.0 + cascade,
+                      (m_document.canvasHeight() - cutout.height()) / 2.0 + cascade);
     const int zBefore = m_document.layerCount();
 
     insertStickerLayer(cutout, pos, asset->name, asset->sourceMediaId,
