@@ -399,6 +399,20 @@ void PaintbrushController::setCanvasItem(QQuickItem *item)
     connect(m_canvas, &PaintbrushCanvasItem::imageDropped,
             this, &PaintbrushController::onLayerDrop);
 
+    /* Track the eight most recently USED colours (history, not palette
+     * content). */
+    connect(m_canvas, &PaintbrushCanvasItem::fgColorChanged,
+            this, [this]() {
+                if (!m_canvas)
+                    return;
+                const QString name = m_canvas->fgColor().name(QColor::HexRgb);
+                m_recentColors.removeAll(name);
+                m_recentColors.prepend(name);
+                while (m_recentColors.size() > 8)
+                    m_recentColors.removeLast();
+                emit recentColorsChanged();
+            });
+
     /* Apply the CURRENT presentation state to the newly attached canvas.
      * setPresentationMode() early-returns when the mode did not change, so a
      * canvas that registers after a video opened would never learn it must

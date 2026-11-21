@@ -639,6 +639,11 @@ public:
                NOTIFY objectSelectionChanged FINAL)
     Q_PROPERTY(QString segmentationProgress READ segmentationProgress
                NOTIFY objectSelectionChanged FINAL)
+    /* The eight most recently USED colours (not palette swatches). */
+    Q_PROPERTY(QVariantList recentColors READ recentColors
+               NOTIFY recentColorsChanged FINAL)
+
+    QVariantList recentColors() const { return m_recentColors; }
 
     bool segmentationBusy() const { return m_segBusy; }
     QString segmentationProgress() const { return m_segProgress; }
@@ -737,6 +742,7 @@ signals:
     void canRedoChanged();
     void statusMessageChanged();
     void projectChanged();
+    void recentColorsChanged();
     void documentChanged();
     void serviceAvailabilityChanged();
     void objectSelectionChanged();
@@ -966,6 +972,7 @@ private:
     bool m_segBusy = false;
     QString m_segProgress;
     bool m_segProgressConnected = false;
+    QVariantList m_recentColors;
     QImage m_objectMask;
     double m_objectMaskScore = 0.0; /* confidence of the current object mask */
     QImage m_maskUndoBefore;   /* mask captured when a refine stroke arms */

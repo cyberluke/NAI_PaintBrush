@@ -105,10 +105,7 @@ Item {
 
             /* recent swatches from the active palette */
             Repeater {
-                model: {
-                    const palettes = PaintbrushCtx.paletteList()
-                    return palettes.length > 0 ? palettes[0].colors.slice(0, 8) : []
-                }
+                model: PaintbrushCtx.recentColors
                 Rectangle {
                     width: VLCStyle.dp(18, VLCStyle.scale)
                     height: width
@@ -131,17 +128,16 @@ Item {
         }
 
         /* ---- primary action -------------------------------------------- */
+        /* Primary action is a TOOL CAPABILITY, not a global fallback. Only a
+         * finished selection has an apply verb; painting and transforming
+         * tools are continuous and have none, so they show no action at all
+         * (and the layout gives the space back to the parameters). */
         Widgets.ActionButtonPrimary {
             Layout.alignment: Qt.AlignVCenter
-            text: root.selecting ? qsTr("Keep") : qsTr("Boost")
-            enabled: root.selecting ? PaintbrushCtx.canKeep
-                                    : PaintbrushCtx.canBoost
-            onClicked: {
-                if (root.selecting)
-                    PaintbrushCtx.keepSelection()
-                else
-                    PaintbrushCtx.boost()
-            }
+            visible: root.selecting
+            text: qsTr("Keep")
+            enabled: PaintbrushCtx.canKeep
+            onClicked: PaintbrushCtx.keepSelection()
         }
     }
 
