@@ -398,10 +398,6 @@ Item {
             anchors.fill: parent
             spacing: 0
 
-            /* the unified horizontal per-tool option toolbar (SOLID): the same
-             * PaintbrushToolbar cell delegate as the vertical rail, one row,
-             * clip:true, horizontal scroll. Never wraps, never overlaps the
-             * palette. */
             /* ONE strip: tool options + palette share a single surface, a
              * single edge and a constant height. Children keep their own
              * layout so a tool switch never reflows the canvas. */
