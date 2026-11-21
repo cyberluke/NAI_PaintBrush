@@ -96,8 +96,12 @@ import VLC.Paintbrush
              * whenever the compose canvas owns the screen. A permanently-true
              * renderingEnabled kept the video window alive under the chrome,
              * so it bled through seams around the toolbar/canvas border. */
+            /* Show the video whenever one is attached. The vout letterboxes
+             * itself inside this rect, so aspect ratio stays correct. When the
+             * document HAS content the opaque canvas paints over it; when the
+             * document is empty (just opened a video, no frame yet) the video
+             * remains visible instead of a blank editor. */
             renderingEnabled: PaintbrushCtx.playerHasVideo
-                              && PaintbrushCtx.presentationMode === 0 /* HarvestVideo */
             videoSurfaceProvider: MainCtx.videoSurfaceProvider
             visible: renderingEnabled
         }
