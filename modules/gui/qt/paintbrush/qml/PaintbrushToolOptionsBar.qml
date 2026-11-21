@@ -68,6 +68,8 @@ Rectangle {
     readonly property real _oneRow: VLCStyle.dp(32, VLCStyle.scale)
                                    + VLCStyle.margin_xsmall
     height: _oneRow + VLCStyle.margin_xsmall * 2
+    /* Overflow clips inside the strip instead of drawing over the canvas. */
+    clip: true
     color: theme.bg.primary
     border.width: 1
     border.color: theme.border
