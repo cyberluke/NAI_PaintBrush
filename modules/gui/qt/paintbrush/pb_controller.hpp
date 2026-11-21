@@ -698,6 +698,9 @@ public:
     /* Non-destructive style on a placed subject: appends/updates an effect on
      * the LINKED layer only; the subject mask and source are untouched. */
     Q_INVOKABLE QString deriveContour(const QString &subjectId);
+    /* Hybrid vector layer: raster render + the editable path persisted in
+     * layer metadata (nai-paintbrush/vector-path/v1). */
+    Q_INVOKABLE QString addVectorLayerFromSelection();
     Q_INVOKABLE QString deriveArtwork(const QString &subjectId,
                                       const QString &recipeId);
     Q_INVOKABLE QString applySubjectStyle(const QString &instanceId,

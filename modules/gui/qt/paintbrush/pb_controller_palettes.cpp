@@ -551,4 +551,62 @@ QString PaintbrushController::deriveContour(const QString &subjectId)
     return QString();
 }
 
+QString PaintbrushController::addVectorLayerFromSelection()
+{
+    const QPainterPath path = m_document.selectionPath();
+    if (path.isEmpty())
+        return QStringLiteral("Select a subject contour first.");
+
+    const QRect bounds = path.boundingRect().toAlignedRect();
+    if (bounds.isEmpty())
+        return QStringLiteral("The selection has no area.");
+
+    QImage render(bounds.size(), QImage::Format_ARGB32_Premultiplied);
+    render.fill(Qt::transparent);
+    {
+        QPainter p(&render);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        p.translate(-bounds.topLeft());
+        QPen pen(m_canvas ? m_canvas->fgColor() : QColor(Qt::black));
+        pen.setWidthF(2.5);
+        pen.setJoinStyle(Qt::RoundJoin);
+        p.setPen(pen);
+        p.setBrush(Qt::NoBrush);
+        p.drawPath(path);
+    }
+
+    QVariantList elements;
+    for (int i = 0; i < path.elementCount(); ++i)
+    {
+        const QPainterPath::Element e = path.elementAt(i);
+        QVariantMap m;
+        m.insert(QStringLiteral("t"), int(e.type));
+        m.insert(QStringLiteral("x"), e.x);
+        m.insert(QStringLiteral("y"), e.y);
+        elements.append(m);
+    }
+
+    beginTransaction(QStringLiteral("Add vector contour layer"));
+    insertStickerLayer(render, QPointF(bounds.topLeft()),
+                       QStringLiteral("Contour (vector)"), QString(), QString(),
+                       0, QImage());
+    CanvasLayer *layer = m_document.layerAt(m_document.layerCount() - 1);
+    if (layer)
+    {
+        layer->metadata[QStringLiteral("vectorPathSchema")] =
+            QStringLiteral("nai-paintbrush/vector-path/v1");
+        layer->metadata[QStringLiteral("vectorPath")] = elements;
+        layer->metadata[QStringLiteral("vectorOriginX")] = bounds.x();
+        layer->metadata[QStringLiteral("vectorOriginY")] = bounds.y();
+    }
+    endTransaction();
+
+    if (m_canvas)
+        m_canvas->markCanvasDirty();
+    emit documentChanged();
+    setStatus(QStringLiteral("Added vector contour layer (%1 points)")
+                  .arg(path.elementCount()));
+    return QString();
+}
+
 } // namespace paintbrush

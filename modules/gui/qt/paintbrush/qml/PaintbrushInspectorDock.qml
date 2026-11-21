@@ -517,6 +517,15 @@ Item {
                 }
                 Widgets.ActionButtonPrimary {
                     Layout.fillWidth: true
+                    text: qsTr("Add contour layer (vector)")
+                    onClicked: {
+                        const err = PaintbrushCtx.addVectorLayerFromSelection()
+                        if (err.length > 0)
+                            console.log("PB_QML vector layer failed: " + err)
+                    }
+                }
+                Widgets.ActionButtonPrimary {
+                    Layout.fillWidth: true
                     text: qsTr("Derive contour — vector")
                     onClicked: {
                         const list = PaintbrushCtx.subjectList()
