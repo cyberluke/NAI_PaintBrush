@@ -120,6 +120,9 @@ Item {
             && modelData.kind === "spacer"
 
         visible: modelData ? (modelData.visible !== false) : true
+        /* Set by a Layout wrapper in the horizontal strip; -1 means the cell
+         * sizes itself (vertical rail and legacy paths). */
+        property real explicitWidth: -1
         /* Horizontal (the adaptive strip) gets roomier sliders and a real gap
          * for spacers: the vertical rail must stay narrow, the strip must not
          * look like a fixed-cell hardware shelf. Intrinsic icon cells keep one
@@ -244,29 +247,45 @@ Item {
     /* Horizontal options: ONE-ROW Flickable with a Row of cells. clip:true so
      * no control, tooltip body or child may draw outside this bar's own
      * rectangle; horizontal contentWidth scrolls when wider than the host. */
-    Flickable {
+    /* Horizontal options: a responsive RowLayout, separate from the vertical
+     * rail. Slider cells FLEX between a real minimum and maximum; icon and
+     * spacer cells stay intrinsic. The vertical Flow is unchanged, so no
+     * horizontal assumption leaks into the tool rail. */
+    RowLayout {
         id: hstrip
         x: 0
         y: 0
         visible: root._isHoriz
         width: root.width
         height: root.cell
-        clip: true
-        contentWidth: hrow.width
-        contentHeight: root.cell
-        boundsBehavior: Flickable.StopAtBounds
-        ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
-        interactive: true
+        spacing: root.spacing
 
-        Row {
-            id: hrow
-            y: 0
-            height: root.cell
-            spacing: root.spacing
+        Repeater {
+            model: root.items
 
-            Repeater {
-                model: root.items
-                delegate: ToolCellDelegate {}
+            delegate: Item {
+                id: hwrap
+                readonly property bool sliderCell: modelData
+                    && (modelData.kind === "slider" || modelData.kind === "option")
+                readonly property bool spacerCell: modelData
+                    && modelData.kind === "spacer"
+
+                implicitHeight: root.cell
+                implicitWidth: sliderCell ? (root.cell * 8)
+                                          : (spacerCell ? (root.cell * 0.4)
+                                                        : root.cell)
+                Layout.preferredHeight: root.cell
+                Layout.preferredWidth: implicitWidth
+                Layout.fillWidth: sliderCell
+                Layout.minimumWidth: sliderCell ? (root.cell * 5) : implicitWidth
+                Layout.maximumWidth: sliderCell ? (root.cell * 16) : implicitWidth
+
+                ToolCellDelegate {
+                    x: 0
+                    y: 0
+                    height: root.cell
+                    explicitWidth: hwrap.width
+                }
             }
         }
     }
