@@ -541,6 +541,7 @@ Item {
             readonly property int headerHeight: Math.round(VLCStyle.dp(38, VLCStyle.scale))
             readonly property int transportHeight: Math.round(VLCStyle.dp(52, VLCStyle.scale))
             readonly property int scrubHeight: Math.round(VLCStyle.dp(26, VLCStyle.scale))
+            readonly property int statusHeight: Math.round(VLCStyle.dp(28, VLCStyle.scale))
             readonly property real defaultWidth: Math.min(VLCStyle.dp(940, VLCStyle.scale),
                                                           Math.max(VLCStyle.dp(640, VLCStyle.scale),
                                                                    canvasHost.width * 0.58))
@@ -555,7 +556,7 @@ Item {
                     ? root.height - 2 * VLCStyle.margin_large
                     : (collapsed
                        ? headerHeight + transportHeight
-                       : headerHeight + videoHeight + scrubHeight + transportHeight)
+                       : headerHeight + videoHeight + statusHeight + scrubHeight + transportHeight)
             x: expanded ? VLCStyle.margin_large
                         : mainRow.x + canvasHost.x + VLCStyle.margin_normal
             y: expanded ? VLCStyle.margin_large
@@ -594,6 +595,15 @@ Item {
                             Layout.preferredHeight: Math.round(VLCStyle.dp(14, VLCStyle.scale))
                             color: theme.accent
                         }
+                        /* source tally: green when the native video output is
+                         * really attached, amber while only the track exists */
+                        Rectangle {
+                            Layout.preferredWidth: Math.round(VLCStyle.dp(7, VLCStyle.scale))
+                            Layout.preferredHeight: Layout.preferredWidth
+                            radius: width / 2
+                            color: PaintbrushCtx.videoOutputAttached ? "#39d98a"
+                                                                     : "#e0a23a"
+                        }
                         Widgets.LabelExt {
                             text: qsTr("SOURCE")
                             color: theme.fg.primary
@@ -614,12 +624,15 @@ Item {
                                   + PaintbrushCtx.playerVideoSize.height
                             color: theme.fg.secondary
                             font.pixelSize: VLCStyle.fontSize_xsmall
+                            font.family: "Consolas"
                         }
                         Widgets.LabelExt {
                             visible: PaintbrushCtx.playerFrameRate > 0
-                            text: PaintbrushCtx.playerFrameRate.toFixed(2) + " fps"
-                            color: theme.fg.secondary
+                            text: PaintbrushCtx.playerFrameRate.toFixed(3) + " fps"
+                            color: theme.fg.primary
                             font.pixelSize: VLCStyle.fontSize_xsmall
+                            font.family: "Consolas"
+                            font.bold: true
                         }
                         Widgets.IconToolButton {
                             text: playerPanel.expanded ? VLCIcons.ic_fluent_chevron_down_24
@@ -656,6 +669,91 @@ Item {
                                           && !playerPanel.collapsed
                         videoSurfaceProvider: MainCtx.videoSurfaceProvider
                         visible: renderingEnabled
+                    }
+                }
+
+                /* broadcast technical strip: PTS, frame index, format, fps and
+                 * remaining time — the reference-monitor readout */
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: playerPanel.statusHeight
+                    visible: !playerPanel.collapsed
+                    color: "#0a0a0d"
+
+                    Rectangle {
+                        anchors.top: parent.top
+                        width: parent.width
+                        height: 1
+                        color: "#1f1f25"
+                    }
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: VLCStyle.margin_small
+                        anchors.rightMargin: VLCStyle.margin_small
+                        spacing: VLCStyle.margin_xsmall
+
+                        Widgets.LabelExt {
+                            text: qsTr("PTS")
+                            color: theme.fg.secondary
+                            font.pixelSize: VLCStyle.fontSize_xsmall
+                            font.letterSpacing: 1.0
+                        }
+                        Widgets.LabelExt {
+                            text: root.formatPts(PaintbrushCtx.playerTimeMs)
+                            color: theme.fg.primary
+                            font.pixelSize: VLCStyle.fontSize_xsmall
+                            font.family: "Consolas"
+                        }
+
+                        Widgets.LabelExt {
+                            text: qsTr("FRAME")
+                            color: theme.fg.secondary
+                            font.pixelSize: VLCStyle.fontSize_xsmall
+                            font.letterSpacing: 1.0
+                        }
+                        Widgets.LabelExt {
+                            text: root.formatFrame(PaintbrushCtx.playerTimeMs)
+                            color: theme.fg.primary
+                            font.pixelSize: VLCStyle.fontSize_xsmall
+                            font.family: "Consolas"
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Widgets.LabelExt {
+                            visible: PaintbrushCtx.playerVideoSize.width > 0
+                            text: PaintbrushCtx.playerVideoSize.width + "×"
+                                  + PaintbrushCtx.playerVideoSize.height
+                            color: theme.fg.secondary
+                            font.pixelSize: VLCStyle.fontSize_xsmall
+                            font.family: "Consolas"
+                        }
+                        Widgets.LabelExt {
+                            visible: PaintbrushCtx.playerFrameRate > 0
+                            text: PaintbrushCtx.playerFrameRate.toFixed(3) + " fps"
+                            color: theme.fg.primary
+                            font.pixelSize: VLCStyle.fontSize_xsmall
+                            font.family: "Consolas"
+                            font.bold: true
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Widgets.LabelExt {
+                            text: qsTr("REMAIN")
+                            color: theme.fg.secondary
+                            font.pixelSize: VLCStyle.fontSize_xsmall
+                            font.letterSpacing: 1.0
+                        }
+                        Widgets.LabelExt {
+                            text: root.formatTimecode(
+                                      Math.max(0, PaintbrushCtx.playerLengthMs
+                                                  - PaintbrushCtx.playerTimeMs))
+                            color: theme.fg.primary
+                            font.pixelSize: VLCStyle.fontSize_xsmall
+                            font.family: "Consolas"
+                        }
                     }
                 }
 
@@ -913,6 +1011,26 @@ Item {
                            Math.floor(((total % 1000) / 1000) * fps))
         return ("0" + h).slice(-2) + ":" + ("0" + m).slice(-2) + ":"
                + ("0" + s).slice(-2) + ":" + ("0" + f).slice(-2)
+    }
+
+    /* Raw presentation timestamp with millisecond resolution (the PTS
+     * readout), independent of the frame-rounded transport timecode. */
+    function formatPts(ms) {
+        const total = Math.max(0, Math.floor(ms))
+        const h = Math.floor(total / 3600000)
+        const m = Math.floor((total % 3600000) / 60000)
+        const s = Math.floor((total % 60000) / 1000)
+        const millis = total % 1000
+        return ("0" + h).slice(-2) + ":" + ("0" + m).slice(-2) + ":"
+               + ("0" + s).slice(-2) + "." + ("00" + millis).slice(-3)
+    }
+
+    /* Absolute frame index at the current PTS, using the real track rate. */
+    function formatFrame(ms) {
+        const fps = PaintbrushCtx.playerFrameRate > 0
+                    ? PaintbrushCtx.playerFrameRate : 25
+        const frame = Math.max(0, Math.floor(ms * fps / 1000))
+        return ("000000" + frame).slice(-6)
     }
 
     /* Fit to the desktop so the bottom chrome (palette + media drawer)
