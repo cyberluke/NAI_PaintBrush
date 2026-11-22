@@ -39,6 +39,11 @@
 #include <fcntl.h>
 #include <io.h>
 #include <shlobj.h>
+#include <string.h>
+
+/* shell32 export used by WinMain(); MinGW gates the prototype behind
+ * NTDDI_VERSION, so declare it explicitly. */
+extern HRESULT WINAPI SetCurrentProcessExplicitAppUserModelID(PCWSTR);
 
 #include "../lib/libvlc_internal.h"
 
@@ -88,6 +93,14 @@ int WINAPI WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
                     int nCmdShow )
 {
     int argc;
+
+    /* The taskbar/dock identity must be set before ANY top-level window exists
+     * in the process. libvlc and Qt create hidden windows while starting up, so
+     * the interface module is already too late; this is the earliest point.
+     * The binary is NAI PaintBrush in workspace mode and keeps the upstream
+     * identity in standard player mode. */
+    if( lpCmdLine != NULL && strstr( lpCmdLine, "--paintbrush" ) != NULL )
+        SetCurrentProcessExplicitAppUserModelID( L"NAI.PaintBrush" );
 
     /* VLC does not change the thread locale, so gettext/libintil will use the
      * user default locale as reference. */
