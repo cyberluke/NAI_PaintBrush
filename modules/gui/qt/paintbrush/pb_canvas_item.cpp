@@ -42,62 +42,93 @@
 
 #include <QFile>
 #include <QMutex>
+#include <QCoreApplication>
 
-/* Crash-path instrumentation (P0.1): this is a DEBUG/diagnostic hook, NOT a
- * realtime probe. By default it is a zero-work no-op so a pointer-move or
- * render frame performs ZERO synchronous filesystem/stderr work. Only when
- * PB_POWDER_TRACE=1 is set does it capture into a bounded lock-free-ish ring
- * and flush the whole ring to the trace file in one batched append (never one
- * open/write/close per event). The previous implementation opened the file,
- * wrote stderr + fflush on EVERY event in renderPowderPreview — a hard hit in
- * the hot preview path. */
+/* Stroke-path instrumentation: ON BY DEFAULT (opt out with PB_POWDER_TRACE=0).
+ * Markers go into a bounded ring (atomic store + snprintf, no I/O). The ring is
+ * appended to pb_stroke_trace.log in one buffered write at the stroke
+ * begin/end hooks and every 128 new markers, so a stroke that dies mid-way
+ * still leaves its tail. Only the markers added since the last flush are
+ * written (never the whole ring again), the file rotates at 16 MB, and every
+ * process writes a session header so consecutive runs stay readable. */
 namespace {
-
 
 std::atomic<bool> g_traceEnabled{false};
 std::atomic<bool> g_traceProbed{false};
 // Bounded in-memory ring: latest N markers only (enough for a crash tail).
 constexpr int kTraceRing = 2048;
+constexpr std::uint32_t kTraceFlushEvery = 128;
+constexpr qint64 kTraceMaxBytes = 16 * 1024 * 1024;
 char g_traceRing[kTraceRing][64];
 std::atomic<std::uint32_t> g_traceHead{0};
+std::atomic<std::uint32_t> g_traceFlushed{0};
 std::atomic<bool> g_traceDirty{false};
+QMutex g_traceMutex;                 /* the QSG/render thread may flush too */
+bool g_traceSessionHeader = false;   /* guarded by g_traceMutex */
+
+void pbCrashTraceFlush();
 
 void pbCrashTrace(const char *msg)
 {
-    // One-time env probe; the fast path is just an atomic load.
+    // One-time env probe; the fast path is just an atomic load. Tracing is the
+    // DEFAULT; only an explicit 0/false/no disables it.
     if (!g_traceProbed.load(std::memory_order_relaxed)) {
         if (g_traceProbed.exchange(true, std::memory_order_relaxed) == false) {
-            const QByteArray v = qgetenv("PB_POWDER_TRACE").trimmed();
-            g_traceEnabled.store(v == "1" || v == "true", std::memory_order_relaxed);
+            const QByteArray v = qgetenv("PB_POWDER_TRACE").trimmed().toLower();
+            const bool off = (v == "0" || v == "false" || v == "no");
+            g_traceEnabled.store(!off, std::memory_order_relaxed);
         }
     }
     if (!g_traceEnabled.load(std::memory_order_relaxed))
-        return;   // zero tracing work in the realtime path
-    const std::uint32_t slot = g_traceHead.fetch_add(1, std::memory_order_relaxed)
-                             & (kTraceRing - 1);
-    ::snprintf(g_traceRing[slot], 64, "%s", msg);
+        return;   // explicit opt-out: zero tracing work in the realtime path
+    const std::uint32_t seq = g_traceHead.fetch_add(1, std::memory_order_relaxed);
+    ::snprintf(g_traceRing[seq & (kTraceRing - 1)], 64, "%s", msg);
     g_traceDirty.store(true, std::memory_order_release);
+    /* Crash tail: the trace must survive a stroke that never reaches its
+     * commit, so flush in small batches instead of only at the stroke end. */
+    if ((seq + 1) % kTraceFlushEvery == 0)
+        pbCrashTraceFlush();
 }
 
-/* Flush the whole ring to the trace file in ONE buffered write. Called from the
- * low-frequency commit/finalize paths (never from the preview/input hot path)
- * so the accumulated tail survives a crash. */
+/* Append the markers added since the last flush in ONE buffered write. Called
+ * from the commit/finalize hooks and every 128 markers; never per frame. */
 void pbCrashTraceFlush()
 {
     if (!g_traceEnabled.load(std::memory_order_relaxed))
         return;
     if (!g_traceDirty.exchange(false, std::memory_order_acq_rel))
         return;
-    QFile f(QStringLiteral("D:/_SATIN_AI/NAI-OS/vlc/pb_stroke_trace.log"));
+    QMutexLocker locker(&g_traceMutex);
+    const QString path = QStringLiteral("D:/_SATIN_AI/NAI-OS/vlc/pb_stroke_trace.log");
+    QFile f(path);
+    /* rotate instead of growing without bound */
+    if (f.exists() && f.size() > kTraceMaxBytes) {
+        const QString old = path + QStringLiteral(".1");
+        QFile::remove(old);
+        QFile::rename(path, old);
+    }
     if (!f.open(QIODevice::Append | QIODevice::Text))
         return;
-    const std::uint32_t head = g_traceHead.load(std::memory_order_relaxed);
-    const std::uint32_t start = head >= kTraceRing ? head - kTraceRing : 0;
     QByteArray out;
+    if (!g_traceSessionHeader) {
+        g_traceSessionHeader = true;
+        out += QByteArray("=== session pid=")
+             + QByteArray::number(QCoreApplication::applicationPid())
+             + " " + QDateTime::currentDateTime().toString(Qt::ISODate).toUtf8()
+             + " ===\n";
+    }
+    const std::uint32_t head = g_traceHead.load(std::memory_order_relaxed);
+    const std::uint32_t oldest = head >= kTraceRing ? head - kTraceRing : 0;
+    std::uint32_t start = g_traceFlushed.load(std::memory_order_relaxed);
+    if (start < oldest)
+        start = oldest;
+    if (start > head)
+        start = head;
     for (std::uint32_t i = start; i < head; ++i) {
         const char *line = g_traceRing[i & (kTraceRing - 1)];
         if (*line) { out += "[pbtrace] "; out += line; out += '\n'; }
     }
+    g_traceFlushed.store(head, std::memory_order_relaxed);
     f.write(out);
     f.close();
 }
