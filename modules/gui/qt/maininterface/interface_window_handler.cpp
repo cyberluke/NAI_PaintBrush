@@ -78,6 +78,11 @@ InterfaceWindowHandler::InterfaceWindowHandler(qt_intf_t *_p_intf, MainCtx* main
         WindowStateHolder::holdOnTop( m_window,  WindowStateHolder::INTERFACE, m_mainCtx->isInterfaceAlwaysOnTop() );
         WindowStateHolder::holdFullscreen( m_window,  WindowStateHolder::INTERFACE, m_window->visibility() == QWindow::FullScreen );
 
+        /* Re-apply after the native window exists: the constructor's setIcon()
+         * runs before the HWND and does not always reach ICON_SMALL, which left
+         * the title bar with the window-class icon. */
+        m_window->setIcon( QApplication::windowIcon() );
+
         if (m_mainCtx->isHideAfterCreation())
             m_window->hide();
     }, Qt::QueuedConnection);

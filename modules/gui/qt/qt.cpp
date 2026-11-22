@@ -80,6 +80,10 @@ extern "C" char **environ;
 #include <QOperatingSystemVersion>
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+/* shell32 export, declared explicitly for the same MinGW/NTDDI reason as in
+ * paintbrush/pb_controller.cpp */
+extern "C" __declspec(dllimport) HRESULT WINAPI
+    SetCurrentProcessExplicitAppUserModelID(PCWSTR AppID);
 #endif
 
 #include "qt.hpp"
@@ -1496,8 +1500,22 @@ static void *Thread( void *obj )
     app.setApplicationVersion( QString::fromUtf8(VERSION_MESSAGE) );
 
     if( var_InheritBool( p_intf, "paintbrush" ) )
-        app.setWindowIcon( QIcon::fromTheme( "nai-paintbrush",
-                                             QIcon( ":/logo/nai-paintbrush256.png" ) ) );
+    {
+#ifdef _WIN32
+        /* Windows fixes the taskbar identity (and its icon group) when the
+         * first top-level window is created. Setting this only from the
+         * PaintbrushController is too late — the app kept VLC's taskbar
+         * identity. Assert it here, before any window exists. */
+        SetCurrentProcessExplicitAppUserModelID( L"NAI.PaintBrush" );
+#endif
+        /* Two explicit sizes: Windows uses the small pixmap for the title bar
+         * and the large one for the taskbar/Alt-Tab. A single-file QIcon leaves
+         * ICON_SMALL to the window class (the VLC cone). */
+        QIcon pbIcon;
+        pbIcon.addFile( QStringLiteral(":/logo/nai-paintbrush16.png") );
+        pbIcon.addFile( QStringLiteral(":/logo/nai-paintbrush256.png") );
+        app.setWindowIcon( pbIcon );
+    }
     else if( QDate::currentDate().dayOfYear() >= QT_XMAS_JOKE_DAY && var_InheritBool( p_intf, "qt-icon-change" ) )
         app.setWindowIcon( QIcon::fromTheme( "vlc-xmas", QIcon( ":/logo/vlc128-xmas.png" ) ) );
     else
