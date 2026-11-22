@@ -4,9 +4,9 @@
 
 ### Create like nobody's watching.<br>Catch the frame everyone missed.<br>Glitter like it's couture.<br>**Make it sliving.** ✨
 
-A studio built around one move: catch a moment — a frame, a photo, a sketch —
-cut out the part that matters, then make it couture with premium glitter powder
-and a poster that moves.
+A **collage atelier** built around one move: catch a moment — a frame, a photo,
+a sketch — cut out the part that matters, then make it couture with premium
+glitter powder and a poster that moves.
 
 **Paint with video. Catch real moments. Compose sliving artwork.**
 
@@ -81,9 +81,9 @@ CPU, just slower.
 ## For the nerds
 
 A native C++/Qt 6/QML creative workspace, not a themed media player and not a
-web wrapper. It reuses VLC's media pipeline and adds its own document model,
-compositing, tools, undo, material rendering, video-object workflow and export
-path.
+web wrapper. It reuses VLC's media pipeline — two decades of European
+savoir-faire — and adds its own document model, compositing, tools, undo,
+material rendering, video-object workflow and export path.
 
 **Engine base:** VLC 4.0.0-dev at commit `e4f2d3a399` (2026-09-28), the parent
 of the first PaintBrush commit. This is a snapshot fork: the engine is **not**
