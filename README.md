@@ -85,10 +85,11 @@ web wrapper. It reuses VLC's media pipeline — two decades of European
 savoir-faire — and adds its own document model, compositing, tools, undo,
 material rendering, video-object workflow and export path.
 
-**Engine base:** VLC 4.0.0-dev at commit `e4f2d3a399` (2026-09-28), the parent
-of the first PaintBrush commit. This is a snapshot fork: the engine is **not**
-continuously merged with upstream yet; the upstream merge is a roadmap item
-before the next major version. Upstream: <https://code.videolan.org/videolan/vlc>.
+**Engine base:** VLC 4.0.0-dev, last merged from upstream at commit `3cc8c28221`
+(2026-10-21). The fork is currently **354 upstream commits behind** (upstream tip
+`391a3bf873`, 2026-11-19); the upstream merge is a roadmap item before the next
+major version, not something this release claims. Upstream:
+<https://code.videolan.org/videolan/vlc>.
 
 ### Build (Windows)
 
