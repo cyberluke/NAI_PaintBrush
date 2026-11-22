@@ -293,12 +293,13 @@ void main()
     vec3 bg = uPaper - shadow * vec3(1.0, 1.0, 0.97);
 
     // ---- grain field (packed glass beads via Voronoi) ---------------
-    // ABSOLUTE world-anchored Voronoi at a fixed grain pitch = uWorldCell (one
-    // sim cell per grain, matching the CPU renderer's grainPitch). The crop's
-    // origin/size never enter this: the same world pixel always maps to the
-    // same integer grain id, jitter, seed and holo phase. The render crop only
-    // decides WHICH pixels are emitted (crop invariance, P1 reviewer #4).
-    vec2 g = world / uWorldCell;
+    // The reference renders ONE GRAIN PER CSS PIXEL, not one per simulation
+    // cell. The coarse heightfield only supplies coverage/colour; the visible
+    // grains live on a screen-density lattice (~1.6 device px), which is what
+    // makes the powder read as fine glitter instead of 8-px beads. Anchored to
+    // ABSOLUTE world so crop/zoom are invariant.
+    float grainWorld = max(uWorldPerPx * 1.6, uWorldCell * 0.06);
+    vec2 g = world / grainWorld;
     vec2 gi = floor(g), gf = fract(g);
     float b1 = 8.0, b2 = 8.0;
     vec2 bR = vec2(0.0), bId = vec2(0.0), bPt = vec2(0.0);
@@ -316,7 +317,7 @@ void main()
     float edge = sqrt(b2) - dist;
 
     // grain centre in ABSOLUTE WORLD (bPt is in grain-pitch == cell units)
-    vec2 gcWorld = bPt * uWorldCell;
+    vec2 gcWorld = bPt * grainWorld;
     ivec2 scC = ivec2(clamp(ivec2(floor(gcWorld / uWorldCell)), ivec2(0), ivec2(uGrid) - ivec2(1)));
     float s = seedAt(gcWorld);
     vec2 sid = bId + s * 13.17;

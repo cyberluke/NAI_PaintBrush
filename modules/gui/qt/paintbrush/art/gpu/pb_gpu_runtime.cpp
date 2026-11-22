@@ -959,7 +959,10 @@ QImage GpuRuntime::renderPowder(const QSize &outSize,
     wv2(96, float(W), float(H));                                        /* uGrid */
     wf(104, pal.holographic);                                           /* uHolo */
     wf(108, float(dpr * 5));                                            /* uFlakePx */
-    wf(112, powder.worldCellSize() * 5.0f);                             /* uFlakeWorld: world flake pitch */
+    /* Reference scale: one flake candidate per ~4 device px, not per 5 sim
+     * cells. Big sim-cell flakes read as coloured blobs; the reference's
+     * mirror shards are a few pixels. */
+    wf(112, std::max(worldPerPx * 4.0f, powder.worldCellSize() * 0.30f)); /* uFlakeWorld */
     wf(116, paper ? paper->tooth : 0.4f);                               /* uTooth */
     wf(120, output == PowderOutput::MaterialLayer ? 1.0f : 0.0f);       /* uMaterialMode */
     wv3(128, L.x(), L.y(), L.z());                                      /* uLightDir */
