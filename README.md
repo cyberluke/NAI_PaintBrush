@@ -42,22 +42,24 @@ glitter powder and a poster that moves.
 
 ## Download
 
-> **Download the signed MSIX from our site** — one file, one link, no account.
-<!-- RELEASE: insert the branded download URL here. Never name the storage vendor or bucket. -->
+> **[NAI-PaintBrush-Setup.exe](https://s4.nanotrik.ai/nai-paintbrush/1.0.0/NAI-PaintBrush-Setup.exe)**
+> — one click: it downloads the app, checks the hash, asks for UAC once,
+> installs and opens NAI PaintBrush.
+<!-- RELEASE: confirm the branded URL above. Never name the storage vendor or bucket. -->
 
-- **Package:** `NAI.PaintBrush_1.0.0.0_x64.msix`
-- **Size:** 2.4 GB (core app + SAM3 + ViTMatte + CUDA/cuDNN runtime)
-- **SHA256:** `2FEE5A832079B0FD1C2D715E7FE535561DB9DBB4A951C37145A9902EFFCCCF1B`
+- **Setup:** `NAI-PaintBrush-Setup.exe` (~0.1 MB)
+- **Package (fetched by the setup):** `NAI.PaintBrush_1.0.0.0_x64.msix`
+- **Size:** 2.4 GB (app + SAM3 + ViTMatte + CUDA/cuDNN runtime)
+- **MSIX SHA256:** `2FEE5A832079B0FD1C2D715E7FE535561DB9DBB4A951C37145A9902EFFCCCF1B`
 - **Signed by:** `CN=NAI Paint Brush, O=NANOTRIK.AI, C=US` (`49F660D8…`)
 
-Windows 10 1809+ / Windows 11, x64.
+Windows 10 1809+ / Windows 11, x64. No PowerShell, no CUDA Toolkit, no model
+setup. Runs on CPU if you have no NVIDIA GPU.
 
-```powershell
-# one command: UAC once, provisions the NAI trust chain, installs the MSIX
-pwsh scripts/pb-install-msix.ps1
-```
-
-Verify what you downloaded before installing:
+**Nerds and managed installs:** the direct MSIX is the same file the setup
+fetches; it installs by double-click only once the NAI chain is trusted (the
+setup imports it), or with `pwsh scripts/pb-install-msix.ps1` from a source
+checkout. Verified before install:
 
 ```powershell
 Get-FileHash .\NAI.PaintBrush_1.0.0.0_x64.msix -Algorithm SHA256
