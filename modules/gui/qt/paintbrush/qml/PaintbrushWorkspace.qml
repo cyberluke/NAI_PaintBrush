@@ -411,6 +411,7 @@ Item {
         }
 
         Item {
+            id: canvasHost
             Layout.fillWidth: true
             Layout.fillHeight: true
             /* clip so panned/zoomed canvas content can never spill over the
@@ -506,6 +507,312 @@ Item {
         visible: PaintbrushCtx.playerHasVideo
     }
 
+    /* ---- REFERENCE MONITOR (VLC VideoSurface + professional transport) ----
+     * A source-monitor surface, not a thumbnail: matte bezel, technical
+     * readout (title, coded resolution, fps), a large 16:9 picture, frame
+     * timecode, full scrub, transport, resize grip, theater expand, and a
+     * close that STOPS the video and releases the output. The canvas and
+     * artwork stay loaded after close. */
+    Item {
+        id: videoPlayerLayer
+        anchors.fill: parent
+        z: 40
+        visible: PaintbrushCtx.playerHasVideo
+
+        Rectangle {
+            anchors.fill: parent
+            visible: playerPanel.expanded
+            color: "#000000"
+            opacity: 0.7
+            MouseArea {
+                anchors.fill: parent
+                onClicked: playerPanel.expanded = false
+            }
+        }
+
+        Rectangle {
+            id: playerPanel
+
+            property bool expanded: false
+            property bool collapsed: false
+            property real userWidth: -1
+
+            readonly property int bezel: Math.max(1, VLCStyle.dp(1, VLCStyle.scale))
+            readonly property int headerHeight: Math.round(VLCStyle.dp(38, VLCStyle.scale))
+            readonly property int transportHeight: Math.round(VLCStyle.dp(52, VLCStyle.scale))
+            readonly property int scrubHeight: Math.round(VLCStyle.dp(26, VLCStyle.scale))
+            readonly property real defaultWidth: Math.min(VLCStyle.dp(940, VLCStyle.scale),
+                                                          Math.max(VLCStyle.dp(640, VLCStyle.scale),
+                                                                   canvasHost.width * 0.58))
+            readonly property real panelWidth: expanded
+                                               ? root.width - 2 * VLCStyle.margin_large
+                                               : Math.max(VLCStyle.dp(560, VLCStyle.scale),
+                                                          userWidth > 0 ? userWidth : defaultWidth)
+            readonly property real videoHeight: Math.round((panelWidth - 2 * bezel) * 9 / 16)
+
+            width: panelWidth
+            height: expanded
+                    ? root.height - 2 * VLCStyle.margin_large
+                    : (collapsed
+                       ? headerHeight + transportHeight
+                       : headerHeight + videoHeight + scrubHeight + transportHeight)
+            x: expanded ? VLCStyle.margin_large
+                        : mainRow.x + canvasHost.x + VLCStyle.margin_normal
+            y: expanded ? VLCStyle.margin_large
+                        : mainRow.y + canvasHost.y + VLCStyle.margin_normal
+
+            color: "#08080a"
+            radius: Math.max(1, VLCStyle.dp(2, VLCStyle.scale))
+            border.width: 1
+            border.color: "#2c2c33"
+            clip: true
+
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                onPressed: mouse.accepted = true
+            }
+
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 0
+
+                /* header: source identity + technical readout */
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: playerPanel.headerHeight
+                    color: "#121216"
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: VLCStyle.margin_small
+                        anchors.rightMargin: VLCStyle.margin_xsmall
+                        spacing: VLCStyle.margin_xsmall
+
+                        Rectangle {
+                            Layout.preferredWidth: Math.round(VLCStyle.dp(3, VLCStyle.scale))
+                            Layout.preferredHeight: Math.round(VLCStyle.dp(14, VLCStyle.scale))
+                            color: theme.accent
+                        }
+                        Widgets.LabelExt {
+                            text: qsTr("SOURCE")
+                            color: theme.fg.primary
+                            font.pixelSize: VLCStyle.fontSize_small
+                            font.bold: true
+                            font.letterSpacing: 1.4
+                        }
+                        Widgets.LabelExt {
+                            Layout.fillWidth: true
+                            text: PaintbrushCtx.currentMediaTitle
+                            color: theme.fg.secondary
+                            font.pixelSize: VLCStyle.fontSize_small
+                            elide: Text.ElideRight
+                        }
+                        Widgets.LabelExt {
+                            visible: PaintbrushCtx.playerVideoSize.width > 0
+                            text: PaintbrushCtx.playerVideoSize.width + " × "
+                                  + PaintbrushCtx.playerVideoSize.height
+                            color: theme.fg.secondary
+                            font.pixelSize: VLCStyle.fontSize_xsmall
+                        }
+                        Widgets.LabelExt {
+                            visible: PaintbrushCtx.playerFrameRate > 0
+                            text: PaintbrushCtx.playerFrameRate.toFixed(2) + " fps"
+                            color: theme.fg.secondary
+                            font.pixelSize: VLCStyle.fontSize_xsmall
+                        }
+                        Widgets.IconToolButton {
+                            text: playerPanel.expanded ? VLCIcons.ic_fluent_chevron_down_24
+                                                       : VLCIcons.fullscreen
+                            description: playerPanel.expanded ? qsTr("Restore monitor")
+                                                              : qsTr("Theater monitor")
+                            onClicked: playerPanel.expanded = !playerPanel.expanded
+                        }
+                        Widgets.IconToolButton {
+                            text: VLCIcons.close
+                            description: qsTr("Stop video and release the monitor")
+                            onClicked: PaintbrushCtx.closeVideo()
+                        }
+                    }
+                }
+
+                /* picture: the native VLC vout inside a matte bezel */
+                Item {
+                    id: videoArea
+                    Layout.fillWidth: true
+                    Layout.fillHeight: playerPanel.expanded
+                    Layout.preferredHeight: playerPanel.expanded ? -1 : playerPanel.videoHeight
+                    visible: !playerPanel.collapsed
+                    clip: true
+
+                    Rectangle {
+                        anchors.fill: parent
+                        color: "#000000"
+                    }
+                    VideoSurface {
+                        anchors.fill: parent
+                        anchors.margins: playerPanel.bezel
+                        renderingEnabled: PaintbrushCtx.playerHasVideo
+                                          && !playerPanel.collapsed
+                        videoSurfaceProvider: MainCtx.videoSurfaceProvider
+                        visible: renderingEnabled
+                    }
+                }
+
+                /* scrub: full-width timeline */
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: playerPanel.scrubHeight
+                    visible: !playerPanel.collapsed
+                    color: "#0d0d10"
+
+                    Slider {
+                        id: monitorSeek
+                        anchors.fill: parent
+                        anchors.leftMargin: VLCStyle.margin_small
+                        anchors.rightMargin: VLCStyle.margin_small
+                        from: 0
+                        to: Math.max(1, PaintbrushCtx.playerLengthMs)
+                        onPressedChanged: {
+                            if (pressed)
+                                PaintbrushCtx.playerSeekBegin()
+                            else {
+                                PaintbrushCtx.playerSeekEnd()
+                                PaintbrushCtx.playerSeek(monitorSeek.value)
+                            }
+                        }
+                        Binding {
+                            target: monitorSeek
+                            property: "value"
+                            value: PaintbrushCtx.playerTimeMs
+                            when: !monitorSeek.pressed
+                        }
+                    }
+                }
+
+                /* transport: timecode + frame-accurate controls */
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: playerPanel.transportHeight
+                    color: "#121216"
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: VLCStyle.margin_small
+                        anchors.rightMargin: VLCStyle.margin_xsmall
+                        spacing: VLCStyle.margin_xsmall
+
+                        Widgets.LabelExt {
+                            text: root.formatTimecode(PaintbrushCtx.playerTimeMs)
+                            color: theme.fg.primary
+                            font.pixelSize: VLCStyle.fontSize_normal
+                            font.family: "Consolas"
+                            font.letterSpacing: 0.6
+                        }
+                        Widgets.LabelExt {
+                            text: "/ " + root.formatTimecode(PaintbrushCtx.playerLengthMs)
+                            color: theme.fg.secondary
+                            font.pixelSize: VLCStyle.fontSize_xsmall
+                            font.family: "Consolas"
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Widgets.IconToolButton {
+                            text: VLCIcons.skip_back
+                            description: qsTr("Go to start")
+                            onClicked: PaintbrushCtx.playerSeek(0)
+                        }
+                        Widgets.IconToolButton {
+                            text: VLCIcons.previous_frame
+                            description: qsTr("Previous frame")
+                            onClicked: PaintbrushCtx.playerFramePrev()
+                        }
+                        Widgets.IconToolButton {
+                            text: PaintbrushCtx.playerIsPlaying ? VLCIcons.pause_filled
+                                                               : VLCIcons.play_filled
+                            description: qsTr("Play / pause")
+                            font.pixelSize: Math.round(VLCStyle.dp(22, VLCStyle.scale))
+                            Layout.preferredWidth: Math.round(VLCStyle.dp(40, VLCStyle.scale))
+                            Layout.preferredHeight: Math.round(VLCStyle.dp(40, VLCStyle.scale))
+                            onClicked: PaintbrushCtx.playerPlayPause()
+                        }
+                        Widgets.IconToolButton {
+                            text: VLCIcons.next_frame
+                            description: qsTr("Next frame")
+                            onClicked: PaintbrushCtx.playerFrameNext()
+                        }
+                        Widgets.IconToolButton {
+                            text: VLCIcons.skip_for
+                            description: qsTr("Go to end")
+                            onClicked: PaintbrushCtx.playerSeek(PaintbrushCtx.playerLengthMs)
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Widgets.IconToolButton {
+                            text: playerPanel.collapsed ? VLCIcons.ic_fluent_chevron_up_24
+                                                        : VLCIcons.ic_fluent_chevron_down_24
+                            description: playerPanel.collapsed ? qsTr("Show monitor")
+                                                               : qsTr("Collapse monitor")
+                            onClicked: playerPanel.collapsed = !playerPanel.collapsed
+                        }
+                    }
+                }
+            }
+
+            /* resize grip: drag to size the monitor */
+            Item {
+                id: resizeGrip
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                width: Math.round(VLCStyle.dp(18, VLCStyle.scale))
+                height: width
+                visible: !playerPanel.expanded && !playerPanel.collapsed
+                z: 5
+
+                Canvas {
+                    anchors.fill: parent
+                    onPaint: {
+                        const ctx = getContext("2d")
+                        ctx.clearRect(0, 0, width, height)
+                        ctx.strokeStyle = "#55555f"
+                        ctx.lineWidth = 1.5
+                        for (let i = 1; i <= 3; ++i) {
+                            const o = width - i * 4
+                            ctx.beginPath()
+                            ctx.moveTo(o, height)
+                            ctx.lineTo(width, o)
+                            ctx.stroke()
+                        }
+                    }
+                }
+                DragHandler {
+                    id: resizeDrag
+                    target: null
+                    property real grabStartWidth: 0
+                    onActiveChanged: if (active)
+                        grabStartWidth = playerPanel.width
+                    onTranslationChanged: if (active)
+                        playerPanel.userWidth = Math.max(
+                            VLCStyle.dp(560, VLCStyle.scale),
+                            Math.min(canvasHost.width,
+                                     grabStartWidth + activeTranslation.x))
+                }
+            }
+
+            Connections {
+                target: PaintbrushCtx
+                function onMediaStateChanged() {
+                    if (!PaintbrushCtx.playerHasVideo) {
+                        playerPanel.expanded = false
+                        playerPanel.collapsed = false
+                        playerPanel.userWidth = -1
+                    }
+                }
+            }
+        }
+    }
     /* first-run experience */
     PaintbrushFirstLaunch {
         anchors.fill: mainRow
@@ -590,6 +897,23 @@ Item {
     Shortcut { sequence: "Ctrl+U"; onActivated: PaintbrushCtx.captureVideoFrame() }
     Shortcut { sequence: "Ctrl+I"; onActivated: assistantDock.expanded = !assistantDock.expanded }
     Shortcut { sequence: "Escape"; onActivated: { PaintbrushCtx.cancelTracking(); PaintbrushCtx.cancelGeneration(); PaintbrushCtx.cancelThumbnails() } }
+
+    /* Professional HH:MM:SS:FF timecode for the reference monitor. The frame
+     * field uses the real track frame rate; 25 fps is only the fallback while
+     * no video track has been probed yet. */
+    function formatTimecode(ms) {
+        const fps = PaintbrushCtx.playerFrameRate > 0
+                    ? Math.max(1, Math.round(PaintbrushCtx.playerFrameRate))
+                    : 25
+        const total = Math.max(0, Math.floor(ms))
+        const h = Math.floor(total / 3600000)
+        const m = Math.floor((total % 3600000) / 60000)
+        const s = Math.floor((total % 60000) / 1000)
+        const f = Math.min(fps - 1,
+                           Math.floor(((total % 1000) / 1000) * fps))
+        return ("0" + h).slice(-2) + ":" + ("0" + m).slice(-2) + ":"
+               + ("0" + s).slice(-2) + ":" + ("0" + f).slice(-2)
+    }
 
     /* Fit to the desktop so the bottom chrome (palette + media drawer)
      * is never hidden behind the taskbar when the window was restored

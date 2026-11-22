@@ -147,6 +147,7 @@ Item {
             currentIndex: PaintbrushCtx.document.currentLayerIndex
 
             delegate: Rectangle {
+                id: layerRow
                 required property int index
                 required property string name
                 required property bool layerVisible
@@ -160,11 +161,9 @@ Item {
                        : "transparent"
 
                 /* Full-row click selects the layer. Declared FIRST so it paints
-                 * BELOW the content RowLayout: the interactive visibility Switch
-                 * stays on top and receives its own clicks, while clicks on the
-                 * label/thumbnail fall through to this MouseArea. (Declared last,
-                 * it sat on top and swallowed every click — the toggle did
-                 * nothing.) */
+                 * BELOW the content RowLayout: the visibility control and the
+                 * reorder grip stay on top and receive their own gestures,
+                 * while clicks on the label/thumbnail fall through here. */
                 MouseArea {
                     anchors.fill: parent
                     onClicked: PaintbrushCtx.setCurrentLayer(index)
@@ -184,15 +183,21 @@ Item {
                         asynchronous: true
                     }
 
-                    /* visibility checkbox bound to the real layer state. Toggle
-                     * off the model's current value (the T.Switch `checked`
-                     * binding re-syncs, so reading `checked` can hand back the
-                     * old value). */
-                    Widgets.CheckButton {
+                    /* Real visibility checkbox (checked = visible), not the
+                     * VLC T.Switch that read as a tri-state control. Toggle
+                     * off the model's current value so a binding resync cannot
+                     * hand back the previous state. */
+                    Widgets.CheckBoxExt {
+                        id: visibilityBox
                         Layout.preferredWidth: VLCStyle.dp(22, VLCStyle.scale)
                         Layout.preferredHeight: VLCStyle.dp(22, VLCStyle.scale)
+                        text: ""
+                        tristate: false
                         checked: layerVisible
                         onClicked: PaintbrushCtx.setLayerVisible(index, !layerVisible)
+                        ToolTip.visible: hovered
+                        ToolTip.text: layerVisible ? qsTr("Hide layer")
+                                                   : qsTr("Show layer")
                     }
 
                     /* real layer name */
@@ -204,20 +209,28 @@ Item {
                         elide: Text.ElideRight
                     }
 
-                    /* Drag-to-reorder: vertical drag of at least half a row
-                     * moves this row to the computed target row (absolute,
-                     * one undoable ReorderCommand). */
-                    DragHandler {
-                        id: layerDrag
-                        target: null
-                        xAxis.enabled: false
-                        onActiveChanged: if (!active) {
-                            const dy = Math.round(activeTranslation.y
-                                                   / Math.max(1, height))
-                            const to = Math.max(0, Math.min(layerList.count - 1,
-                                                           index + dy))
-                            if (to !== index)
-                                PaintbrushCtx.moveLayerTo(index, to)
+                    /* Drag-only reorder grip. The old row-wide DragHandler
+                     * competed with the visibility control and swallowed its
+                     * clicks; drags now start only on this grip. */
+                    Widgets.IconLabel {
+                        Layout.preferredWidth: VLCStyle.dp(20, VLCStyle.scale)
+                        Layout.alignment: Qt.AlignVCenter
+                        text: VLCIcons.ic_fluent_arrow_move
+                        color: theme.fg.secondary
+                        font.pixelSize: VLCStyle.fontSize_small
+
+                        DragHandler {
+                            id: layerDrag
+                            target: null
+                            xAxis.enabled: false
+                            onActiveChanged: if (!active) {
+                                const dy = Math.round(activeTranslation.y
+                                                       / Math.max(1, layerRow.height))
+                                const to = Math.max(0, Math.min(layerList.count - 1,
+                                                               index + dy))
+                                if (to !== index)
+                                    PaintbrushCtx.moveLayerTo(index, to)
+                            }
                         }
                     }
                 }

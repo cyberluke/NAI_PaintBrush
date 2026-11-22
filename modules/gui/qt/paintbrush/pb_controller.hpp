@@ -170,6 +170,9 @@ class PaintbrushController : public QObject
     Q_PROPERTY(qint64 playerTimeMs READ playerTimeMs NOTIFY mediaStateChanged FINAL)
     Q_PROPERTY(qint64 playerLengthMs READ playerLengthMs NOTIFY mediaStateChanged FINAL)
     Q_PROPERTY(bool playerHasVideo READ playerHasVideo NOTIFY mediaStateChanged FINAL)
+    /* Reference-monitor readout: real track frame rate + coded video size. */
+    Q_PROPERTY(double playerFrameRate READ playerFrameRate NOTIFY mediaStateChanged FINAL)
+    Q_PROPERTY(QSize playerVideoSize READ playerVideoSize NOTIFY mediaStateChanged FINAL)
     Q_PROPERTY(bool addFrameBusy READ addFrameBusy NOTIFY addFrameBusyChanged FINAL)
     Q_PROPERTY(QString diagnosticsText READ diagnosticsText NOTIFY serviceAvailabilityChanged FINAL)
     Q_PROPERTY(bool lookupAvailable READ lookupAvailable NOTIFY serviceAvailabilityChanged FINAL)
@@ -592,6 +595,8 @@ public:
     qint64 playerLengthMs() const;
     bool playerHasVideo() const;
     bool playerIsPlaying() const;
+    double playerFrameRate() const;
+    QSize playerVideoSize() const;
     /* Media-session vs vout state split (P0.3). */
     bool mediaLoaded() const;
     bool mediaHasVideoTrack() const;
@@ -1055,6 +1060,9 @@ private:
      * playback player is the PlaybackSession (viewing only); every exact-
      * frame consumer decodes through this FrameProvider. */
     EditFrameSource m_editSource;
+    int m_playerFrameRateNum = 0;
+    int m_playerFrameRateDen = 0;
+    QSize m_playerVideoSize;
     /* Dedicated decoder for interactive object selection + temporal tracking.
      * Isolated from the media-drawer filmstrip thumbnails so a batch cannot
      * starve or cancel an exact-frame request (shared-preparser P0). */

@@ -88,10 +88,14 @@ PaintbrushController::PaintbrushController(qt_intf_t *intf, QObject *parent)
                               "player video state: hasVideoOutput=%d "
                               "playerHasVideo=%d",
                               hasVideo ? 1 : 0, playerHasVideo() ? 1 : 0);
+                    updateFrameDurationFromPlayer();
                     emit mediaStateChanged();
                 });
         connect(playerController, &PlayerController::voutListChanged,
-                this, [this](vout_thread_t **, int) { emit mediaStateChanged(); });
+                this, [this](vout_thread_t **, int) {
+                    updateFrameDurationFromPlayer();
+                    emit mediaStateChanged();
+                });
         if (TrackListModel *videoTracks = playerController->getVideoTracks())
         {
             connect(videoTracks, &TrackListModel::countChanged,
@@ -100,6 +104,11 @@ PaintbrushController::PaintbrushController(qt_intf_t *intf, QObject *parent)
                                   "video track count=%d playerHasVideo=%d",
                                   videoTracks->getCount(),
                                   playerHasVideo() ? 1 : 0);
+                        /* The track list changes AFTER the media-state signal:
+                         * this is the first point where the real frame rate
+                         * and coded video size can be read for the reference
+                         * monitor header/timecode. */
+                        updateFrameDurationFromPlayer();
                         emit mediaStateChanged();
                     });
         }
@@ -4995,6 +5004,8 @@ void PaintbrushController::updateFrameDurationFromPlayer()
 {
     int num = 0;
     int den = 0;
+    int videoWidth = 0;
+    int videoHeight = 0;
     if (m_intf && m_intf->p_mainPlayerController)
     {
         vlc_player_t *player = m_intf->p_mainPlayerController->getPlayer();
@@ -5005,17 +5016,34 @@ void PaintbrushController::updateFrameDurationFromPlayer()
             vlc_player_Lock(player);
             const struct vlc_player_track *track =
                 vlc_player_GetVideoTrackAt(player, 0);
-            if (track && track->fmt.video.i_frame_rate > 0 &&
-                track->fmt.video.i_frame_rate_base > 0)
+            if (track)
             {
-                num = int(track->fmt.video.i_frame_rate);
-                den = int(track->fmt.video.i_frame_rate_base);
+                /* The coded size can be 0 while the visible size is known;
+                 * the reference-monitor readout wants the displayed size. */
+                const auto &video = track->fmt.video;
+                videoWidth = video.i_visible_width > 0
+                                 ? int(video.i_visible_width) : int(video.i_width);
+                videoHeight = video.i_visible_height > 0
+                                  ? int(video.i_visible_height) : int(video.i_height);
+                if (track->fmt.video.i_frame_rate > 0 &&
+                    track->fmt.video.i_frame_rate_base > 0)
+                {
+                    num = int(track->fmt.video.i_frame_rate);
+                    den = int(track->fmt.video.i_frame_rate_base);
+                }
             }
             vlc_player_Unlock(player);
         }
     }
+    m_playerFrameRateNum = num;
+    m_playerFrameRateDen = den;
+    m_playerVideoSize = QSize(videoWidth, videoHeight);
     m_editSource.setFrameRate(num, den);
     m_selectionSource.setFrameRate(num, den);
+    pbLogInfo(VLC_OBJECT(m_intf), "presentation",
+              "reference monitor: video=%dx%d rate=%d/%d (%.3f fps)",
+              videoWidth, videoHeight, num, den,
+              den > 0 ? double(num) / double(den) : 0.0);
 }
 qint64 PaintbrushController::playerTimeMs() const
 {
@@ -5036,6 +5064,18 @@ bool PaintbrushController::playerIsPlaying() const
      * derive from this. */
     return m_intf->p_mainPlayerController->getPlayingState()
            == PlayerController::PLAYING_STATE_PLAYING;
+}
+
+double PaintbrushController::playerFrameRate() const
+{
+    return m_playerFrameRateDen > 0
+               ? double(m_playerFrameRateNum) / double(m_playerFrameRateDen)
+               : 0.0;
+}
+
+QSize PaintbrushController::playerVideoSize() const
+{
+    return m_playerVideoSize;
 }
 
 /* ------------------------------------------------------------ presentation */

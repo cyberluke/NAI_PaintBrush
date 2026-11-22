@@ -19,12 +19,8 @@ import VLC.Paintbrush
      * is selected. The canvas item itself is owned by the workspace root and
      * is reparented here so it can be shared with the tool rail and palette.
      *
-     * When a video is loaded the video output (a native window layered behind
-     * this transparent QML view) is anchored to this area by the VideoSurface
-     * below, and the checkerboard is hidden so the playing video shows through
-     * the blank canvas as the frame source. The chrome (tool rail, top bar,
-     * palette, docks, media drawer) paints its own opaque background, so the
-     * video stays confined to the canvas area. */
+     * The live video is shown by the workspace player panel above this view;
+     * this canvas owns the document and its checkerboard only. */
     Item {
         id: root
 
@@ -84,28 +80,10 @@ import VLC.Paintbrush
             }
         }
 
-        /* anchors the native video window to the canvas area. The LIVE video
-         * is the visual source ONLY in HarvestVideo presentation (P0#1):
-         * VideoSurface.renderingEnabled is not a playback switch — the
-         * presentation split is driven by the controller's presentationMode.
-         * In ComposeCanvas mode the video surface is hidden and the normal
-         * document canvas is the visual source. */
-        VideoSurface {
-            id: videoSurface
-            anchors.fill: parent
-            /* Rendering follows VISIBILITY: the native vout must stop painting
-             * whenever the compose canvas owns the screen. A permanently-true
-             * renderingEnabled kept the video window alive under the chrome,
-             * so it bled through seams around the toolbar/canvas border. */
-            /* Show the video whenever one is attached. The vout letterboxes
-             * itself inside this rect, so aspect ratio stays correct. When the
-             * document HAS content the opaque canvas paints over it; when the
-             * document is empty (just opened a video, no frame yet) the video
-             * remains visible instead of a blank editor. */
-            renderingEnabled: PaintbrushCtx.playerHasVideo
-            videoSurfaceProvider: MainCtx.videoSurfaceProvider
-            visible: renderingEnabled
-        }
+        /* The live VLC VideoSurface lives in the workspace player panel, not
+         * behind this canvas: an opaque document canvas always covered it, so
+         * the playing video was invisible. The panel surfaces it above the
+         * canvas and owns its close/release lifecycle. */
 
         /* Slim AI progress rail. Object Select's first job loads a 706 MB
          * model and then encodes a frame; both phases used to be invisible.
@@ -160,15 +138,13 @@ import VLC.Paintbrush
             z: 60
         }
 
-        /* checkerboard behind transparent content; hidden when the live video
-         * is the visual source (HarvestVideo) so the video picture serves as
-         * the canvas backdrop. In ComposeCanvas mode the document canvas is
-         * shown over this backdrop exactly as before. */
+        /* checkerboard behind transparent content. The live video is no
+         * longer the canvas backdrop (it lives in the workspace player
+         * panel), so the checkerboard is always the document backdrop. */
         Repeater {
             id: checkerGrid
 
-            visible: !(PaintbrushCtx.playerHasVideo
-                       && PaintbrushCtx.isHarvestPresentation)
+            visible: true
 
             readonly property int cellSize: 16
             readonly property int cols: Math.max(1, Math.ceil(parent.width / cellSize))

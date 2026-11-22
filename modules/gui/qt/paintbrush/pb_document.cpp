@@ -683,12 +683,16 @@ QImage DocumentRenderer::effectiveSourceAt(const CanvasLayer &layer, const Conte
 void DocumentRenderer::compositeLayer(QImage &target, const QRect &region,
                                       const CanvasLayer &layer, const Context &ctx)
 {
+    /* Hidden layers are skipped for EVERY layer type, including vector: the
+     * visibility flag is a document invariant, not a raster-only flag. */
+    if (!layer.visible)
+        return;
     if (layer.type == LAYER_VECTOR)
     {
         compositeLayerRaw(target, region, layer);
         return;
     }
-    if (layer.raster.isNull() || !layer.visible)
+    if (layer.raster.isNull())
         return;
     if (!layer.hasEnabledEffects())
     {
@@ -723,12 +727,15 @@ void DocumentRenderer::compositeLayerAt(QImage &target, const QRect &region,
                                         const Context &ctx,
                                         const PaintbrushDocument &doc, qint64 timeMs)
 {
+    /* see compositeLayer(): hidden layers never reach the raw path */
+    if (!layer.visible)
+        return;
     if (layer.type == LAYER_VECTOR)
     {
         compositeLayerRaw(target, region, layer);
         return;
     }
-    if (layer.raster.isNull() || !layer.visible)
+    if (layer.raster.isNull())
         return;
     if (!layer.hasEnabledEffects() && !layer.hasPuppet())
     {

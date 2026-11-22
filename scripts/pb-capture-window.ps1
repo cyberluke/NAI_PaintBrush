@@ -29,6 +29,12 @@
   Optional SendKeys sequence sent to the workspace after it settles and before
   the capture (e.g. "o" to switch to Object Select). Used to verify tool-state
   UI without a human at the keyboard.
+
+.PARAMETER Method
+  PrintWindow (default) captures the QML window only. Screen captures the
+  window rect from the desktop and therefore includes separate native
+  top-level windows such as the VLC VideoSurface vout. Use Screen when
+  verifying a live video surface.
 #>
 [CmdletBinding()]
 param(
@@ -37,6 +43,8 @@ param(
     [int]$WaitSeconds = 9,
     [string[]]$ExtraArgs = @(),
     [string]$Keys = "",
+    [ValidateSet("PrintWindow", "Screen")]
+    [string]$Method = "PrintWindow",
     [string]$SamModel = "",
     [string]$SamDevice = ""
 )
@@ -159,6 +167,14 @@ try {
         }
     }
 
+    if ($Method -eq "Screen") {
+        # the native vout is a separate top-level window: it must be on screen
+        # and the app foreground for CopyFromScreen to see it
+        [void][PbWin32]::ShowWindow($target, 9)     # SW_RESTORE
+        [void][PbWin32]::SetForegroundWindow($target)
+        Start-Sleep -Milliseconds 600
+    }
+
     $r = New-Object PbWin32+RECT
     [void][PbWin32]::GetWindowRect($target, [ref]$r)
     $w = $r.Right - $r.Left
@@ -170,9 +186,13 @@ try {
     Add-Type -AssemblyName System.Drawing
     $bmp = New-Object System.Drawing.Bitmap $w, $hgt
     $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $hdc = $g.GetHdc()
-    [void][PbWin32]::PrintWindow($target, $hdc, 2)  # PW_RENDERFULLCONTENT
-    $g.ReleaseHdc($hdc)
+    if ($Method -eq "Screen") {
+        $g.CopyFromScreen($r.Left, $r.Top, 0, 0, $bmp.Size)
+    } else {
+        $hdc = $g.GetHdc()
+        [void][PbWin32]::PrintWindow($target, $hdc, 2)  # PW_RENDERFULLCONTENT
+        $g.ReleaseHdc($hdc)
+    }
     $g.Dispose()
     $bmp.Save($OutFile, [System.Drawing.Imaging.ImageFormat]::Png)
     $bmp.Dispose()
