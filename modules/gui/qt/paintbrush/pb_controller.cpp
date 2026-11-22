@@ -715,7 +715,9 @@ void PaintbrushController::setCanvasItem(QQuickItem *item)
     m_canvas->setController(this);
     m_canvas->setDocument(&m_document);
     m_canvas->setUndoStack(&m_undoStack);
-    m_canvas->setPowderGpuEnabled(m_powderRenderer == QLatin1String("gpu"));
+    /* auto and gpu both PREFER the premium GPU renderer; the canvas falls
+     * back to CPU only when D3D11 is unavailable. "cpu" forces the legacy. */
+    m_canvas->setPowderGpuEnabled(m_powderRenderer != QLatin1String("cpu"));
 
     connect(m_canvas, &PaintbrushCanvasItem::objectSelectClick,
             this, &PaintbrushController::onCanvasObjectClick);

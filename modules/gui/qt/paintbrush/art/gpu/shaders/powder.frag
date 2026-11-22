@@ -48,9 +48,9 @@ layout(std140, binding = 2) uniform ubuf {
     float uMaterialMode;   // 0 = REFERENCE_SURFACE (opaque paper+powder)
                            // 1 = MATERIAL_LAYER (transparent material only)
     vec3 uLightDir;        // normalized direction to the key light
-    float uPad1;
+    float uMirror;         // 0 satin ... 1 mirror (premium flake BRDF)
     vec3 uPaper;           // paper colour
-    float uPad2;
+    float uExposure;       // filmic exposure for HDR mirror highlights
     vec3 uPal[16];         // powder palette slots
 };
 
@@ -120,6 +120,70 @@ vec3 thinFilm(float cosI, float d)
 }
 vec3 tintSpec(vec3 c) { return c / max(max(c.r, max(c.g, c.b)), 0.04); }
 
+// ---- premium studio IBL ------------------------------------------------
+// A tiny procedural environment, oriented to the shared light rig: a large
+// key softbox, a cool strip fill, a warm low rim, and a horizon sheen. The
+// mirror flakes reflect THIS, which is what makes powder read as mirror
+// shards rather than coloured dots. `R` and `L` are surface-space (z up).
+vec3 envStudio(vec3 R, vec3 L)
+{
+    vec3 key = normalize(L);
+    vec3 up = abs(key.z) > 0.95 ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
+    vec3 T = normalize(cross(up, key));
+    vec3 B = cross(key, T);
+    vec3 q = vec3(dot(R, T), dot(R, B), dot(R, key));
+    float az = atan(q.y, q.x);
+    float el = asin(clamp(q.z, -1.0, 1.0));
+
+    vec3 col = mix(vec3(0.045, 0.050, 0.065), vec3(0.42, 0.46, 0.55),
+                   smoothstep(-0.5, 0.9, el));
+    // broad ZENITH softbox: nearly-flat mirror facets reflect this, so the
+    // heap gets a continuous mirror sheen instead of isolated dots.
+    col += vec3(7.0, 6.4, 5.6) * smoothstep(0.95, 0.25,
+               length(vec2(az, el - 1.55)));
+    // rig-aligned key softbox (low, raking)
+    col += vec3(3.0, 2.7, 2.3) * smoothstep(0.22, 0.04,
+               length(vec2(az + 0.4, el - 0.50)));
+    // tall cool strip fill (opposite side)
+    col += vec3(1.4, 1.7, 2.2) * smoothstep(0.12, 0.02,
+               length(vec2(az - 2.5, (el - 0.05) * 0.6)));
+    // warm low rim
+    col += vec3(2.4, 1.3, 0.8) * smoothstep(0.10, 0.02,
+               length(vec2(az + 2.3, el + 0.25)));
+    // horizon sheen
+    col += vec3(0.7, 0.8, 1.0) * exp(-pow(el * 4.0, 2.0)) * 0.18;
+    return col;
+}
+
+// Diffraction-grating rainbow: a view-dependent hue sweep with a per-flake
+// phase (the second half of the "holographic" look, next to thin film).
+vec3 gratingHue(vec3 R, float phase, float freq)
+{
+    vec3 axis = normalize(vec3(0.55, 0.83, 0.12));
+    float d = dot(R, axis) * freq + phase;
+    vec3 rgb = 0.5 + 0.5 * cos(6.28318 * (d + vec3(0.0, 0.33, 0.67)));
+    return pow(clamp(rgb, 0.0, 1.0), vec3(1.7));
+}
+
+// Filmic tonemap so mirror highlights roll off instead of clipping to white.
+vec3 filmic(vec3 x)
+{
+    x *= uExposure;
+    const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
+
+// Hue-preserving filmic: the highlight rolls off in LUMINANCE and the chroma
+// ratio is kept, so a pink/cyan grain never turns into a white dot. Essential
+// for glitter identity under a strong mirror environment.
+vec3 filmicHue(vec3 x)
+{
+    float l = max(dot(x, vec3(0.2126, 0.7152, 0.0722)), 1e-4);
+    float tl = filmic(vec3(l)).x;
+    return clamp(x * (tl / l), 0.0, 4.0);
+}
+
+// One mirror flake: GGX metal lobe + studio IBL + thin-film/grating holo.
 vec3 flakeLight(vec2 sidSeed, float chance, float flatness,
                 vec3 N, vec3 L, vec3 H, vec3 tint,
                 out vec3 rainbow, out float isFlake)
@@ -130,21 +194,67 @@ vec3 flakeLight(vec2 sidSeed, float chance, float flatness,
     if (isFlake == 0.0) return vec3(0.0);
     vec3 gh  = hash32(sidSeed + 71.3);
     vec3 gh3 = hash32(sidSeed * 0.73 + 19.0);
-    float tilt = (0.05 + 0.85 * gh3.z) * (1.0 - 0.55 * flatness);
-    float rate = exp2(mix(-2.5, 0.8, gh2.z));
-    /* reference phase: the random `gh3.y * 6.28` is INSIDE the sine modulation,
-     * so each flake's shimmer rests on its own static phase, not added outside. */
-    float a = gh2.y * 6.2832 + (gh.x > 0.5 ? 1.0 : -1.0) * uTime * rate
-            + 0.6 * sin(uTime * rate * (0.6 + 1.6 * gh3.x) + gh3.y * 6.28);
-    vec3 Nf = normalize(N + vec3(cos(a), sin(a), 0.0) * tilt);
-    float fd = max(dot(Nf, H), 0.0);
-    float sharp = mix(14.0, 140.0, gh3.x * gh3.x);
-    float amp = 1.0 + 4.0 * pow(gh3.y, 3.0);
-    float film = mix(250.0, 600.0, hash32(sidSeed * 2.7 + 1.3).x);
-    rainbow = mix(tintSpec(tint), thinFilm(max(dot(Nf, L), 0.0), film), uHolo);
-    float spec = pow(fd, sharp) * amp;
-    return rainbow * (pow(fd, 12.0) * 0.15 + spec * 1.6)
-         + vec3(1.0) * pow(spec, 3.0) * 0.08;
+
+    /* Mirror facet normal: a real random 3D tilt (not a 2D wobble), flattened
+     * on glued grains because they are pressed into the adhesive. */
+    float tilt = (0.15 + 1.05 * gh3.z) * (1.0 - 0.35 * flatness);
+    float rate = exp2(mix(-2.0, 0.8, gh2.z));
+    /* Time turns each facet: the mirror/holo reflection sweeps as the powder
+     * shimmers, instead of only the glint twinkling. */
+    float az = gh2.y * 6.2832 + gh.x * 2.0
+             + sin(uTime * rate + gh3.y * 6.2832) * 0.55;
+    vec3 Nf = normalize(N + vec3(cos(az), sin(az), 0.0) * tilt
+                          + vec3(0.0, 0.0, 0.35) * (gh3.y - 0.5));
+
+    vec3 V = vec3(0.0, 0.0, 1.0);
+    float NdotV = max(dot(Nf, V), 0.001);
+    float NdotL = max(dot(Nf, L), 0.0);
+    vec3 R = reflect(-V, Nf);
+
+    /* Metal Fresnel + GGX microfacet lobe. uMirror 0 = soft satin, 1 = mirror. */
+    float F0 = mix(0.55, 0.98, uMirror);
+    float F = F0 + (1.0 - F0) * pow(1.0 - NdotV, 5.0);
+    float rough = mix(0.28, 0.045, uMirror) * mix(1.0, 1.6, gh3.x);
+    float a = max(rough * rough, 0.0015);
+    vec3 Hf = normalize(L + V);
+    float NdotH = max(dot(Nf, Hf), 0.0);
+    float den = NdotH * NdotH * (a * a - 1.0) + 1.0;
+    float D = (a * a) / (3.14159 * den * den);
+    float k = a * 0.5;
+    float G = (NdotL / (NdotL * (1.0 - k) + k))
+            * (NdotV / (NdotV * (1.0 - k) + k));
+    vec3 keyCol = vec3(1.02, 0.98, 0.93) * 2.0;
+    vec3 spec = keyCol * (D * G * F / (4.0 * NdotV * max(NdotL, 0.02)))
+              * NdotL;
+
+    /* The mirror: reflected studio environment, tinted by the material. */
+    vec3 env = envStudio(R, L) * F;
+    vec3 tintedEnv = env * mix(tintSpec(tint), vec3(1.0),
+                               0.10 + 0.10 * (1.0 - uHolo));
+
+    /* Holographic layer: thin film (thickness) + grating (view angle). */
+    float film = mix(220.0, 780.0, hash32(sidSeed * 2.7 + 1.3).x);
+    vec3 filmCol = thinFilm(NdotV, film);
+    float gphase = hash32(sidSeed * 4.1 + 8.7).x * 6.2832
+                 + uTime * (0.4 + 1.2 * gh2.z);
+    vec3 grat = gratingHue(R, gphase, 9.0 + 10.0 * gh3.y);
+    /* Coherent material rule: a shard is the SAME HUE as the powder, only
+     * brighter. Chromatic dispersion is a subtle secondary effect (<=18% at
+     * full shimmer), never a rainbow chip that breaks the material. */
+    vec3 holo = mix(filmCol, grat, 0.20 + 0.20 * gh2.z);
+    holo = pow(clamp(holo, 0.0, 1.0), vec3(1.25));
+    vec3 shardHue = mix(tintSpec(tint), holo, 0.18 * uHolo);
+    rainbow = shardHue;
+
+    vec3 lit = tintedEnv * (0.95 + 0.35 * uMirror)
+             + spec * mix(vec3(1.0), shardHue, 0.25) * (0.6 + 0.7 * uMirror);
+
+    /* Sharp glint + twinkle: the sparkle that sells holographic powder. */
+    float glint = pow(max(dot(Nf, Hf), 0.0), 900.0);
+    float twinkle = 0.65 + 0.35 * sin(uTime * (2.0 + 6.0 * gh3.y)
+                                     + gh3.x * 6.2832);
+    lit += vec3(1.0, 0.98, 0.94) * glint * (0.5 + 1.6 * uMirror) * twinkle;
+    return lit * (0.70 + 0.60 * uMirror);
 }
 
 void main()
@@ -236,12 +346,30 @@ void main()
     float tone = (0.80 + 0.26 * gh.z) * (1.0 + 0.05 * exposedGlue);
     tone *= mix(1.0, 0.72, step(0.95, gh3.y));
     vec3 albedo = tint * tone;
-    vec3 bead = albedo * (0.80 + 0.30 * diff);
+    vec3 bead = albedo * (0.55 + 0.25 * diff);
     bead *= mix(0.84, 1.0, smoothstep(0.0, 0.22, edge));
     bead += mix(vec3(1.0), tintSpec(tint), 0.5) * pow(max(dot(Nb, H), 0.0), 45.0) * 0.35;
+    /* Glass bead: Fresnel + studio reflection, so the bead has a mirror rim
+     * instead of only a highlight dot. */
+    vec3 Vb = vec3(0.0, 0.0, 1.0);
+    vec3 Rb = reflect(-Vb, Nb);
+    float Fb = 0.04 + 0.96 * pow(1.0 - clamp(dot(Nb, Vb), 0.0, 1.0), 5.0);
+    /* Colored-metal body: the environment reflection is TINTED, so the
+     * pile reads as coloured mirror powder (continuous sheen), not satin
+     * beads with isolated white dots. Hue is preserved by filmicHue. */
+    vec3 mirrorTint = mix(vec3(0.65), tintSpec(tint), 0.85);
+    bead += envStudio(Rb, L) * mirrorTint
+          * (0.16 + 0.40 * uMirror) * inBead;
+    bead += vec3(1.0) * Fb * 0.06 * inBead;
+    /* Subtle per-bead iridescence: holographic powder reads as a rainbow
+     * mosaic even between the explicit mirror flakes. */
+    vec3 beadHue = mix(vec3(1.0),
+                       gratingHue(Rb, hash12(sid * 1.9 + 3.1) * 6.2832, 14.0),
+                       0.10 * uHolo);
+    bead *= beadHue;
 
     vec3 rainbow; float isFlake;
-    vec3 flake = flakeLight(sid, 0.06, exposedGlue, N, L, H, tint, rainbow, isFlake);
+    vec3 flake = flakeLight(sid, 0.35, exposedGlue, N, L, H, tint, rainbow, isFlake);
     /* DARK-MATERIAL CHROMA LIMIT: a near-black tint must not turn the flake's
      * thin-film rainbow into isolated RGB dots. Bleed the chromatic energy to
      * its luminance (neutral silver mirror), keeping a specular flash not a
@@ -301,13 +429,13 @@ void main()
         float glueF = cs.a * smoothstep(0.02, 0.25, cs.b);
         float looseF = max(cs.r - cs.b, 0.0);
         float onGlue = glueF * (1.0 - smoothstep(0.25, 1.1, looseF));
-        if (r1.x > mix(0.45, 0.8, onGlue) * (uFlakePx / 5.0)) continue;
+        if (r1.x > mix(0.88, 0.97, onGlue) * (uFlakePx / 5.0)) continue;
         vec2 fsid = id * 3.1 + cs.g * 13.17;
         vec3 r2 = hash32(fsid + 40.0);
         if (r2.y >= max(clamp(looseF / 1.2, 0.0, 1.0), glueF)) continue;
 
         float size = r2.x * r2.x * r2.x;
-        float radius = mix(0.12, 0.45, size);
+        float radius = mix(0.22, 0.68, size);
         vec3 fc = hash32(fsid * 1.7 + 3.3);
         vec3 tintF = cellColour(ct, fc.x, r2.y < clamp(looseF / 1.2, 0.0, 1.0));
         vec3 rb; float isF;
@@ -324,7 +452,8 @@ void main()
 
         vec3 silver = tintF * 0.945 * (0.80 + 0.24 * macroDiff) * (0.92 + 0.14 * r2.z);
         float lift = clamp(peak, 0.0, 1.0);
-        col = mix(col, silver + lit * (1.0 + size), cov * mix(0.45, 1.0, lift));
+        col = mix(col, silver * 0.55 + lit * (1.15 + 0.75 * size),
+                  cov * mix(0.55, 1.0, lift));
         float over = max(peak - 1.0, 0.0);
         bloom += normalize(lit + 1e-4) * over * exp(-pow(d2 / (radius * 1.5), 2.0))
                * smoothstep(1.15, 0.8, d2) * 0.25 * (0.4 + size);
@@ -397,7 +526,7 @@ void main()
          * inside the deepest contact shadow — never collapse to (0,0,0).
          * Apply the floor to the PREMULTIPLIED output (mat*a), so a grain with
          * low alpha still reads a tinted color rather than rounding to black. */
-        vec3 outCol = mat * a;
+        vec3 outCol = filmicHue(mat) * a;
         float outLum = dot(outCol, vec3(0.299, 0.587, 0.114));
         float floorV = 0.012 + 0.05 * a * (1.0 - dot(mat, vec3(0.333)));
         if (a > 0.03 && outLum < floorV)
@@ -409,6 +538,6 @@ void main()
     else
     {
         /* reference surface: opaque paper + powder (standalone harness) */
-        fragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+        fragColor = vec4(filmicHue(col), 1.0);
     }
 }

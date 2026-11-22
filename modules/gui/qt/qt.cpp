@@ -269,10 +269,10 @@ static void ShowDialog   ( intf_thread_t *, int, int, intf_dialog_args_t * );
                               "so the native video output is embedded in the canvas instead "\
                               "of appearing as a separate player window." )
 #define PB_POWDER_RENDERER_TEXT N_( "Glitter powder renderer" )
-#define PB_POWDER_RENDERER_LONGTEXT N_( "auto/cpu: CPU material renderer (measured faster "\
-                                         "for interactive powder unions); gpu: experimental "\
-                                         "GPU powder shader (passes the parity harness but is "\
-                                         "about 2x slower because of upload/readback)." )
+#define PB_POWDER_RENDERER_LONGTEXT N_( "auto/gpu: premium GPU mirror/holo powder renderer "\
+                                         "(coherent material-hue shards, studio IBL, subtle "\
+                                         "dispersion); cpu: legacy CPU material renderer. "\
+                                         "GPU has an upload/readback cost but is the intended look." )
 #define PB_VLM_BASE_TEXT N_( "Vision model base URL" )
 #define PB_VLM_BASE_LONGTEXT N_( "Base URL of an OpenAI-compatible vision endpoint "\
                                  "used by Ask about this." )

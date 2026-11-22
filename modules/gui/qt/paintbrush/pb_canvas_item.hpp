@@ -84,9 +84,9 @@ class PaintbrushCanvasItem : public QQuickItem
     Q_PROPERTY(qreal brushColorVariation READ brushColorVariation WRITE setBrushColorVariation NOTIFY artParamsChanged FINAL)
     /* Glitter-Powder workbench: active subtool for TOOL_GLITTER_POWDER. */
     Q_PROPERTY(int powderTool READ powderTool WRITE setPowderTool NOTIFY powderToolChanged FINAL)
-    /* Experimental GPU powder surface pass. Default off: the measured CPU
-     * material renderer is faster than the GPU upload+shade+readback for the
-     * interactive union sizes (see the powder harness benchmark). */
+    /* Premium GPU powder surface pass (mirror/holo). Preferred by default;
+     * the canvas falls back to the CPU material renderer when D3D11 is not
+     * available. "cpu" in the settings forces the legacy renderer. */
     Q_PROPERTY(bool powderGpuEnabled READ powderGpuEnabled WRITE setPowderGpuEnabled NOTIFY powderGpuChanged FINAL)
     /* Per-subtool physical sizes (reference P0.5):
      *   Glue / Eraser values = visible width

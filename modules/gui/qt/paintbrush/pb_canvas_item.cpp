@@ -1751,9 +1751,11 @@ void PaintbrushCanvasItem::stepPowderBlow(float dtSec)
      * unions at 20 Hz so tile upload/compositing stays within budget. */
     m_powderRenderAcc += dtSec;
     const int unionArea = m_powderUnion.width() * m_powderUnion.height();
-    const double previewInterval = unionArea <= 256 * 256 ? 1.0 / 60.0
-                                 : unionArea <= 768 * 768 ? 1.0 / 30.0
-                                                          : 1.0 / 20.0;
+    const double previewInterval = m_powderGpuEnabled
+        ? (unionArea <= 256 * 256 ? 1.0 / 30.0
+           : unionArea <= 768 * 768 ? 1.0 / 20.0 : 1.0 / 15.0)
+        : (unionArea <= 256 * 256 ? 1.0 / 60.0
+           : unionArea <= 768 * 768 ? 1.0 / 30.0 : 1.0 / 20.0);
     if (m_powderRenderAcc >= previewInterval)
     {
         m_powderRenderAcc = 0.0f;

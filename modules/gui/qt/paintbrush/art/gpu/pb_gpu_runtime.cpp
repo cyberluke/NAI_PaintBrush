@@ -964,6 +964,10 @@ QImage GpuRuntime::renderPowder(const QSize &outSize,
     wf(120, output == PowderOutput::MaterialLayer ? 1.0f : 0.0f);       /* uMaterialMode */
     wv3(128, L.x(), L.y(), L.z());                                      /* uLightDir */
     wv3(144, pal.paper.redF(), pal.paper.greenF(), pal.paper.blueF());  /* uPaper */
+    /* vec3 writers pad to 16 bytes, so these scalar fields MUST be written
+     * after uLightDir/uPaper or their padding zeroes them (black frame). */
+    wf(140, 0.90f);                                                     /* uMirror */
+    wf(156, 1.00f);                                                     /* uExposure */
     for (int i = 0; i < 16; ++i)                            /* uPal[16] */
     {
         /* Pad ALL 16 palette slots so an out-of-range cell index never samples

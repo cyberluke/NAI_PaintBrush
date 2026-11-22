@@ -213,6 +213,25 @@ static Scene makeDense(const PowderPalette &pal, std::uint32_t seed = 5u)
     return s;
 }
 
+/* silver mirror: the holographic-mirror acceptance look (white/silver). */
+static Scene makeSilver(const PowderPalette &base)
+{
+    Scene s;
+    s.pal = base;
+    s.pal.colors = { QColor("#f4f4f8"), QColor("#c9ced8"), QColor("#ffffff") };
+    s.pal.holographic = 0.85f;
+    s.g.reset(QSize(256, 256), 4.0f, 17u);
+    GlitterParams p; p.amount = 1.4f; p.flakeSize = 0.8f;
+    p.color = QColor("#e8eaf0");
+    const float wc = 512.0f;
+    for (int i = 0; i < 5; ++i)
+        s.g.pourGlitter(wc + (i - 2) * 7.0f, wc + ((i % 3) - 1) * 6.0f,
+                        22.0f + 2.0f * i, p);
+    s.g.relax(); s.g.relax();
+    seedCells(s.g, wc, wc, 50.0f, 21.0f);
+    return s;
+}
+
 /* mixed: two colours (slot0 pink + slot12 cyan). */
 static Scene makeMixed(PowderPalette &pal)
 {
@@ -418,6 +437,7 @@ int main(int argc, char **argv)
     Scene dense = makeDense(pal);
     Scene mixed = makeMixed(pal);
     Scene glue  = makeGlue(pal);
+    Scene silver = makeSilver(pal);
 
     /* light rig variations (mirror a scene-space light). */
     ArtLightRig rigLeft;  rigLeft.direction  = QVector3D(-0.4f, 0.8f, 0.6f);
@@ -433,11 +453,12 @@ int main(int argc, char **argv)
     QImage imgT1    = renderScene(rt, dense, originX, originY, worldPerPx, rig0, paper, T1);
     QImage imgLtL   = renderScene(rt, dense, originX, originY, worldPerPx, rigLeft,  paper, T0);
     QImage imgLtR   = renderScene(rt, dense, originX, originY, worldPerPx, rigRight, paper, T0);
+    QImage imgSilver = renderScene(rt, silver, originX, originY, worldPerPx, rig0, paper, T0);
 
     struct Named {
         const char *name; const QImage &img;
     };
-    const Named imgs[8] = {
+    const Named imgs[9] = {
         { "gpu_powder_thin.png",       imgThin  },
         { "gpu_powder_dense.png",      imgDense },
         { "gpu_powder_mixed.png",      imgMixed },
@@ -446,12 +467,13 @@ int main(int argc, char **argv)
         { "gpu_powder_t1.png",         imgT1    },
         { "gpu_powder_light_left.png", imgLtL   },
         { "gpu_powder_light_right.png",imgLtR   },
+        { "gpu_powder_silver.png",     imgSilver },
     };
 
     /* ---- write the PNGs + validate reload ----------------------------- */
-    qint64 sizes[8];
+    qint64 sizes[9];
     std::printf("-- writing PNGs into %s\n", qPrintable(buildDir));
-    for (int i = 0; i < 8; ++i)
+    for (int i = 0; i < 9; ++i)
     {
         const QString path = QDir(buildDir).filePath(QString::fromUtf8(imgs[i].name));
         const bool wr = savePng(imgs[i].img, path);
@@ -472,7 +494,7 @@ int main(int argc, char **argv)
     /* ---- 2. each PNG is real data (valid non-null, non-empty, has some
      *         non-background pixels, recall reload round-trip). -------- */
     std::printf("-- per-image content checks\n");
-    for (int i = 0; i < 8; ++i)
+    for (int i = 0; i < 9; ++i)
     {
         char label[96];
         std::snprintf(label, sizeof(label), "png fine: %s", imgs[i].name);
