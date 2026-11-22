@@ -8,10 +8,15 @@ settings persistence through the VLC config; native video presentation in
 HarvestVideo (vout/track state fix, `c03ecc0bd1`); toolbar theme/icon resolution
 (`317ca0ad1b`); capture/compose keyframe instead of black viewer snapshot
 (`b11892c597`); lazy SAM load on first segmentation instead of the eager
-startup load (`452ac7e835`). **Pending:** decoded-frame preview for painting over live video
-(async plan in `docs/HANDOFF.md` §2.3, not implemented); full invariant-8
-capability migration; native `LAYER_VECTOR`; true stylus pressure; native visual
-acceptance of toolbar, video, capture/compose, settings, undo and strip.
+startup load (`452ac7e835`); native `LAYER_VECTOR` with in-canvas double-click
+node editing and undoable `VectorPathCommand` (`793fc42d7b`); semantic tool
+capabilities / invariant 8 complete (`36dd5725ea`, `12cc2fb37b`); standalone
+C++ media-logic harness (`36dd5725ea`). Stylus pressure is wired (tablet
+pressure → `pressureFactor`, precision toggle; native tablet acceptance
+pending). **Pending:** decoded-frame preview for painting over live video
+(async plan in `docs/HANDOFF.md` §2.3, not implemented); native visual/tablet
+acceptance of toolbar, video, capture/compose, settings, undo, vector nodes and
+stylus.
 
 **Target:** `modules/gui/qt/paintbrush/docs/ADAPTIVE_UI_AND_SUBJECTS.md`
 

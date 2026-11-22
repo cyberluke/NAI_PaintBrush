@@ -20,13 +20,16 @@
   compose keeps the decoded keyframe instead of the black viewer snapshot.
   `452ac7e835` — lazy SAM load on first segmentation (no 706 MB startup
   stall). `01112f6900` — settings tracking status guarded before the service
-  is ready. This lamp is the docs commit that contains this file.
-- **Verified build (2026-11-21 16:50):**
-  `ninja -C win64-meson modules/libqt_plugin.dll` → `EXIT=0` (clean workspace
-  rebuild). Artifact: `win64-meson/modules/libqt_plugin.dll`,
-  `21.11.2026 16:50:20`, 417,229,068 bytes. QML resource
-  `paintbrush_assets.cpp` regenerated `16:49:00`.
-- **Provenance:** app code is committed at `01112f6900`; the temporary
+  is ready. `793fc42d7b` — native `LAYER_VECTOR` + in-canvas node editing
+  (plus the `samGpuBackendLinked` / Windows CPU-backend compile fixes).
+  `12cc2fb37b` — powder subtool capabilities; invariant 8 complete.
+  This lamp is the docs commit that contains this file.
+- **Verified build (2026-11-22 00:55):**
+  `ninja -C win64-meson modules/libqt_plugin.dll` → `EXIT=0`.
+  Artifact: `win64-meson/modules/libqt_plugin.dll`,
+  `22.11.2026 00:55:09`, 403,750,744 bytes. QML resource
+  `paintbrush_assets.cpp` regenerated `00:54:01`.
+- **Provenance:** app code is committed at `12cc2fb37b`; the temporary
   end-to-end QML probe was removed before the build. Four launch helper scripts
   (`scripts/launch-pb-noskip.ps1`, `launch-pb-sam.ps1`,
   `launch-pb-software-decode.ps1`, `run-paintbrush.ps1`) are modified by
@@ -55,11 +58,11 @@ modules\gui\qt\paintbrush\probes\run-probes.ps1
 ```
 
 ```
-check-qml-contracts          PASS (264 controller members declared)
+check-qml-contracts          PASS (271 controller members declared)
 check-palettes               PASS (27 palettes, 27 unique ids)
 ProbeCanvasAttach            PASS
 ProbeModelBinding            PASS
-2/2 probes passed
+5/5 probes passed
 EXIT=0
 ```
 
@@ -227,9 +230,13 @@ Render/interaction contract for that future preview:
 |---|---|
 | **Settings persistence (repaired)** — `config_PutPsz`/`config_PutInt` + `config_SaveConfigFile`, read-back validation, empty-on-success, sticky restart state, SAM device normalization (`auto/gpu/cpu`, empty/unknown → auto), PTS clamp 20–2000 ms, API keys stay environment-only | `pb_controller.{hpp,cpp}`, `pb_common.{hpp,cpp}`, `pb_segmentation_service.cpp`, `pb_tracking_service.cpp`, `PaintbrushSettingsDialog.qml`; `453f11e913` |
 | **Subject transactions (repaired)** — `placeSubject`/`deleteInstance` are one `CompositeCommand` covering both the layer command and the persisted `SubjectInstance` record; the instance id is captured in the `InsertLayerCommand` payload before it is pushed; deleting the only layer is refused instead of orphaning the record | `pb_controller_palettes.cpp`, `pb_history.hpp`, `pb_controller.{hpp,cpp}`; `453f11e913` |
-| **QML contract guard (repaired)** — legitimate JS members such as `model.indexOf` are allowed; delegate `model.<role>` misuse is still flagged; actual gate 2/2 PASS | `probes/check-qml-contracts.ps1`; `453f11e913` |
+| **QML contract guard (repaired)** — legitimate JS members such as `model.indexOf` are allowed; delegate `model.<role>` misuse is still flagged; actual gate 5/5 PASS | `probes/check-qml-contracts.ps1`; `453f11e913` |
 | **Video presentation (native, fixed)** — root cause: one-shot `mediaStateChanged` before parsing, with no vout/track subscriptions; the controller now re-emits on `hasVideoOutputChanged`, `voutListChanged` and video track `countChanged`, logs the real state, and the QML `VideoSurface` becomes visible and reports geometry to the existing compositor. No renderer rewrite. | `pb_controller.cpp`; `c03ecc0bd1` |
 | **Capture/compose (fixed)** — keep the nearest decoded keyframe when the exact PTS is unverified, with its real PTS; force RGB32; remove the black viewer-snapshot fallback; a genuine decode failure keeps HarvestVideo alive and reports the error. | `pb_controller.cpp`; `b11892c597` |
+| **Native `LAYER_VECTOR` + in-canvas node editing** — local editable `QPainterPath` + stroke/fill/width; canonical renderer draws the path (preview raster is thumbnail-only); vector content bounds/transform; project-store round-trip; double-click arms the QML node overlay; each drag is one `VectorPathCommand` with undo/redo and preview refresh. | `pb_common.hpp`, `pb_layer.{hpp,cpp}`, `pb_document.cpp`, `pb_project_store.cpp`, `pb_controller.{hpp,cpp}`, `pb_history.{hpp,cpp}`, `pb_canvas_item.{hpp,cpp}`, `PaintbrushCanvasView.qml`; `793fc42d7b` |
+| **Semantic tool capabilities (invariant 8 complete)** — object-select/size/flow/bristle/glitter/powder + powder-subtool + harvest-presentation capabilities; no QML capability decision uses a tool number. | `pb_controller.{hpp,cpp}`, QML; `36dd5725ea`, `12cc2fb37b` |
+| **C++ media harness** — pure-Qt `media_logic_test` (FrameRef/DecodedFrame/PTS/LRU/priority); gate 5/5. | `tests/media_logic_test.cpp`, `probes/run-media-logic-tests.ps1`, `probes/run-probes.ps1`; `36dd5725ea` |
+| **Stylus pressure** — existing tablet pressure path feeds `pressureFactor()`/bristle; precision toggle + pressure-to-opacity/min/max; native tablet acceptance pending. | `pb_canvas_item.{hpp,cpp}`, `bristle_brush.cpp`, `PaintbrushToolOptionsBar.qml` |
 | Adaptive strip baseline (one 64dp surface, RowLayout, flex sliders, intrinsic icons, clipping) | `PaintbrushStrip.qml`, `PaintbrushToolbar.qml`, `PaintbrushToolOptionsBar.qml`, `PaintbrushWorkspace.qml`; commits `57469a8b71`…`7e8faff59e`; the one-surface/implicit-width refactor is committed at `317ca0ad1b`. |
 | **Toolbar theme/icon repair** — explicit `VLCStyle.palette` on all 15 paintbrush `ColorContext`s; `Widgets.IconLabel` for VLCIcons glyph fallback (sets the icon font family); options bar refreshes on `toolCapabilitiesChanged`; canvas `toolName` + attach-time capability emission | `PaintbrushToolbar.qml`, `PaintbrushToolOptionsBar.qml`, all paintbrush `ColorContext` QML, `pb_canvas_item.hpp`, `pb_controller.cpp`; `317ca0ad1b` |
 | Compact colour group: FG/BG chips, 8 recent selected colours, palette popover over all 27 persisted palettes | `PaintbrushStrip.qml`, `b971b9f847`, `7a38f8dd63` |
@@ -263,14 +270,13 @@ Render/interaction contract for that future preview:
 6. Source media is never destructively rewritten.
 7. A raster artefact is never labelled `vector`; vector means stored, editable
    path geometry.
-8. **Partially enforced.** QML must consume capability properties for
-   capability decisions, not tool numbers. `PaintbrushStrip.qml` uses
-   `toolUsesColor` / `toolHasPrimaryAction` / `toolIsBusy`, but the following
-   still use numeric ids and are a known migration gap:
-   `PaintbrushPaletteBar.qml:116`, `PaintbrushBoostBar.qml:39`,
-   `PaintbrushToolOptionsBar.qml:115/121/133/148`, and
-   `PaintbrushCanvasView.qml:170` (`presentationMode === 0`). Do not claim full
-   compliance until these are migrated.
+8. **Enforced.** QML consumes capability properties for capability decisions:
+   `toolUsesColor`, `toolHasPrimaryAction`, `toolIsBusy`,
+   `toolIsObjectSelect`, `toolHasSizeParameter/Flow/Bristle/Glitter/Powder`,
+   `powderToolIsGlue/Glitter/Push/Eraser`, and `isHarvestPresentation`. The
+   only remaining numeric comparisons are the tool rail’s active-tool identity
+   (`canvas.tool === src.toolId`) and action payload values that set a subtool;
+   neither is a capability decision.
 9. History is history: recent colours are *selected* colours, not palettes and
    not painted-with.
 10. Settings persistence uses `config_PutPsz`/`config_PutInt` (VLC config,
@@ -287,6 +293,9 @@ Render/interaction contract for that future preview:
     snapshot. Use the decoded keyframe with its REAL PTS and label it
     unverified; a real decode failure leaves the live video visible and reports
     the error.
+13. Vector layers are path-native. `LAYER_VECTOR` renders `vectorPath` through
+    the canonical compositor; the raster is a thumbnail preview only. Node
+    edits are one undoable `VectorPathCommand` and serialize with the project.
 
 ## 5. Known limitations / unverified
 
@@ -316,14 +325,19 @@ Render/interaction contract for that future preview:
   signal graph (common to DComp/Win7); the actual runtime mode/rects were not
   captured in this session. If acceptance still fails, capture the §2.1
   evidence before changing the renderer.
-- **Invariant 8**: the numeric-id checks listed in §4.8 remain.
-- **Probe coverage**: 2 QML probes + 2 static checks. `pb_media_logic.hpp` has
-  no standalone C++ harness; settings/undo paths are not probe-covered.
+- **Invariant 8**: enforced (§4.8); only active-tool identity and action
+  payload values remain numeric.
+- **Probe coverage**: 2 QML probes + 2 static checks + the C++ media harness;
+  gate 5/5. Settings/undo paths still lack a dedicated controller-level test.
+- **Native vector/node/stylus acceptance**: native `LAYER_VECTOR`, the
+  double-click node editor, and the tablet-pressure path are code-complete;
+  verify them on the target tablet/display. Vector node undo/redo and project
+  round-trip need the native pass.
 - **Startup responsiveness**: the eager SAM preload was removed in
   `452ac7e835`; the worker waits idle and the 706 MB model loads on the first
   segmentation request. This removes the startup “Loading SAM model…” stall
   that starved the workspace. **Native acceptance pending.**
-- **Worktree**: app code committed at `01112f6900`; four launch helper scripts
+- **Worktree**: app code committed at `12cc2fb37b`; four launch helper scripts
   and the concurrent docs (`DEMO.md`, root/superseded handoffs) are modified by
   another workstream and uncommitted (not staged). Verify in the built app.
 - **Store/document atomicity**: the composite makes undo/redo coherent across
@@ -352,9 +366,12 @@ Render/interaction contract for that future preview:
 
 - **The audit repair is committed at `453f11e913`; the video-state fix is
   committed at `c03ecc0bd1`; the toolbar theme/icon fix is committed at
-  `317ca0ad1b`; the capture keyframe fix is committed at `b11892c597`.**
+  `317ca0ad1b`; the capture keyframe fix is committed at `b11892c597`; the
+  lazy SAM fix at `452ac7e835`; the settings guard at `01112f6900`; the native
+  vector layer/node editor at `793fc42d7b`; the powder capabilities at
+  `12cc2fb37b`.**
 - No app files from this work are left uncommitted; app code is at
-  `01112f6900`. The four modified launch helper scripts and concurrent docs
+  `12cc2fb37b`. The four modified launch helper scripts and concurrent docs
   belong to another workstream and are not staged.
 - **Do not** add a plaintext API-key field or a `var_SetString`-based setter.
   The supported secret path is the environment, read by `pbApiKey()`.
@@ -363,8 +380,8 @@ Render/interaction contract for that future preview:
 ## 7. Next actions, in order
 
 1. **Native visual acceptance** of the toolbar, live video presentation,
-   “Add frame”/compose, settings persistence/Apply, and subject undo/redo in
-   the built app.
+   “Add frame”/compose, settings/undo, the native vector layer + double-click
+   node editor, and tablet pressure in the built app.
 2. If live video still fails, capture the §2.1 runtime evidence (mode, native
    rect, surface geometry, `hasEmbededVideo`); do not start with a renderer
    rewrite. If “Add frame” fails, read `capture: decoded/inserted/decode failed`
@@ -372,14 +389,11 @@ Render/interaction contract for that future preview:
    acceptable unverified capture.
 3. Implement a decoded-frame preview only if painting/tracking over live video
    requires a QImage; use `requestAsync` + token + cancellation.
-4. Migrate the remaining numeric tool-id checks (§4.8).
-5. Add a C++ harness for `pb_media_logic.hpp` and probe the settings Apply /
-   subject undo contracts.
-6. Runtime-confirm layer show/hide and strip visuals.
-7. Remaining ADR ambitions: native `LAYER_VECTOR` in-canvas node editing
-   (re-count the call sites before scoping; the old “15 call sites” figure is
-   not reproducible from the current tree) and true stylus pressure feeding
-   `pressureFactor()`.
+4. Runtime-confirm layer show/hide and strip visuals.
+5. Extend the C++ harness to settings-Apply/subject-undo controller contracts
+   (the pure media harness and invariant-8 gate are complete).
+6. Remaining ADR refinement: richer bezier-handle node UX (native path editing
+   is live) and any future decoded preview.
 
 ## 8. Diagnostics cheat-sheet
 
@@ -401,28 +415,34 @@ Render/interaction contract for that future preview:
 ## 9. Build / most-recent evidence
 
 ```
-ninja -C win64-meson modules/libqt_plugin.dll   EXIT=0 (clean workspace rebuild 16:50:20)
-modules/libqt_plugin.dll                        21.11.2026 16:50:20, 417,229,068 bytes
-QML resource paintbrush_assets.cpp              regenerated 16:49:00
-probes                                          check-qml-contracts PASS (264),
+ninja -C win64-meson modules/libqt_plugin.dll   EXIT=0 (vector/powder objects + link
+                                                00:55:09)
+modules/libqt_plugin.dll                        22.11.2026 00:55:09, 403,750,744 bytes
+QML resource paintbrush_assets.cpp              regenerated 00:54:01
+probes                                          check-qml-contracts PASS (271),
                                                 check-palettes PASS (27),
-                                                2/2 probes passed, EXIT=0
-                                                (after 01112f6900)
+                                                5/5 probes passed, EXIT=0
+                                                (after 12cc2fb37b)
 code repair commit                              453f11e913
 video-state commit                              c03ecc0bd1
 toolbar theme/icon commit                       317ca0ad1b
 capture keyframe commit                         b11892c597
 lazy SAM commit                                 452ac7e835
 settings status guard commit                    01112f6900
+native vector layer/node editor commit          793fc42d7b
+powder capabilities commit                      12cc2fb37b
 runtime smoke (built app, 1.mp4, 10:38)         video track count=1 playerHasVideo=0
                                                 player video state: hasVideoOutput=1
                                                 playerHasVideo=1
+app load check (after 793fc42d7b)                workspace loaded, setCanvasItem
+                                                logged, no QML load errors in the
+                                                app log; overlay hidden by default
 capture UI smoke                                temporary QML timer probe did not
                                                 fire in the automated workspace;
                                                 probe removed; native UI acceptance
                                                 pending
 HEAD                                            this docs commit
-worktree                                        app code 01112f6900; four launch
+worktree                                        app code 12cc2fb37b; four launch
                                                 scripts + concurrent docs modified
                                                 by another workstream (not staged)
 ```
