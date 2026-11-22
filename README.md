@@ -10,10 +10,6 @@ of a video, and turn it all into a poster that moves.
 
 **Paint with video. Catch real moments. Compose sliving artwork.**
 
-> Sampling built the best records. The Prodigy pulled moments off the radio and
-> made a hit; you pull a frame out of a video, cut out the part that matters,
-> and flip it into something unmistakably yours.
-
 [Download](#download) · [The loop](#the-loop) · [What it does](#what-it-does) · [The AI part](#the-ai-part-honestly) · [For the nerds](#for-the-nerds)
 
 ---
