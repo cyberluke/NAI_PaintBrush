@@ -54,6 +54,12 @@ line.
 **Sign before packaging.** Any manifest, bundle or release index must describe
 the signed bytes; re-signing after packaging invalidates it.
 
+Signing rewrites `libqt_plugin.dll`, which invalidates `modules\plugins.dat`
+(VLC then starts without the Qt interface, i.e. with no window). `pb-sign.ps1`
+regenerates the cache after signing, and `launch-pb-noskip.ps1` refreshes it
+whenever the plugin is newer than the cache. Ship the post-sign `plugins.dat`,
+never a pre-sign one.
+
 ## Verify
 
 ```powershell

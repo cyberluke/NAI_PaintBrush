@@ -42,7 +42,8 @@ if build_vlc and (host_system != 'darwin' or have_osx) and not have_win_store an
             include_directories: [
                 vlc_src_root / 'share/icons',
             ],
-            depend_files: [vlc_manifest],
+            depend_files: [vlc_manifest,
+                           vlc_src_root / 'share/icons/nai-paintbrush.ico'],
         )
     endif
 

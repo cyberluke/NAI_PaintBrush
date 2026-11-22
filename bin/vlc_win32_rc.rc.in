@@ -3,7 +3,7 @@
 
 #include <winuser.h>
 
-VLC_ICON ICON "vlc.ico"
+VLC_ICON ICON "nai-paintbrush.ico"
 
 1 VERSIONINFO
 FILETYPE 1
@@ -15,14 +15,14 @@ BEGIN
   BEGIN
     BLOCK "040904E4"
     BEGIN
-      VALUE "CompanyName", "VideoLAN"
-      VALUE "ProductName", "VLC media player"
+      VALUE "CompanyName", "NANOTRIK.AI"
+      VALUE "ProductName", "NAI PaintBrush"
       VALUE "ProductVersion", VERSION_NUMBER_STR
-      VALUE "InternalName", "vlc"
-      VALUE "OriginalFilename", "vlc.exe"
+      VALUE "InternalName", "nai-paintbrush"
+      VALUE "OriginalFilename", "nai-paintbrush.exe"
       VALUE "FileVersion", "@VERSION@"
-      VALUE "FileDescription", "VLC media player"
-      VALUE "LegalCopyright", "Copyright \251 @COPYRIGHT_YEARS@ VideoLAN and VLC Authors"
+      VALUE "FileDescription", "NAI PaintBrush"
+      VALUE "LegalCopyright", "Copyright \251 @COPYRIGHT_YEARS@ VideoLAN and VLC Authors; \251 2026 NAI PaintBrush authors"
       VALUE "LegalTrademarks", "VLC media player, VideoLAN and x264 are registered trademarks from VideoLAN"
     END
   END

@@ -1495,7 +1495,10 @@ static void *Thread( void *obj )
                                    : qtr("VLC media player") );
     app.setApplicationVersion( QString::fromUtf8(VERSION_MESSAGE) );
 
-    if( QDate::currentDate().dayOfYear() >= QT_XMAS_JOKE_DAY && var_InheritBool( p_intf, "qt-icon-change" ) )
+    if( var_InheritBool( p_intf, "paintbrush" ) )
+        app.setWindowIcon( QIcon::fromTheme( "nai-paintbrush",
+                                             QIcon( ":/logo/nai-paintbrush256.png" ) ) );
+    else if( QDate::currentDate().dayOfYear() >= QT_XMAS_JOKE_DAY && var_InheritBool( p_intf, "qt-icon-change" ) )
         app.setWindowIcon( QIcon::fromTheme( "vlc-xmas", QIcon( ":/logo/vlc128-xmas.png" ) ) );
     else
         app.setWindowIcon( QIcon::fromTheme( "vlc", QIcon( ":/logo/vlc256.png" ) ) );

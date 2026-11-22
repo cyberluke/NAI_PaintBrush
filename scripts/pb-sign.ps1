@@ -144,8 +144,17 @@ foreach ($f in $Files) {
 }
 $rows | Format-Table -AutoSize
 
-if (-not $TrustChain) {
+if (-not $TrustChain -and ($rows.Status -contains 'NotTrusted')) {
     Write-Host "Status 'NotTrusted' is expected unless the NAI root is trusted for this user; re-run with -TrustChain or use the installer trust step."
+}
+
+# Signing rewrites libqt_plugin.dll, which invalidates modules\plugins.dat. VLC
+# then silently starts without the Qt interface, so the cache MUST be rebuilt
+# after signing and the packaged plugins.dat must be the post-sign one.
+$cacheGen = Join-Path $bin 'vlc-cache-gen.exe'
+if (Test-Path -LiteralPath $cacheGen) {
+    & $cacheGen (Join-Path $build 'modules') | Out-Null
+    Write-Host "Plugin cache regenerated for the signed plugin."
 }
 if ($failed -gt 0) {
     Write-Error ("{0} artifact(s) did not verify as Valid." -f $failed)

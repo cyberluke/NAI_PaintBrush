@@ -35,6 +35,18 @@ $env:QML_IMPORT_PATH = "C:\msys64\mingw64\share\qt6\qml"
 $env:QML2_IMPORT_PATH = $env:QML_IMPORT_PATH
 $env:PATH = "$bin;C:\msys64\mingw64\bin;$(Join-Path $root 'win64-meson\lib');$(Join-Path $root 'win64-meson\src');" + $env:PATH
 
+# A rebuilt (or re-signed) libqt_plugin.dll invalidates modules\plugins.dat and
+# VLC then silently runs without the Qt interface (no window). Refresh the cache
+# whenever the plugin is newer than the cache.
+$modules = Join-Path $root 'win64-meson\modules'
+$pluginsDat = Join-Path $modules 'plugins.dat'
+$qtPlugin = Join-Path $modules 'libqt_plugin.dll'
+if ((Test-Path -LiteralPath $qtPlugin) -and
+    ((-not (Test-Path -LiteralPath $pluginsDat)) -or
+     ((Get-Item -LiteralPath $qtPlugin).LastWriteTime -gt (Get-Item -LiteralPath $pluginsDat).LastWriteTime))) {
+    & (Join-Path $bin 'vlc-cache-gen.exe') $modules | Out-Null
+}
+
 $extra = @()
 if ($MatteSelfTest) { $extra += "--paintbrush-matte-selftest" }
 foreach ($item in $Media) { if ($item -ne "") { $extra += "--paintbrush-open=$item" } }
