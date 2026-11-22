@@ -1486,7 +1486,13 @@ static void *Thread( void *obj )
     }
 #endif
 
-    app.setApplicationDisplayName( qtr("VLC media player") );
+    /* In the Paintbrush workspace the product name is the window title the QML
+     * sets; an application display name here would be appended to it by the
+     * platform ("NAI PaintBrush - VLC media player"). Keep it empty there and
+     * the standard player name elsewhere. */
+    app.setApplicationDisplayName( var_InheritBool( p_intf, "paintbrush" )
+                                   ? QString()
+                                   : qtr("VLC media player") );
     app.setApplicationVersion( QString::fromUtf8(VERSION_MESSAGE) );
 
     if( QDate::currentDate().dayOfYear() >= QT_XMAS_JOKE_DAY && var_InheritBool( p_intf, "qt-icon-change" ) )

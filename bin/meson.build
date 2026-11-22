@@ -46,7 +46,7 @@ if build_vlc and (host_system != 'darwin' or have_osx) and not have_win_store an
         )
     endif
 
-    executable('vlc',
+    executable('nai-paintbrush',
         vlc_sources + vlc_win_extra,
         link_with: [libvlc, libvlccore],
         link_args: gc_sections_linkargs,

@@ -2,14 +2,14 @@
 $ErrorActionPreference = "Stop"
 $root = "D:\_SATIN_AI\NAI-OS\vlc"
 $bin = Join-Path $root "win64-meson\bin"
-$vlc = Join-Path $bin "vlc.exe"
+$exe = Join-Path $bin "nai-paintbrush.exe"
 $env:VLC_PLUGIN_PATH = Join-Path (Join-Path $root "win64-meson") "modules"
 $env:QT_PLUGIN_PATH  = "C:\msys64\mingw64\share\qt6\plugins"
 $env:QML_IMPORT_PATH = "C:\msys64\mingw64\share\qt6\qml"
 $env:QML2_IMPORT_PATH = $env:QML_IMPORT_PATH
 $env:PATH = "$bin;C:\msys64\mingw64\bin;$(Join-Path $root 'win64-meson\lib');$(Join-Path $root 'win64-meson\src');" + $env:PATH
 
-& $vlc `
+& $exe `
   "--paintbrush" "--no-media-library" "--no-qt-privacy-ask" "--no-qt-updates-notif" `
   "--avcodec-hw=none" `
   "--verbose=2" "--file-logging" "--logmode=text" "--logfile=D:\_SATIN_AI\NAI-OS\vlc\pb_sw.log" "--log-verbose=2" `

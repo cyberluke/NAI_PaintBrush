@@ -12,7 +12,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$ProcessName = "paintbrush",
+    [string]$ProcessName = "nai-paintbrush",
     [string]$OutFile = "D:\_SATIN_AI\NAI-OS\vlc\pb-workspace.png",
     [ValidateSet("PrintWindow", "Screen")]
     [string]$Method = "Screen"

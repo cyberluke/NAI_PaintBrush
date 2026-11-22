@@ -6,7 +6,7 @@
   The paintbrush workspace is a native Qt window whose chrome (bottom strip)
   can sit below the visible desktop area on a scaled display, so a plain
   CopyFromScreen screenshot is not a reliable GUI gate. This script launches
-  the built paintbrush.exe, finds the real visible top-level window that
+  the built nai-paintbrush.exe, finds the real visible top-level window that
   belongs to the process (not a hidden Qt helper), and renders it with
   PrintWindow(PW_RENDERFULLCONTENT) into a PNG at the window's own size.
 
@@ -14,7 +14,7 @@
     pwsh -File scripts/pb-capture-window.ps1 -OutFile C:\tmp\pb.png
 
 .PARAMETER Exe
-  paintbrush.exe (defaults to win64-meson\bin\paintbrush.exe).
+  nai-paintbrush.exe (defaults to win64-meson\bin\nai-paintbrush.exe).
 
 .PARAMETER OutFile
   Destination PNG (defaults to <repo>\pb-window.png).
@@ -38,7 +38,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Exe = "D:\_SATIN_AI\NAI-OS\vlc\win64-meson\bin\paintbrush.exe",
+    [string]$Exe = "D:\_SATIN_AI\NAI-OS\vlc\win64-meson\bin\nai-paintbrush.exe",
     [string]$OutFile = "D:\_SATIN_AI\NAI-OS\vlc\pb-window.png",
     [int]$WaitSeconds = 9,
     [string[]]$ExtraArgs = @(),
@@ -53,11 +53,10 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $bin = Join-Path $root "win64-meson\bin"
 if (-not (Test-Path -LiteralPath $Exe)) {
-    $Exe = Join-Path $bin "paintbrush.exe"
+    $Exe = Join-Path $bin "nai-paintbrush.exe"
 }
 if (-not (Test-Path -LiteralPath $Exe)) {
-    Copy-Item -LiteralPath (Join-Path $bin "vlc.exe") -Destination (Join-Path $bin "paintbrush.exe") -Force
-    $Exe = Join-Path $bin "paintbrush.exe"
+    throw "NAI Paintbrush build output not found: $Exe`nBuild it first: ninja -C win64-meson bin/nai-paintbrush.exe"
 }
 
 $env:VLC_PLUGIN_PATH = Join-Path $root "win64-meson\modules"
@@ -98,9 +97,9 @@ public class PbWin32 {
 }
 '@
 
-$existing = Get-Process -Name paintbrush -ErrorAction SilentlyContinue
+$existing = Get-Process -Name nai-paintbrush -ErrorAction SilentlyContinue
 if ($existing) {
-    Write-Warning "paintbrush is already running; close it first so this capture is deterministic"
+    Write-Warning "nai-paintbrush is already running; close it first so this capture is deterministic"
 }
 
 $log = Join-Path $env:TEMP "pb-capture-vlc.log"

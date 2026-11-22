@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   Copies the MSVC/CUDA bridge, its ggml dependency DLLs and the CUDA runtime
-  DLLs into the directory next to vlc.exe/paintbrush.exe. The MinGW plugin
+  DLLs into the directory next to nai-paintbrush.exe. The MinGW plugin
   loads sam3_cuda.dll through the C ABI; the bridge resolves its dependencies
   from its own directory (LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR).
 

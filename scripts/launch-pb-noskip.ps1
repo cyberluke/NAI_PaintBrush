@@ -1,6 +1,7 @@
 # A/B test: no decoder catch-up skipping (hurry-up disabled, no skip frame/idct/loopfilter)
-# Product identity: the app runs as paintbrush.exe (a copy of the vlc.exe
-# binary) so the process/taskbar never clash with a media player.
+# Product identity: the build produces nai-paintbrush.exe (the VLC engine
+# binary renamed at link time), so the process/taskbar never clash with a
+# media player.
 #
 # Optional arguments (defaults preserve the original no-skip launch):
 #   -Media <path>        open a video in the Paintbrush workspace
@@ -24,9 +25,9 @@ param(
 $ErrorActionPreference = "Stop"
 $root = "D:\_SATIN_AI\NAI-OS\vlc"
 $bin = Join-Path $root "win64-meson\bin"
-$vlc = Join-Path $bin "paintbrush.exe"
-if (-not (Test-Path -LiteralPath $vlc)) {
-    Copy-Item -LiteralPath (Join-Path $bin "vlc.exe") -Destination $vlc -Force
+$exe = Join-Path $bin "nai-paintbrush.exe"
+if (-not (Test-Path -LiteralPath $exe)) {
+    throw "NAI Paintbrush build output not found: $exe`nBuild it first: ninja -C win64-meson bin/nai-paintbrush.exe"
 }
 $env:VLC_PLUGIN_PATH = Join-Path (Join-Path $root "win64-meson") "modules"
 $env:QT_PLUGIN_PATH  = "C:\msys64\mingw64\share\qt6\plugins"
@@ -41,7 +42,7 @@ if ($NoAutosave) { $extra += "--no-paintbrush-autosave" }
 if ($SamModel -ne "") { $extra += "--paintbrush-sam-model=$SamModel" }
 if ($SamDevice -ne "") { $extra += "--paintbrush-sam-device=$SamDevice" }
 
-& $vlc `
+& $exe `
   "--paintbrush" "--no-media-library" "--no-qt-privacy-ask" "--no-qt-updates-notif" `
   "--no-qt-name-in-title" "--no-one-instance" `
   "--no-avcodec-hurry-up" `

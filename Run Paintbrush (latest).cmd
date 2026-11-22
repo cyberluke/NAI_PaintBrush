@@ -3,7 +3,7 @@ rem ============================================================
 rem  Run Paintbrush (latest build) - convenience launcher
 rem  Double-click me, or run from a terminal.
 rem  Launches the latest win64-meson build via the project's
-rem  canonical launch script (paintbrush.exe, no decoder skip).
+rem  canonical launch script (nai-paintbrush.exe, no decoder skip).
 rem  When launched through "Run Paintbrush (latest).lnk" this runs
 rem  inside a `cmd /K` console so the app log stays visible and
 rem  Ctrl-C behaves normally.

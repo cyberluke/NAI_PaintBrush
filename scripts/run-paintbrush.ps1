@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   Sets the required environment variables (plugin/QML paths and PATH), then
-  launches the built vlc.exe in Paintbrush mode. Fails clearly if the build
+  launches the built nai-paintbrush.exe in Paintbrush mode. Fails clearly if the build
   output is missing.
 
   Optional parameters:
@@ -51,11 +51,11 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $build = Join-Path $root "win64-meson"
 $bin   = Join-Path $build "bin"
-$vlc   = Join-Path $bin "vlc.exe"
+$exe   = Join-Path $bin "nai-paintbrush.exe"
 
 # --- fail clearly if the build output is missing -------------------------
-if (-not (Test-Path -LiteralPath $vlc)) {
-    Write-Error "Paintbrush build output not found: $vlc`nRun a build first (see modules/gui/qt/paintbrush/BUILDING.md)."
+if (-not (Test-Path -LiteralPath $exe)) {
+    Write-Error "Paintbrush build output not found: $exe`nRun a build first (see modules/gui/qt/paintbrush/BUILDING.md)."
     exit 1
 }
 
@@ -97,12 +97,12 @@ if ($Extra) {
     $args += ($Extra -split "\s+")
 }
 
-$cmd = "& '$vlc' " + (($args | ForEach-Object { if ($_ -match "\s") { "'$_'" } else { $_ } }) -join " ")
+$cmd = "& '$exe' " + (($args | ForEach-Object { if ($_ -match "\s") { "'$_'" } else { $_ } }) -join " ")
 Write-Host "Launcher root: $root"
-Write-Host "VLC: $vlc"
+Write-Host "NAI Paintbrush: $exe"
 Write-Host "Command: $cmd"
 
 if (-not $NoLaunch) {
     Write-Host "Launching NAI Paintbrush..."
-    & $vlc @args
+    & $exe @args
 }

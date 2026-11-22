@@ -1,140 +1,142 @@
-# VLC media player
+# NAI Paintbrush
 
-**VLC** is a libre and open source **media player** and **multimedia engine**,
-focused on **playing everything**, and **running everywhere**.
+**An AI-native paint and video workstation, built on the VLC 4 engine.**
 
-**VLC** can play most multimedia files, discs, streams, devices and is also able to
-convert, encode, **stream** and manipulate streams into numerous formats.
+NAI Paintbrush is one editor and one document system for digital painting,
+editable vector illustration, non-destructive compositing, and turning
+real-world subjects extracted from video into editable artwork. It runs as a
+single native Windows application (`nai-paintbrush.exe`) on top of libVLC's
+playback, decode and filter core.
 
-VLC is used by many over the world, on numerous platforms, for very different use cases.
+> This repository is a derivative of [VLC](https://www.videolan.org/) focused on
+> the Paintbrush application. The VLC engine remains under its original
+> licenses — see [License and upstream](#license-and-upstream).
 
-The **engine of VLC** can be embedded into 3rd party applications, and is called *libVLC*.
+---
 
-**VLC** is part of the [VideoLAN project](https://videolan.org) and
-is developed and supported by a community of volunteers.
+## What it is
 
-The VideoLAN project was started at the university [École Centrale Paris](https://www.centralesupelec.fr/) who
-relicensed VLC under the GPLv2 license in February 2001. Since then, VLC has
-been downloaded **billions** of times.
+One document, one toolset, no mode switches:
 
-## License
+- **Painting** — pressure-aware brushes, layers, non-destructive edits, undo
+  across the whole document.
+- **Vector + raster** — editable vector paths live inside the same layer stack
+  as raster paint (`LAYER_VECTOR`, in-canvas node editing).
+- **Compositing** — layer transforms, effects (blur, shadow, glow), paper and
+  material surfaces.
+- **Glitter powder material** — a real powder simulation rendered by the GPU
+  powder shader (mirror flakes, holographic sheen, gravity, blow). Live preview
+  runs at display rate.
+- **Video subjects** — reference monitor, frame capture into the canvas, object
+  selection (SAM3), neural alpha matting (ViTMatte via ONNX Runtime + CUDA), and
+  temporal tracking for rotoscoping.
+- **Adaptive UI** — the tool strip and options bar are driven by semantic tool
+  capabilities, not by fixed cells.
 
-**VLC** is released under the GPLv2 *(or later)* license.
-*On some platforms, it is de facto GPLv3, because of the licenses of dependencies*.
+Product contract: [`modules/gui/qt/paintbrush/docs/ADAPTIVE_UI_AND_SUBJECTS.md`](modules/gui/qt/paintbrush/docs/ADAPTIVE_UI_AND_SUBJECTS.md).
 
-**libVLC**, the engine is released under the LGPLv2 *(or later)* license. \
-This allows embedding the engine in 3rd party applications, while letting them to be licensed under other licenses.
+## Status
 
-# Platforms
+Active development, Windows-first (MSYS2 / MinGW64, Qt 6.8, D3D11 RHI).
+The product contract is partially implemented; its status line is the honest
+list of what is real and what is pending. Operational notes, build history and
+known gaps live in
+[`modules/gui/qt/paintbrush/docs/HANDOFF.md`](modules/gui/qt/paintbrush/docs/HANDOFF.md).
+Performance work and its measured baseline live in
+[`modules/gui/qt/paintbrush/docs/PERFORMANCE_TODO.md`](modules/gui/qt/paintbrush/docs/PERFORMANCE_TODO.md).
 
-VLC is available for the following platforms:
-- [Windows] *(from 7 and later, including UWP platforms and all versions of Windows 10)*
-- [macOS] *(10.10 and later)*
-- [GNU/Linux] and affiliated
-- [BSD] and affiliated
-- [Android] *(4.2 and later)*, including Android TV and Android Auto
-- [iOS] *(9 and later)*, including AppleTV and iPadOS
-- Haiku, OS/2 and a few others.
+## Build (Windows)
 
-[Windows]: https://www.videolan.org/vlc/download-windows.html
-[macOS]: https://www.videolan.org/vlc/download-macosx.html
-[GNU/Linux]: https://www.videolan.org/vlc/#download
-[BSD]: https://www.videolan.org/vlc/download-freebsd.html
-[Android]: https://www.videolan.org/vlc/download-android.html
-[iOS]: https://www.videolan.org/vlc/download-ios.html
+Prerequisites: MSYS2 with the `mingw64` toolchain, Meson, Ninja, and the Qt 6
+runtime that ships in `contrib/x86_64-w64-mingw32`. The build directory is
+`win64-meson`.
 
-Not all platforms receive the same amount of care, due to our limited resources.
+Fast loop while working on the application layer (rebuilds the Qt plugin and
+regenerates the plugin cache):
 
-**Nota Bene**: The [Android app](https://code.videolan.org/videolan/vlc-android/) and
-the [iOS app](https://code.videolan.org/videolan/vlc-ios/) are located in different repositories
-than the main one.
-
-# Contributing & Community
-
-**VLC** is maintained by a community of people, and VideoLAN is not paying any of them.\
-The community is composed of developers, helpers, maintainers, designers and writers that want
-this open source project to thrive.
-
-The main development of VLC is done in the C language, but this repository also contains
-plenty of C++, Obj-C, asm and Rust.
-
-Other repositories linked to vlc are done in languages including Kotlin/Java [(Android)](https://code.videolan.org/videolan/vlc-android/),
-Swift [(iOS)](https://code.videolan.org/videolan/vlc-ios/), and C# [(libVLCSharp)](https://code.videolan.org/videolan/libvlcsharp/).
-
-We need help with the following tasks:
-- Coding
-- Packaging for Windows, macOS and Linux distributions
-- Technical writing for the documentation
-- Design
-- Support
-- Community management and communication.
-
-Please contribute :)
-
-We are on IRC. You can find us on the **#videolan** channel on *[Libera.chat]*.
-
-[Libera.chat]: https://libera.chat
-
-## Contributions
-
-Contributions are now done through Merge Requests on our [GitLab repository](https://code.videolan.org/videolan/vlc/).
-
-CI and discussions should be resolved before a Merge Request can be merged.
-
-# libVLC
-
-**libVLC** is an embeddable engine for 3rd party applications and frameworks.
-
-It runs on the same platforms as VLC *(and sometimes on more)* and can provide playback,
-streaming and conversion of multimedia files and streams.
-
-
-**libVLC** has numerous bindings for other languages, such as C++, Python and C#.
-
-# Support
-
-## Links
-
-Some useful links that might help you:
-
-- [VLC web site](https://www.videolan.org/vlc/)
-- [Support](https://www.videolan.org/support/)
-- [Forums](https://forum.videolan.org/)
-- [Wiki](https://wiki.videolan.org/)
-- [Developer's Corner](https://wiki.videolan.org/Developers_Corner)
-- [VLC hacking guide](https://wiki.videolan.org/Hacker_Guide)
-- [Bugtracker](https://code.videolan.org/videolan/vlc/-/issues)
-- [VideoLAN web site](https://www.videolan.org/)
-
-## Source Code sitemap
+```powershell
+pwsh scripts/pb-build-plugin.ps1
 ```
-ABOUT-NLS          - Notes on the Free Translation Project.
-AUTHORS            - VLC authors.
-COPYING            - The GPL license.
-COPYING.LIB        - The LGPL license.
-INSTALL            - Installation and building instructions.
-NEWS               - Important modifications between the releases.
-README             - Project summary.
-THANKS             - VLC contributors.
 
-bin/               - VLC binaries.
-bindings/          - libVLC bindings to other languages.
-compat/            - compatibility library for operating systems missing
-                     essential functionalities.
-contrib/           - Facilities for retrieving external libraries and building
-                     them for systems that don't have the right versions.
-doc/               - Miscellaneous documentation.
-extras/analyser    - Code analyser and editor specific files.
-extras/buildsystem - Different build system specific files.
-extras/misc        - Files that don't fit in the other extras/ categories.
-extras/package     - VLC packaging specific files such as spec files.
-extras/tools/      - Facilities for retrieving external building tools needed
-                     for systems that don't have the right versions.
-include/           - Header files.
-lib/               - libVLC source code.
-modules/           - VLC plugins and modules. Most of the code is here.
-po/                - VLC translations.
-share/             - Common resource files.
-src/               - libvlccore source code.
-test/              - Testing system.
+Full build (also relinks the application):
+
+```powershell
+$env:PATH = 'C:\msys64\mingw64\bin;C:\msys64\usr\bin;' + $env:PATH
+ninja -C win64-meson
 ```
+
+Output:
+
+```
+win64-meson\bin\nai-paintbrush.exe
+```
+
+The executable is the VLC engine binary renamed at link time
+(`bin/meson.build`), so the process and taskbar never clash with a media
+player. No wrapper, no copy step.
+
+## Run
+
+```powershell
+pwsh scripts/launch-pb-noskip.ps1
+```
+
+The launcher sets the plugin/QML paths and starts the app with the no-skip
+decoder profile used for frame-accurate painting. Useful switches:
+
+```powershell
+# open a video in the workspace (never pass media as a bare argument)
+pwsh scripts/launch-pb-noskip.ps1 -Media D:\clips\dance.mp4
+
+# neural matte self-test
+pwsh scripts/launch-pb-noskip.ps1 -MatteSelfTest
+
+# run the binary directly
+win64-meson\bin\nai-paintbrush.exe --paintbrush
+```
+
+`--paintbrush` selects the NAI Paintbrush workspace. Without it the same binary
+starts the standard VLC interface.
+
+## Repository layout
+
+```
+bin/                              application entry point (the renamed VLC main)
+lib/  src/  include/              libVLC engine core
+modules/                          VLC plugins (codecs, video output, interfaces)
+modules/gui/qt/paintbrush/        THE PRODUCT: Qt Quick UI, canvas, document,
+                                  materials, GPU renderers, matting, tracking
+scripts/                          build, launch, capture and verification tools
+docs (paintbrush)/                product contract, handoff lamp, performance
+```
+
+## Verification and diagnostics
+
+```powershell
+# focus the app, select Glitter powder (Shift+L), drag a stroke, capture
+pwsh scripts/pb-powder-verify.ps1 -NoBlow -StepMs 60
+
+# powder cost split on stderr (bake/pack/upload/tick)
+$env:PB_POWDER_PERF='1'; pwsh scripts/launch-pb-noskip.ps1
+```
+
+Stroke tracing is on by default and appends to `pb_stroke_trace.log`
+(16 MB rotation, `PB_POWDER_TRACE=0` disables it).
+
+## License and upstream
+
+NAI Paintbrush is a derivative work of **VLC media player** by the
+[VideoLAN project](https://www.videolan.org/), used under the GNU General
+Public License.
+
+- The combined application is distributed under **GPLv2 or later**. See
+  [`COPYING`](COPYING).
+- libVLC, the engine, is under **LGPLv2 or later**. See
+  [`COPYING.LIB`](COPYING.LIB).
+- Upstream source: <https://code.videolan.org/videolan/vlc>
+- Upstream authors and contributors: [`AUTHORS`](AUTHORS).
+
+Changes in this repository are the NAI Paintbrush application layer under
+`modules/gui/qt/paintbrush/`, the link-time rename of the main executable, and
+the build/verification scripts under `scripts/`. They are published under the
+same GPLv2-or-later terms.

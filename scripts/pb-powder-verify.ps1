@@ -12,7 +12,7 @@
 #   "POWDER PERF gpu=1 physics=..ms pack=..ms pack_bytes=.."     -> cost split
 [CmdletBinding()]
 param(
-    [string]$ProcessName = "paintbrush",
+    [string]$ProcessName = "nai-paintbrush",
     [string]$OutFile = "D:\_SATIN_AI\NAI-OS\vlc\_REVIEW\pb-powder-verify.png",
     [string]$LogFile = "D:\_SATIN_AI\NAI-OS\vlc\pb_noskip.log",
     [switch]$NoBlow,
