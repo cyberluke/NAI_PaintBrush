@@ -542,20 +542,54 @@ Item {
             readonly property int transportHeight: Math.round(VLCStyle.dp(52, VLCStyle.scale))
             readonly property int scrubHeight: Math.round(VLCStyle.dp(26, VLCStyle.scale))
             readonly property int statusHeight: Math.round(VLCStyle.dp(28, VLCStyle.scale))
-            readonly property real defaultWidth: Math.max(VLCStyle.dp(640, VLCStyle.scale),
-                                                          canvasHost.width * 0.72)
+            readonly property real defaultWidth: Math.min(VLCStyle.dp(1180, VLCStyle.scale),
+                                                          Math.max(VLCStyle.dp(640, VLCStyle.scale),
+                                                                   canvasHost.width * 0.62))
+            readonly property real desiredWidth: expanded
+                                                 ? root.width - 2 * VLCStyle.margin_large
+                                                 : Math.max(VLCStyle.dp(560, VLCStyle.scale),
+                                                            userWidth > 0 ? userWidth : defaultWidth)
+            /* Real source aspect. A portrait clip must not get a 16:9 box:
+             * that inflated the monitor and pushed its picture out of the
+             * window (the black-surface regression). */
+            readonly property real videoAspect: (PaintbrushCtx.playerVideoSize.width > 0
+                                                 && PaintbrushCtx.playerVideoSize.height > 0)
+                                                ? PaintbrushCtx.playerVideoSize.width
+                                                  / PaintbrushCtx.playerVideoSize.height
+                                                : 16 / 9
+            /* The monitor may never cover the media drawer/timeline. */
+            readonly property real bottomLimit: (mediaDrawer.visible ? mediaDrawer.y
+                                                                     : bottomChrome.y)
+                                                - VLCStyle.margin_xsmall
+            readonly property real maxPanelHeight: Math.max(headerHeight + transportHeight
+                                                            + VLCStyle.dp(140, VLCStyle.scale),
+                                                            bottomLimit - y)
+            readonly property real chromeHeight: headerHeight + statusHeight
+                                                 + scrubHeight + transportHeight
+            readonly property real maxVideoHeight: Math.max(VLCStyle.dp(120, VLCStyle.scale),
+                                                            maxPanelHeight - chromeHeight)
+            readonly property real widthForHeight: maxVideoHeight * videoAspect + 2 * bezel
             readonly property real panelWidth: expanded
                                                ? root.width - 2 * VLCStyle.margin_large
-                                               : Math.max(VLCStyle.dp(560, VLCStyle.scale),
-                                                          userWidth > 0 ? userWidth : defaultWidth)
-            readonly property real videoHeight: Math.round((panelWidth - 2 * bezel) * 9 / 16)
+                                               : (userWidth > 0
+                                                  ? Math.max(VLCStyle.dp(560, VLCStyle.scale),
+                                                             userWidth)
+                                                  : Math.min(desiredWidth, widthForHeight))
+            readonly property real videoHeight: expanded
+                                                ? Math.max(VLCStyle.dp(120, VLCStyle.scale),
+                                                           height - chromeHeight)
+                                                : Math.max(VLCStyle.dp(120, VLCStyle.scale),
+                                                           Math.min((panelWidth - 2 * bezel) / videoAspect,
+                                                                    maxVideoHeight))
 
             width: panelWidth
             height: expanded
                     ? root.height - 2 * VLCStyle.margin_large
                     : (collapsed
                        ? headerHeight + transportHeight
-                       : headerHeight + videoHeight + statusHeight + scrubHeight + transportHeight)
+                       : Math.min(headerHeight + videoHeight + statusHeight
+                                  + scrubHeight + transportHeight,
+                                  maxPanelHeight))
             x: expanded ? VLCStyle.margin_large
                         : mainRow.x + canvasHost.x + VLCStyle.margin_normal
             y: expanded ? VLCStyle.margin_large

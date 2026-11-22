@@ -37,6 +37,9 @@ extern "C" __declspec(dllimport) HRESULT WINAPI
 #include <QDateTime>
 #include <QUuid>
 #include <QVariantMap>
+#include <QTextStream>
+#include <QTimer>
+#include <cmath>
 #include <cstdlib>
 #include <QWindow>
 #include <QScreen>
@@ -242,6 +245,7 @@ PaintbrushController::~PaintbrushController()
     m_autosaveTimer.stop();
     m_thumbnails.cancel();
     m_segmentation.shutdown();
+    m_matting.shutdown();
     m_tracking.shutdown();
     m_editSource.shutdown();
     m_selectionSource.shutdown();
@@ -254,6 +258,60 @@ PaintbrushController::~PaintbrushController()
 void PaintbrushController::configureServices()
 {
     m_segmentation.configure(VLC_OBJECT(m_intf));
+    m_matting.configure(VLC_OBJECT(m_intf));
+    connect(&m_matting, &MattingService::matteReady,
+            this, &PaintbrushController::onMatteReady);
+    connect(&m_matting, &MattingService::refineFailed,
+            this, &PaintbrushController::onMatteFailed);
+    connect(&m_matting, &MattingService::statusChanged,
+            this, &PaintbrushController::onMatteStatusChanged);
+    connect(&m_matting, &MattingService::availabilityChanged,
+            this, &PaintbrushController::onMattingAvailabilityChanged);
+    connect(&m_matting, &MattingService::busyChanged,
+            this, [this](bool busy) {
+                if (m_matteRefining == busy)
+                    return;
+                m_matteRefining = busy;
+                emit mattingStateChanged();
+            });
+
+    /* `--paintbrush-open=<file>` asks the WORKSPACE to open the media. This is
+     * deliberately not a bare playlist argument: a bare media item starts
+     * playing before Harvest mode exists, so libvlc creates a separate native
+     * video window (the "fullscreen VLC" symptom). openVideoFile() enters
+     * Harvest first, then starts playback, so the vout is embedded. */
+    if (pbConfigBool(VLC_OBJECT(m_intf), "paintbrush"))
+    {
+        const QString openPath =
+            pbConfigString(VLC_OBJECT(m_intf), "paintbrush-open").trimmed();
+        if (!openPath.isEmpty() && QFileInfo::exists(openPath))
+        {
+            const QUrl url = QUrl::fromLocalFile(openPath);
+            QTimer::singleShot(500, this, [this, url]() {
+                openVideoFile(url);
+            });
+            pbLogInfo(VLC_OBJECT(m_intf), "paintbrush",
+                      "paintbrush-open: %s", qUtf8Printable(openPath));
+        }
+    }
+
+    /* Developer acceptance switch: run the end-to-end matte self-test once a
+     * video frame is available. Never runs unless explicitly requested. */
+    if (pbConfigBool(VLC_OBJECT(m_intf), "paintbrush-matte-selftest"))
+    {
+        auto *timer = new QTimer(this);
+        timer->setInterval(1000);
+        connect(timer, &QTimer::timeout, this, [this, timer]() {
+            if (!liveMediaReady() || m_welcomeVisible)
+                return;
+            timer->stop();
+            timer->deleteLater();
+            QTimer::singleShot(1500, this, [this]() { runMatteSelfTest(); });
+        });
+        timer->start();
+        pbLogInfo(VLC_OBJECT(m_intf), "matting",
+                  "matte self-test armed (waiting for a workspace video frame)");
+    }
     m_tracking.configure(VLC_OBJECT(m_intf));
     m_vision.configure(VLC_OBJECT(m_intf));
     m_generation.configure(VLC_OBJECT(m_intf));
@@ -2452,6 +2510,14 @@ void PaintbrushController::onSegmentationMaskReady(const QImage &mask, double sc
     }
     updateObjectSelection();
     emit objectSelectionChanged();
+    /* Refinement is ADDITIVE: the SAM3 mask above stays authoritative; the
+     * matte is derived asynchronously and can always be disabled/recomputed. */
+    ++m_selectionRevision;
+    m_matteResult = paintbrush::matte::Result();
+    m_matteIdentity = paintbrush::matte::FrameIdentity();
+    m_matteError.clear();
+    scheduleMatteRefinement(m_matteDiagnostics);
+    emit mattingStateChanged();
     pbLogInfo(VLC_OBJECT(m_intf), "segmentation",
               "mask ready: %dx%d score=%.3f method=%s sourceKind=%d",
               mask.width(), mask.height(), score, method.toUtf8().constData(),
@@ -2495,7 +2561,7 @@ void PaintbrushController::onSegmentationMaskReady(const QImage &mask, double sc
                       subjectError.toUtf8().constData());
     }
 
-    setStatus(QStringLiteral("Object selected (confidence %.0f%%)").arg(score * 100.0));
+    setStatus(QStringLiteral("Object selected (confidence %1%)").arg(score * 100.0, 0, 'f', 0));
 }
 
 void PaintbrushController::onSegmentationError(const QString &message)
@@ -2522,6 +2588,395 @@ void PaintbrushController::onSegmentationAvailability(bool available,
     Q_UNUSED(available);
     Q_UNUSED(reason);
     emit serviceAvailabilityChanged();
+}
+
+/* ---------------------------------------------------------------- matting */
+
+QString PaintbrushController::mattingStatusText() const
+{
+    if (!m_matteError.isEmpty())
+        return m_matteError;
+    const QString status = m_matting.statusText();
+    const QString backend = m_matting.backendText();
+    if (backend.isEmpty())
+        return status;
+    return QStringLiteral("%1 · %2").arg(status, backend);
+}
+
+bool PaintbrushController::matteAvailable() const
+{
+    paintbrush::matte::Result result;
+    return currentMatte(&result);
+}
+
+bool PaintbrushController::currentMatte(paintbrush::matte::Result *out) const
+{
+    if (!out || !m_matteResult.isValid())
+        return false;
+    if (m_matteIdentity.selectionRevision != m_selectionRevision)
+        return false;
+    if (!m_selection.ref.mrl.isEmpty()
+        && m_matteIdentity.mediaId != m_selection.ref.mrl)
+        return false;
+    if (m_matteIdentity.ptsMs != m_selection.ref.ptsMs)
+        return false;
+    *out = m_matteResult;
+    return true;
+}
+
+QString PaintbrushController::matteInfoText() const
+{
+    if (m_matteRefining)
+        return QStringLiteral("Refining matte…");
+    paintbrush::matte::Result result;
+    if (!currentMatte(&result))
+        return m_matteError;
+    QString text = result.backend;
+    if (result.inferenceMs >= 0.0)
+        text += QStringLiteral(" · %1 ms").arg(result.inferenceMs, 0, 'f', 1);
+    text += QStringLiteral(" · unknown %1%")
+                .arg(result.trimapUnknownFraction * 100.0, 0, 'f', 1);
+    if (result.topology.holesFilled > 0)
+        text += QStringLiteral(" · holes restored %1").arg(result.topology.holesFilled);
+    if (result.topology.detachedRemoved > 0)
+        text += QStringLiteral(" · specks removed %1").arg(result.topology.detachedRemoved);
+    if (result.topology.holesDeferred > 0)
+        text += QStringLiteral(" · openings deferred %1").arg(result.topology.holesDeferred);
+    return text;
+}
+
+void PaintbrushController::setMatteMode(int mode)
+{
+    const paintbrush::matte::Mode resolved =
+        mode <= 0 ? paintbrush::matte::Mode::Raw
+        : mode >= 2 ? paintbrush::matte::Mode::Neural
+                    : paintbrush::matte::Mode::Refined;
+    if (resolved == m_matting.mode())
+        return;
+    m_matting.setMode(resolved);
+    config_PutInt("paintbrush-matting-mode", int(resolved));
+    ++m_refinementRevision;
+    m_matteResult = paintbrush::matte::Result();
+    scheduleMatteRefinement(m_matteDiagnostics);
+    emit mattingSettingsChanged();
+    emit mattingStateChanged();
+}
+
+void PaintbrushController::setMatteQuality(int quality)
+{
+    const paintbrush::matte::Quality resolved =
+        quality <= 0 ? paintbrush::matte::Quality::Preview
+        : quality >= 2 ? paintbrush::matte::Quality::Maximum
+                       : paintbrush::matte::Quality::Balanced;
+    if (resolved == m_matting.quality())
+        return;
+    m_matting.setQuality(resolved);
+    ++m_refinementRevision;
+    m_matteResult = paintbrush::matte::Result();
+    scheduleMatteRefinement(m_matteDiagnostics);
+    emit mattingSettingsChanged();
+    emit mattingStateChanged();
+}
+
+QString PaintbrushController::mattingDevice() const
+{
+    return m_matting.deviceTier() == 1 ? QStringLiteral("gpu")
+         : m_matting.deviceTier() == 2 ? QStringLiteral("cpu")
+                                       : QStringLiteral("auto");
+}
+
+void PaintbrushController::setMattingDevice(const QString &device)
+{
+    const QString value = device.trimmed().toLower();
+    const int tier = value == QLatin1String("gpu") ? 1
+                   : value == QLatin1String("cpu") ? 2
+                                                   : 0;
+    if (tier == m_matting.deviceTier())
+        return;
+    m_matting.setDeviceTier(tier);
+    emit mattingSettingsChanged();
+    emit mattingStateChanged();
+}
+
+void PaintbrushController::setMattingModelDir(const QString &dir)
+{
+    m_matting.setModelDir(dir);
+    emit mattingSettingsChanged();
+    emit mattingStateChanged();
+}
+
+void PaintbrushController::setMatteAdvanced(int boundary, int detail,
+                                            int artifacts, int holes,
+                                            int decontamination, int temporal)
+{
+    paintbrush::matte::Parameters params = m_matting.parameters();
+    params.innerBandPx = qBound(1, boundary, 24);
+    params.outerBandPx = qBound(params.innerBandPx + 1, boundary * 2, 48);
+    params.detailRecovery = qBound(0.0, detail / 100.0, 1.0);
+    params.artifactSuppression = qBound(0.0, artifacts / 100.0, 1.0);
+    params.holeRecovery = qBound(0.0, holes / 100.0, 1.0);
+    params.decontamination = qBound(0.0, decontamination / 100.0, 1.0);
+    params.temporalStability = qBound(0.0, temporal / 100.0, 1.0);
+    m_matting.setParameters(params);
+    config_PutInt("paintbrush-matting-boundary", params.innerBandPx);
+    config_PutInt("paintbrush-matting-detail", detail);
+    config_PutInt("paintbrush-matting-artifacts", artifacts);
+    config_PutInt("paintbrush-matting-holes", holes);
+    config_PutInt("paintbrush-matting-decontamination", decontamination);
+    config_PutInt("paintbrush-matting-temporal", temporal);
+    ++m_refinementRevision;
+    m_matteResult = paintbrush::matte::Result();
+    scheduleMatteRefinement(m_matteDiagnostics);
+    emit mattingSettingsChanged();
+    emit mattingStateChanged();
+}
+
+QVariantMap PaintbrushController::matteAdvanced() const
+{
+    const paintbrush::matte::Parameters p = m_matting.parameters();
+    QVariantMap map;
+    map.insert(QStringLiteral("boundary"), p.innerBandPx);
+    map.insert(QStringLiteral("detail"), int(std::lround(p.detailRecovery * 100.0)));
+    map.insert(QStringLiteral("artifacts"), int(std::lround(p.artifactSuppression * 100.0)));
+    map.insert(QStringLiteral("holes"), int(std::lround(p.holeRecovery * 100.0)));
+    map.insert(QStringLiteral("decontamination"),
+               int(std::lround(p.decontamination * 100.0)));
+    map.insert(QStringLiteral("temporal"), int(std::lround(p.temporalStability * 100.0)));
+    return map;
+}
+
+void PaintbrushController::refreshMatte()
+{
+    ++m_refinementRevision;
+    m_matteResult = paintbrush::matte::Result();
+    scheduleMatteRefinement(true);
+    emit mattingStateChanged();
+}
+
+void PaintbrushController::scheduleMatteRefinement(bool diagnostics)
+{
+    m_matteDiagnostics = diagnostics;
+    if (m_matting.mode() == paintbrush::matte::Mode::Raw)
+    {
+        m_matteError.clear();
+        emit mattingStateChanged();
+        return;
+    }
+    if (m_objectMask.isNull() || m_selection.frame.isNull())
+    {
+        m_matteError = QStringLiteral("Select an object to refine its matte.");
+        emit mattingStateChanged();
+        return;
+    }
+    if (m_objectMask.size() != m_selection.frame.size())
+    {
+        m_matteError = QStringLiteral(
+            "Neural refinement needs a native-frame selection; document-space "
+            "masks keep the deterministic edge.");
+        emit mattingStateChanged();
+        return;
+    }
+
+    paintbrush::matte::Inputs inputs;
+    inputs.rgb = m_selection.frame;
+    inputs.mask = m_objectMask;
+    /* Prompt points are not retained by ObjectSelectionContext; the SAM mask
+     * already encodes them, so topology analysis relies on geometry/colour. */
+
+    paintbrush::matte::FrameIdentity identity;
+    identity.mediaId = m_selection.ref.mrl;
+    identity.ptsMs = m_selection.ref.ptsMs;
+    identity.subjectId = m_selection.sessionId.isEmpty()
+                             ? QStringLiteral("object-selection")
+                             : m_selection.sessionId;
+    identity.selectionRevision = m_selectionRevision;
+    identity.refinementRevision = m_refinementRevision;
+    identity.mediaGeneration = m_selectionRevision;
+
+    paintbrush::matte::Result cached;
+    if (!diagnostics && m_matting.cached(identity, &cached))
+    {
+        onMatteReady(cached, identity, 0);
+        return;
+    }
+    m_matteError.clear();
+    m_matteRefining = true;
+    emit mattingStateChanged();
+    m_matting.request(inputs, identity, diagnostics);
+}
+
+void PaintbrushController::updateMatteOverlay()
+{
+    paintbrush::matte::Result result;
+    if (!m_canvas || !currentMatte(&result))
+        return;
+    const QImage alpha = result.alpha.toGrayscale8();
+    if (alpha.isNull() || alpha.size() != m_selection.frame.size())
+        return;
+    if (m_selection.sourceKind == ObjectSelectionContext::SourceLiveVideo
+        && m_selection.validFrame())
+    {
+        m_canvas->setLiveHarvestOverlay(alpha, m_selection.contentRect,
+                                        m_selection.frameToItem);
+        m_canvas->markCanvasDirty();
+    }
+    else if (m_selection.sourceKind == ObjectSelectionContext::SourceCanvasLayer)
+    {
+        QImage canvasMask(m_document.canvasSize(), QImage::Format_Grayscale8);
+        canvasMask.fill(0);
+        QPainter p(&canvasMask);
+        p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        p.setTransform(m_selection.frameToCanvas);
+        p.drawImage(QPointF(0, 0), alpha);
+        p.end();
+        m_canvas->setObjectMask(canvasMask, 1.0);
+        m_canvas->markCanvasDirty();
+    }
+}
+
+void PaintbrushController::onMatteReady(
+    const paintbrush::matte::Result &result,
+    const paintbrush::matte::FrameIdentity &identity, quint64 requestId)
+{
+    Q_UNUSED(requestId);
+    if (identity.selectionRevision != m_selectionRevision)
+        return; /* stale refinement for a superseded selection */
+    if (identity.ptsMs != m_selection.ref.ptsMs)
+        return;
+    m_matteResult = result;
+    m_matteIdentity = identity;
+    m_matteRefining = false;
+    ++m_matteGeneration;
+    m_matteError.clear();
+    updateMatteOverlay();
+    emit mattingStateChanged();
+    pbLogInfo(VLC_OBJECT(m_intf), "matting",
+              "matte ready: backend=%s pts=%lld unknown=%.3f holes=%d deferred=%d "
+              "specks=%d inferenceMs=%.1f",
+              result.backend.toUtf8().constData(),
+              (long long)identity.ptsMs,
+              result.trimapUnknownFraction,
+              result.topology.holesFilled,
+              result.topology.holesDeferred,
+              result.topology.detachedRemoved,
+              result.inferenceMs);
+}
+
+void PaintbrushController::onMatteFailed(quint64 requestId, const QString &message)
+{
+    Q_UNUSED(requestId);
+    m_matteRefining = false;
+    m_matteError = QStringLiteral("Neural matting: %1").arg(message);
+    /* The deterministic matte (if any) stays usable; the error is surfaced
+     * verbatim instead of being presented as a successful neural result. */
+    emit mattingStateChanged();
+    pbLogWarn(VLC_OBJECT(m_intf), "matting", "refinement failed: %s",
+              message.toUtf8().constData());
+}
+
+void PaintbrushController::onMatteStatusChanged(const QString &status)
+{
+    Q_UNUSED(status);
+    emit mattingStateChanged();
+}
+
+void PaintbrushController::onMattingAvailabilityChanged()
+{
+    emit serviceAvailabilityChanged();
+    emit mattingStateChanged();
+}
+
+QString PaintbrushController::matteDiagnosticDataUrl(int view) const
+{
+    paintbrush::matte::Result result;
+    if (!currentMatte(&result) || !result.diagnostics.enabled)
+        return {};
+    QImage image;
+    switch (view)
+    {
+    case 0: image = result.diagnostics.original; break;
+    case 1: image = result.diagnostics.semanticMask; break;
+    case 2: image = result.diagnostics.repairedMask; break;
+    case 3: image = result.diagnostics.trimapColor.isNull()
+                    ? result.diagnostics.trimap : result.diagnostics.trimapColor;
+        break;
+    case 4: image = result.diagnostics.alphaPreview; break;
+    case 5: image = result.diagnostics.foregroundRgb; break;
+    case 6: image = result.diagnostics.backgroundEstimate; break;
+    case 7: image = result.diagnostics.premultipliedRgba; break;
+    default: break;
+    }
+    if (image.isNull())
+        return {};
+    /* Bounded preview: the Inspector is never asked to decode a 4K PNG. */
+    if (qMax(image.width(), image.height()) > 640)
+        image = image.scaled(640, 640, Qt::KeepAspectRatio,
+                             Qt::SmoothTransformation);
+    QByteArray bytes;
+    QBuffer buffer(&bytes);
+    buffer.open(QIODevice::WriteOnly);
+    if (!image.save(&buffer, "PNG"))
+        return {};
+    return QStringLiteral("data:image/png;base64,")
+           + QString::fromLatin1(bytes.toBase64());
+}
+
+void PaintbrushController::exportMatteDiagnostics()
+{
+    paintbrush::matte::Result result;
+    if (!currentMatte(&result) || !result.diagnostics.enabled)
+    {
+        setStatus(QStringLiteral(
+            "Run \"Refresh matte\" first to generate diagnostic views."));
+        return;
+    }
+    const QString dir = QDir(QStandardPaths::writableLocation(
+                                 QStandardPaths::PicturesLocation))
+                            .filePath(QStringLiteral("NAI Paintbrush/matte-diagnostics"));
+    if (!QDir().mkpath(dir))
+    {
+        setStatus(QStringLiteral("Could not create %1").arg(dir));
+        return;
+    }
+    int written = 0;
+    auto save = [&](const QImage &image, const QString &name) {
+        if (image.isNull())
+            return;
+        if (image.save(QDir(dir).filePath(name)))
+            ++written;
+    };
+    const QString stamp = QStringLiteral("%1-pts%2")
+                              .arg(QDateTime::currentDateTime().toString(
+                                       QStringLiteral("yyyyMMdd-hhmmss")))
+                              .arg(m_matteIdentity.ptsMs);
+    save(result.diagnostics.original, stamp + QStringLiteral("-0-original.png"));
+    save(result.diagnostics.semanticMask, stamp + QStringLiteral("-1-semantic.png"));
+    save(result.diagnostics.repairedMask, stamp + QStringLiteral("-2-topology.png"));
+    save(result.diagnostics.trimap, stamp + QStringLiteral("-3-trimap.png"));
+    save(result.diagnostics.trimapColor, stamp + QStringLiteral("-4-trimap-color.png"));
+    save(result.diagnostics.alphaPreview, stamp + QStringLiteral("-5-alpha.png"));
+    save(result.diagnostics.backgroundEstimate, stamp + QStringLiteral("-6-background.png"));
+    save(result.diagnostics.foregroundRgb, stamp + QStringLiteral("-7-foreground.png"));
+    save(result.diagnostics.premultipliedRgba, stamp + QStringLiteral("-8-premultiplied.png"));
+    QFile meta(QDir(dir).filePath(stamp + QStringLiteral("-meta.txt")));
+    if (meta.open(QIODevice::WriteOnly | QIODevice::Text))
+    {
+        QTextStream out(&meta);
+        out << "NAI Paintbrush matte diagnostics\n"
+            << "backend=" << result.backend << "\n"
+            << "model=" << result.modelRevision << "\n"
+            << "ptsMs=" << m_matteIdentity.ptsMs << "\n"
+            << "selectionRevision=" << m_matteIdentity.selectionRevision << "\n"
+            << "refinementRevision=" << m_matteIdentity.refinementRevision << "\n"
+            << "inferenceMs=" << result.inferenceMs << "\n"
+            << "unknownFraction=" << result.trimapUnknownFraction << "\n"
+            << "holesFilled=" << result.topology.holesFilled << "\n"
+            << "holesDeferred=" << result.topology.holesDeferred << "\n"
+            << "detachedRemoved=" << result.topology.detachedRemoved << "\n";
+        meta.close();
+        ++written;
+    }
+    setStatus(QStringLiteral("Wrote %1 matte diagnostics to %2").arg(written).arg(dir));
 }
 
 void PaintbrushController::updateObjectSelection()
@@ -3229,6 +3684,44 @@ QImage PaintbrushController::objectCrop() const
                                  .intersected(m.rect());
         if (bounds.isEmpty())
             return {};
+        paintbrush::matte::Result matteResult;
+        if (currentMatte(&matteResult)
+            && matteResult.premultipliedRgba.size() == m_selection.frame.size()
+            && matteResult.foregroundRgb.size() == m_selection.frame.size())
+        {
+            /* Use the refined continuous alpha and the decontaminated colour,
+             * with a crop that includes the fractional boundary (the binary
+             * mask bbox can be one or two pixels tighter than the matte). */
+            const QImage straight = paintbrush::matte::straightRgba(
+                matteResult.foregroundRgb, matteResult.alpha);
+            if (!straight.isNull())
+            {
+                int rMinX = straight.width(), rMinY = straight.height();
+                int rMaxX = -1, rMaxY = -1;
+                for (int y = 0; y < straight.height(); ++y)
+                {
+                    const QRgb *line = reinterpret_cast<const QRgb *>(
+                        straight.constScanLine(y));
+                    for (int x = 0; x < straight.width(); ++x)
+                    {
+                        if (qAlpha(line[x]) > 1)
+                        {
+                            rMinX = qMin(rMinX, x);
+                            rMaxX = qMax(rMaxX, x);
+                            rMinY = qMin(rMinY, y);
+                            rMaxY = qMax(rMaxY, y);
+                        }
+                    }
+                }
+                if (rMaxX >= rMinX && rMaxY >= rMinY)
+                {
+                    const QRect refinedBounds(rMinX, rMinY,
+                                              rMaxX - rMinX + 1,
+                                              rMaxY - rMinY + 1);
+                    return straight.copy(refinedBounds);
+                }
+            }
+        }
         const QImage region = m_selection.frame.copy(bounds);
         const QImage mask = m.copy(bounds);
         return applyMaskAsAlpha(region, mask);
@@ -5921,15 +6414,15 @@ QString PaintbrushController::runDecoderSamSelfTest()
             disconnect(m_selfTestErrConn);
             m_selfTestErrConn = QMetaObject::Connection();
         }
-        m_selfTestReport += QStringLiteral("\nSAM: mask %1x%2, score %.0f%% (method %3)")
+        m_selfTestReport += QStringLiteral("\nSAM: mask %1x%2, score %3% (method %4)")
                                 .arg(mask.width())
                                 .arg(mask.height())
-                                .arg(score * 100.0)
+                                .arg(score * 100.0, 0, 'f', 0)
                                 .arg(method);
-        setStatus(QStringLiteral("Self test: SAM mask %1x%2, score %.0f%%.")
+        setStatus(QStringLiteral("Self test: SAM mask %1x%2, score %3%.")
                       .arg(mask.width())
                       .arg(mask.height())
-                      .arg(score * 100.0));
+                      .arg(score * 100.0, 0, 'f', 0));
         m_selfTestFrame = QImage();
         emit selfTestReportChanged();
     });
@@ -5950,6 +6443,247 @@ QString PaintbrushController::runDecoderSamSelfTest()
                          m_selfTestFrame.height() / 2.0);
     m_segmentation.segment(m_selfTestFrame,
                            QVector<QPointF>{center}, {}, {});
+    setStatus(QStringLiteral("Self test: frame decoded — running SAM…"));
+    return m_selfTestReport;
+}
+
+QString PaintbrushController::runMatteSelfTest()
+{
+    QStringList report;
+    report << QStringLiteral("=== Matte acceptance self-test ===");
+    m_selfTestReport = report.join(QLatin1Char('\n'));
+    emit selfTestReportChanged();
+
+    if (!liveMediaReady())
+    {
+        m_selfTestReport += QStringLiteral("\nFAIL: no video session");
+        emit selfTestReportChanged();
+        return m_selfTestReport;
+    }
+    if (m_matteSelfTestPending)
+    {
+        m_selfTestReport += QStringLiteral("\nA matte self-test is already running.");
+        emit selfTestReportChanged();
+        return m_selfTestReport;
+    }
+    if (!m_segmentation.isConfigured())
+    {
+        m_selfTestReport += QStringLiteral("\nFAIL: SAM is not configured");
+        emit selfTestReportChanged();
+        return m_selfTestReport;
+    }
+
+    resetLiveSelectionSession();
+    m_segmentation.cancel();
+    const QString mrl = currentMediaMRL();
+    const qint64 pts = playerTimeMs();
+    report << QStringLiteral("MRL: %1").arg(mrl)
+           << QStringLiteral("PTS: %1 ms").arg(pts);
+
+    const DecodedFrame frame = requestFrame(mrl, pts);
+    if (!frame.ok() || frame.image.isNull())
+    {
+        m_selfTestReport += QStringLiteral("\nFAIL: exact frame decode failed");
+        emit selfTestReportChanged();
+        return m_selfTestReport;
+    }
+    m_selfTestFrame = frame.image;
+    report << QStringLiteral("Decoded: %1x%2, actual %3 ms (verified %4)")
+                  .arg(frame.image.width())
+                  .arg(frame.image.height())
+                  .arg(frame.ptsMs)
+                  .arg(frame.ptsVerified ? QStringLiteral("yes")
+                                         : QStringLiteral("no"));
+
+    m_matteSelfTestPending = true;
+    m_selfTestReport = report.join(QLatin1Char('\n'));
+    emit selfTestReportChanged();
+
+    if (m_selfTestConn)
+        disconnect(m_selfTestConn);
+    if (m_selfTestErrConn)
+        disconnect(m_selfTestErrConn);
+
+    /* 1) semantic mask from a few centre points */
+    m_selfTestConn = connect(&m_segmentation, &SegmentationService::maskReady,
+                             this, [this, mrl, pts](const QImage &mask,
+                                                    double score,
+                                                    const QString &method) {
+        disconnect(m_selfTestConn);
+        m_selfTestConn = QMetaObject::Connection();
+        if (m_selfTestErrConn)
+        {
+            disconnect(m_selfTestErrConn);
+            m_selfTestErrConn = QMetaObject::Connection();
+        }
+        if (mask.isNull())
+        {
+            m_matteSelfTestPending = false;
+            m_selfTestReport += QStringLiteral("\nFAIL: empty semantic mask");
+            emit selfTestReportChanged();
+            return;
+        }
+        m_selfTestReport += QStringLiteral(
+            "\nSAM: mask %1x%2, score %3%, method %4")
+            .arg(mask.width()).arg(mask.height())
+            .arg(score * 100.0, 0, 'f', 1).arg(method);
+
+        /* 2) make the self-test selection the current one */
+        m_selection.sourceKind = ObjectSelectionContext::SourceLiveVideo;
+        m_selection.ref.mrl = mrl;
+        m_selection.ref.ptsMs = pts;
+        m_selection.frame = m_selfTestFrame;
+        m_selection.mask = mask;
+        m_selection.contentRect = QRectF(0, 0, m_selfTestFrame.width(),
+                                         m_selfTestFrame.height());
+        m_objectMask = mask;
+        m_objectSelected = true;
+        ++m_selectionRevision;
+        m_matteResult = paintbrush::matte::Result();
+        m_matteIdentity = paintbrush::matte::FrameIdentity();
+
+        /* 3) wait for the matte */
+        auto finish = [this](const paintbrush::matte::Result &result,
+                             const paintbrush::matte::FrameIdentity &identity) {
+            m_matteSelfTestPending = false;
+            m_selfTestReport += QStringLiteral(
+                "\nMatte: backend=%1 pts=%2 unknown=%3%")
+                .arg(result.backend)
+                .arg(identity.ptsMs)
+                .arg(result.trimapUnknownFraction * 100.0, 0, 'f', 2);
+            if (result.inferenceMs >= 0.0)
+                m_selfTestReport += QStringLiteral(", inference %1 ms")
+                                        .arg(result.inferenceMs, 0, 'f', 1);
+            m_selfTestReport += QStringLiteral(
+                "\nTopology: holes filled %1, deferred %2, specks removed %3, kept %4")
+                .arg(result.topology.holesFilled)
+                .arg(result.topology.holesDeferred)
+                .arg(result.topology.detachedRemoved)
+                .arg(result.topology.detachedKept);
+
+            int fractional = 0;
+            for (int y = 0; y < result.alpha.height(); ++y)
+                for (int x = 0; x < result.alpha.width(); ++x)
+                {
+                    const float a = result.alpha.at(x, y);
+                    if (a > 0.02f && a < 0.98f)
+                        ++fractional;
+                }
+            m_selfTestReport += QStringLiteral(
+                "\nAlpha: %1x%2, centre %3, corner %4, fractional %5 px")
+                .arg(result.alpha.width())
+                .arg(result.alpha.height())
+                .arg(result.alpha.at(result.alpha.width() / 2,
+                                     result.alpha.height() / 2), 0, 'f', 3)
+                .arg(result.alpha.at(0, 0), 0, 'f', 3)
+                .arg(fractional);
+
+            /* 4) composite over a checkerboard (background-substitution test) */
+            if (!result.alpha.isNull() && !result.foregroundRgb.isNull())
+            {
+                const QImage straight = paintbrush::matte::straightRgba(
+                    result.foregroundRgb, result.alpha);
+                const int w = straight.width();
+                const int h = straight.height();
+                QImage checker(w, h, QImage::Format_RGB32);
+                for (int y = 0; y < h; ++y)
+                {
+                    QRgb *line = reinterpret_cast<QRgb *>(checker.scanLine(y));
+                    for (int x = 0; x < w; ++x)
+                        line[x] = (((x / 32) + (y / 32)) & 1)
+                                      ? qRgb(210, 210, 210)
+                                      : qRgb(150, 150, 150);
+                }
+                QPainter painter(&checker);
+                painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+                painter.drawImage(0, 0, straight);
+                painter.end();
+
+                const QString dir = QDir(QStandardPaths::writableLocation(
+                                             QStandardPaths::PicturesLocation))
+                                        .filePath(QStringLiteral(
+                                            "NAI Paintbrush/matte-diagnostics"));
+                QDir().mkpath(dir);
+                const QString stamp = QStringLiteral("selftest-%1")
+                    .arg(QDateTime::currentDateTime().toString(
+                        QStringLiteral("yyyyMMdd-hhmmss")));
+                const QString compositePath =
+                    QDir(dir).filePath(stamp + QStringLiteral("-composite-over-checker.png"));
+                const QString alphaPath =
+                    QDir(dir).filePath(stamp + QStringLiteral("-alpha.png"));
+                const QString texPath =
+                    QDir(dir).filePath(stamp + QStringLiteral("-premultiplied.png"));
+                const bool saved = checker.save(compositePath)
+                                   && result.alpha.toGrayscale8().save(alphaPath)
+                                   && result.premultipliedRgba.save(texPath);
+                m_selfTestReport += QStringLiteral(
+                    "\nArtifacts: %1 %2").arg(saved ? QStringLiteral("written")
+                                                    : QStringLiteral("FAILED"),
+                                                dir);
+                if (!result.diagnostics.trimapColor.isNull())
+                    result.diagnostics.trimapColor.save(
+                        QDir(dir).filePath(stamp + QStringLiteral("-trimap.png")));
+            }
+            emit selfTestReportChanged();
+            pbLogInfo(VLC_OBJECT(m_intf), "matting", "%s",
+                      m_selfTestReport.toUtf8().constData());
+            setStatus(QStringLiteral("Matte self-test complete (%1).")
+                          .arg(result.backend));
+            /* One warm pass proves the persistent session is reused and
+             * reports steady-state latency (the first run includes CUDA
+             * kernel/graph warm-up). */
+            ++m_refinementRevision;
+            m_matteResult = paintbrush::matte::Result();
+            scheduleMatteRefinement(false);
+            /* Diagnostics stay available in the Inspector; leave the selection
+             * in place so the user can inspect the matte. */
+        };
+
+        QMetaObject::Connection readyConn = connect(
+            &m_matting, &MattingService::matteReady, this,
+            [this, finish](const paintbrush::matte::Result &result,
+                           const paintbrush::matte::FrameIdentity &identity,
+                           quint64) {
+                disconnect(m_selfTestMatteConn);
+                m_selfTestMatteConn = QMetaObject::Connection();
+                if (!m_matteSelfTestPending)
+                    return;
+                finish(result, identity);
+            });
+        m_selfTestMatteConn = readyConn;
+
+        QTimer::singleShot(180000, this, [this]() {
+            if (!m_matteSelfTestPending)
+                return;
+            m_matteSelfTestPending = false;
+            m_selfTestReport += QStringLiteral("\nFAIL: matte self-test timed out");
+            emit selfTestReportChanged();
+        });
+
+        scheduleMatteRefinement(true);
+        setStatus(QStringLiteral("Self test: matte refinement running…"));
+    });
+
+    m_selfTestErrConn = connect(&m_segmentation, &SegmentationService::errorOccurred,
+                                this, [this](const QString &message) {
+        if (!m_selfTestConn || !m_matteSelfTestPending)
+            return;
+        disconnect(m_selfTestConn);
+        disconnect(m_selfTestErrConn);
+        m_selfTestConn = QMetaObject::Connection();
+        m_selfTestErrConn = QMetaObject::Connection();
+        m_matteSelfTestPending = false;
+        m_selfTestReport += QStringLiteral("\nFAIL: SAM error — %1").arg(message);
+        emit selfTestReportChanged();
+    });
+
+    const QPointF center(frame.image.width() / 2.0, frame.image.height() / 2.0);
+    const QPointF offsets[2] = {
+        QPointF(center.x() - frame.image.width() * 0.08, center.y()),
+        QPointF(center.x(), center.y() - frame.image.height() * 0.08),
+    };
+    m_segmentation.segment(frame.image,
+                           QVector<QPointF>{center, offsets[0], offsets[1]}, {}, {});
     setStatus(QStringLiteral("Self test: frame decoded — running SAM…"));
     return m_selfTestReport;
 }

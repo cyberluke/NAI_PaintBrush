@@ -37,6 +37,8 @@ Item {
 
     /* contextual open state: default closed, auto-opens for selections */
     property bool pinned: false
+    /* advanced matte controls are collapsed until requested */
+    property bool matteAdvancedOpen: false
     /* Explicit user dismissal: when true the inspector stays collapsed even
      * while a selection/object is active (the fold button can always close
      * it). Cleared by the topbar toggle and when a NEW selection is made. */
@@ -676,6 +678,231 @@ Item {
                                ? PaintbrushCtx.setObjectMaskEdgeHard()
                                : PaintbrushCtx.setObjectMaskEdgeSoft()
                 }
+            }
+
+            /* ---- Neural alpha matting (non-destructive) ------------------
+             * Raw    : the untouched SAM3 mask.
+             * Refined: topology repair + sub-pixel edge (no model).
+             * Neural : ViTMatte continuous alpha + foreground decontamination.
+             * The semantic mask is never replaced; switching back to Raw is
+             * always possible. */
+            Rectangle {
+                Layout.fillWidth: true
+                height: 1
+                color: theme.border
+                visible: PaintbrushCtx.objectSelected
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: VLCStyle.margin_xsmall
+                visible: PaintbrushCtx.objectSelected
+
+                Widgets.LabelExt {
+                    text: qsTr("Matte")
+                    color: theme.fg.secondary
+                    font.pixelSize: VLCStyle.fontSize_small
+                    Layout.fillWidth: true
+                }
+                BusyIndicator {
+                    running: PaintbrushCtx.matteRefining
+                    visible: running
+                    implicitWidth: VLCStyle.dp(18, VLCStyle.scale)
+                    implicitHeight: implicitWidth
+                }
+                Widgets.IconToolButton {
+                    text: VLCIcons.ic_fluent_arrow_sync_24_regular
+                    description: qsTr("Recompute the matte and load diagnostics")
+                    onClicked: PaintbrushCtx.refreshMatte()
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: VLCStyle.margin_xxxsmall
+                visible: PaintbrushCtx.objectSelected
+
+                Repeater {
+                    model: [qsTr("Raw"), qsTr("Refined"), qsTr("Neural")]
+                    delegate: Button {
+                        required property int index
+                        required property string modelData
+                        Layout.fillWidth: true
+                        text: modelData
+                        checkable: true
+                        checked: PaintbrushCtx.matteMode === index
+                        onClicked: PaintbrushCtx.matteMode = index
+                        font.pixelSize: VLCStyle.fontSize_xsmall
+                        padding: VLCStyle.margin_xxsmall
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: VLCStyle.margin_xsmall
+                visible: PaintbrushCtx.objectSelected
+
+                Widgets.LabelExt {
+                    text: qsTr("Quality")
+                    color: theme.fg.secondary
+                    font.pixelSize: VLCStyle.fontSize_xsmall
+                    Layout.fillWidth: true
+                }
+                ComboBox {
+                    model: [qsTr("Preview"), qsTr("Balanced"), qsTr("Maximum")]
+                    currentIndex: PaintbrushCtx.matteQuality
+                    onActivated: PaintbrushCtx.matteQuality = currentIndex
+                    Layout.preferredWidth: VLCStyle.dp(132, VLCStyle.scale)
+                    font.pixelSize: VLCStyle.fontSize_xsmall
+                }
+            }
+
+            Widgets.LabelExt {
+                Layout.fillWidth: true
+                text: PaintbrushCtx.matteInfoText
+                visible: PaintbrushCtx.objectSelected && text.length > 0
+                color: PaintbrushCtx.matteAvailable ? theme.fg.secondary : theme.accent
+                font.pixelSize: VLCStyle.fontSize_xsmall
+                wrapMode: Text.WordWrap
+            }
+
+            Widgets.LabelExt {
+                Layout.fillWidth: true
+                text: PaintbrushCtx.mattingStatusText
+                visible: PaintbrushCtx.objectSelected
+                         && !PaintbrushCtx.matteAvailable && text.length > 0
+                color: theme.fg.secondary
+                font.pixelSize: VLCStyle.fontSize_xsmall
+                wrapMode: Text.WordWrap
+            }
+
+            /* advanced controls (collapse keeps the primary panel clean) */
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: VLCStyle.margin_xsmall
+                visible: PaintbrushCtx.objectSelected
+
+                Widgets.IconToolButton {
+                    text: root.matteAdvancedOpen ? VLCIcons.chevron_down
+                                                 : VLCIcons.ic_fluent_chevron_right_24
+                    description: qsTr("Advanced matte controls")
+                    checkable: true
+                    checked: root.matteAdvancedOpen
+                    onClicked: root.matteAdvancedOpen = !root.matteAdvancedOpen
+                }
+                Widgets.LabelExt {
+                    text: qsTr("Boundary and artefact controls")
+                    color: theme.fg.secondary
+                    font.pixelSize: VLCStyle.fontSize_xsmall
+                    Layout.fillWidth: true
+                }
+            }
+
+            ColumnLayout {
+                id: matteAdvanced
+                Layout.fillWidth: true
+                spacing: VLCStyle.margin_xxxsmall
+                visible: PaintbrushCtx.objectSelected && root.matteAdvancedOpen
+
+                function applyAdvanced(key, value) {
+                    var a = PaintbrushCtx.matteAdvanced()
+                    a[key] = value
+                    PaintbrushCtx.setMatteAdvanced(a.boundary, a.detail,
+                                                   a.artifacts, a.holes,
+                                                   a.decontamination, a.temporal)
+                }
+
+                Repeater {
+                    model: [
+                        { key: "boundary", label: qsTr("Boundary band (px)"),
+                          from: 1, to: 24 },
+                        { key: "detail", label: qsTr("Fine-detail recovery"),
+                          from: 0, to: 100 },
+                        { key: "artifacts", label: qsTr("Artefact suppression"),
+                          from: 0, to: 100 },
+                        { key: "holes", label: qsTr("Enclosed-hole recovery"),
+                          from: 0, to: 100 },
+                        { key: "decontamination", label: qsTr("Colour decontamination"),
+                          from: 0, to: 100 },
+                        { key: "temporal", label: qsTr("Temporal stability"),
+                          from: 0, to: 100 }
+                    ]
+                    delegate: ColumnLayout {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        spacing: 0
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Widgets.LabelExt {
+                                text: modelData.label
+                                color: theme.fg.primary
+                                font.pixelSize: VLCStyle.fontSize_xsmall
+                                Layout.fillWidth: true
+                            }
+                            Widgets.LabelExt {
+                                text: Math.round(control.value)
+                                color: theme.fg.secondary
+                                font.pixelSize: VLCStyle.fontSize_xsmall
+                            }
+                        }
+                        Slider {
+                            id: control
+                            Layout.fillWidth: true
+                            from: modelData.from
+                            to: modelData.to
+                            stepSize: 1
+                            value: PaintbrushCtx.matteAdvanced()[modelData.key]
+                            onMoved: matteAdvanced.applyAdvanced(
+                                         modelData.key, Math.round(value))
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: VLCStyle.margin_xsmall
+                    Widgets.ActionButtonPrimary {
+                        Layout.fillWidth: true
+                        text: qsTr("Export diagnostics…")
+                        onClicked: PaintbrushCtx.exportMatteDiagnostics()
+                    }
+                }
+            }
+
+            /* diagnostic view (explicitly loaded by Refresh) */
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: VLCStyle.margin_xsmall
+                visible: PaintbrushCtx.objectSelected
+
+                Widgets.LabelExt {
+                    text: qsTr("Diagnostic view")
+                    color: theme.fg.secondary
+                    font.pixelSize: VLCStyle.fontSize_xsmall
+                    Layout.fillWidth: true
+                }
+                ComboBox {
+                    id: matteDiagView
+                    model: [qsTr("Original"), qsTr("Semantic"), qsTr("Topology"),
+                            qsTr("Trimap"), qsTr("Alpha"), qsTr("Foreground"),
+                            qsTr("Background"), qsTr("Premultiplied")]
+                    Layout.preferredWidth: VLCStyle.dp(132, VLCStyle.scale)
+                    font.pixelSize: VLCStyle.fontSize_xsmall
+                }
+            }
+
+            Image {
+                Layout.fillWidth: true
+                Layout.preferredHeight: VLCStyle.dp(150, VLCStyle.scale)
+                visible: PaintbrushCtx.objectSelected && source.length > 0
+                fillMode: Image.PreserveAspectFit
+                asynchronous: true
+                cache: false
+                source: PaintbrushCtx.matteGeneration >= 0
+                        ? PaintbrushCtx.matteDiagnosticDataUrl(matteDiagView.currentIndex)
+                        : ""
             }
         }
 

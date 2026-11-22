@@ -20,6 +20,8 @@
 #include "pb_sticker.hpp"
 #include "pb_segmentation_service.hpp"
 #include "pb_tracking_service.hpp"
+#include "pb_matte.hpp"
+#include "pb_matting_service.hpp"
 #include "pb_vision_service.hpp"
 #include "pb_generation_service.hpp"
 #include "pb_assistant_service.hpp"
@@ -115,6 +117,18 @@ class PaintbrushController : public QObject
     Q_PROPERTY(QString generationUnavailableReason READ generationUnavailableReason NOTIFY serviceAvailabilityChanged FINAL)
     Q_PROPERTY(bool trackingAvailable READ trackingAvailable NOTIFY serviceAvailabilityChanged FINAL)
     Q_PROPERTY(QString trackingUnavailableReason READ trackingUnavailableReason NOTIFY serviceAvailabilityChanged FINAL)
+    /* Neural matting / rotoscoping surface (Object Select refinement). */
+    Q_PROPERTY(bool mattingNeuralAvailable READ mattingNeuralAvailable NOTIFY mattingStateChanged FINAL)
+    Q_PROPERTY(QString mattingBackendText READ mattingBackendText NOTIFY mattingStateChanged FINAL)
+    Q_PROPERTY(QString mattingStatusText READ mattingStatusText NOTIFY mattingStateChanged FINAL)
+    Q_PROPERTY(bool matteRefining READ matteRefining NOTIFY mattingStateChanged FINAL)
+    Q_PROPERTY(bool matteAvailable READ matteAvailable NOTIFY mattingStateChanged FINAL)
+    Q_PROPERTY(QString matteInfoText READ matteInfoText NOTIFY mattingStateChanged FINAL)
+    Q_PROPERTY(int matteGeneration READ matteGeneration NOTIFY mattingStateChanged FINAL)
+    Q_PROPERTY(int matteMode READ matteMode WRITE setMatteMode NOTIFY mattingSettingsChanged FINAL)
+    Q_PROPERTY(int matteQuality READ matteQuality WRITE setMatteQuality NOTIFY mattingSettingsChanged FINAL)
+    Q_PROPERTY(QString mattingModelDir READ mattingModelDir WRITE setMattingModelDir NOTIFY mattingSettingsChanged FINAL)
+    Q_PROPERTY(QString mattingDevice READ mattingDevice WRITE setMattingDevice NOTIFY mattingSettingsChanged FINAL)
     Q_PROPERTY(bool companionAvailable READ companionAvailable NOTIFY serviceAvailabilityChanged FINAL)
     Q_PROPERTY(QString companionUnavailableReason READ companionUnavailableReason NOTIFY serviceAvailabilityChanged FINAL)
     Q_PROPERTY(bool assistantConfigured READ assistantConfigured NOTIFY serviceAvailabilityChanged FINAL)
@@ -538,6 +552,31 @@ public:
     QString segmentationStatusText() const;
     bool trackingAvailable() const { return m_tracking.isConfigured(); }
     QString trackingUnavailableReason() const { return m_tracking.unavailableReason(); }
+    bool mattingNeuralAvailable() const { return m_matting.neuralAvailable(); }
+    QString mattingBackendText() const { return m_matting.backendText(); }
+    QString mattingStatusText() const;
+    QString matteInfoText() const;
+    bool matteRefining() const { return m_matteRefining; }
+    bool matteAvailable() const;
+    int matteGeneration() const { return m_matteGeneration; }
+    int matteMode() const { return int(m_matting.mode()); }
+    void setMatteMode(int mode);
+    int matteQuality() const { return int(m_matting.quality()); }
+    void setMatteQuality(int quality);
+    QString mattingModelDir() const { return m_matting.modelDir(); }
+    void setMattingModelDir(const QString &dir);
+    QString mattingDevice() const;
+    void setMattingDevice(const QString &device);
+    /* Compact advanced surface for the Inspector: boundary px (1..24),
+     * detail/artifacts/holes/decontamination/temporal are 0..100. */
+    Q_INVOKABLE void setMatteAdvanced(int boundary, int detail, int artifacts,
+                                      int holes, int decontamination, int temporal);
+    Q_INVOKABLE QVariantMap matteAdvanced() const;
+    Q_INVOKABLE void refreshMatte();
+    Q_INVOKABLE void exportMatteDiagnostics();
+    /* 0 original, 1 semantic, 2 topology, 3 trimap, 4 alpha, 5 foreground,
+     * 6 background, 7 premultiplied. Empty when diagnostics are not loaded. */
+    Q_INVOKABLE QString matteDiagnosticDataUrl(int view) const;
     bool companionAvailable() const { return m_companion.mode() != CompanionService::MODE_OFF; }
     QString companionUnavailableReason() const { return m_companionModeOffReason; }
     bool assistantConfigured() const { return m_assistant.isConfigured(); }
@@ -618,6 +657,9 @@ public:
      * returning a diagnostics report (thumbnail data URL + PTS delta + mask
      * dims/score). Deliberately does NOT depend on the VideoSurface/vout. */
     Q_INVOKABLE QString runDecoderSamSelfTest();
+    /* End-to-end acceptance: decode current frame -> SAM -> deterministic
+     * matte -> ViTMatte -> composite over a checkerboard, with a report. */
+    Q_INVOKABLE QString runMatteSelfTest();
     QString selfTestReport() const { return m_selfTestReport; }
     /* The full decoder+SAM self-test report. The decoder phase completes
      * synchronously inside runDecoderSamSelfTest(); the SAM phase is async and
@@ -835,6 +877,8 @@ signals:
     void serviceAvailabilityChanged();
     void objectSelectionChanged();
     void objectMaskEdgeChanged();
+    void mattingStateChanged();
+    void mattingSettingsChanged();
     void trackingStateChanged();
     void visionStateChanged();
     void generationStateChanged();
@@ -866,6 +910,12 @@ private slots:
     void onSegmentationMaskReady(const QImage &mask, double score, const QString &method);
     void onSegmentationError(const QString &message);
     void onSegmentationAvailability(bool available, const QString &reason);
+    void onMatteReady(const paintbrush::matte::Result &result,
+                      const paintbrush::matte::FrameIdentity &identity,
+                      quint64 requestId);
+    void onMatteFailed(quint64 requestId, const QString &message);
+    void onMatteStatusChanged(const QString &status);
+    void onMattingAvailabilityChanged();
     void onVisionResponse(const QString &conversationId, const QString &answer,
                           const QString &evidence, const QString &uncertainty,
                           const QString &raw);
@@ -1040,6 +1090,9 @@ private:
      * eviction. */
     qint64 trackedMaskBytes() const;
     qint64 enforceTrackMaskMemoryBudget();
+    void scheduleMatteRefinement(bool diagnostics = false);
+    bool currentMatte(paintbrush::matte::Result *out) const;
+    void updateMatteOverlay();
 
     qt_intf_t *m_intf = nullptr;
     PaintbrushDocument m_document;
@@ -1048,6 +1101,17 @@ private:
     PaintbrushCanvasItem *m_canvas = nullptr;
 
     SegmentationService m_segmentation;
+    MattingService m_matting;
+    /* Latest refined matte for the CURRENT semantic selection. Refinement is
+     * additive: m_objectMask stays the authoritative SAM3 mask. */
+    paintbrush::matte::Result m_matteResult;
+    paintbrush::matte::FrameIdentity m_matteIdentity;
+    quint64 m_selectionRevision = 0;
+    quint64 m_refinementRevision = 0;
+    bool m_matteRefining = false;
+    int m_matteGeneration = 0;
+    bool m_matteDiagnostics = false;
+    QString m_matteError;
     TrackingService m_tracking;
     VisionService m_vision;
     GenerationService m_generation;
@@ -1175,6 +1239,8 @@ private:
      * finalized by a one-shot connection. */
     QString m_selfTestReport;
     QImage m_selfTestFrame;
+    bool m_matteSelfTestPending = false;
+    QMetaObject::Connection m_selfTestMatteConn;
     QMetaObject::Connection m_selfTestConn;
     QMetaObject::Connection m_selfTestErrConn;
 

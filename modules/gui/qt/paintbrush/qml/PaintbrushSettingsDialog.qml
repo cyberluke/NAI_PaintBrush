@@ -45,6 +45,8 @@ Dialog {
     /* ---- draft state ------------------------------------------------- */
     property string draftSamModel: ""
     property string draftSamDevice: ""
+    property string draftMatteModelDir: ""
+    property string draftMatteDevice: ""
     property string draftVlmUrl: ""
     property string draftVlmModel: ""
     property string draftAssistantUrl: ""
@@ -55,6 +57,8 @@ Dialog {
     function resetDraft() {
         draftSamModel = PaintbrushCtx.settingsSamModel
         draftSamDevice = PaintbrushCtx.settingsSamDevice
+        draftMatteModelDir = PaintbrushCtx.mattingModelDir
+        draftMatteDevice = PaintbrushCtx.mattingDevice
         draftVlmUrl = PaintbrushCtx.settingsVlmUrl
         draftVlmModel = PaintbrushCtx.settingsVlmModel
         draftAssistantUrl = PaintbrushCtx.settingsAssistantUrl
@@ -63,6 +67,10 @@ Dialog {
         applyMessage = ""
     }
     function apply() {
+        /* Matting settings are applied through their own live properties so
+         * applyNaiSettings keeps its established signature. */
+        PaintbrushCtx.mattingModelDir = draftMatteModelDir.trim()
+        PaintbrushCtx.mattingDevice = draftMatteDevice
         const answer = PaintbrushCtx.applyNaiSettings(
                     draftSamModel.trim(),
                     draftSamDevice.trim(),
@@ -227,6 +235,50 @@ Dialog {
                         fieldText: root.draftVlmModel
                         placeholder: qsTr("e.g. gpt-4o-mini")
                         onTextEdited: root.draftVlmModel = text
+                    }
+                }
+
+                /* ---------------- Neural matting ------------------------- */
+                SettingsSection {
+                    title: qsTr("Neural matting")
+
+                    SettingsRow {
+                        label: qsTr("ViTMatte model directory")
+                        status: PaintbrushCtx.mattingNeuralAvailable
+                                ? qsTr("Ready") : qsTr("Unavailable")
+                        ok: PaintbrushCtx.mattingNeuralAvailable
+                        fieldText: root.draftMatteModelDir
+                        placeholder: qsTr("Directory with vitmatte-s-*.onnx + manifest.json")
+                        onTextEdited: root.draftMatteModelDir = text
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: VLCStyle.margin_xsmall
+                        Widgets.LabelExt {
+                            text: qsTr("Device")
+                            color: theme.fg.primary
+                            font.pixelSize: VLCStyle.fontSize_small
+                            Layout.fillWidth: true
+                        }
+                        Widgets.LabelExt {
+                            text: PaintbrushCtx.mattingBackendText
+                            color: theme.fg.secondary
+                            font.pixelSize: VLCStyle.fontSize_xsmall
+                        }
+                        ComboBox {
+                            model: ["gpu", "auto", "cpu"]
+                            currentIndex: Math.max(0, model.indexOf(root.draftMatteDevice))
+                            onActivated: root.draftMatteDevice = model[currentIndex]
+                            Layout.preferredWidth: VLCStyle.dp(140, VLCStyle.scale)
+                        }
+                    }
+                    Widgets.LabelExt {
+                        Layout.fillWidth: true
+                        text: PaintbrushCtx.mattingStatusText
+                        color: PaintbrushCtx.mattingNeuralAvailable ? theme.fg.secondary
+                                                                   : theme.accent
+                        font.pixelSize: VLCStyle.fontSize_xsmall
+                        wrapMode: Text.WordWrap
                     }
                 }
 

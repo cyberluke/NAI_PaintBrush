@@ -250,6 +250,24 @@ static void ShowDialog   ( intf_thread_t *, int, int, intf_dialog_args_t * );
                                   "object selection and tracking." )
 #define PB_SAM_DEVICE_TEXT N_( "SAM inference device" )
 #define PB_SAM_DEVICE_LONGTEXT N_( "Device used for SAM inference: auto, cpu or gpu." )
+#define PB_MATTE_DIR_TEXT N_( "Neural matting model directory" )
+#define PB_MATTE_DIR_LONGTEXT N_( "Directory containing vitmatte-s-512.onnx, "\
+                                  "vitmatte-s-1024.onnx and manifest.json. "\
+                                  "Defaults to <application>/matting/models." )
+#define PB_MATTE_DEVICE_TEXT N_( "Neural matting device" )
+#define PB_MATTE_DEVICE_LONGTEXT N_( "Device used for neural matting: auto, cpu or gpu. "\
+                                     "GPU mode never silently runs the model on the CPU." )
+#define PB_MATTE_PRESET_TEXT N_( "Neural matting quality" )
+#define PB_MATTE_MODE_TEXT N_( "Matte refinement mode" )
+#define PB_MATTE_SELFTEST_TEXT N_( "Run the matte acceptance self-test at startup" )
+#define PB_MATTE_SELFTEST_LONGTEXT N_( "Developer acceptance switch: once a video frame is "\
+                                       "available, decode it, segment the centre object, run "\
+                                       "the neural matte and write the diagnostics + composite "\
+                                       "under Pictures/NAI Paintbrush/matte-diagnostics." )
+#define PB_OPEN_TEXT N_( "Open media in the Paintbrush workspace" )
+#define PB_OPEN_LONGTEXT N_( "Open the given file THROUGH the workspace's own video path, "\
+                              "so the native video output is embedded in the canvas instead "\
+                              "of appearing as a separate player window." )
 #define PB_VLM_BASE_TEXT N_( "Vision model base URL" )
 #define PB_VLM_BASE_LONGTEXT N_( "Base URL of an OpenAI-compatible vision endpoint "\
                                  "used by Ask about this." )
@@ -434,6 +452,30 @@ vlc_module_begin ()
     add_string( "paintbrush-sam-model", NULL, PB_SAM_MODEL_TEXT, PB_SAM_MODEL_LONGTEXT )
     add_string( "paintbrush-sam-device", "gpu", PB_SAM_DEVICE_TEXT, PB_SAM_DEVICE_LONGTEXT )
             change_string_list( psz_sam_devices, psz_sam_devices_text )
+    add_string( "paintbrush-matting-model-dir", NULL, PB_MATTE_DIR_TEXT,
+                PB_MATTE_DIR_LONGTEXT )
+    add_string( "paintbrush-matting-device", "auto", PB_MATTE_DEVICE_TEXT,
+                PB_MATTE_DEVICE_LONGTEXT )
+            change_string_list( psz_sam_devices, psz_sam_devices_text )
+    add_integer_with_range( "paintbrush-matting-preset", 1, 0, 2,
+                            PB_MATTE_PRESET_TEXT, nullptr )
+    add_integer_with_range( "paintbrush-matting-mode", 2, 0, 2,
+                            PB_MATTE_MODE_TEXT, nullptr )
+    add_integer_with_range( "paintbrush-matting-boundary", 4, 1, 24,
+                            N_( "Matte boundary band (px at 1080p)" ), nullptr )
+    add_integer_with_range( "paintbrush-matting-detail", 65, 0, 100,
+                            N_( "Matte fine-detail recovery (0-100)" ), nullptr )
+    add_integer_with_range( "paintbrush-matting-artifacts", 55, 0, 100,
+                            N_( "Matte artefact suppression (0-100)" ), nullptr )
+    add_integer_with_range( "paintbrush-matting-holes", 55, 0, 100,
+                            N_( "Matte enclosed-hole recovery (0-100)" ), nullptr )
+    add_integer_with_range( "paintbrush-matting-decontamination", 75, 0, 100,
+                            N_( "Matte colour decontamination (0-100)" ), nullptr )
+    add_integer_with_range( "paintbrush-matting-temporal", 50, 0, 100,
+                            N_( "Matte temporal stability (0-100)" ), nullptr )
+    add_bool( "paintbrush-matte-selftest", false, PB_MATTE_SELFTEST_TEXT,
+              PB_MATTE_SELFTEST_LONGTEXT )
+    add_string( "paintbrush-open", NULL, PB_OPEN_TEXT, PB_OPEN_LONGTEXT )
     add_string( "paintbrush-vlm-base-url", NULL, PB_VLM_BASE_TEXT, PB_VLM_BASE_LONGTEXT )
     add_string( "paintbrush-vlm-model", NULL, PB_VLM_MODEL_TEXT, nullptr )
     add_integer_with_range( "paintbrush-vlm-timeout", 60, 5, 600, PB_VLM_TIMEOUT_TEXT, nullptr )
