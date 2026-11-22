@@ -22,6 +22,7 @@ param(
     [string]$Version = "1.0.0.0",
     [string]$Arch = "x64",
     [switch]$IncludeAI,
+    [string]$SamModel = "D:\_SATIN_AI\models\sam3-q4_0.ggml",
     [switch]$SkipSign,
     [switch]$Install,
     [string]$OutDir = "",
@@ -121,6 +122,15 @@ if ($IncludeAI) {
     } else {
         Write-Warning "matting runtime not found: $matting"
     }
+
+    # SAM3 weights: redistribution is granted by the SAM License (bundled with
+    # them); the app finds them at <exe>\models\sam3-q4_0.ggml with no config.
+    if (-not (Test-Path -LiteralPath $SamModel)) {
+        throw "SAM3 model not found: $SamModel`nPass -SamModel <path to sam3-q4_0.ggml>"
+    }
+    $modelDir = Join-Path $stage 'models'
+    New-Item -ItemType Directory -Path $modelDir -Force | Out-Null
+    Copy-Item -LiteralPath $SamModel -Destination (Join-Path $modelDir 'sam3-q4_0.ggml') -Force
 }
 
 # The Qt interface needs its QML modules and Qt plugins; the packaged app has no
@@ -131,6 +141,22 @@ foreach ($pair in @(@('qml', 'qml'), @('plugins', 'qtplugins'))) {
     $srcQt = Join-Path $qtShare $pair[0]
     if (-not (Test-Path -LiteralPath $srcQt)) { throw "Qt directory not found: $srcQt" }
     Copy-Item -LiteralPath $srcQt -Destination (Join-Path $stage $pair[1]) -Recurse -Force
+}
+
+# Ship the license/notice files inside the package: the MSIX distributes Qt,
+# FFmpeg, MinGW and (optionally) CUDA binaries, so the notices must travel with
+# the bytes.
+foreach ($doc in @('COPYING', 'COPYING.LIB', 'LICENSE-THIRD-PARTY.md', 'AUTHORS')) {
+    $srcDoc = Join-Path $root $doc
+    if (Test-Path -LiteralPath $srcDoc) {
+        Copy-Item -LiteralPath $srcDoc -Destination (Join-Path $stage $doc) -Force
+    } elseif ($doc -in @('COPYING', 'COPYING.LIB', 'LICENSE-THIRD-PARTY.md')) {
+        throw "Required notice file missing: $srcDoc"
+    }
+}
+$licenseDir = Join-Path $root 'packaging\msix\licenses'
+if (Test-Path -LiteralPath $licenseDir) {
+    Copy-Item -LiteralPath $licenseDir -Destination (Join-Path $stage 'licenses') -Recurse -Force
 }
 
 # --- strip our MinGW-built binaries ---------------------------------------

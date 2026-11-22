@@ -74,3 +74,12 @@ modules/gui/qt/paintbrush/*.npb~
 .cert/
 *.pfx
 *.pfx.pwd
+
+# Never publish local build logs, traces, screenshots or test keys
+pb_*.log
+pb_*.png
+pb_stroke_trace.log
+pb_aumid_debug.txt
+stage.log
+_REVIEW/*.png
+_REVIEW/harness/**/*.pem

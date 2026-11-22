@@ -5,6 +5,7 @@
  *****************************************************************************/
 
 #include "pb_tracking_service.hpp"
+#include "pb_model_paths.hpp"
 
 #include <QFileInfo>
 #include <QTimer>
@@ -38,6 +39,8 @@ void TrackingService::configure(vlc_object_t *obj)
 {
     m_obj = obj;
     m_modelPath = pbConfigString(obj, "paintbrush-sam-model").trimmed();
+    if (m_modelPath.isEmpty())
+        m_modelPath = defaultSamModelPath();   /* packaged weights next to the exe */
     m_device = pbNormalizeSamDevice(
         pbConfigString(obj, "paintbrush-sam-device"));
     m_stepMs = qBound<qint64>(

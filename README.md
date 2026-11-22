@@ -1,257 +1,153 @@
 # NAI PaintBrush
 
+![NAI PaintBrush](docs/assets/screenshot.png)
+
+### You draw a blob. It becomes a masterpiece. Then you add glitter. ✨
+
+No talent required. NAI PaintBrush is AI-assisted drawing for people who just
+want to make something cool: scribble, slap on stickers, spill actual sparkling
+glitter powder, cut yourself out of a video, and turn the whole thing into a
+poster that moves.
+
 **Paint with video. Harvest real moments. Compose living artwork.**
+<br><sub>*Sliving, even.*</sub>
 
-NAI PaintBrush is a native multimedia painting and composition studio. Start
-from a blank canvas or an exact video frame, isolate subjects, build layered
-artwork with physical-looking materials, and export a high-resolution image or a
-short **Living Poster**.
-
-This is not a themed media player. It is a dedicated C++/Qt 6/QML creative
-workspace developed inside a fork of the **VLC 4.0.0-dev** source tree: it
-reuses VLC's native media pipeline and implements its own document model,
-compositing, tools, undo system, material rendering, video-object workflow and
-export path.
-
-**Status:** active development, Windows-first source build. The list below
-describes implementations in this repository, with recorded acceptance evidence
-linked under [Engineering evidence](#engineering-evidence-and-limitations).
+[Download](#download) · [The loop](#the-loop) · [What it does](#what-it-does) · [The AI part](#the-ai-part-honestly) · [For the nerds](#for-the-nerds)
 
 ---
 
-## From video to artwork
+## The loop
 
-1. **Open and navigate video** in the integrated media drawer — seek, inspect
-   thumbnails and capture an exact source frame.
-2. **Select the subject** — manual mask editing or configured **SAM3**
-   segmentation and tracking, then refine edges and extract transparent
-   cutouts.
-3. **Harvest** — keep chosen subjects or poses in a document-scoped tray with
-   source-frame / presentation-timestamp provenance.
-4. **Compose** — arrange editable image, text and effect layers; choose paper,
-   color moods, brush marks, stickers and glitter.
-5. **Boost** — analyze a same-source pose sequence, suggest hierarchy and depth,
-   optionally bridge a gap with a newly decoded and segmented frame, and apply
-   the composition as one undoable transaction.
-6. **Bring a poster to life** — a time-aware renderer animates a harvested
-   figure with source-informed, photo-limited motion. Preview it on the canvas
-   and export a Living Poster as PNG frames or, when the required encoders are
-   present, MP4 / transparent WebM.
+1. **Draw something.** A blob. A stick figure. Your cat. It's fine.
+2. **Add glitter powder.** Real GPU glitter: pour it, glue it, tilt it, blow it.
+   This is the feature. You will not stop.
+3. **Dress it up.** Paper, moods, stickers, text, shapes, layers that don't
+   wreck each other.
+4. **Steal yourself from a video.** Pick a frame, select yourself, cut it out,
+   now you're a sticker.
+5. **Make it move.** Living Poster turns the composition into a short animated
+   poster.
+6. **Export and post it.** PNG, MP4, or transparent WebM.
 
-The creative workflow remains usable without AI models. SAM3, visual
-understanding, generative edits and assistant functions require their
-respective configured model/runtime or compatible provider.
+*Mommy energy: everything you make is beautiful, and then you add glitter.*
 
-## What makes PaintBrush different
+## What it does
 
-| System | Implementation |
-| --- | --- |
-| **Native canvas and editing** | Qt Quick scene graph; brushes, spray, shapes, selection/mask refinement, pressure-aware pen input, layers, transforms, thumbnails, autosave/recovery and typed undo/redo. |
-| **Video-to-art bridge** | VLC-backed decode and frame capture; original-frame provenance, subject extraction, object tracking and a frame-aware Harvest tray. |
-| **Art materials runtime** | Six procedural paper stocks; bristle brush; physical-state glitter with glue, bonded/loose grains and document lighting; deterministic material state. |
-| **Composition engine** | Layer roles; non-destructive shadow, glow, motion blur, outline and ghost effects; six visual moods, editable typography and procedural badges. |
-| **Boost + Living Poster** | Deterministic composition/bridge planning, photo-constrained puppet motion, time-aware compositing and reversible edits. |
-| **Rendering and delivery** | GPU preview path via Qt **QRhi/D3D11** for paper, glitter and finish effects; CPU reference renderer retained for deterministic acceptance/export; scale-aware image export and encoder-gated video export. |
-| **AI-assisted tools** | SAM3 segmentation/tracking, optional VLM object questions, generative actions and a configurable OpenAI-compatible assistant gateway. |
+| | |
+|---|---|
+| ✨ **Glitter powder** | A real powder simulation on the GPU: grains, glue, gravity, blow, holographic mirror flakes. Live at display rate. |
+| 🖌️ **Draw** | Pressure-aware brushes, spray, shapes, text, layers, transforms, and an undo that actually undoes. |
+| 🧷 **Video to sticker** | Open a video, grab a frame, select the subject with SAM3, cut it out with neural matting (ViTMatte), track it across frames. |
+| 🎞️ **Living Poster** | A time-aware renderer animates a harvested figure; preview it on the canvas, export a short poster. |
+| 🖼️ **Export** | Scale-aware PNG, plus MP4 / transparent WebM when the local encoders exist. |
+| 🔒 **Local-first** | No account, no cloud, no "sign in to draw". Files on your PC. |
 
-**Boundaries.** QRhi GPU acceleration is a preview path, not a claim that the
-whole editor/export pipeline runs on the GPU; the core renderer and exports have
-separate verification paths. A real SAM3 CPU session can be slow at high
-resolution. Living Poster output depends on the available FFmpeg binary and its
-H.264/VP9 encoders. The powder material renders live at display rate; the
-release bake is still one synchronous pass.
+## Download
 
-## Architecture: product code, not a theme
+> **The signed MSIX is hosted on our R2 bucket — link in the release post.**
+<!-- RELEASE: put the R2 URL here -->
 
-```text
-modules/gui/qt/paintbrush/
-  qml/                 native creative workspace and controls
-  pb_document.*        document model and canonical renderer
-  pb_layer.*           editable layers / identity / material state
-  pb_history.*         typed commands and transactional undo
-  pb_frame_capture.*   decoded source frames
-  pb_segmentation_*    SAM3 subject selection
-  pb_tracking_*        object tracking
-  pb_harvest.*         exact-frame asset tray
-  pb_boost.*           composition / bridge planning
-  pb_export.*          image and Living Poster delivery
-  art/                 paper, brushes, glitter, finish, moods, GPU
-  motion/              source-informed puppet / Living Poster runtime
-```
+- **Package:** `NAI.PaintBrush_1.0.0.0_x64.msix`
+- **Size:** 2.4 GB (core app + SAM3 + ViTMatte + CUDA/cuDNN runtime)
+- **SHA256:** `2FEE5A832079B0FD1C2D715E7FE535561DB9DBB4A951C37145A9902EFFCCCF1B`
+- **Signed by:** `CN=NAI Paint Brush, O=NANOTRIK.AI, C=US` (`49F660D8…`)
 
-The Meson project identifies **VLC 4.0.0-dev**, and `contrib/src/ffmpeg/rules.mak`
-pins **FFmpeg 9.0** for dependency builds. That pin alone does not mean every
-developer build contains or exposes every FFmpeg encoder — the Living Poster
-controls probe the local encoder availability.
-
-Projects are stored in the versioned **`.npb`** format. The document/render
-layer preserves media references and edits independently of the current
-playback position.
-
-## Build (Windows)
-
-The documented and exercised target is **Windows + MSYS2/MINGW64 + Qt 6 +
-Meson/Ninja**. The VLC parent tree is cross-platform, but this README does not
-assert equivalent PaintBrush build or runtime validation on macOS or Linux.
-
-Prerequisites: MSYS2 with the `mingw64` toolchain, Meson, Ninja, and the Qt 6
-runtime that ships in `contrib/x86_64-w64-mingw32`. The build directory is
-`win64-meson`. Read
-[`modules/gui/qt/paintbrush/BUILDING.md`](modules/gui/qt/paintbrush/BUILDING.md)
-first — it covers the toolchain, contrib setup, the Qt plugin loop, the plugin
-cache and known Meson regeneration issues.
-
-Fast loop while working on the application layer (rebuilds the Qt plugin and
-regenerates the plugin cache):
+Windows 10 1809+ / Windows 11, x64.
 
 ```powershell
+# one command: UAC once, provisions the NAI trust chain, installs the MSIX
+pwsh scripts/pb-install-msix.ps1
+```
+
+Verify what you downloaded before installing:
+
+```powershell
+Get-FileHash .\NAI.PaintBrush_1.0.0.0_x64.msix -Algorithm SHA256
+Get-AuthenticodeSignature .\NAI.PaintBrush_1.0.0.0_x64.msix |
+  Format-List Status, SignerCertificate
+```
+
+Object Select, matting and tracking work out of the box: the package ships
+SAM3 (q4) and ViTMatte plus the CUDA/cuDNN runtime. A recent NVIDIA driver is
+enough — no CUDA Toolkit or cuDNN install. No GPU? Everything still runs on the
+CPU, just slower.
+
+## The AI part (honestly)
+
+- **Bundled:** SAM3 weights (SAM License), ViTMatte (Apache-2.0), ONNX Runtime,
+  CUDA/cuDNN redistributables.
+- **Bring your own:** the assistant / generative actions need an
+  OpenAI-compatible endpoint and your key. Drawing, glitter and stickers need
+  no key.
+- **No fake hype:** the app doesn't pretend to be your mom. It just makes the
+  thing you drew actually look good.
+
+## For the nerds
+
+A native C++/Qt 6/QML creative workspace, not a themed media player and not a
+web wrapper. It reuses VLC's media pipeline and adds its own document model,
+compositing, tools, undo, material rendering, video-object workflow and export
+path.
+
+**Engine base:** VLC 4.0.0-dev at commit `e4f2d3a399` (2026-09-28), the parent
+of the first PaintBrush commit. This is a snapshot fork: the engine is **not**
+continuously merged with upstream yet; the upstream merge is a roadmap item
+before the next major version. Upstream: <https://code.videolan.org/videolan/vlc>.
+
+### Build (Windows)
+
+MSYS2 `mingw64`, Meson, Ninja, Qt 6 from the contrib/MSYS tree. The build
+directory is `win64-meson`. See
+[`modules/gui/qt/paintbrush/BUILDING.md`](modules/gui/qt/paintbrush/BUILDING.md).
+
+```powershell
+# fast loop while working on the UI
 pwsh scripts/pb-build-plugin.ps1
-```
 
-Full build (also relinks the application):
-
-```powershell
+# full build (relinks the app)
 $env:PATH = 'C:\msys64\mingw64\bin;C:\msys64\usr\bin;' + $env:PATH
 ninja -C win64-meson
 ```
 
-Output:
-
-```
-win64-meson\bin\nai-paintbrush.exe
-```
-
-The executable is the VLC engine binary renamed at link time
-(`bin/meson.build`), so the process and taskbar never clash with a media
-player. No wrapper, no copy step.
-
-Installable package (signed with the product leaf, see [`SECURITY.md`](SECURITY.md)):
+Output: `win64-meson\bin\nai-paintbrush.exe` (the VLC engine binary renamed at
+link time). Run it with `pwsh scripts/launch-pb-noskip.ps1`.
 
 ```powershell
-pwsh scripts/pb-build-msix.ps1                # core package (~267 MB)
-pwsh scripts/pb-build-msix.ps1 -IncludeAI     # + CUDA / matting models
+# signed MSIX (core)
+pwsh scripts/pb-build-msix.ps1
+# signed MSIX with AI models + CUDA runtime
+pwsh scripts/pb-build-msix.ps1 -IncludeAI -SamModel D:\models\sam3-q4_0.ggml
 ```
 
-Output: `win64-meson\msix\msix\NAI.PaintBrush_<version>_x64.msix`.
+### Layout
 
-Install it (self-elevates through UAC, provisions the NAI trust chain, then
-sideloads the package):
-
-```powershell
-pwsh scripts/pb-install-msix.ps1
+```text
+bin/                      application entry point (renamed VLC main)
+lib/ src/ include/        libVLC engine core
+modules/                  VLC plugins and the Qt interface
+modules/gui/qt/paintbrush  THE PRODUCT: document, canvas, tools, materials,
+                          GPU renderers (powder, paper), matting, tracking
+scripts/                  build, launch, capture, verification, packaging
+packaging/msix/           manifest, assets, license texts
 ```
 
-## Run
+Performance ledger: [`docs/PERFORMANCE_TODO.md`](modules/gui/qt/paintbrush/docs/PERFORMANCE_TODO.md)
+(powder bake 3.7 ms, whole input tick 2.6 ms, 60 fps live preview).
 
-```powershell
-pwsh scripts/launch-pb-noskip.ps1
-```
-
-The canonical launcher sets the plugin/QML paths and starts the app with the
-no-skip decoder profile used for frame-accurate painting. Common switches:
-
-```powershell
-# open a video in the workspace (media is never a bare argument)
-pwsh scripts/launch-pb-noskip.ps1 -Media D:\clips\dance.mp4
-
-# neural matte self-test
-pwsh scripts/launch-pb-noskip.ps1 -MatteSelfTest
-
-# alternative launcher with SAM control
-pwsh scripts/run-paintbrush.ps1 -NoSam
-pwsh scripts/run-paintbrush.ps1 -Media "D:\media\clip.mp4" -SamModel "D:\models\sam3-q4_0.ggml"
-
-# run the binary directly
-win64-meson\bin\nai-paintbrush.exe --paintbrush
-```
-
-`--paintbrush` selects the NAI PaintBrush workspace; without it the same binary
-starts the standard VLC interface. `Run Paintbrush (latest).cmd` is a developer
-convenience launcher that expects a valid local build — do not point users at a
-generic upstream VLC release and imply it includes PaintBrush.
-
-## Verification and diagnostics
-
-```powershell
-# focus the app, select Glitter powder (Shift+L), drag a stroke, capture
-pwsh scripts/pb-powder-verify.ps1 -NoBlow -StepMs 60
-
-# powder cost split on stderr (bake/pack/upload/tick)
-$env:PB_POWDER_PERF='1'; pwsh scripts/launch-pb-noskip.ps1
-```
-
-Stroke tracing is on by default and appends to `pb_stroke_trace.log`
-(16 MB rotation, `PB_POWDER_TRACE=0` disables it). The measured performance
-baseline and the remaining performance TODO live in
-[`modules/gui/qt/paintbrush/docs/PERFORMANCE_TODO.md`](modules/gui/qt/paintbrush/docs/PERFORMANCE_TODO.md).
-
-Releases are Authenticode-signed with the product leaf issued by the NAI Code
-Signing CA (`CN=NAI PaintBrush, O=NANOTRIK.AI, C=US`). See
-[`SECURITY.md`](SECURITY.md) for the thumbprint, the verification chain and the
-operator signing flow (`pwsh scripts/pb-sign.ps1`).
-
-## Engineering evidence and limitations
-
-Recorded project checks, not tests rerun by this README change:
+### Evidence
 
 - [`_REVIEW/PAINTBRUSH_2_STAGE_REPORT.md`](_REVIEW/PAINTBRUSH_2_STAGE_REPORT.md)
-  — Art/Harvest/Boost, the QRhi GPU first port, editable typography,
-  real-video/SAM3 acceptance and scale-aware image export.
 - [`_REVIEW/PAINTBRUSH_LIVING_SHOWROOM.md`](_REVIEW/PAINTBRUSH_LIVING_SHOWROOM.md)
-  — time-aware canvas preview and real MP4/WebM mux acceptance with encoder
-  checks.
 - [`_REVIEW/PAINTBRUSH_LIVING_HARVEST.md`](_REVIEW/PAINTBRUSH_LIVING_HARVEST.md)
-  — deterministic motion, photo safety limits, provenance, restoration and
-  serialization.
 - [`modules/gui/qt/paintbrush/docs/HANDOFF.md`](modules/gui/qt/paintbrush/docs/HANDOFF.md)
-  — implementation handoff and integration caveats;
-  [`DEMO.md`](modules/gui/qt/paintbrush/DEMO.md) — human demo checklist.
-
-Some reports describe earlier stages and may contain historical limitations
-superseded by later work. GPU output remains an accelerator, not the
-authoritative golden export path. The Windows developer environment and the
-configured AI dependencies are the best-evidenced setup; reproducible public
-installer delivery is not established here.
-
-## Repository layout
-
-```
-bin/                              application entry point (renamed VLC main)
-lib/  src/  include/              libVLC engine core
-modules/                          VLC plugins (codecs, video output, interfaces)
-modules/gui/qt/paintbrush/        THE PRODUCT: document, canvas, tools,
-                                  materials, GPU renderers, matting, tracking
-scripts/                          build, launch, capture, verification tools
-_REVIEW/                          recorded stage reports and render harnesses
-```
-
-## Product family and upstream credit
-
-NAI PaintBrush is one of several independent NAI applications.
-[NAI OS](https://github.com/cyberluke/NAI-OS) provides the Windows desktop shell
-and integration surface, not the PaintBrush source code or its rendering
-runtime.
-
-This repository includes the original
-[VideoLAN VLC](https://code.videolan.org/videolan/vlc) codebase. VLC and its
-contributors retain attribution for upstream work; the inherited introduction
-is preserved verbatim as
-[`README.VLC-UPSTREAM.md`](README.VLC-UPSTREAM.md).
 
 ## License
 
-- The combined application is distributed under **GPLv2 or later**. See
-  [`COPYING`](COPYING).
-- libVLC, the engine, is under **LGPLv2.1 or later**. See
-  [`COPYING.LIB`](COPYING.LIB).
-- Upstream source: <https://code.videolan.org/videolan/vlc>
-- Upstream authors and contributors: [`AUTHORS`](AUTHORS), [`THANKS`](THANKS).
-- Individual bundled components may carry their own notices.
+- Combined application: **GPL-2.0-or-later** — [`COPYING`](COPYING).
+- libVLC engine: **LGPL-2.1-or-later** — [`COPYING.LIB`](COPYING.LIB).
+- Third-party binaries and bundled AI models: [`LICENSE-THIRD-PARTY.md`](LICENSE-THIRD-PARTY.md),
+  with the full texts in [`packaging/msix/licenses/`](packaging/msix/licenses/).
+- Inherited VLC README: [`README.VLC-UPSTREAM.md`](README.VLC-UPSTREAM.md).
 
-Changes in this repository are the NAI PaintBrush application layer under
-`modules/gui/qt/paintbrush/`, the link-time rename of the main executable, and
-the build/verification scripts under `scripts/`. They are published under the
-same GPLv2-or-later terms.
-
-**NAI PaintBrush is a separately developed product built on that foundation. No
-affiliation with or endorsement by VideoLAN is implied.**
+NAI PaintBrush is an independent product built on the VLC engine. No affiliation
+with or endorsement by VideoLAN is implied.

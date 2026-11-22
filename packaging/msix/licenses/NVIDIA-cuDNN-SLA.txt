@@ -1,0 +1,581 @@
+(()=>{if(window.__fernStyleAttrs)return;window.__fernStyleAttrs=1;const A="data-fern-style",S="["+A+"]",M='meta[name="fern-csp-strict-style"]';const T=/<[a-zA-Z][^\s\/>]*(?:\s+[^\s\/>"'=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'<>]+))?)*\s*\/?>/g,N=/(\s+)([^\s\/>"'=]+)(\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'<>]+))?/g;const s=(v)=>typeof v==="string"&&/style/i.test(v)&&document.querySelector(M)!=null?v.replace(T,(t)=>t.includes(A)?t:t.replace(N,(m,g,n,x)=>n.toLowerCase()==="style"?g+A+(x??""):m)):v;const E=Element.prototype;for(const p of["innerHTML","outerHTML"]){const d=Object.getOwnPropertyDescriptor(E,p);const u=d?.set;if(u!=null)Object.defineProperty(E,p,{...d,set(v){u.call(this,s(v))}})}const I=E.insertAdjacentHTML;E.insertAdjacentHTML=function(p,v){return I.call(this,p,s(v))};const r=(e)=>{const v=e.getAttribute(A);if(v==null||e.style==null)return;if(e.style.length===0){e.style.cssText=v}else{const t=document.createElement("div").style;t.cssText=v;for(let i=0;i<t.length;i++){const n=t[i];if(e.style.getPropertyValue(n)==="")e.style.setProperty(n,t.getPropertyValue(n),t.getPropertyPriority(n))}}e.removeAttribute(A)};const b=(e)=>{if(e.style==null||e.style.length!==0)return;const v=e.getAttribute("style");if(v)e.style.cssText=v};const f=(e)=>{r(e);b(e)};const w=(n)=>{if(n.nodeType!==1)return;f(n);for(const e of n.querySelectorAll(S+",[style]"))f(e)};const o=new MutationObserver((m)=>{for(const x of m){if(x.type==="attributes")r(x.target);else for(const n of x.addedNodes)w(n)}});const O={childList:true,subtree:true,attributes:true,attributeFilter:[A]};const k=()=>{if(document.querySelector(M)!=null)o.observe(document,O);else o.disconnect()};o.observe(document,O);w(document.documentElement);document.addEventListener("DOMContentLoaded",()=>{o.takeRecords();w(document.documentElement);k()},{once:true});document.addEventListener("astro:after-swap",()=>{w(document.documentElement);k()})})();
+Software License Agreement | NVIDIA cuDNN
+[{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"docs.nvidia.com","item":"https://docs.nvidia.com/cudnn"},{"@type":"ListItem","position":2,"name":"Latest","item":"https://docs.nvidia.com/cudnn/overview"},{"@type":"ListItem","position":3,"name":"Reference","item":"https://docs.nvidia.com/cudnn/reference"},{"@type":"ListItem","position":4,"name":"Software License Agreement","item":"https://docs.nvidia.com/cudnn/reference/eula"}]},{"@context":"https://schema.org","@type":"TechArticle","headline":"Software License Agreement","url":"https://docs.nvidia.com/cudnn/reference/eula","description":"This license agreement, including exhibits attached (\"Agreement\") is a legal agreement between you and NVIDIA Corporation (\"NVIDIA\") and governs your use of a…","inLanguage":"en","dateModified":"2026-09-11T15:28:12.334Z","isPartOf":{"@type":"WebSite","name":"NVIDIA cuDNN","url":"https://docs.nvidia.com"}}]
+globalThis.__FERN_ICONS_ORIGIN__="/cudnn/_fern-files/_icons";
+(function(){const isDev = false;
+
+      (function () {
+        if (typeof document.startViewTransition !== "function") {
+          // No native VT (or a load order that already ran ClientRouter): Astro
+          // uses its plain swap path, which is what this shim produces anyway.
+          if (isDev) { console.warn("[fern-docs] startViewTransition unavailable; VT bypass not installed"); }
+          return;
+        }
+        try {
+          Object.defineProperty(document, "startViewTransition", {
+            configurable: true,
+            value: function (cb) {
+              var updateDone = Promise.resolve().then(function () { return cb && cb(); });
+              return {
+                updateCallbackDone: updateDone,
+                ready: updateDone,
+                finished: updateDone,
+                skipTransition: function () {}
+              };
+            }
+          });
+        } catch (e) {
+          // startViewTransition is non-configurable on this engine, so we can't
+          // replace it. Native VT stays live for every navigation — slower, but
+          // not a regression. Surface it in dev.
+          if (isDev) { console.warn("[fern-docs] could not replace startViewTransition:", e); }
+        }
+      })();
+    })();
+(function(){var c=document.currentScript;var l=[];var s=document.createElement("script");s.setAttribute("type","module");s.setAttribute("src","/cudnn/_astro/ClientRouter.astro_astro_type_script_index_0_lang.Dp0ajVvz.js");s.setAttribute("integrity","sha256-2yi1fzywfzk/FHvXTMLet1xFkHVEz/Jo7Xl2/HdL2m8=");s.async=false;var f=window.__fernDeferredModules||(window.__fernDeferredModules={n:0,seen:false});if(!f.bound){f.bound=true;document.addEventListener("astro:page-load",function(){f.seen=true;});}f.n++;var d=function(){f.n--;if(f.n===0&&!f.seen&&document.readyState==="complete"){document.dispatchEvent(new Event("astro:page-load"));}};s.addEventListener("load",d);s.addEventListener("error",d);l.push(s);var s=document.createElement("script");s.setAttribute("type","module");s.setAttribute("src","/cudnn/_astro/DocsLayout.astro_astro_type_script_index_0_lang.Dp0ajVvz.js");s.setAttribute("integrity","sha256-2yi1fzywfzk/FHvXTMLet1xFkHVEz/Jo7Xl2/HdL2m8=");s.async=false;var f=window.__fernDeferredModules||(window.__fernDeferredModules={n:0,seen:false});if(!f.bound){f.bound=true;document.addEventListener("astro:page-load",function(){f.seen=true;});}f.n++;var d=function(){f.n--;if(f.n===0&&!f.seen&&document.readyState==="complete"){document.dispatchEvent(new Event("astro:page-load"));}};s.addEventListener("load",d);s.addEventListener("error",d);l.push(s);var s=document.createElement("script");s.setAttribute("type","module");s.setAttribute("src","/cudnn/_astro/DocsLayout.astro_astro_type_script_index_1_lang.Dp0ajVvz.js");s.setAttribute("integrity","sha256-2yi1fzywfzk/FHvXTMLet1xFkHVEz/Jo7Xl2/HdL2m8=");s.async=false;var f=window.__fernDeferredModules||(window.__fernDeferredModules={n:0,seen:false});if(!f.bound){f.bound=true;document.addEventListener("astro:page-load",function(){f.seen=true;});}f.n++;var d=function(){f.n--;if(f.n===0&&!f.seen&&document.readyState==="complete"){document.dispatchEvent(new Event("astro:page-load"));}};s.addEventListener("load",d);s.addEventListener("error",d);l.push(s);var s=document.createElement("script");s.setAttribute("type","module");s.setAttribute("src","/cudnn/_astro/DocsLayout.astro_astro_type_script_index_2_lang.Dp0ajVvz.js");s.setAttribute("integrity","sha256-2yi1fzywfzk/FHvXTMLet1xFkHVEz/Jo7Xl2/HdL2m8=");s.async=false;var f=window.__fernDeferredModules||(window.__fernDeferredModules={n:0,seen:false});if(!f.bound){f.bound=true;document.addEventListener("astro:page-load",function(){f.seen=true;});}f.n++;var d=function(){f.n--;if(f.n===0&&!f.seen&&document.readyState==="complete"){document.dispatchEvent(new Event("astro:page-load"));}};s.addEventListener("load",d);s.addEventListener("error",d);l.push(s);var s=document.createElement("script");s.setAttribute("type","module");s.setAttribute("src","/cudnn/_astro/DocsLayout.astro_astro_type_script_index_3_lang.Dp0ajVvz.js");s.setAttribute("integrity","sha256-2yi1fzywfzk/FHvXTMLet1xFkHVEz/Jo7Xl2/HdL2m8=");s.async=false;var f=window.__fernDeferredModules||(window.__fernDeferredModules={n:0,seen:false});if(!f.bound){f.bound=true;document.addEventListener("astro:page-load",function(){f.seen=true;});}f.n++;var d=function(){f.n--;if(f.n===0&&!f.seen&&document.readyState==="complete"){document.dispatchEvent(new Event("astro:page-load"));}};s.addEventListener("load",d);s.addEventListener("error",d);l.push(s);var s=document.createElement("script");s.setAttribute("type","module");s.setAttribute("src","/cudnn/_astro/DocsLayout.astro_astro_type_script_index_4_lang.Dp0ajVvz.js");s.setAttribute("integrity","sha256-2yi1fzywfzk/FHvXTMLet1xFkHVEz/Jo7Xl2/HdL2m8=");s.async=false;var f=window.__fernDeferredModules||(window.__fernDeferredModules={n:0,seen:false});if(!f.bound){f.bound=true;document.addEventListener("astro:page-load",function(){f.seen=true;});}f.n++;var d=function(){f.n--;if(f.n===0&&!f.seen&&document.readyState==="complete"){document.dispatchEvent(new Event("astro:page-load"));}};s.addEventListener("load",d);s.addEventListener("error",d);l.push(s);var s=document.createElement("script");s.setAttribute("type","module");s.setAttribute("src","/cudnn/_astro/DocsLayout.astro_astro_type_script_index_5_lang.Dp0ajVvz.js");s.setAttribute("integrity","sha256-2yi1fzywfzk/FHvXTMLet1xFkHVEz/Jo7Xl2/HdL2m8=");s.async=false;var f=window.__fernDeferredModules||(window.__fernDeferredModules={n:0,seen:false});if(!f.bound){f.bound=true;document.addEventListener("astro:page-load",function(){f.seen=true;});}f.n++;var d=function(){f.n--;if(f.n===0&&!f.seen&&document.readyState==="complete"){document.dispatchEvent(new Event("astro:page-load"));}};s.addEventListener("load",d);s.addEventListener("error",d);l.push(s);var s=document.createElement("script");s.setAttribute("type","module");s.setAttribute("src","/cudnn/_astro/DocsLayout.astro_astro_type_script_index_6_lang.Dp0ajVvz.js");s.setAttribute("integrity","sha256-2yi1fzywfzk/FHvXTMLet1xFkHVEz/Jo7Xl2/HdL2m8=");s.async=false;var f=window.__fernDeferredModules||(window.__fernDeferredModules={n:0,seen:false});if(!f.bound){f.bound=true;document.addEventListener("astro:page-load",function(){f.seen=true;});}f.n++;var d=function(){f.n--;if(f.n===0&&!f.seen&&document.readyState==="complete"){document.dispatchEvent(new Event("astro:page-load"));}};s.addEventListener("load",d);s.addEventListener("error",d);l.push(s);var s=document.createElement("script");s.setAttribute("type","module");s.setAttribute("src","/cudnn/_astro/DocsLayout.astro_astro_type_script_index_7_lang.Dp0ajVvz.js");s.setAttribute("integrity","sha256-2yi1fzywfzk/FHvXTMLet1xFkHVEz/Jo7Xl2/HdL2m8=");s.async=false;var f=window.__fernDeferredModules||(window.__fernDeferredModules={n:0,seen:false});if(!f.bound){f.bound=true;document.addEventListener("astro:page-load",function(){f.seen=true;});}f.n++;var d=function(){f.n--;if(f.n===0&&!f.seen&&document.readyState==="complete"){document.dispatchEvent(new Event("astro:page-load"));}};s.addEventListener("load",d);s.addEventListener("error",d);l.push(s);var s=document.createElement("script");s.setAttribute("type","module");s.setAttribute("src","/cudnn/_astro/DocsLayout.astro_astro_type_script_index_8_lang.Dp0ajVvz.js");s.setAttribute("integrity","sha256-2yi1fzywfzk/FHvXTMLet1xFkHVEz/Jo7Xl2/HdL2m8=");s.async=false;var f=window.__fernDeferredModules||(window.__fernDeferredModules={n:0,seen:false});if(!f.bound){f.bound=true;document.addEventListener("astro:page-load",function(){f.seen=true;});}f.n++;var d=function(){f.n--;if(f.n===0&&!f.seen&&document.readyState==="complete"){document.dispatchEvent(new Event("astro:page-load"));}};s.addEventListener("load",d);s.addEventListener("error",d);l.push(s);var s=document.createElement("script");s.setAttribute("type","module");s.setAttribute("src","/cudnn/_astro/_...slug_.astro_astro_type_script_index_0_lang.Dp0ajVvz.js");s.setAttribute("integrity","sha256-2yi1fzywfzk/FHvXTMLet1xFkHVEz/Jo7Xl2/HdL2m8=");s.async=false;var f=window.__fernDeferredModules||(window.__fernDeferredModules={n:0,seen:false});if(!f.bound){f.bound=true;document.addEventListener("astro:page-load",function(){f.seen=true;});}f.n++;var d=function(){f.n--;if(f.n===0&&!f.seen&&document.readyState==="complete"){document.dispatchEvent(new Event("astro:page-load"));}};s.addEventListener("load",d);s.addEventListener("error",d);l.push(s);var s=document.createElement("script");s.setAttribute("type","module");s.setAttribute("src","/cudnn/_astro/DocsLayout.astro_astro_type_script_index_9_lang.Dp0ajVvz.js");s.setAttribute("integrity","sha256-2yi1fzywfzk/FHvXTMLet1xFkHVEz/Jo7Xl2/HdL2m8=");s.async=false;var f=window.__fernDeferredModules||(window.__fernDeferredModules={n:0,seen:false});if(!f.bound){f.bound=true;document.addEventListener("astro:page-load",function(){f.seen=true;});}f.n++;var d=function(){f.n--;if(f.n===0&&!f.seen&&document.readyState==="complete"){document.dispatchEvent(new Event("astro:page-load"));}};s.addEventListener("load",d);s.addEventListener("error",d);l.push(s);var i=function(){for(var k=0;k<l.length;k++){var s=l[k];(c&&c.parentNode?c.parentNode:document.head).insertBefore(s,c);}};if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",i);}else{i();}})();
+(function () {
+        if (window.__fernStyledJsxSwapGuardBound) { return; }
+        window.__fernStyledJsxSwapGuardBound = true;
+        var moved = [];
+        document.addEventListener("astro:before-swap", function (event) {
+          moved = Array.prototype.slice.call(document.querySelectorAll("style[data-styled-jsx]"));
+          var incomingHead = event.newDocument && event.newDocument.head;
+          if (!incomingHead) { return; }
+          for (var i = 0; i < moved.length; i++) {
+            incomingHead.appendChild(moved[i]);
+          }
+        });
+        document.addEventListener("astro:after-swap", function () {
+          for (var i = 0; i < moved.length; i++) {
+            if (moved[i] && !moved[i].parentNode) { document.head.appendChild(moved[i]); }
+          }
+          moved = [];
+        });
+      })();
+window.__FERN_SITE_STATE__={"domain":"docs.nvidia.com","basePath":"/cudnn","logoText":"cuDNN","darkModeCode":false,"isWhitelabeled":true,"isAirgapped":false,"isDiscriminatedUnionDropdownEnabled":false,"isAskAiEnabled":false,"isAskAiPiiMaskingEnabled":false,"isPrefetchDisabled":true,"isDefaultSearchFilterOn":false,"isPrioritizeCurrentProductOn":true,"isPopularSearchesOn":false,"isSearchDisabled":false,"apiReferenceLayout":"indented","apiReferenceExpandProperties":false,"breadcrumbsCurrentPage":false,"breadcrumbsSticky":false,"breadcrumbsDisableNonPageAncestors":false,"isApiKeyInjectionAvailable":false,"isPrintMode":false}
+(function () {
+        var forcedTheme = null;
+        function applyTheme(el) {
+          try {
+            var theme = forcedTheme;
+            if (!theme) {
+              var stored = localStorage.getItem("theme");
+              theme = stored === "light" || stored === "dark" ? stored : (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+            }
+            if (!el.classList.contains(theme)) {
+              el.classList.remove("light", "dark");
+              el.classList.add(theme);
+            }
+            if (el.style.colorScheme !== theme) {
+              el.style.colorScheme = theme;
+            }
+          } catch (e) {
+          }
+        }
+        // Chrome regions (header / sidebar) whose configured background contrasts with
+        // the page theme carry data-light-theme-class / data-dark-theme-class; give each
+        // the class for the root's current theme so its color vars re-scope with it.
+        function scopeChrome(el) {
+          try {
+            if (!el.querySelectorAll) return;
+            var dark = el.classList.contains("dark");
+            var nodes = el.querySelectorAll("[data-light-theme-class],[data-dark-theme-class]");
+            for (var i = 0; i < nodes.length; i++) {
+              var node = nodes[i];
+              var want = node.getAttribute(dark ? "data-dark-theme-class" : "data-light-theme-class");
+              node.classList.remove("light", "dark");
+              if (want) node.classList.add(want);
+            }
+          } catch (e) {
+          }
+        }
+        // Prepare the incoming root before Astro swaps it; page-load runs after paint.
+        document.addEventListener("astro:before-swap", function (event) {
+          applyTheme(event.newDocument.documentElement);
+          scopeChrome(event.newDocument.documentElement);
+        });
+        applyTheme(document.documentElement);
+        if (document.body) {
+          scopeChrome(document.documentElement);
+        } else {
+          document.addEventListener("DOMContentLoaded", function () { scopeChrome(document.documentElement); });
+        }
+        // The theme switcher (next-themes) flips the root class after load.
+        if (typeof MutationObserver === "function") {
+          var lastDark = document.documentElement.classList.contains("dark");
+          new MutationObserver(function () {
+            var dark = document.documentElement.classList.contains("dark");
+            if (dark === lastDark) return;
+            lastDark = dark;
+            scopeChrome(document.documentElement);
+          })
+            .observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+        }
+      })();
+(function () {
+        if (window.__fernRuntimeHeadStyleSwapGuardBound) { return; }
+        window.__fernRuntimeHeadStyleSwapGuardBound = true;
+        var PERSIST_ATTR = "data-astro-transition-persist";
+        var fromIncoming = new WeakSet();
+        var nextId = 0;
+        var serverStyles = document.head.querySelectorAll("style");
+        for (var k = 0; k < serverStyles.length; k++) {
+          fromIncoming.add(serverStyles[k]);
+        }
+        document.addEventListener("astro:before-swap", function (event) {
+          var incomingDocument = event.newDocument;
+          var incomingHead = incomingDocument && incomingDocument.head;
+          if (!incomingHead) { return; }
+          var incomingStyles = incomingHead.querySelectorAll("style");
+          var incomingTexts = Object.create(null);
+          for (var i = 0; i < incomingStyles.length; i++) {
+            fromIncoming.add(incomingStyles[i]);
+            incomingTexts[incomingStyles[i].textContent] = true;
+          }
+          var liveStyles = document.head.querySelectorAll("style");
+          for (var j = 0; j < liveStyles.length; j++) {
+            var el = liveStyles[j];
+            if (
+              fromIncoming.has(el) ||
+              el.hasAttribute("data-styled-jsx") ||
+              el.hasAttribute("data-vite-dev-id") ||
+              incomingTexts[el.textContent] === true
+            ) {
+              continue;
+            }
+            var id = el.getAttribute(PERSIST_ATTR);
+            if (!id) {
+              id = "fern-runtime-style-" + nextId++;
+              el.setAttribute(PERSIST_ATTR, id);
+            }
+            if (incomingHead.querySelector("[" + PERSIST_ATTR + '="' + id + '"]') == null) {
+              var placeholder = incomingDocument.createElement("style");
+              placeholder.setAttribute(PERSIST_ATTR, id);
+              incomingHead.appendChild(placeholder);
+            }
+          }
+        });
+      })();
+(function(){var c=document.currentScript;var s=document.createElement("script");s.setAttribute("src","/cudnn/_fern-files/nvidia-cudnn.docs.buildwithfern.com/fb56ba39d065e3dc3bdb5dbfad51128aa37e1f4262637f55369af1a10bebd89f/_dot_dot_/_dot_dot_/_dot_dot_/_dot_dot_/_dot_dot_/_dot_dot_/_dot_dot_/tmp/fern-theme-215284d3bcdf1c5a/theme_asset_5.js");s.setAttribute("data-fern-custom-script","");s.async=false;(c&&c.parentNode?c.parentNode:document.head).insertBefore(s,c);})();
+For AI agents: a documentation index is available at the root level at /llms.txt. Append /llms.txt to any URL for a page-level index, or .md for the markdown version of any page.
+(function(){let e=(e,t)=>{let n=async()=>{await(await e())()},r=typeof t.value==`object`?t.value:void 0,i={timeout:r==null?void 0:r.timeout};`requestIdleCallback`in window?window.requestIdleCallback(n,i):setTimeout(n,i.timeout||200)};(self.Astro||(self.Astro={})).idle=e,window.dispatchEvent(new Event(`astro:idle`))})();
+(function(){var c=document.currentScript;var s=document.createElement("script");s.text="(function(){function e(t){\"@babel/helpers - typeof\";return e=typeof Symbol==`function`&&typeof Symbol.iterator==`symbol`?function(e){return typeof e}:function(e){return e&&typeof Symbol==`function`&&e.constructor===Symbol&&e!==Symbol.prototype?`symbol`:typeof e},e(t)}function t(t,n){if(e(t)!=`object`||!t)return t;var r=t[Symbol.toPrimitive];if(r!==void 0){var i=r.call(t,n||`default`);if(e(i)!=`object`)return i;throw TypeError(`@@toPrimitive must return a primitive value.`)}return(n===`string`?String:Number)(t)}function n(n){var r=t(n,`string`);return e(r)==`symbol`?r:r+``}function r(e,t,r){return(t=n(t))in e?Object.defineProperty(e,t,{value:r,enumerable:!0,configurable:!0,writable:!0}):e[t]=r,e}let i=/* @__PURE__ */ new Set([`__proto__`,`constructor`,`prototype`]);{let e={0:e=>a(e),1:e=>n(e),2:e=>new RegExp(e),3:e=>new Date(e),4:e=>new Map(n(e)),5:e=>new Set(n(e)),6:e=>BigInt(e),7:e=>new URL(e),8:e=>new Uint8Array(e),9:e=>new Uint16Array(e),10:e=>new Uint32Array(e),11:e=>1/0*e},t=t=>{let[n,r]=t;return n in e?e[n](r):void 0},n=e=>e.map(t),a=e=>typeof e!=`object`||!e?e:Object.fromEntries(Object.entries(e).map(([e,n])=>[e,t(n)]));class o extends HTMLElement{constructor(...e){super(...e),r(this,`Component`,void 0),r(this,`hydrator`,void 0),r(this,`hydrate`,async()=>{var e;if(!this.hydrator||!this.isConnected)return;let t=(e=this.parentElement)==null?void 0:e.closest(`astro-island[ssr]`);if(t){t.addEventListener(`astro:hydrate`,this.hydrate,{once:!0});return}let n=this.querySelectorAll(`astro-slot`),r={},i=this.querySelectorAll(`template[data-astro-template]`);for(let e of i){let t=e.closest(this.tagName);t!=null&&t.isSameNode(this)&&(r[e.getAttribute(`data-astro-template`)||`default`]=e.innerHTML,e.remove())}for(let e of n){let t=e.closest(this.tagName);t!=null&&t.isSameNode(this)&&(r[e.getAttribute(`name`)||`default`]=e.innerHTML)}let o;try{o=this.hasAttribute(`props`)?a(JSON.parse(this.getAttribute(`props`))):{}}catch(e){let t=this.getAttribute(`component-url`)||`\u003cunknown>`,n=this.getAttribute(`component-export`);throw n&&(t+=` (export ${n})`),console.error(`[hydrate] Error parsing props for component ${t}`,this.getAttribute(`props`),e),e}await this.hydrator(this)(this.Component,o,r,{client:this.getAttribute(`client`)}),this.removeAttribute(`ssr`),this.dispatchEvent(new CustomEvent(`astro:hydrate`))}),r(this,`unmount`,()=>{this.isConnected||this.dispatchEvent(new CustomEvent(`astro:unmount`))})}disconnectedCallback(){document.removeEventListener(`astro:after-swap`,this.unmount),document.addEventListener(`astro:after-swap`,this.unmount,{once:!0})}connectedCallback(){if(!this.hasAttribute(`await-children`)||document.readyState===`interactive`||document.readyState===`complete`)this.childrenConnectedCallback();else{let e=()=>{document.removeEventListener(`DOMContentLoaded`,e),t.disconnect(),this.childrenConnectedCallback()},t=new MutationObserver(()=>{var t;((t=this.lastChild)==null?void 0:t.nodeType)===Node.COMMENT_NODE&&this.lastChild.nodeValue===`astro:end`&&(this.lastChild.remove(),e())});t.observe(this,{childList:!0}),document.addEventListener(`DOMContentLoaded`,e)}}async childrenConnectedCallback(){let e=this.getAttribute(`before-hydration-url`);e&&await import(e),this.start()}getRetryImportUrl(e){let t=new URL(e,document.baseURI);return t.searchParams.set(`astro-retry`,Date.now().toString()),t.toString()}async importWithRetry(e){try{return await import(e)}catch(t){return await new Promise(e=>setTimeout(e,1e3)),import(this.getRetryImportUrl(e))}}handleHydrationError(e){let t=this.getAttribute(`component-url`),n=new CustomEvent(`astro:hydration-error`,{cancelable:!0,bubbles:!0,composed:!0,detail:{error:e,componentUrl:t}});this.dispatchEvent(n)&&console.error(`[astro-island] Error hydrating ${t}`,e)}async start(){let e=JSON.parse(this.getAttribute(`opts`)),t=this.getAttribute(`client`);if(Astro[t]===void 0)window.addEventListener(`astro:${t}`,()=>this.start(),{once:!0});else try{await Astro[t](async()=>{let e=this.getAttribute(`renderer-url`);try{let[t,{default:n}]=await Promise.all([this.importWithRetry(this.getAttribute(`component-url`)),e?this.importWithRetry(e):Promise.resolve({default:()=>()=>{}})]),r=this.getAttribute(`component-export`)||`default`;if(r.includes(`.`)){this.Component=t;for(let e of r.split(`.`)){if(i.has(e)||!this.Component||typeof this.Component!=`object`&&typeof this.Component!=`function`||!Object.hasOwn(this.Component,e))throw Error(`Invalid component export path: ${r}`);this.Component=this.Component[e]}}else{if(i.has(r))throw Error(`Invalid component export path: ${r}`);this.Component=t[r]}return this.hydrator=n,this.hydrate}catch(e){return this.handleHydrationError(e),()=>{}}},e,this)}catch(e){this.handleHydrationError(e)}}attributeChangedCallback(){this.hydrate()}}r(o,`observedAttributes`,[`props`]),customElements.get(`astro-island`)||customElements.define(`astro-island`,o)}})();";s.async=false;(c&&c.parentNode?c.parentNode:document.head).insertBefore(s,c);})();
+(function(){var p=new URLSearchParams(window.location.search),d=document.documentElement.dataset,e=p.get("embedded")==="true",h=p.get("header"),f=p.get("footer"),s=p.get("sidebar");if(e){d.embedded="true"}if(h==="false"||(e&&h!=="true")){d.hideHeader="true"}if(f==="false"||(e&&f!=="true")){d.hideFooter="true"}if(s==="false"||(e&&s!=="true")){d.hideSidebar="true"}})()
+{"tabIdToTabbedId":{},"versionSwitcher":{"versions":[{"versionId":"Latest","title":"Latest","slug":"cudnn/reference/eula","defaultSlug":"cudnn/reference/eula","default":true,"hidden":false}],"fallbackVersion":{"versionId":"Latest","title":"Latest"},"currentVersionId":"Latest","currentVersionSlug":"cudnn","useDenseLayout":false,"isCohere":false}}
+(function(){let e=async e=>{await(await e())()};(self.Astro||(self.Astro={})).load=e,window.dispatchEvent(new Event(`astro:load`))})();
+((e, i, s, u, m, a, l, h) => {
+	let d = document.documentElement, w = ["light", "dark"];
+	function p(n) {
+		(Array.isArray(e) ? e : [e]).forEach((y) => {
+			let k = y === "class", S = k && a ? m.map((f) => a[f] || f) : m;
+			k ? (d.classList.remove(...S), d.classList.add(a && a[n] ? a[n] : n)) : d.setAttribute(y, n);
+		}), R(n);
+	}
+	function R(n) {
+		h && w.includes(n) && (d.style.colorScheme = n);
+	}
+	function c() {
+		return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+	}
+	if (u) p(u);
+	else try {
+		let n = localStorage.getItem(i) || s;
+		p(l && n === "system" ? c() : n);
+	} catch (n) {}
+})("class","theme","system",null,["light","dark"],null,true,true)
+cuDNN
+Latest
+Latest
+Search
+/
+(function () {
+        // Only write when the value changes: every write restyles the whole
+        // document. The ResizeObserver path reads `contentRect` after layout
+        // instead of forcing a synchronous layout before first paint.
+        function applyHeaderHeight(height) {
+          var value = height + "px";
+          if (document.documentElement.style.getPropertyValue("--header-height") !== value) {
+            document.documentElement.style.setProperty("--header-height", value);
+          }
+        }
+        function syncHeaderHeight() {
+          var header = document.getElementById("fern-header");
+          if (header) {
+            var style = window.getComputedStyle(header);
+            applyHeaderHeight(header.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom));
+          }
+        }
+        var ro;
+        function setup() {
+          var header = document.getElementById("fern-header");
+          if (header && "ResizeObserver" in window) {
+            if (ro) { ro.disconnect(); }
+            ro = new ResizeObserver(function (entries) {
+              var entry = entries[entries.length - 1];
+              if (entry) { applyHeaderHeight(entry.contentRect.height); }
+            });
+            ro.observe(header);
+          } else {
+            (window.requestAnimationFrame || window.setTimeout)(syncHeaderHeight);
+          }
+        }
+        setup();
+        if (!window.__fernHeaderHeightBound) {
+          window.__fernHeaderHeightBound = true;
+          document.addEventListener("astro:page-load", setup);
+          // The swap replaces <html>'s attributes (including the inline style
+          // holding the synced value), so carry it over to the incoming document
+          // or the header/main/sidebar briefly snap to the stylesheet fallback.
+          document.addEventListener("astro:before-swap", function (event) {
+            var current = document.documentElement.style.getPropertyValue("--header-height");
+            if (current && event.newDocument) {
+              event.newDocument.documentElement.style.setProperty("--header-height", current);
+            }
+          });
+        }
+      })();
+Skip to navigation
+(function(){function e(){let e=globalThis.scheduler;return typeof e?.yield==`function`?e.yield():new Promise(e=>setTimeout(e,0))}function t(t,n,r){let i=[`pointerdown`,`touchstart`,`keydown`,`focusin`],a={capture:!0,passive:!0},o,s=!1,c=()=>{o!=null&&(typeof window.cancelIdleCallback==`function`?window.cancelIdleCallback(o):window.clearTimeout(o),o=void 0)},l=()=>{if(!s){s=!0,c();for(let e of i)r.removeEventListener(e,l,a);t().then(async t=>{await e(),await t()})}},u=n.value;if(typeof u==`string`&&u!==``&&new URLSearchParams(window.location.search).has(u))l();else{for(let e of i)r.addEventListener(e,l,a);o=typeof window.requestIdleCallback==`function`?window.requestIdleCallback(l,{timeout:2e3}):window.setTimeout(l,200)}}(self.Astro||(self.Astro={})).deferred=t,window.dispatchEvent(new Event(`astro:deferred`))})();
+On this page
+LICENSE AGREEMENT FOR NVIDIA SOFTWARE DEVELOPMENT KITS
+License.
+Grant
+Distribution Requirements
+Authorized Users
+Pre-Release SDK
+Updates
+Components Under Other Licenses
+Reservation of Rights
+Limitations.
+Ownership.
+No Warranties.
+Limitations of Liability.
+Termination.
+General.
+cuDNN SUPPLEMENT TO SOFTWARE LICENSE AGREEMENT FOR NVIDIA SOFTWARE DEVELOPMENT KITS
+Scroll to top
+Reference
+Software License Agreement
+Copy page
+|
+View as Markdown
+|
+Open in Claude
+|
+More actions
+This page is for version Latest (default).
+For other versions, use one of these documentation indexes:
+- Latest (default): https://docs.nvidia.com/cudnn/latest/llms.txt
+LICENSE AGREEMENT FOR NVIDIA SOFTWARE DEVELOPMENT KITS
+This license agreement, including exhibits attached (“Agreement”) is a legal agreement between you and NVIDIA Corporation (“NVIDIA”) and governs your use of a NVIDIA software development kit (“SDK”).
+Each SDK has its own set of software and materials, but here is a description of the types of items that may be included in a SDK: source code, header files, APIs, data sets and assets (examples include images, textures, models, scenes, videos, native API input/output files), binary software, sample code, libraries, utility programs, programming code and documentation.
+This Agreement can be accepted only by an adult of legal age of majority in the country in which the SDK is used.
+If you are entering into this Agreement on behalf of a company or other legal entity, you represent that you have the legal authority to bind the entity to this Agreement, in which case “you” will mean the entity you represent.
+If you don’t have the required age or authority to accept this Agreement, or if you don’t accept all the terms and conditions of this Agreement, do not download, install or use the SDK.
+You agree to use the SDK only for purposes that are permitted by (a) this Agreement, and (b) any applicable law, regulation or generally accepted practices or guidelines in the relevant jurisdictions.
+License.
+Grant
+Subject to the terms of this Agreement, NVIDIA hereby grants you a non-exclusive, nontransferable license, without the right to sublicense (except as expressly provided in this Agreement) to:
+Install and use the SDK,
+Modify and create derivative works of sample source code delivered in the SDK, and
+Distribute those portions of the SDK that are identified in this Agreement as distributable, as incorporated in object code format into a software application that meets the distribution requirements indicated in this Agreement.
+Distribution Requirements
+These are the distribution requirements for you to exercise the distribution grant:
+Your application must have material additional functionality, beyond the included portions of the SDK.
+The distributable portions of the SDK shall only be accessed by your application.
+The following notice shall be included in modifications and derivative works of sample source code distributed: “This software contains source code provided by NVIDIA Corporation.”
+Unless a developer tool is identified in this Agreement as distributable, it is delivered for your internal use only.
+The terms under which you distribute your application must be consistent with the terms of this Agreement, including (without limitation) terms relating to the license grant and license restrictions and protection of NVIDIA’s intellectual property rights. Additionally, you agree that you will protect the privacy, security and legal rights of your application users.
+You agree to notify NVIDIA in writing of any known or suspected distribution or use of the SDK not in compliance with the requirements of this Agreement, and to enforce the terms of your agreements with respect to distributed SDK.
+Authorized Users
+You may allow employees and contractors of your entity or of your subsidiary(ies) to access and use the SDK from your secure network to perform work on your behalf.
+If you are an academic institution you may allow users enrolled or employed by the academic institution to access and use the SDK from your secure network.
+You are responsible for the compliance with the terms of this Agreement by your authorized users. If you become aware that your authorized users didn’t follow the terms of this Agreement, you agree to take reasonable steps to resolve the non-compliance and prevent new occurrences.
+Pre-Release SDK
+The SDK versions identified as alpha, beta, preview or otherwise as pre-release, may not be fully functional, may contain errors or design flaws, and may have reduced or different security, privacy, accessibility, availability, and reliability standards relative to commercial versions of NVIDIA software and materials. Use of a pre-release SDK may result in unexpected results, loss of data, project delays or other unpredictable damage or loss.
+You may use a pre-release SDK at your own risk, understanding that pre-release SDKs are not intended for use in production or business-critical systems.
+NVIDIA may choose not to make available a commercial version of any pre-release SDK. NVIDIA may also choose to abandon development and terminate the availability of a prerelease SDK at any time without liability.
+Updates
+NVIDIA may, at its option, make available patches, workarounds or other updates to this SDK. Unless the updates are provided with their separate governing terms, they are deemed part of the SDK licensed to you as provided in this Agreement.
+You agree that the form and content of the SDK that NVIDIA provides may change without prior notice to you. While NVIDIA generally maintains compatibility between versions, NVIDIA may in some cases make changes that introduce incompatibilities in future versions of the SDK.
+Components Under Other Licenses
+The SDK may come bundled with, or otherwise include or be distributed with, NVIDIA or third party software licensed with separate legal notices or terms as may be described in proprietary notices accompanying the SDK. If and to the extent there is a conflict between the terms in this Agreement and the license terms associated with the component, the license terms associated with the components control only to the extent necessary to resolve the conflict.
+Reservation of Rights
+NVIDIA reserves all rights, title and interest in and to the SDK not expressly granted to you under this Agreement.
+Limitations.
+The following license limitations apply to your use of the SDK:
+2.1 You may not reverse engineer, decompile or disassemble, or remove copyright or other proprietary notices from any portion of the SDK or copies of the SDK.
+2.2 Except as expressly provided in this Agreement, you may not copy, sell, rent, sublicense, transfer, distribute, modify, or create derivative works of any portion of the SDK.
+2.3 Unless you have an agreement with NVIDIA for this purpose, you may not indicate that an application created with the SDK is sponsored or endorsed by NVIDIA.
+2.4 You may not bypass, disable, or circumvent any encryption, security, digital rights management or authentication mechanism in the SDK.
+2.5 You may not use the SDK in any manner that would cause it to become subject to an open source software license. As examples, licenses that require as a condition of use, modification, and/or distribution that the SDK be (i) disclosed or distributed in source code form; (ii) licensed for the purpose of making derivative works; or (iii) redistributable at no charge.
+2.6 You acknowledge that the SDK as delivered is not tested or certified by NVIDIA for use in connection with the design, construction, maintenance, and/or operation of any system where the use or failure of such system could result in a situation that threatens the safety of human life or results in catastrophic damages (each, a “Critical Application”). Examples of Critical Applications include use in avionics, navigation, autonomous vehicle applications, ai solutions for automotive products, military, medical, life support or other life critical applications. NVIDIA shall not be liable to you or any third party, in whole or in part, for any claims or damages arising from such uses. You are solely responsible for ensuring that any product or service developed with the SDK as a whole includes sufficient features to comply with all applicable legal and regulatory standards and requirements.
+2.7 You agree to defend, indemnify and hold harmless NVIDIA and its affiliates, and their respective employees, contractors, agents, officers and directors, from and against any and all claims, damages, obligations, losses, liabilities, costs or debt, fines, restitutions and expenses (including but not limited to attorney’s fees and costs incident to establishing the right of indemnification) arising out of or related to products or services that use the SDK in or for Critical Applications, and for use of the SDK, outside of the scope of this Agreement or not in compliance with its terms.
+Ownership.
+3.1 NVIDIA or its licensors hold all rights, title and interest in and to the SDK and its modifications and derivative works, including their respective intellectual property rights, subject to your rights under Section 3.2. This SDK may include software and materials from NVIDIA’s licensors, and these licensors are intended third party beneficiaries that may enforce this Agreement with respect to their intellectual property rights.
+3.2 You hold all rights, title and interest in and to your applications and your derivative works of the sample source code delivered in the SDK, including their respective intellectual property rights, subject to NVIDIA’s rights under section 3.1.
+3.3 You may, but don’t have to, provide to NVIDIA suggestions, feature requests or other feedback regarding the SDK, including possible enhancements or modifications to the SDK. For any feedback that you voluntarily provide, you hereby grant NVIDIA and its affiliates a perpetual, non-exclusive, worldwide, irrevocable license to use, reproduce, modify, license, sublicense (through multiple tiers of sublicensees), and distribute (through multiple tiers of distributors) it without the payment of any royalties or fees to you. NVIDIA will use feedback at its choice. NVIDIA is constantly looking for ways to improve its products, so you may send feedback to NVIDIA through the developer portal at
+https://developer.nvidia.com
+.
+No Warranties.
+THE SDK IS PROVIDED BY NVIDIA “AS IS” AND “WITH ALL FAULTS.” TO THE MAXIMUM EXTENT PERMITTED BY LAW, NVIDIA AND ITS AFFILIATES EXPRESSLY DISCLAIM ALL WARRANTIES OF ANY KIND OR NATURE, WHETHER EXPRESS, IMPLIED OR STATUTORY, INCLUDING, BUT NOT LIMITED TO, ANY WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, NON-INFRINGEMENT, OR THE ABSENCE OF ANY DEFECTS THEREIN, WHETHER LATENT OR PATENT. NO WARRANTY IS MADE ON THE BASIS OF TRADE USAGE, COURSE OF DEALING OR COURSE OF TRADE.
+Limitations of Liability.
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, NVIDIA AND ITS AFFILIATES SHALL NOT BE LIABLE FOR ANY SPECIAL, INCIDENTAL, PUNITIVE OR CONSEQUENTIAL DAMAGES, OR ANY LOST PROFITS, LOSS OF USE, LOSS OF DATA OR LOSS OF GOODWILL, OR THE COSTS OF PROCURING SUBSTITUTE PRODUCTS, ARISING OUT OF OR IN CONNECTION WITH THIS AGREEMENT OR THE USE OR PERFORMANCE OF THE SDK, WHETHER SUCH LIABILITY ARISES FROM ANY CLAIM BASED UPON BREACH OF CONTRACT, BREACH OF WARRANTY, TORT (INCLUDING NEGLIGENCE), PRODUCT LIABILITY OR ANY OTHER CAUSE OF ACTION OR THEORY OF LIABILITY. IN NO EVENT WILL NVIDIA’S AND ITS AFFILIATES TOTAL CUMULATIVE LIABILITY UNDER OR ARISING OUT OF THIS AGREEMENT EXCEED US$10.00. THE NATURE OF THE LIABILITY OR THE NUMBER OF CLAIMS OR SUITS SHALL NOT ENLARGE OR EXTEND THIS LIMIT.
+These exclusions and limitations of liability shall apply regardless if NVIDIA or its affiliates have been advised of the possibility of such damages, and regardless of whether a remedy fails its essential purpose. These exclusions and limitations of liability form an essential basis of the bargain between the parties, and, absent any of these exclusions or limitations of liability, the provisions of this Agreement, including, without limitation, the economic terms, would be substantially different.
+Termination.
+6.1 This Agreement will continue to apply until terminated by either you or NVIDIA as described below.
+6.2 If you want to terminate this Agreement, you may do so by stopping to use the SDK.
+6.3 NVIDIA may, at any time, terminate this Agreement if: (i) you fail to comply with any term of this Agreement and the non-compliance is not fixed within thirty (30) days following notice from NVIDIA (or immediately if you violate NVIDIA’s intellectual property rights); (ii) you commence or participate in any legal proceeding against NVIDIA with respect to the SDK; or (iii) NVIDIA decides to no longer provide the SDK in a country or, in NVIDIA’s sole discretion, the continued use of it is no longer commercially viable.
+6.4 Upon any termination of this Agreement, you agree to promptly discontinue use of the SDK and destroy all copies in your possession or control. Your prior distributions in accordance with this Agreement are not affected by the termination of this Agreement. Upon written request, you will certify in writing that you have complied with your commitments under this section. Upon any termination of this Agreement all provisions survive except for the licenses granted to you.
+General.
+If you wish to assign this Agreement or your rights and obligations, including by merger, consolidation, dissolution or operation of law, contact NVIDIA to ask for permission. Any attempted assignment not approved by NVIDIA in writing shall be void and of no effect. NVIDIA may assign, delegate or transfer this Agreement and its rights and obligations, and if to a non-affiliate you will be notified.
+You agree to cooperate with NVIDIA and provide reasonably requested information to verify your compliance with this Agreement.
+This Agreement will be governed in all respects by the laws of the United States and of the State of Delaware as those laws are applied to contracts entered into and performed entirely within Delaware by Delaware residents, without regard to the conflicts of laws principles. The United Nations Convention on Contracts for the International Sale of Goods is specifically disclaimed. You agree to all terms of this Agreement in the English language.
+The state or federal courts residing in Santa Clara County, California shall have exclusive jurisdiction over any dispute or claim arising out of this Agreement. Notwithstanding this, you agree that NVIDIA shall still be allowed to apply for injunctive remedies or an equivalent type of urgent legal relief in any jurisdiction.
+If any court of competent jurisdiction determines that any provision of this Agreement is illegal, invalid or unenforceable, such provision will be construed as limited to the extent necessary to be consistent with and fully enforceable under the law and the remaining provisions will remain in full force and effect. Unless otherwise specified, remedies are cumulative.
+Each party acknowledges and agrees that the other is an independent contractor in the performance of this Agreement.
+The SDK has been developed entirely at private expense and is “commercial items” consisting of “commercial computer software” and “commercial computer software documentation” provided with RESTRICTED RIGHTS. Use, duplication or disclosure by the U.S. Government or a U.S. Government subcontractor is subject to the restrictions in this Agreement pursuant to DFARS 227.7202-3(a) or as set forth in subparagraphs (b)(1) and (2) of the Commercial Computer Software - Restricted Rights clause at FAR 52.227-19, as applicable. Contractor/manufacturer is NVIDIA, 2788 San Tomas Expressway, Santa Clara, CA 95051
+The SDK is subject to United States export laws and regulations. You agree that you will not ship, transfer or export the SDK into any country, or use the SDK in any manner, prohibited by the United States Bureau of Industry and Security or economic sanctions regulations administered by the U.S. Department of Treasury’s Office of Foreign Assets Control (OFAC), or any applicable export laws, restrictions or regulations. These laws include restrictions on destinations, end users and end use. By accepting this Agreement, you confirm that you are not a resident or citizen of any country currently embargoed by the U.S. and that you are not otherwise prohibited from receiving the SDK.
+Any notice delivered by NVIDIA to you under this Agreement will be delivered via mail, email or fax. You agree that any notices that NVIDIA sends you electronically will satisfy any legal communication requirements. Please direct your legal notices or other correspondence to NVIDIA Corporation, 2788 San Tomas Expressway, Santa Clara, California 95051, United States of America, Attention: Legal Department.
+This Agreement and any exhibits incorporated into this Agreement constitute the entire agreement of the parties with respect to the subject matter of this Agreement and supersede all prior negotiations or documentation exchanged between the parties relating to this SDK license. Any additional and/or conflicting terms on documents issued by you are null, void, and invalid. Any amendment or waiver under this Agreement shall be in writing and signed by representatives of both parties.
+(v. February 22, 2022)
+cuDNN SUPPLEMENT TO SOFTWARE LICENSE AGREEMENT FOR NVIDIA SOFTWARE DEVELOPMENT KITS
+The terms in this supplement govern your use of the NVIDIA cuDNN SDK under the terms of your license agreement (“Agreement”) as modified by this supplement. Capitalized terms used but not defined below have the meaning assigned to them in the Agreement.
+This supplement is an exhibit to the Agreement and is incorporated as an integral part of the Agreement. In the event of conflict between the terms in this supplement and the terms in the Agreement, the terms in this supplement govern.
+4.1 License Scope
+. The SDK is licensed for you to develop applications only for use in systems with NVIDIA GPUs.
+2. Distribution
+. The following portions of the SDK are distributable under the Agreement: the runtime files .so and .dll.
+In addition to the rights above, for parties that are developing software intended solely for use on Jetson development kits or Jetson modules and running Linux for Tegra software the following shall apply: the SDK may be distributed in its entirety, as provided by NVIDIA and without separation of its components, for you and/or your licensees to create software development kits for use only on the Jetson platform and running Linux for Tegra software.
+3. Licensing
+. If the distribution terms in this Agreement are not suitable for your organization, or for any questions regarding this Agreement, please contact NVIDIA at
+nvidia-compute-license-questions@nvidia.com
+.
+(v. February 22, 2022)
+(function(){function e(){let e=globalThis.scheduler;return typeof e?.yield==`function`?e.yield():new Promise(e=>setTimeout(e,0))}function t(t,n,r){let i=!1,a=()=>{i||(i=!0,t().then(async t=>{await e(),await t()}))};if(document.documentElement.hasAttribute(`data-fern-hydrate-all`)){typeof window.requestIdleCallback==`function`?window.requestIdleCallback(a,{timeout:2e3}):window.setTimeout(a,200);return}let o=typeof n.value==`object`?n.value:void 0,s=new IntersectionObserver(e=>{for(let t of e)if(t.isIntersecting){s.disconnect(),a();break}},{rootMargin:o?.rootMargin});for(let e of r.children)s.observe(e)}(self.Astro||(self.Astro={})).lazy=t,window.dispatchEvent(new Event(`astro:lazy`))})();
+Previous
+Support
+Next
+Acknowledgements
+Overview
+Samples
+Model Samples
+Release Notes
+API Reference
+Operations Overview
+Python API Naming Conventions
+Determinism Support
+Attention
+Sparse Attention
+Block Scaling
+Causal Conv1d
+Concatenate
+Convolutions
+Custom Reduction
+FFT Causal Conv1d
+Linear Attention
+Matmul
+MoE Grouped Matmul
+Normalizations
+Pointwise and Reduction
+Resampling
+Reshape
+RoPE (Rotary Position Embedding)
+Slice
+Transpose
+GNN
+For Agents
+Developer Guide
+Overview
+Core Concepts
+Graphs
+Hardware Forward Compatibility
+Odds and Ends
+Debugging
+Installation
+Installing cuDNN Backend
+Installing cuDNN Frontend
+Building and Running a cuDNN Dependent Program
+Cross-Compiling cuDNN Samples
+Reference
+Supported Products
+FAQs
+Support
+Software License Agreement
+Acknowledgements
+Notices
+cuDNN Backend
+(function(){let e=async e=>{await(await e())()};(self.Astro||(self.Astro={})).only=e,window.dispatchEvent(new Event(`astro:only`))})();
+Overview
+Samples
+Model Samples
+Operations Overview
+Python API Naming Conventions
+Determinism Support
+Attention
+Ahead-of-time Attention (SM120 C/C++)
+Gated Attention Block (SM107)
+Attention Gate + Quantize Decode Step (SM100-class)
+Compact GQA backward (SM107)
+NVFP4 Attention QAT Backward
+SDPA Backward (SM100/SM103, d = 128)
+SDPA Backward (SM107, d = 256–512)
+SDPA Backward (SM120)
+Sparse Attention
+Native Sparse Attention (NSA)
+Simplified Sparse Attention
+DeepSeek Sparse Attention (DSA)
+Query Sparse Attention (QSA)
+Indexed QSA training
+HSTU Attention (Blackwell SM100/SM103)
+HSTU LayerNorm-Multiply-SiLU-Dropout (LMSD)
+Block Sparse Attention (BSA)
+CSA Fused Compressor
+Aligned HCA Backward
+Flex Attention
+Flex Attention Mask Plan Design
+Block Scaling
+NVFP4 block-scale conversion
+Causal Conv1d
+Causal Conv1d Python API
+Causal Conv1d Decode Update
+Concatenate
+Convolutions
+Fused Conv3D + Bias + Residual + RMSNorm + SiLU
+Custom Reduction
+How custom reductions work
+FFT Causal Conv1d
+Linear Attention
+FLA Integration Shims
+Kimi Delta Attention in JAX
+Fused GDN Decode / Verify Steps (FlashInfer Backend)
+Matmul
+Discrete Grouped GEMM + dSwiGLU (SM100)
+Discrete Grouped GEMM + SwiGLU (SM100)
+FP8 Projection for Decode Rows (SM100-class)
+SwiGLU FP4 Gate / Up Product for Decode Rows (SM100-class)
+GEMM + Amax (SM100)
+GEMM + dsReLU (SM100)
+GEMM + RoPE + MXFP8 Projection (SM100)
+GEMM + sReLU (SM100)
+GEMM + SwiGLU (SM100)
+Grouped GEMM (SM100 BF16)
+Grouped GEMM + dGLU (SM100)
+Grouped GEMM + dsReLU (SM100)
+Grouped GEMM + dSwiGLU (SM100)
+Grouped GEMM + GLU (SM100)
+Grouped GEMM + GLU + Hadamard (SM100)
+Grouped GEMM + GLU + Hadamard + Quant (SM100)
+Grouped GEMM + Quant (SM100)
+Grouped GEMM + Quant -- Unified (SM100)
+Grouped GEMM + sReLU (SM100)
+Grouped GEMM + SwiGLU (SM100)
+Grouped GEMM + WGrad (Unified)
+DSv4.1 mHC Projection/RMS Backward (SM100/SM103)
+MoE Grouped Matmul
+Shared-Expert Decode Pair (SM100-class)
+Normalizations
+LayerNorm and RMSNorm in JAX
+RMSNorm + RHT + Amax (SM100)
+Fused RMSNorm + SiLU
+Add + RMSNorm + Quantize Decode Step (SM100-class)
+Pointwise and Reduction
+Engram Saved-State Gate
+Resampling
+Reshape
+RoPE (Rotary Position Embedding)
+Tail RoPE + Microscaled QDQ
+Prepared BF16 Tail RoPE
+DSv4.1 Vision RoPE Backward
+Slice
+Transpose
+GNN simple aggregation
+GAT and GATv2 attention
+Compile-time constant tensors
+Adding Torch Custom Ops in cuDNN Frontend
+CUDA Graphs
+Custom Execution Plan
+Deviceless Ahead-of-time Compilation
+Dynamic Shapes and Kernel Cache
+Limiting Execution Plan Shared Memory
+Framework integration performance: getting the best per-call performance from cuDNN Frontend
+First-class `cudnn.Handle` — design
+Python-native `cudnn.pygraph` and pluggable execution backends
+Composing multi-kernel blocks in Python
+C++ launcher: repeated calls launched from C++
+Overview
+Core Concepts
+Graphs
+Hardware Forward Compatibility
+Odds and Ends
+Debugging
+Installing cuDNN Backend
+Prerequisites
+Installing cuDNN Backend on Linux
+Installing cuDNN Backend on Windows
+Installing cuDNN Frontend
+cuDNN Frontend Dependencies
+Installing the cuDNN Python Frontend
+Installing the cuDNN C++ Frontend
+Next Steps
+Building and Running a cuDNN Dependent Program
+Cross-Compiling cuDNN Samples
+Supported Products
+FAQs
+Support
+Software License Agreement
+Acknowledgements
+Notices
+Latest
+(function () {
+          // Runs on the initial load AND on every view-transition swap: Astro
+          // re-inserts the `transition:persist`ed sidebar into the new document,
+          // and re-inserting a scroll container resets its scrollTop to 0, so we
+          // restore the position from sessionStorage before paint to avoid a
+          // visible jump. The companion scroll listener below keeps that stored
+          // value in lockstep with the live scroll (the hydrated build did this
+          // via React); without it the restored value drifts stale and the
+          // sidebar jumps to the wrong offset on navigation.
+          try {
+            var KEY = "fern-sidebar-scroll-position";
+            var container = document.getElementById("fern-sidebar-scroll-area");
+            if (!container) { return; }
+            var storedRaw = window.sessionStorage.getItem(KEY);
+            var stored = storedRaw != null ? parseInt(storedRaw, 10) : 0;
+            if (Number.isFinite(stored) && stored > 0) {
+              container.scrollTop = stored;
+              return;
+            }
+            var active = container.querySelector('.fern-sidebar-link[data-state="active"]');
+            if (!active) { return; }
+            var cRect = container.getBoundingClientRect();
+            var aRect = active.getBoundingClientRect();
+            var isAbove = aRect.top < cRect.top;
+            var isBelow = aRect.bottom > cRect.bottom;
+            if (!isAbove && !isBelow) { return; }
+            var offset = aRect.top - cRect.top + container.scrollTop;
+            var target = Math.max(0, Math.round(offset - container.clientHeight / 3));
+            container.scrollTop = target;
+            if (target > 0) {
+              window.sessionStorage.setItem(KEY, String(target));
+            }
+          } catch (e) { /* sessionStorage/layout unavailable — fall back to the hydration-time scroll */ }
+        })();
+Developer-friendly docs for your API
+Privacy Policy
+|
+Your Privacy Choices
+|
+Terms of Service
+|
+Accessibility
+|
+Corporate Policies
+|
+Product Security
+|
+Contact
+Copyright ©
+2026
+, NVIDIA Corporation.
+(function(){var h=location.hostname;var t=document.getElementById("fern-preview-masquerade");if(!t||!(h==="localhost"||h==="127.0.0.1"||h.endsWith(".workers.dev")||h.endsWith(".docs.dev.buildwithfern.com")||(h.endsWith(".docs.buildwithfern.com")&&/^[^.]+-preview-[^.]/.test(h))))return;if(document.querySelector('astro-island[component-url*="PreviewMasquerade"]')){t.remove();return;}t.replaceWith(t.content);})();

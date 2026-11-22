@@ -35,6 +35,8 @@
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QCursor>
+#include <QStandardPaths>
+#include <QDir>
 #include <QPixmap>
 #include <cstdio>
 #include <atomic>
@@ -99,7 +101,13 @@ void pbCrashTraceFlush()
     if (!g_traceDirty.exchange(false, std::memory_order_acq_rel))
         return;
     QMutexLocker locker(&g_traceMutex);
-    const QString path = QStringLiteral("D:/_SATIN_AI/NAI-OS/vlc/pb_stroke_trace.log");
+    /* Per-user location: packaged/installed builds have no source tree, and a
+     * fixed developer path silently disabled tracing on every public install. */
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    if (dir.isEmpty())
+        return;
+    QDir().mkpath(dir);
+    const QString path = dir + QStringLiteral("/pb_stroke_trace.log");
     QFile f(path);
     /* rotate instead of growing without bound */
     if (f.exists() && f.size() > kTraceMaxBytes) {
