@@ -542,9 +542,8 @@ Item {
             readonly property int transportHeight: Math.round(VLCStyle.dp(52, VLCStyle.scale))
             readonly property int scrubHeight: Math.round(VLCStyle.dp(26, VLCStyle.scale))
             readonly property int statusHeight: Math.round(VLCStyle.dp(28, VLCStyle.scale))
-            readonly property real defaultWidth: Math.min(VLCStyle.dp(940, VLCStyle.scale),
-                                                          Math.max(VLCStyle.dp(640, VLCStyle.scale),
-                                                                   canvasHost.width * 0.58))
+            readonly property real defaultWidth: Math.max(VLCStyle.dp(640, VLCStyle.scale),
+                                                          canvasHost.width * 0.72)
             readonly property real panelWidth: expanded
                                                ? root.width - 2 * VLCStyle.margin_large
                                                : Math.max(VLCStyle.dp(560, VLCStyle.scale),
@@ -687,72 +686,66 @@ Item {
                         color: "#1f1f25"
                     }
 
+                    /* three equal columns keep the PTS exactly centered while
+                     * the format/fps and frame/remaining readouts flank it */
                     RowLayout {
                         anchors.fill: parent
                         anchors.leftMargin: VLCStyle.margin_small
                         anchors.rightMargin: VLCStyle.margin_small
-                        spacing: VLCStyle.margin_xsmall
+                        spacing: 0
 
-                        Widgets.LabelExt {
-                            text: qsTr("PTS")
-                            color: theme.fg.secondary
-                            font.pixelSize: VLCStyle.fontSize_xsmall
-                            font.letterSpacing: 1.0
-                        }
-                        Widgets.LabelExt {
-                            text: root.formatPts(PaintbrushCtx.playerTimeMs)
-                            color: theme.fg.primary
-                            font.pixelSize: VLCStyle.fontSize_xsmall
-                            font.family: "Consolas"
-                        }
-
-                        Widgets.LabelExt {
-                            text: qsTr("FRAME")
-                            color: theme.fg.secondary
-                            font.pixelSize: VLCStyle.fontSize_xsmall
-                            font.letterSpacing: 1.0
-                        }
-                        Widgets.LabelExt {
-                            text: root.formatFrame(PaintbrushCtx.playerTimeMs)
-                            color: theme.fg.primary
-                            font.pixelSize: VLCStyle.fontSize_xsmall
-                            font.family: "Consolas"
+                        Item {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            Widgets.LabelExt {
+                                anchors.left: parent.left
+                                anchors.verticalCenter: parent.verticalCenter
+                                visible: PaintbrushCtx.playerVideoSize.width > 0
+                                text: PaintbrushCtx.playerVideoSize.width + "×"
+                                      + PaintbrushCtx.playerVideoSize.height + "   "
+                                      + PaintbrushCtx.playerFrameRate.toFixed(3) + " fps"
+                                color: theme.fg.secondary
+                                font.pixelSize: VLCStyle.fontSize_xsmall
+                                font.family: "Consolas"
+                            }
                         }
 
-                        Item { Layout.fillWidth: true }
-
-                        Widgets.LabelExt {
-                            visible: PaintbrushCtx.playerVideoSize.width > 0
-                            text: PaintbrushCtx.playerVideoSize.width + "×"
-                                  + PaintbrushCtx.playerVideoSize.height
-                            color: theme.fg.secondary
-                            font.pixelSize: VLCStyle.fontSize_xsmall
-                            font.family: "Consolas"
+                        Item {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            RowLayout {
+                                anchors.centerIn: parent
+                                spacing: VLCStyle.margin_xsmall
+                                Widgets.LabelExt {
+                                    text: qsTr("PTS")
+                                    color: theme.fg.secondary
+                                    font.pixelSize: VLCStyle.fontSize_xsmall
+                                    font.letterSpacing: 1.2
+                                }
+                                Widgets.LabelExt {
+                                    text: root.formatPts(PaintbrushCtx.playerTimeMs)
+                                    color: theme.fg.primary
+                                    font.pixelSize: VLCStyle.fontSize_normal
+                                    font.family: "Consolas"
+                                    font.bold: true
+                                }
+                            }
                         }
-                        Widgets.LabelExt {
-                            visible: PaintbrushCtx.playerFrameRate > 0
-                            text: PaintbrushCtx.playerFrameRate.toFixed(3) + " fps"
-                            color: theme.fg.primary
-                            font.pixelSize: VLCStyle.fontSize_xsmall
-                            font.family: "Consolas"
-                            font.bold: true
-                        }
 
-                        Item { Layout.fillWidth: true }
-
-                        Widgets.LabelExt {
-                            text: qsTr("REMAIN")
-                            color: theme.fg.secondary
-                            font.pixelSize: VLCStyle.fontSize_xsmall
-                            font.letterSpacing: 1.0
-                        }
-                        Widgets.LabelExt {
-                            text: root.formatTimecode(
-                                      Math.max(0, PaintbrushCtx.playerLengthMs
-                                                  - PaintbrushCtx.playerTimeMs))
-                            color: theme.fg.primary
-                            font.pixelSize: VLCStyle.fontSize_xsmall
-                            font.family: "Consolas"
+                        Item {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            Widgets.LabelExt {
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: qsTr("FRAME ") + root.formatFrame(PaintbrushCtx.playerTimeMs)
+                                      + "    " + qsTr("REMAIN ") + root.formatTimecode(
+                                          Math.max(0, PaintbrushCtx.playerLengthMs
+                                                      - PaintbrushCtx.playerTimeMs))
+                                color: theme.fg.secondary
+                                font.pixelSize: VLCStyle.fontSize_xsmall
+                                font.family: "Consolas"
+                            }
                         }
                     }
                 }
@@ -894,7 +887,7 @@ Item {
                     onTranslationChanged: if (active)
                         playerPanel.userWidth = Math.max(
                             VLCStyle.dp(560, VLCStyle.scale),
-                            Math.min(canvasHost.width,
+                            Math.min(root.width - playerPanel.x - VLCStyle.margin_normal,
                                      grabStartWidth + activeTranslation.x))
                 }
             }
@@ -995,6 +988,7 @@ Item {
     Shortcut { sequence: "Ctrl+U"; onActivated: PaintbrushCtx.captureVideoFrame() }
     Shortcut { sequence: "Ctrl+I"; onActivated: assistantDock.expanded = !assistantDock.expanded }
     Shortcut { sequence: "Escape"; onActivated: { PaintbrushCtx.cancelTracking(); PaintbrushCtx.cancelGeneration(); PaintbrushCtx.cancelThumbnails() } }
+
 
     /* Professional HH:MM:SS:FF timecode for the reference monitor. The frame
      * field uses the real track frame rate; 25 fps is only the fallback while
