@@ -193,8 +193,19 @@ int pbConfigInt(vlc_object_t *obj, const char *name);
  * GPU-only request. */
 QString pbNormalizeSamDevice(const QString &value);
 
-/* Read an API key from the environment or VLC config (never logged). */
+/* Read an API key from the environment or VLC config (never logged).
+ * The environment variable wins when it is non-empty. */
 QString pbApiKey(vlc_object_t *obj, const char *envVar, const char *configName);
+
+/* Read ONLY the persisted API key from the VLC config, ignoring the
+ * environment override. This is what the Settings field edits and displays:
+ * it must show exactly the value that Apply stores, even while an environment
+ * variable is overriding it at request time. Never logged. */
+QString pbStoredApiKey(vlc_object_t *obj, const char *configName);
+
+/* True when the environment variable for this key is set to a non-empty
+ * value, i.e. when it overrides the persisted key. */
+bool pbApiKeyFromEnvironment(const char *envVar);
 
 /* Log a completed AI request with its id, duration and outcome. Used by the
  * network services so diagnostics/logs carry request IDs and timings

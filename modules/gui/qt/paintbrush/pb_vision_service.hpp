@@ -74,6 +74,16 @@ public:
     QString model() const { return m_model; }
     QString unavailableReason() const { return m_unavailableReason; }
     int timeoutMs() const { return m_timeoutMs; }
+    /* True when no dedicated VLM endpoint is configured and this service runs
+     * on the assistant gateway (its base URL, model and, unless a VLM key is
+     * set, its API key). */
+    bool usingAssistantFallback() const { return m_usingAssistantFallback; }
+
+    /* Hot-apply a new API key without reconfiguring the endpoint. Requests
+     * read the key on the GUI thread when they are built, so assigning it is
+     * safe while other replies are in flight; in-flight replies keep the
+     * header they were sent with. Never logged. */
+    void setApiKey(const QString &key) { m_apiKey = key; }
 
     /* Ask a question about an object. conversationId is the session key:
      * follow-ups reusing the same id append to that session's history;
@@ -128,6 +138,9 @@ private:
     QString m_unavailableReason;
     int m_timeoutMs = 60000;
     bool m_busy = false;
+    /* Set by configure(): the endpoint/model/key came from the assistant
+     * gateway because no dedicated vision endpoint was configured. */
+    bool m_usingAssistantFallback = false;
     /* Opt-in for local dev endpoints with self-signed certificates
      * (paintbrush-vlm-insecure). Default false: TLS is validated. */
     bool m_insecure = false;

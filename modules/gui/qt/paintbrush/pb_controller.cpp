@@ -5825,6 +5825,22 @@ QString PaintbrushController::settingsAssistantModel() const
 {
     return pbConfigString(VLC_OBJECT(m_intf), "paintbrush-assistant-model");
 }
+QString PaintbrushController::settingsVlmApiKey() const
+{
+    return pbStoredApiKey(VLC_OBJECT(m_intf), "paintbrush-vlm-api-key");
+}
+QString PaintbrushController::settingsAssistantApiKey() const
+{
+    return pbStoredApiKey(VLC_OBJECT(m_intf), "paintbrush-assistant-api-key");
+}
+bool PaintbrushController::settingsVlmApiKeyFromEnv() const
+{
+    return pbApiKeyFromEnvironment("PAINTBRUSH_VLM_API_KEY");
+}
+bool PaintbrushController::settingsAssistantApiKeyFromEnv() const
+{
+    return pbApiKeyFromEnvironment("PAINTBRUSH_ASSISTANT_API_KEY");
+}
 int PaintbrushController::settingsPtsToleranceMs() const
 {
     return qBound(20,
@@ -5845,39 +5861,52 @@ QString PaintbrushController::applyNaiSettings(const QString &samModel,
                                                const QString &samDevice,
                                                const QString &vlmUrl,
                                                const QString &vlmModel,
+                                               const QString &vlmApiKey,
                                                const QString &assistantUrl,
                                                const QString &assistantModel,
+                                               const QString &assistantApiKey,
                                                int ptsToleranceMs)
 {
     /* Persist into the VLC configuration layer (source of truth — never a
      * second settings store). config_Put*() is the persistent API: var_Set*()
      * only mutates a runtime variable and never marks the config dirty, so it
-     * silently did nothing here. Secret values are never read or shown;
-     * changing them is out of scope (the user sets them via environment
-     * variables, which pbApiKey() prefers over the config file). */
+     * silently did nothing here. API keys are stored in the same config file
+     * the dialog edits; the environment variables still take precedence at
+     * request time (pbApiKey) and the dialog says so. Values are never
+     * logged. */
     const QString model = samModel.trimmed();
     const QString device = pbNormalizeSamDevice(samDevice);
     const QString vlmBase = vlmUrl.trimmed();
     const QString vlmName = vlmModel.trimmed();
+    const QString vlmKey = vlmApiKey.trimmed();
     const QString assistantBase = assistantUrl.trimmed();
     const QString assistantName = assistantModel.trimmed();
+    const QString assistantKey = assistantApiKey.trimmed();
     const int ptsTolerance = qBound(20, ptsToleranceMs, 2000);
 
+    /* Endpoint/model identity: these still need a service re-configure and
+     * therefore a restart. API keys are read per request and are hot-applied
+     * below, so a key-only change never forces a restart. */
     const bool changedModel = model != settingsSamModel()
         || device != settingsSamDevice()
         || vlmBase != settingsVlmUrl()
         || vlmName != settingsVlmModel()
         || assistantBase != settingsAssistantUrl()
         || assistantName != settingsAssistantModel();
+    const bool changedKeys = vlmKey != settingsVlmApiKey()
+        || assistantKey != settingsAssistantApiKey();
 
     config_PutPsz("paintbrush-sam-model", model.toUtf8().constData());
     config_PutPsz("paintbrush-sam-device", device.toUtf8().constData());
     config_PutPsz("paintbrush-vlm-base-url", vlmBase.toUtf8().constData());
     config_PutPsz("paintbrush-vlm-model", vlmName.toUtf8().constData());
+    config_PutPsz("paintbrush-vlm-api-key", vlmKey.toUtf8().constData());
     config_PutPsz("paintbrush-assistant-base-url",
                   assistantBase.toUtf8().constData());
     config_PutPsz("paintbrush-assistant-model",
                   assistantName.toUtf8().constData());
+    config_PutPsz("paintbrush-assistant-api-key",
+                  assistantKey.toUtf8().constData());
     config_PutInt("paintbrush-edit-pts-tolerance-ms", ptsTolerance);
 
     /* config_PutPsz() has no error return and silently does nothing when the
@@ -5894,8 +5923,10 @@ QString PaintbrushController::applyNaiSettings(const QString &samModel,
         || pbNormalizeSamDevice(readStr("paintbrush-sam-device")) != device
         || readStr("paintbrush-vlm-base-url") != vlmBase
         || readStr("paintbrush-vlm-model") != vlmName
+        || readStr("paintbrush-vlm-api-key") != vlmKey
         || readStr("paintbrush-assistant-base-url") != assistantBase
         || readStr("paintbrush-assistant-model") != assistantName
+        || readStr("paintbrush-assistant-api-key") != assistantKey
         || int(config_GetInt("paintbrush-edit-pts-tolerance-ms"))
                != ptsTolerance)
     {
@@ -5913,6 +5944,33 @@ QString PaintbrushController::applyNaiSettings(const QString &samModel,
             "could not be saved.");
     }
 
+    /* API keys are safe to hot-apply: each service reads the key when it
+     * builds a request, never mid-request. Recompute the EFFECTIVE keys with
+     * pbApiKey so an environment override keeps winning; the vision service
+     * additionally falls back to the assistant key when it runs on the
+     * assistant gateway (its configure() rule). */
+    vlc_object_t *obj = VLC_OBJECT(m_intf);
+    const QString effectiveVlmKey =
+        pbApiKey(obj, "PAINTBRUSH_VLM_API_KEY", "paintbrush-vlm-api-key");
+    const QString effectiveAssistantKey =
+        pbApiKey(obj, "PAINTBRUSH_ASSISTANT_API_KEY",
+                 "paintbrush-assistant-api-key");
+    m_assistant.setApiKey(effectiveAssistantKey);
+    m_lookup.setApiKey(effectiveAssistantKey);
+    m_vision.setApiKey(
+        effectiveVlmKey.isEmpty() && m_vision.usingAssistantFallback()
+            ? effectiveAssistantKey
+            : effectiveVlmKey);
+
+    /* Keep the "a key is configured" status truthful after the edit. */
+    const bool hasSecret =
+        !effectiveVlmKey.isEmpty()
+        || !pbApiKey(obj, "PAINTBRUSH_IMAGE_API_KEY",
+                     "paintbrush-image-api-key").isEmpty()
+        || !effectiveAssistantKey.isEmpty();
+    const bool secretsChanged = hasSecret != m_settingsSecretsPresent;
+    m_settingsSecretsPresent = hasSecret;
+
     /* The exact-frame PTS tolerance is safe to hot-apply to the edit decoder
      * (it is only read at decode time). Use the value we wrote, never a
      * re-read of a possibly stale config item. */
@@ -5926,10 +5984,13 @@ QString PaintbrushController::applyNaiSettings(const QString &samModel,
         m_settingsRestartRequired = true;
 
     emit settingsChanged();
-    setStatus(changedModel
-        ? QStringLiteral("Settings saved — restart VLC to apply model and "
-                         "endpoint changes.")
-        : QStringLiteral("Settings saved."));
+    if (!changedModel && (changedKeys || secretsChanged))
+        setStatus(QStringLiteral("API keys saved and applied."));
+    else
+        setStatus(changedModel
+            ? QStringLiteral("Settings saved — restart VLC to apply model and "
+                             "endpoint changes.")
+            : QStringLiteral("Settings saved."));
     return QString();               /* empty = applied cleanly */
 }
 

@@ -373,13 +373,29 @@ QString pbNormalizeSamDevice(const QString &value)
 
 QString pbApiKey(vlc_object_t *obj, const char *envVar, const char *configName)
 {
-    /* Environment takes precedence over config so keys never need to be
-     * stored in the VLC config file. The value is never logged. */
+    /* Environment takes precedence over config, so an operator can override
+     * a stored key without touching the settings surface. The value is never
+     * logged. */
     const QString env = QProcessEnvironment::systemEnvironment().value(
         QString::fromLatin1(envVar));
     if (!env.isEmpty())
         return env;
     return pbConfigString(obj, configName);
+}
+
+QString pbStoredApiKey(vlc_object_t *obj, const char *configName)
+{
+    /* The Settings field must show exactly what the config stores, never the
+     * environment override (which would make a saved edit look applied while
+     * the override still wins at request time). */
+    return pbConfigString(obj, configName);
+}
+
+bool pbApiKeyFromEnvironment(const char *envVar)
+{
+    return !QProcessEnvironment::systemEnvironment()
+                .value(QString::fromLatin1(envVar))
+                .isEmpty();
 }
 
 void pbLogMsg(vlc_object_t *obj, int prio, const char *category,

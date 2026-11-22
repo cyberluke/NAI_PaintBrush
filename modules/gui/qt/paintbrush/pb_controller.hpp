@@ -676,8 +676,18 @@ public:
     Q_PROPERTY(QString settingsVlmModel READ settingsVlmModel NOTIFY settingsChanged FINAL)
     Q_PROPERTY(QString settingsAssistantUrl READ settingsAssistantUrl NOTIFY settingsChanged FINAL)
     Q_PROPERTY(QString settingsAssistantModel READ settingsAssistantModel NOTIFY settingsChanged FINAL)
+    /* Persisted API keys — exactly what the VLC config stores, never the
+     * environment override (see settings*ApiKeyFromEnv). The Settings dialog
+     * edits these so a key survives Apply and a restart. */
+    Q_PROPERTY(QString settingsVlmApiKey READ settingsVlmApiKey NOTIFY settingsChanged FINAL)
+    Q_PROPERTY(QString settingsAssistantApiKey READ settingsAssistantApiKey NOTIFY settingsChanged FINAL)
+    /* True when PAINTBRUSH_VLM_API_KEY / PAINTBRUSH_ASSISTANT_API_KEY is set
+     * in the environment; it overrides the stored key at request time, so the
+     * dialog must say so rather than pretend the field is in charge. */
+    Q_PROPERTY(bool settingsVlmApiKeyFromEnv READ settingsVlmApiKeyFromEnv NOTIFY settingsChanged FINAL)
+    Q_PROPERTY(bool settingsAssistantApiKeyFromEnv READ settingsAssistantApiKeyFromEnv NOTIFY settingsChanged FINAL)
     Q_PROPERTY(int settingsPtsToleranceMs READ settingsPtsToleranceMs NOTIFY settingsChanged FINAL)
-    Q_PROPERTY(bool settingsSecretsPresent READ settingsSecretsPresent CONSTANT FINAL)
+    Q_PROPERTY(bool settingsSecretsPresent READ settingsSecretsPresent NOTIFY settingsChanged FINAL)
     /* CUDA runtime DLL presence (LoadLibrary only, no CUDA init). The live
      * adapter probe is refreshed when Settings opens so a missing DLL or a
      * CUDA failure is reported before the user applies a GPU preference. */
@@ -778,23 +788,32 @@ public:
     QString settingsVlmModel() const;
     QString settingsAssistantUrl() const;
     QString settingsAssistantModel() const;
+    QString settingsVlmApiKey() const;
+    QString settingsAssistantApiKey() const;
+    bool settingsVlmApiKeyFromEnv() const;
+    bool settingsAssistantApiKeyFromEnv() const;
     int settingsPtsToleranceMs() const;
-    /* True when any secret (API key) is configured; the UI then shows a
-     * "configured" placeholder instead of ever displaying the value. */
+    /* True when any secret (API key) is configured, from the environment or
+     * the config. The dialog uses it for the companion/vision status text;
+     * the actual values are only exposed through the persisted-key
+     * properties above. */
     bool settingsSecretsPresent() const { return m_settingsSecretsPresent; }
     bool settingsRestartRequired() const { return m_settingsRestartRequired; }
     /* Apply NAI settings. Persists into the VLC config layer with config_Put*
-     * (and saves the file immediately), hot-applies what is safe, and sets
-     * settingsRestartRequired for model/endpoint changes. Never displays
-     * stored secrets in clear text. Returns a failure message, or an EMPTY
-     * string on success — a restart notice is a separate state, not a
+     * (and saves the file immediately), hot-applies what is safe (API keys
+     * and the PTS tolerance), and sets settingsRestartRequired for
+     * model/endpoint changes. Stored secrets are shown only in the Settings
+     * field itself and are never logged. Returns a failure message, or an
+     * EMPTY string on success — a restart notice is a separate state, not a
      * failure. */
     Q_INVOKABLE QString applyNaiSettings(const QString &samModel,
                                          const QString &samDevice,
                                          const QString &vlmUrl,
                                          const QString &vlmModel,
+                                         const QString &vlmApiKey,
                                          const QString &assistantUrl,
                                          const QString &assistantModel,
+                                         const QString &assistantApiKey,
                                          int ptsToleranceMs);
     Q_INVOKABLE void clearRestartRequired();
 

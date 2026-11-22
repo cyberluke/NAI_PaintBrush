@@ -59,6 +59,11 @@ public:
     int timeoutMs() const { return m_timeoutMs; }
     bool reasoning() const { return m_reasoning; }
 
+    /* Hot-apply a new API key without reconfiguring the endpoint. Requests
+     * read the key on the GUI thread when they are built, so assigning it is
+     * safe while other replies are in flight. Never logged. */
+    void setApiKey(const QString &key) { m_apiKey = key; }
+
     /* TLS posture (A7): certificate validation is on unless the operator
      * explicitly opts into self-signed endpoints. */
     bool insecureTlsOptIn() const { return m_insecureTls; }

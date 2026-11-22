@@ -49,8 +49,10 @@ Dialog {
     property string draftMatteDevice: ""
     property string draftVlmUrl: ""
     property string draftVlmModel: ""
+    property string draftVlmApiKey: ""
     property string draftAssistantUrl: ""
     property string draftAssistantModel: ""
+    property string draftAssistantApiKey: ""
     property int draftPtsToleranceMs: 250
     property string applyMessage: ""
 
@@ -61,8 +63,10 @@ Dialog {
         draftMatteDevice = PaintbrushCtx.mattingDevice
         draftVlmUrl = PaintbrushCtx.settingsVlmUrl
         draftVlmModel = PaintbrushCtx.settingsVlmModel
+        draftVlmApiKey = PaintbrushCtx.settingsVlmApiKey
         draftAssistantUrl = PaintbrushCtx.settingsAssistantUrl
         draftAssistantModel = PaintbrushCtx.settingsAssistantModel
+        draftAssistantApiKey = PaintbrushCtx.settingsAssistantApiKey
         draftPtsToleranceMs = PaintbrushCtx.settingsPtsToleranceMs
         applyMessage = ""
     }
@@ -76,8 +80,10 @@ Dialog {
                     draftSamDevice.trim(),
                     draftVlmUrl.trim(),
                     draftVlmModel.trim(),
+                    draftVlmApiKey.trim(),
                     draftAssistantUrl.trim(),
                     draftAssistantModel.trim(),
+                    draftAssistantApiKey.trim(),
                     draftPtsToleranceMs)
         if (answer && answer.length > 0) {
             applyMessage = answer          /* keep open: the user must see it */
@@ -236,6 +242,27 @@ Dialog {
                         placeholder: qsTr("e.g. gpt-4o-mini")
                         onTextEdited: root.draftVlmModel = text
                     }
+                    SettingsRow {
+                        label: qsTr("Vision API key")
+                        status: PaintbrushCtx.settingsVlmApiKeyFromEnv
+                                ? qsTr("Environment override")
+                                : (root.draftVlmApiKey.length > 0
+                                   ? qsTr("Stored") : qsTr("Not set"))
+                        ok: PaintbrushCtx.settingsVlmApiKeyFromEnv
+                            || root.draftVlmApiKey.length > 0
+                        fieldText: root.draftVlmApiKey
+                        placeholder: qsTr("Bearer token (optional for local endpoints)")
+                        secret: true
+                        onTextEdited: root.draftVlmApiKey = text
+                    }
+                    Widgets.LabelExt {
+                        Layout.fillWidth: true
+                        visible: PaintbrushCtx.settingsVlmApiKeyFromEnv
+                        text: qsTr("PAINTBRUSH_VLM_API_KEY is set in the environment and overrides the key stored here.")
+                        color: theme.fg.secondary
+                        font.pixelSize: VLCStyle.fontSize_xsmall
+                        wrapMode: Text.WordWrap
+                    }
                 }
 
                 /* ---------------- Neural matting ------------------------- */
@@ -304,11 +331,30 @@ Dialog {
                         placeholder: qsTr("Model name")
                         onTextEdited: root.draftAssistantModel = text
                     }
+                    SettingsRow {
+                        label: qsTr("Companion API key")
+                        status: PaintbrushCtx.settingsAssistantApiKeyFromEnv
+                                ? qsTr("Environment override")
+                                : (root.draftAssistantApiKey.length > 0
+                                   ? qsTr("Stored") : qsTr("Not set"))
+                        ok: PaintbrushCtx.settingsAssistantApiKeyFromEnv
+                            || root.draftAssistantApiKey.length > 0
+                        fieldText: root.draftAssistantApiKey
+                        placeholder: qsTr("Bearer token (optional for local endpoints)")
+                        secret: true
+                        onTextEdited: root.draftAssistantApiKey = text
+                    }
                     Widgets.LabelExt {
                         Layout.fillWidth: true
-                        text: PaintbrushCtx.settingsSecretsPresent
-                              ? qsTr("API keys are configured. Keys are read from the environment (PAINTBRUSH_*_API_KEY); this dialog never stores or displays them.")
-                              : qsTr("No API keys configured — the local endpoints above need none. Persistent keys belong in PAINTBRUSH_VLM_API_KEY / PAINTBRUSH_ASSISTANT_API_KEY, not in this dialog.")
+                        visible: PaintbrushCtx.settingsAssistantApiKeyFromEnv
+                        text: qsTr("PAINTBRUSH_ASSISTANT_API_KEY is set in the environment and overrides the key stored here.")
+                        color: theme.fg.secondary
+                        font.pixelSize: VLCStyle.fontSize_xsmall
+                        wrapMode: Text.WordWrap
+                    }
+                    Widgets.LabelExt {
+                        Layout.fillWidth: true
+                        text: qsTr("Keys entered here are saved in the plain-text VLC configuration file and reused on the next start. Environment variables (PAINTBRUSH_VLM_API_KEY / PAINTBRUSH_ASSISTANT_API_KEY) take precedence when set. Keys are never written to logs.")
                         color: theme.fg.secondary
                         font.pixelSize: VLCStyle.fontSize_xsmall
                         wrapMode: Text.WordWrap
@@ -486,6 +532,10 @@ Dialog {
         property bool ok: true
         property string fieldText: ""
         property string placeholder: ""
+        /* Secret rows (API keys) mask the value and offer an explicit reveal;
+         * the value is still the persisted one, so Apply round-trips it. */
+        property bool secret: false
+        property bool revealed: false
         signal textEdited(string text)
 
         Layout.fillWidth: true
@@ -513,12 +563,42 @@ Dialog {
                 font.pixelSize: VLCStyle.fontSize_xsmall
             }
         }
-        TextField {
+        RowLayout {
             Layout.fillWidth: true
-            text: row.fieldText
-            placeholderText: row.placeholder
-            selectByMouse: true
-            onTextEdited: row.textEdited(text)
+            spacing: VLCStyle.margin_xxsmall
+
+            TextField {
+                id: field
+                Layout.fillWidth: true
+                text: row.fieldText
+                placeholderText: row.placeholder
+                selectByMouse: true
+                echoMode: row.secret && !row.revealed
+                          ? TextInput.Password : TextInput.Normal
+                Accessible.name: row.label
+                onTextEdited: row.textEdited(text)
+            }
+            Button {
+                visible: row.secret
+                text: row.revealed ? qsTr("Hide") : qsTr("Show")
+                flat: true
+                Layout.preferredWidth: VLCStyle.dp(72, VLCStyle.scale)
+                Accessible.name: row.revealed
+                                 ? qsTr("Hide API key") : qsTr("Show API key")
+                onClicked: {
+                    row.revealed = !row.revealed
+                    field.forceActiveFocus()
+                    field.cursorPosition = field.length
+                }
+            }
+        }
+        /* A TextField drops its declarative text binding on the first
+         * keystroke. Re-assign from the draft whenever the draft is reset
+         * (dialog open/close/Apply), so stored values actually reappear. The
+         * inequality guard keeps normal typing untouched (no cursor jump). */
+        onFieldTextChanged: {
+            if (field.text !== row.fieldText)
+                field.text = row.fieldText
         }
     }
 

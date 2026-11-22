@@ -89,6 +89,10 @@ public:
     bool lookup(const QImage &objectCrop, const QString &vlmDescription,
                 const QString &ocrText, const QString &query);
 
+    /* Hot-apply the assistant gateway API key (this service reuses that
+     * gateway). Never logged. */
+    void setApiKey(const QString &key) { m_apiKey = key; }
+
     QVariantList matches() const;
 
     /* Parse a model reply (JSON object or plain text) into candidate match

@@ -45,6 +45,7 @@ void VisionService::configure(vlc_object_t *obj)
     /* TLS opt-in for trusted local dev endpoints with self-signed
      * certificates. Default false: certificate validation is enforced. */
     m_insecure = pbConfigBool(obj, "paintbrush-vlm-insecure");
+    m_usingAssistantFallback = false;
 
     if (m_baseUrl.isEmpty())
     {
@@ -53,6 +54,7 @@ void VisionService::configure(vlc_object_t *obj)
          * model accepts image parts, so "Ask about this" works immediately. */
         m_baseUrl = pbConfigString(obj, "paintbrush-assistant-base-url").trimmed();
         m_model = pbConfigString(obj, "paintbrush-assistant-model").trimmed();
+        m_usingAssistantFallback = true;
         if (m_apiKey.isEmpty())
             m_apiKey = pbApiKey(obj, "PAINTBRUSH_ASSISTANT_API_KEY",
                                 "paintbrush-assistant-api-key");

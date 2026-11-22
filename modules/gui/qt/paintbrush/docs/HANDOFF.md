@@ -228,7 +228,7 @@ Render/interaction contract for that future preview:
 
 | Area | Commits / files |
 |---|---|
-| **Settings persistence (repaired)** — `config_PutPsz`/`config_PutInt` + `config_SaveConfigFile`, read-back validation, empty-on-success, sticky restart state, SAM device normalization (`auto/gpu/cpu`, empty/unknown → auto), PTS clamp 20–2000 ms, API keys stay environment-only | `pb_controller.{hpp,cpp}`, `pb_common.{hpp,cpp}`, `pb_segmentation_service.cpp`, `pb_tracking_service.cpp`, `PaintbrushSettingsDialog.qml`; `453f11e913` |
+| **Settings persistence (repaired)** — `config_PutPsz`/`config_PutInt` + `config_SaveConfigFile`, read-back validation, empty-on-success, sticky restart state, SAM device normalization (`auto/gpu/cpu`, empty/unknown → auto), PTS clamp 20–2000 ms, API keys editable + persisted (env overrides) | `pb_controller.{hpp,cpp}`, `pb_common.{hpp,cpp}`, `pb_vision_service.{hpp,cpp}`, `pb_assistant_service.hpp`, `pb_lookup_service.hpp`, `pb_segmentation_service.cpp`, `pb_tracking_service.cpp`, `PaintbrushSettingsDialog.qml`; `453f11e913` |
 | **Subject transactions (repaired)** — `placeSubject`/`deleteInstance` are one `CompositeCommand` covering both the layer command and the persisted `SubjectInstance` record; the instance id is captured in the `InsertLayerCommand` payload before it is pushed; deleting the only layer is refused instead of orphaning the record | `pb_controller_palettes.cpp`, `pb_history.hpp`, `pb_controller.{hpp,cpp}`; `453f11e913` |
 | **QML contract guard (repaired)** — legitimate JS members such as `model.indexOf` are allowed; delegate `model.<role>` misuse is still flagged; actual gate 5/5 PASS | `probes/check-qml-contracts.ps1`; `453f11e913` |
 | **Video presentation (native, fixed)** — root cause: one-shot `mediaStateChanged` before parsing, with no vout/track subscriptions; the controller now re-emits on `hasVideoOutputChanged`, `voutListChanged` and video track `countChanged`, logs the real state, and the QML `VideoSurface` becomes visible and reports geometry to the existing compositor. No renderer rewrite. | `pb_controller.cpp`; `c03ecc0bd1` |
@@ -282,9 +282,12 @@ Render/interaction contract for that future preview:
 10. Settings persistence uses `config_PutPsz`/`config_PutInt` (VLC config,
     marked dirty) + `config_SaveConfigFile`. `var_Set*` is runtime-only and
     never persists. Apply returns an **empty string on success**;
-    restart-required is separate sticky state, not a failure message. Secrets
-    stay in environment variables; the settings dialog never stores or displays
-    a key.
+    restart-required is separate sticky state, not a failure message. API keys
+    for the vision and assistant endpoints are editable in the dialog and are
+    persisted with the other settings (plain text in `vlcrc`, which the dialog
+    states); `PAINTBRUSH_*_API_KEY` environment variables still win at request
+    time via `pbApiKey()`, and the dialog shows that override explicitly. Keys
+    are never logged, and key-only changes are hot-applied (no restart).
 11. Video visibility is driven by the **real vout/track state**, never by the
     open call alone. `playerHasVideo` must be re-evaluated when
     `hasVideoOutputChanged`, `voutListChanged` or the video track count changes;
@@ -357,10 +360,13 @@ Render/interaction contract for that future preview:
   cannot choose the dGPU by name; a per-application driver preference is still
   required.
 - **Taskbar progress** is wired but not runtime-verified.
-- **API keys**: environment-only (`PAINTBRUSH_VLM_API_KEY`,
-  `PAINTBRUSH_IMAGE_API_KEY`, `PAINTBRUSH_ASSISTANT_API_KEY`). No plaintext
-  credential storage is supported by this dialog. If persistent secrets are
-  required, use OS secure storage, not `vlcrc`.
+- **API keys**: the Vision and Companion API-key fields are stored in the VLC
+  configuration (`paintbrush-vlm-api-key`, `paintbrush-assistant-api-key`) and
+  survive Apply/restart. Storage is plain text in `vlcrc`, as disclosed in the
+  dialog. Environment variables (`PAINTBRUSH_VLM_API_KEY`,
+  `PAINTBRUSH_IMAGE_API_KEY`, `PAINTBRUSH_ASSISTANT_API_KEY`) take precedence
+  at request time and are labelled in the dialog. If stronger secrecy is
+  required, use OS secure storage instead of `vlcrc`.
 
 ## 6. Uncommitted work / next owner
 
@@ -373,8 +379,12 @@ Render/interaction contract for that future preview:
 - No app files from this work are left uncommitted; app code is at
   `12cc2fb37b`. The four modified launch helper scripts and concurrent docs
   belong to another workstream and are not staged.
-- **Do not** add a plaintext API-key field or a `var_SetString`-based setter.
-  The supported secret path is the environment, read by `pbApiKey()`.
+- **API-key edit rule (supersedes the earlier environment-only rule)**: the
+  Vision/Companion key fields are an explicit product decision. Keep them
+  persisted through `config_PutPsz` with read-back validation, keep the
+  environment override precedence in `pbApiKey()`, label the override in the
+  dialog, and never log or display a key outside its masked field. Do not add a
+  `var_SetString`-based setter (runtime-only, never persisted).
 - For native verification, use the built app; the app is the UI gate.
 
 ## 7. Next actions, in order
