@@ -129,6 +129,7 @@ class PaintbrushController : public QObject
     Q_PROPERTY(int matteQuality READ matteQuality WRITE setMatteQuality NOTIFY mattingSettingsChanged FINAL)
     Q_PROPERTY(QString mattingModelDir READ mattingModelDir WRITE setMattingModelDir NOTIFY mattingSettingsChanged FINAL)
     Q_PROPERTY(QString mattingDevice READ mattingDevice WRITE setMattingDevice NOTIFY mattingSettingsChanged FINAL)
+    Q_PROPERTY(QString powderRenderer READ powderRenderer WRITE setPowderRenderer NOTIFY powderRendererChanged FINAL)
     Q_PROPERTY(bool companionAvailable READ companionAvailable NOTIFY serviceAvailabilityChanged FINAL)
     Q_PROPERTY(QString companionUnavailableReason READ companionUnavailableReason NOTIFY serviceAvailabilityChanged FINAL)
     Q_PROPERTY(bool assistantConfigured READ assistantConfigured NOTIFY serviceAvailabilityChanged FINAL)
@@ -570,6 +571,8 @@ public:
     void setMattingModelDir(const QString &dir);
     QString mattingDevice() const;
     void setMattingDevice(const QString &device);
+    QString powderRenderer() const { return m_powderRenderer; }
+    void setPowderRenderer(const QString &renderer);
     /* Compact advanced surface for the Inspector: boundary px (1..24),
      * detail/artifacts/holes/decontamination/temporal are 0..100. */
     Q_INVOKABLE void setMatteAdvanced(int boundary, int detail, int artifacts,
@@ -902,6 +905,7 @@ signals:
     void objectMaskEdgeChanged();
     void mattingStateChanged();
     void mattingSettingsChanged();
+    void powderRendererChanged();
     void trackingStateChanged();
     void visionStateChanged();
     void generationStateChanged();
@@ -1141,6 +1145,7 @@ private:
     bool m_matteRefining = false;
     int m_matteGeneration = 0;
     bool m_matteDiagnostics = false;
+    QString m_powderRenderer = QStringLiteral("auto");
     QString m_matteError;
     TrackingService m_tracking;
     VisionService m_vision;

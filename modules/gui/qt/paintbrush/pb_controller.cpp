@@ -259,6 +259,14 @@ void PaintbrushController::configureServices()
 {
     m_segmentation.configure(VLC_OBJECT(m_intf));
     m_matting.configure(VLC_OBJECT(m_intf));
+    /* Powder renderer default is CPU (measured faster); "gpu" is the explicit
+     * experimental opt-in. */
+    const QString powder = pbConfigString(VLC_OBJECT(m_intf),
+                                          "paintbrush-powder-renderer")
+                               .trimmed().toLower();
+    if (powder == QLatin1String("gpu") || powder == QLatin1String("cpu")
+        || powder == QLatin1String("auto"))
+        m_powderRenderer = powder;
     connect(&m_matting, &MattingService::matteReady,
             this, &PaintbrushController::onMatteReady);
     connect(&m_matting, &MattingService::refineFailed,
@@ -707,6 +715,7 @@ void PaintbrushController::setCanvasItem(QQuickItem *item)
     m_canvas->setController(this);
     m_canvas->setDocument(&m_document);
     m_canvas->setUndoStack(&m_undoStack);
+    m_canvas->setPowderGpuEnabled(m_powderRenderer == QLatin1String("gpu"));
 
     connect(m_canvas, &PaintbrushCanvasItem::objectSelectClick,
             this, &PaintbrushController::onCanvasObjectClick);
@@ -2826,6 +2835,25 @@ void PaintbrushController::setMattingDevice(const QString &device)
     m_matting.setDeviceTier(tier);
     emit mattingSettingsChanged();
     emit mattingStateChanged();
+}
+
+void PaintbrushController::setPowderRenderer(const QString &renderer)
+{
+    const QString value = renderer.trimmed().toLower();
+    const QString resolved = (value == QLatin1String("gpu")
+                              || value == QLatin1String("cpu"))
+                                 ? value : QStringLiteral("auto");
+    if (resolved == m_powderRenderer)
+        return;
+    m_powderRenderer = resolved;
+    config_PutPsz("paintbrush-powder-renderer", resolved.toUtf8().constData());
+    if (m_canvas)
+        m_canvas->setPowderGpuEnabled(resolved == QLatin1String("gpu"));
+    emit powderRendererChanged();
+    setStatus(resolved == QLatin1String("gpu")
+                  ? QStringLiteral("Powder renderer: GPU (experimental; measured "
+                                   "slower than CPU for small unions)")
+                  : QStringLiteral("Powder renderer: CPU"));
 }
 
 void PaintbrushController::setMattingModelDir(const QString &dir)

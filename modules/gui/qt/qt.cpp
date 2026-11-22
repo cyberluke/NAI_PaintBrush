@@ -268,6 +268,11 @@ static void ShowDialog   ( intf_thread_t *, int, int, intf_dialog_args_t * );
 #define PB_OPEN_LONGTEXT N_( "Open the given file THROUGH the workspace's own video path, "\
                               "so the native video output is embedded in the canvas instead "\
                               "of appearing as a separate player window." )
+#define PB_POWDER_RENDERER_TEXT N_( "Glitter powder renderer" )
+#define PB_POWDER_RENDERER_LONGTEXT N_( "auto/cpu: CPU material renderer (measured faster "\
+                                         "for interactive powder unions); gpu: experimental "\
+                                         "GPU powder shader (passes the parity harness but is "\
+                                         "about 2x slower because of upload/readback)." )
 #define PB_VLM_BASE_TEXT N_( "Vision model base URL" )
 #define PB_VLM_BASE_LONGTEXT N_( "Base URL of an OpenAI-compatible vision endpoint "\
                                  "used by Ask about this." )
@@ -398,6 +403,10 @@ static const char *const psz_sam_devices[] = { "gpu", "auto", "cpu" };
 static const char *const psz_sam_devices_text[] =
     { N_( "GPU" ), N_( "Automatic" ), N_( "CPU" ) };
 
+static const char *const psz_powder_renderers[] = { "auto", "cpu", "gpu" };
+static const char *const psz_powder_renderers_text[] =
+    { N_( "Automatic (CPU)" ), N_( "CPU" ), N_( "GPU (experimental)" ) };
+
 static const char *const compositor_vlc[] = {
     "auto",
 #ifdef _WIN32
@@ -476,6 +485,9 @@ vlc_module_begin ()
     add_bool( "paintbrush-matte-selftest", false, PB_MATTE_SELFTEST_TEXT,
               PB_MATTE_SELFTEST_LONGTEXT )
     add_string( "paintbrush-open", NULL, PB_OPEN_TEXT, PB_OPEN_LONGTEXT )
+    add_string( "paintbrush-powder-renderer", "auto", PB_POWDER_RENDERER_TEXT,
+                PB_POWDER_RENDERER_LONGTEXT )
+            change_string_list( psz_powder_renderers, psz_powder_renderers_text )
     add_string( "paintbrush-vlm-base-url", NULL, PB_VLM_BASE_TEXT, PB_VLM_BASE_LONGTEXT )
     add_string( "paintbrush-vlm-model", NULL, PB_VLM_MODEL_TEXT, nullptr )
     add_integer_with_range( "paintbrush-vlm-timeout", 60, 5, 600, PB_VLM_TIMEOUT_TEXT, nullptr )

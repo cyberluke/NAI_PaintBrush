@@ -84,6 +84,10 @@ class PaintbrushCanvasItem : public QQuickItem
     Q_PROPERTY(qreal brushColorVariation READ brushColorVariation WRITE setBrushColorVariation NOTIFY artParamsChanged FINAL)
     /* Glitter-Powder workbench: active subtool for TOOL_GLITTER_POWDER. */
     Q_PROPERTY(int powderTool READ powderTool WRITE setPowderTool NOTIFY powderToolChanged FINAL)
+    /* Experimental GPU powder surface pass. Default off: the measured CPU
+     * material renderer is faster than the GPU upload+shade+readback for the
+     * interactive union sizes (see the powder harness benchmark). */
+    Q_PROPERTY(bool powderGpuEnabled READ powderGpuEnabled WRITE setPowderGpuEnabled NOTIFY powderGpuChanged FINAL)
     /* Per-subtool physical sizes (reference P0.5):
      *   Glue / Eraser values = visible width
      *   Glitter / Push values = reference radius
@@ -112,6 +116,9 @@ public:
     /* -- Glitter-Powder workbench subtool --------------------------------- */
     int powderTool() const { return int(m_powderTool); }
     void setPowderTool(int t);   /* clamps to the 4 stroke modes (never Pour/Blow stored) */
+
+    bool powderGpuEnabled() const { return m_powderGpuEnabled; }
+    void setPowderGpuEnabled(bool enabled);
 
     qreal powderGlueWidth()   const { return m_powderGlueWidth; }
     qreal powderGlitterSize() const { return m_powderGlitterSize; }
@@ -299,6 +306,7 @@ public:
 signals:
 void toolChanged(int tool);
 void powderToolChanged(int tool);
+void powderGpuChanged(bool enabled);
 void fgColorChanged();
     void bgColorChanged();
     void brushSizeChanged();
@@ -574,6 +582,7 @@ private:
      * through the same powder.frag surface so the document + export are GPU. */
     art::GpuRuntime m_gpuRender;   /* lazily initialized; best-effort only */
     bool m_gpuRenderTried = false;
+    bool m_powderGpuEnabled = false;
     /* Long-press breath (reference blowOnLongPress): holding a powder/smear
      * stroke still for ~0.6 s blows the loose powder away, leaving what's
      * bonded to the glue. */

@@ -41,6 +41,7 @@
 #include "modules/gui/qt/paintbrush/art/gpu/pb_gpu_runtime.cpp"
 
 #include <QGuiApplication>
+#include <QElapsedTimer>
 #include <QImage>
 #include <QColor>
 #include <QRgb>
@@ -705,6 +706,93 @@ int main(int argc, char **argv)
                         "FAIL");
             CHECK("MATERIAL_LAYER renderer available", false);
         }
+    }
+
+    /* ---- CPU vs GPU cost at realistic union sizes ---------------------
+     * A powder preview renders the touched union (typically 256-1024 px on a
+     * side). Measure the real break-even before enabling the GPU path in the
+     * interactive loop. */
+    {
+        std::printf("\n-- powder render cost (dense heap, same world span) --\n");
+        auto bench = [&](int size, int reps) {
+            /* Keep the same world span as the 512 reference render. */
+            const float perPx = 0.5f * (512.0f / float(size));
+            QElapsedTimer timer;
+            timer.start();
+            for (int i = 0; i < reps; ++i)
+            {
+                const QImage img = dense.g.render(QSize(size, size), originX,
+                                                  originY, perPx, rig0, pal,
+                                                  paper, ArtScale(), T0);
+                if (img.isNull())
+                {
+                    std::printf("  bench %4d^2: CPU render failed\n", size);
+                    return;
+                }
+            }
+            const double cpuMs = double(timer.elapsed()) / double(reps);
+            timer.restart();
+            for (int i = 0; i < reps; ++i)
+            {
+                const QImage img = rt.renderPowder(
+                    QSize(size, size), dense.g, dense.pal, originX, originY,
+                    perPx, rig0, paper, T0, 1,
+                    GpuRuntime::PowderOutput::MaterialLayer);
+                if (img.isNull())
+                {
+                    std::printf("  bench %4d^2: GPU render failed\n", size);
+                    return;
+                }
+            }
+            const double gpuMs = double(timer.elapsed()) / double(reps);
+            std::printf("  bench %4d^2: CPU %7.1f ms   GPU %7.1f ms   speedup %.2fx\n",
+                        size, cpuMs, gpuMs, gpuMs > 0.0 ? cpuMs / gpuMs : 0.0);
+        };
+        bench(256, 5);
+        bench(512, 5);
+        bench(1024, 3);
+    }
+
+    /* ---- powder SIMULATION cost ---------------------------------------
+     * The renderer was never the dominant cost; these numbers decide whether
+     * a GPU surface pass can help the live tool at all. */
+    {
+        std::printf("\n-- powder simulation cost (256^2 grid, 4.0 world cell) --\n");
+        QElapsedTimer timer;
+        const int reps = 5;
+        GlitterParams p;
+        p.amount = 1.5f;
+        p.flakeSize = 0.8f;
+        p.color = pal.colors.value(0, QColor("#f2a7c8"));
+        const float wc = 512.0f;
+
+        timer.start();
+        for (int r = 0; r < reps; ++r)
+        {
+            glitter::GlitterPowder g;
+            g.reset(QSize(256, 256), 4.0f, std::uint32_t(5 + r));
+            for (int i = 0; i < 6; ++i)
+                g.pourGlitter(wc + (i - 2) * 8.0f, wc + (i % 3 - 1) * 6.0f,
+                              22.0f + 2.0f * i, p);
+            g.relax();
+            g.relax();
+            g.decayFlow();
+        }
+        std::printf("  dense scene build (6 pours + 2 relax): %6.1f ms\n",
+                    double(timer.elapsed()) / double(reps));
+
+        glitter::GlitterPowder warm;
+        warm.reset(QSize(256, 256), 4.0f, 99u);
+        timer.restart();
+        for (int r = 0; r < 20; ++r)
+            warm.pourGlitter(wc + (r % 5) * 2.0f, wc, 24.0f, p);
+        std::printf("  one pourGlitter (warm grid):           %6.2f ms\n",
+                    double(timer.elapsed()) / 20.0);
+        timer.restart();
+        for (int r = 0; r < 20; ++r)
+            warm.relax();
+        std::printf("  one relax():                           %6.2f ms\n",
+                    double(timer.elapsed()) / 20.0);
     }
 
     /* ---- final summary ------------------------------------------------ */
