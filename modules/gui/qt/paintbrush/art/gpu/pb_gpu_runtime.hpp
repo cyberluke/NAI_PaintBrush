@@ -116,7 +116,13 @@ public:
                         float worldPerPx, const ArtLightRig &rig,
                         const PaperStock *paper, qint64 timeMs,
                         int uiDpr = 1,
-                        PowderOutput output = PowderOutput::MaterialLayer);
+                        PowderOutput output = PowderOutput::MaterialLayer,
+                        /* grid cells to pack/upload; invalid = the whole grid.
+                         * The shader only reads the rendered cells plus a few
+                         * neighbours, so a live preview of one brush segment
+                         * packs its window instead of all W*H cells (this is
+                         * 20 of the ~24 ms a bake used to cost). */
+                        const QRect &cellWindow = QRect());
 
     /* One finish effect applied to `source` (premultiplied ARGB32).
      * `mode`: 0 DirectedBlur, 1 Shadow, 2 Glow — the same three the canvas

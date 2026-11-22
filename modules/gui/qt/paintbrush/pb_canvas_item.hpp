@@ -603,6 +603,9 @@ private:
     bool m_powderSceneBroken = false;
     /* one "live preview renderer = ..." log line per powder stroke */
     bool m_powderModeLogged = false;
+    /* true when the last material bake used the GPU powder surface (vs the
+     * CPU Voronoi fallback); reported by PB_POWDER_PERF. */
+    bool m_lastPowderBakeGpu = false;
     qint64 m_lastPowderRelaxMs = 0;      /* bounds the relax sweep to ~60 Hz */
     bool m_gpuRenderTried = false;
     bool m_powderGpuEnabled = false;
@@ -670,6 +673,12 @@ qint64 m_lastPowderPreviewMs = 0;
      * preview canceling itself). */
     void renderPowderPreview(bool commitBake = false);
     void renderPowderUnion();    /* render + persist-material (commit paths) */
+    /* Bake one layer-space region of the AUTHORITATIVE powder material with
+     * the SAME renderer the commit uses: the GPU powder.frag surface when it
+     * is ready (premium mirror/holo look), the CPU Voronoi only as a fallback.
+     * Keeping preview and commit on one renderer is what stops the material
+     * from changing appearance when the stroke is released. */
+    QImage bakePowderRegion(const QRect &region, double timeMs, bool *usedGpu = nullptr);
     /* True when the live powder union is drawn by the zero-readback scene-graph
      * node: powder engine ready, GPU path enabled, and the powder material
      * layer is the untransformed TOP layer (the node draws above all tiles, so

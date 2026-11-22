@@ -21,6 +21,8 @@
 #include <QDateTime>
 #include <cstring>
 #include <cmath>
+#include <chrono>
+#include <array>
 
 #include <rhi/qrhi.h>
 
@@ -38,11 +40,22 @@ inline void pbSetVertexInput(QRhiCommandBuffer *cb, QRhiBuffer *vb)
 
 /* The framebuffer holds premultiplied bytes (blend One/OneMinusSrcAlpha);
  * readback labels them ARGB32 (straight), so un-premultiply to match the
- * CPU golden images the harness compares against. */
+ * CPU golden images the harness compares against.
+ *
+ * INTEGER reciprocal table: the old version did three double divisions per
+ * pixel (qRed()*255.0/a + 0.5), which measured ~14 ms on a preview-sized
+ * bake — more than the whole GPU pass. kInv[a] = round(255*65536/a), and
+ * v*kInv[a] <= 255*255*65536 = 4.26e9 still fits in quint32. */
 QImage unPremultiply(const QImage &premul)
 {
     if (premul.isNull())
         return {};
+    static const std::array<quint32, 256> kInv = [] {
+        std::array<quint32, 256> t{};
+        for (int a = 1; a < 256; ++a)
+            t[size_t(a)] = (255u * 65536u + quint32(a) / 2u) / quint32(a);
+        return t;
+    }();
     QImage out(premul.size(), QImage::Format_ARGB32);
     for (int y = 0; y < premul.height(); ++y)
     {
@@ -50,16 +63,18 @@ QImage unPremultiply(const QImage &premul)
         QRgb *dst = reinterpret_cast<QRgb *>(out.scanLine(y));
         for (int x = 0; x < premul.width(); ++x)
         {
-            const int a = qAlpha(src[x]);
-            if (a == 0)
+            const QRgb v = src[x];
+            const quint32 a = quint32(qAlpha(v));
+            if (a == 0u)
             {
                 dst[x] = 0;
                 continue;
             }
-            const int r = qBound(0, int(qRed(src[x]) * 255.0 / a + 0.5), 255);
-            const int g = qBound(0, int(qGreen(src[x]) * 255.0 / a + 0.5), 255);
-            const int b = qBound(0, int(qBlue(src[x]) * 255.0 / a + 0.5), 255);
-            dst[x] = qRgba(r, g, b, a);
+            const quint32 f = kInv[a];
+            const int r = int(qMin(255u, (quint32(qRed(v)) * f + 32768u) >> 16));
+            const int g = int(qMin(255u, (quint32(qGreen(v)) * f + 32768u) >> 16));
+            const int b = int(qMin(255u, (quint32(qBlue(v)) * f + 32768u) >> 16));
+            dst[x] = qRgba(r, g, b, int(a));
         }
     }
     return out;
@@ -823,9 +838,10 @@ QImage GpuRuntime::renderPowder(const QSize &outSize,
                                 const glitter::PowderPalette &pal,
                                 float outOriginWorldX, float outOriginWorldY,
                                 float worldPerPx, const ArtLightRig &rig,
-                                const PaperStock *paper, qint64 timeMs,
+                                PaperStock const *paper, qint64 timeMs,
                                 int uiDpr,
-                                PowderOutput output)
+                                PowderOutput output,
+                                const QRect &cellWindow)
 {
     if (!m_rhi || !m_pipelines || !ensureTarget(outSize))
         return {};
@@ -839,15 +855,35 @@ QImage GpuRuntime::renderPowder(const QSize &outSize,
     const int dpr = qMax(1, uiDpr);
     const int palN = qMax(1, pal.colors.size());
 
+    /* PB_POWDER_PERF=1: split the one-shot bake cost into pack / upload / draw /
+     * readback so the real-time work targets the actual bottleneck. */
+    const auto tStart = std::chrono::steady_clock::now();
+    auto msSince = [](const std::chrono::steady_clock::time_point &a) {
+        return std::chrono::duration<double, std::milli>(
+                   std::chrono::steady_clock::now() - a).count();
+    };
+
     /* --- FLOAT simulation texture (RGBA16F) ----------------------------
      * Preserves the REAL cell-unit heights/stuck/glue as the physics has them
      * (no 0..15 -> 0..1 quantization), so the shader's reference thresholds
      * see the actual values. r=height g=seed b=stuck a=glue */
+    /* Pack ONLY the requested cell window (plus the caller's neighbour margin).
+     * The buffers stay full-grid so the shader's world->cell mapping is
+     * unchanged; everything outside the window is the zero fill. A live
+     * preview of one brush segment therefore packs a few thousand cells
+     * instead of all W*H (measured: 21 ms of a 24 ms bake). */
+    QRect packWin = cellWindow.isValid() ? cellWindow.intersected(QRect(0, 0, W, H))
+                                         : QRect(0, 0, W, H);
+    if (packWin.isEmpty())
+        packWin = QRect(0, 0, W, H);
+    const int px0 = packWin.left(), py0 = packWin.top();
+    const int px1 = packWin.right(), py1 = packWin.bottom();
+
     QByteArray simHalf(W * H * 4 * 2, '\0');     /* 4 channels x float16 */
     quint8 *sim8 = reinterpret_cast<quint8 *>(simHalf.data());
-    for (int y = 0; y < H; ++y)
+    for (int y = py0; y <= py1; ++y)
     {
-        for (int x = 0; x < W; ++x)
+        for (int x = px0; x <= px1; ++x)
         {
             const glitter::PowderCell &c = powder.powderCellAt(y * W + x);
             /* never feed the shader a non-finite height/seed: a giant or NaN
@@ -876,9 +912,9 @@ QImage GpuRuntime::renderPowder(const QSize &outSize,
      * The shader decodes with floor(texelFetch(uCol).* 255 + 0.5) so the
      * palette indices survive (no 0..15 -> 0..1 sampler normalization loss). */
     QByteArray colBuf(W * H * 4, '\0');
-    for (int y = 0; y < H; ++y)
+    for (int y = py0; y <= py1; ++y)
     {
-        for (int x = 0; x < W; ++x)
+        for (int x = px0; x <= px1; ++x)
         {
             const glitter::PowderCell &c = powder.powderCellAt(y * W + x);
             const size_t o = size_t(y * W + x) * 4;
@@ -894,6 +930,8 @@ QImage GpuRuntime::renderPowder(const QSize &outSize,
         }
     }
 
+    const double tPackMs = msSince(tStart);
+
     QRhiTexture *simTex = m_rhi->newTexture(QRhiTexture::RGBA16F, QSize(W, H), 1, {});
     QRhiTexture *colTex = m_rhi->newTexture(QRhiTexture::RGBA8, QSize(W, H), 1, {});
     /* P0.2: full-resolution world-anchored glue field (sub-res per cell) as a
@@ -907,7 +945,11 @@ QImage GpuRuntime::renderPowder(const QSize &outSize,
     QVector<quint8> glueField;
     {
         QSize gsz(1, 1);
-        if (output == PowderOutput::MaterialLayer && powder.hasGlueField())
+        /* The glue field is kGlueSubRes^2 = 64 bytes per powder cell: for a
+         * 1001x564 grid that is a 36 MB copy + 36 MB texture + 36 MB upload
+         * PER CALL. Glitter-only material has no glue at all, so bind the 1x1
+         * zero stub unless the engine actually carries glue. */
+        if (output == PowderOutput::MaterialLayer && powder.hasAnyGlue())
         {
             glueField = powder.glueFieldBytes();
             gsz = QSize(W * glueSub, H * glueSub);
@@ -989,9 +1031,11 @@ QImage GpuRuntime::renderPowder(const QSize &outSize,
     u->uploadTexture(simTex, { QRhiTextureUploadEntry(0, 0,
                             QRhiTextureSubresourceUploadDescription(simHalf.constData(),
                                                                     quint32(simHalf.size()))) });
-    /* packed colour texture as an owned QImage (removes ARGB swap) */
-    QImage colI((const uchar *)colBuf.constData(), W, H, W * 4, QImage::Format_RGBA8888);
-    u->uploadTexture(colTex, colI.copy());
+    /* packed colour texture from the tightly packed buffer (RGBA8, stride
+     * W*4): no extra QImage copy per call */
+    u->uploadTexture(colTex, { QRhiTextureUploadEntry(0, 0,
+        QRhiTextureSubresourceUploadDescription(colBuf.constData(),
+                                                quint32(colBuf.size()))) });
     /* P0.2: upload the full-res glue field as the uGlue texture (R8, or a 1x1
      * zero stub when none exists so the SRB binding is always valid). */
     if (glueTex)
@@ -1010,6 +1054,7 @@ QImage GpuRuntime::renderPowder(const QSize &outSize,
         }
     }
     u->updateDynamicBuffer(m_pipelines->powderUb, 0, kUbSize, ub.constData());
+    const double tUploadMs = msSince(tStart);
 
     /* per-call SRB (layout must match the powder pipeline's) */
     QRhiShaderResourceBindings *srb = m_rhi->newShaderResourceBindings();
@@ -1052,12 +1097,35 @@ QImage GpuRuntime::renderPowder(const QSize &outSize,
     cb->draw(6);
     cb->endPass();
     m_rhi->endOffscreenFrame();
+    const double tDrawMs = msSince(tStart);
 
     delete vb;          /* no longer referenced once the frame is submitted */
     delete srb;         /* ditto */
     freeResources();
     QImage result = readback(m_target, outSize);
-    return unPremultiply(result);
+    const double tReadMs = msSince(tStart);
+    QImage straight = unPremultiply(result);
+    const double tUnMs = msSince(tStart);
+    if (qEnvironmentVariableIsSet("PB_POWDER_PERF")) {
+        static double sPack = 0, sUpload = 0, sDraw = 0, sRead = 0, sUn = 0;
+        static int sN = 0;
+        sPack += tPackMs;
+        sUpload += tUploadMs - tPackMs;
+        sDraw += tDrawMs - tUploadMs;
+        sRead += tReadMs - tDrawMs;
+        sUn += tUnMs - tReadMs;
+        if (++sN >= 30) {
+            fprintf(stderr,
+                    "POWDER BAKE pack=%.1f upload=%.1f draw=%.1f read=%.1f "
+                    "unpremult=%.1f total=%.1f px=%d\n",
+                    sPack / sN, sUpload / sN, sDraw / sN, sRead / sN, sUn / sN,
+                    (sPack + sUpload + sDraw + sRead + sUn) / sN,
+                    outSize.width() * outSize.height());
+            sPack = sUpload = sDraw = sRead = sUn = 0;
+            sN = 0;
+        }
+    }
+    return straight;
 }
 
 /* ---------------------------------------------------------------- finish */

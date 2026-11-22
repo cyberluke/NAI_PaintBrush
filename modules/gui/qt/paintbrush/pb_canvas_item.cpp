@@ -170,6 +170,7 @@ PaintbrushCanvasItem::PaintbrushCanvasItem(QQuickItem *parent)
     m_repaintTimer.setSingleShot(true);
     m_repaintTimer.setInterval(8);
     connect(&m_repaintTimer, &QTimer::timeout, this, [this]() {
+        const auto tTick0 = std::chrono::steady_clock::now();
         const bool powderStroke = m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR;
         /* consume the latest sampled input position first, then flush */
         if (m_movePending)
@@ -200,6 +201,11 @@ PaintbrushCanvasItem::PaintbrushCanvasItem(QQuickItem *parent)
         if (!m_dirtyTiles.isEmpty() || m_movePending || m_powderBlowing
             || (powderStroke && m_strokeActive))
             m_repaintTimer.start();
+        if (m_perf.enabled && (powderStroke || m_powderBlowing)) {
+            m_perf.frameMs += std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - tTick0).count();
+            ++m_perf.nFrame;
+        }
         update();
     });
 
@@ -1170,15 +1176,13 @@ if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
          * drives the holographic shimmer while drawing; the committed pass
          * (renderPowderUnion) uses phase 0 for a deterministic static result */
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
-        if (m_lastPowderPreviewMs > 0)
-            m_powderShimmerMs += now - m_lastPowderPreviewMs;
-        m_lastPowderPreviewMs = now;
         const bool gpuLive = powderGpuLivePreview();
         if (!m_powderModeLogged)
         {
             m_powderModeLogged = true;
             qInfo("pb powder: live preview renderer = %s",
-                  gpuLive ? "gpu-qsg (zero readback)" : "cpu material");
+                  gpuLive ? "gpu-qsg (zero readback)"
+                          : "incremental material bake (gpu surface when ready)");
         }
         {
             char tb[64];
@@ -1199,6 +1203,9 @@ if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
              * cost the GPU pass was supposed to remove. The authoritative
              * raster is baked exactly once by renderPowderUnion() on release. */
             m_strokeHadPaint = true;
+            if (m_lastPowderPreviewMs > 0)
+                m_powderShimmerMs += now - m_lastPowderPreviewMs;
+            m_lastPowderPreviewMs = now;
             refreshPowderScene();
             powderPerfReport();
             m_strokeLastDab = toLocal;
@@ -1223,17 +1230,29 @@ if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
             return;
         }
         ensureScratch(renderRect);
-        /* render with the sim's AUTHORITATIVE palette so grains deposited as
-         * new colours resolve to their true slots (never clamped to paper), and
-         * ONE holographic control drives the material (P0.12) */
-        m_powderPal.colors = m_powder.palette();
-        m_powderPal.holographic = m_powderParams.shimmer;
+        /* Display-rate cadence: the physics still runs on every 8 ms input
+         * tick, but the material bake + scratch composite + tile upload only
+         * when the last preview is older than the interval for this window.
+         * The shimmer clock accumulates the skipped time, so the material
+         * stays time-correct. */
+        const int previewArea = renderRect.width() * renderRect.height();
+        const qint64 previewIntervalMs = previewArea <= 256 * 256 ? 16
+                                       : previewArea <= 768 * 768 ? 33 : 50;
+        if (m_lastPowderPreviewMs > 0
+            && now - m_lastPowderPreviewMs < previewIntervalMs)
+        {
+            m_strokeLastDab = toLocal;
+            return;
+        }
+        if (m_lastPowderPreviewMs > 0)
+            m_powderShimmerMs += now - m_lastPowderPreviewMs;
+        m_lastPowderPreviewMs = now;
+        /* ONE renderer for preview and commit: bakePowderRegion uses the GPU
+         * powder.frag surface (the same premium material the commit bakes),
+         * not the legacy CPU Voronoi. That is what removes the "old algorithm
+         * with white dots" look while the stroke is still in progress. */
         const auto tr0 = std::chrono::steady_clock::now();
-        QImage flakes = m_powder.render(renderRect.size(), float(renderRect.x()),
-                                        float(renderRect.y()), 1.0f,
-                                        m_doc->lightRig(), m_powderPal,
-                                        m_doc->paperStock(), m_doc->artScale(1.0f),
-                                        m_powderShimmerMs);
+        QImage flakes = bakePowderRegion(renderRect, m_powderShimmerMs);
         if (m_perf.enabled)
         {
             const auto tr1 = std::chrono::steady_clock::now();
@@ -1242,8 +1261,12 @@ if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
         }
         {
             QPainter p(&m_scratchTile);
+            /* A powder layer's raster IS a bake of the material state, and the
+             * sim already holds the previously committed grains: clear the
+             * window and draw only the fresh material. Drawing the old raster
+             * underneath it double-composited the old powder. */
             p.setCompositionMode(QPainter::CompositionMode_Source);
-            p.drawImage(renderRect.topLeft() - m_scratchOrigin, layer->raster, renderRect);
+            p.fillRect(renderRect.translated(-m_scratchOrigin), QColor(0, 0, 0, 0));
             p.setCompositionMode(QPainter::CompositionMode_SourceOver);
             p.drawImage(renderRect.topLeft() - m_scratchOrigin, flakes);
             p.end();
@@ -1265,6 +1288,7 @@ if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
         if (toStringHasMaterial)
             m_strokeHadPaint = true;
         markTilesDirty(mappedRect(renderRect));
+        powderPerfReport();
         m_strokeLastDab = toLocal;
         return;
     }
@@ -1621,12 +1645,12 @@ QRect PaintbrushCanvasItem::powderCellWindow(const QRect &layerRect) const
     if (W <= 0 || H <= 0 || layerRect.isEmpty())
         return QRect();
     const double cell = qMax(0.01f, m_powder.worldCellSize());
-    /* +-2 cells: the shader reads one-cell neighbours (height gradient, grain
+    /* +-4 cells: the shader reads one-cell neighbours (height gradient, grain
      * lattice jitter) and relax() sweeps with a 1-cell margin. */
-    const int x0 = qBound(0, int(std::floor(layerRect.left() / cell)) - 2, W - 1);
-    const int y0 = qBound(0, int(std::floor(layerRect.top() / cell)) - 2, H - 1);
-    const int x1 = qBound(x0, int(std::ceil(layerRect.right() / cell)) + 2, W - 1);
-    const int y1 = qBound(y0, int(std::ceil(layerRect.bottom() / cell)) + 2, H - 1);
+    const int x0 = qBound(0, int(std::floor(layerRect.left() / cell)) - 4, W - 1);
+    const int y0 = qBound(0, int(std::floor(layerRect.top() / cell)) - 4, H - 1);
+    const int x1 = qBound(x0, int(std::ceil(layerRect.right() / cell)) + 4, W - 1);
+    const int y1 = qBound(y0, int(std::ceil(layerRect.bottom() / cell)) + 4, H - 1);
     return QRect(QPoint(x0, y0), QPoint(x1, y1));
 }
 
@@ -1644,9 +1668,11 @@ void PaintbrushCanvasItem::powderPerfReport()
     if (!m_perf.enabled || m_perf.nPhy + m_perf.nRender < 60)
         return;
     fprintf(stderr,
-            "POWDER PERF gpu=%d physics=%.2fms(%d) pack=%.2fms(%d) "
-            "pack_cells=%d pack_bytes=%lld airborne=%d dirty_px=%d\n",
+            "POWDER PERF bake=%s qsg=%d tick=%.1fms(%d) physics=%.2fms(%d) "
+            "render=%.2fms(%d) pack_cells=%d pack_bytes=%lld airborne=%d dirty_px=%d\n",
+            m_lastPowderBakeGpu ? "gpu" : "cpu",
             powderGpuLivePreview() ? 1 : 0,
+            m_perf.frameMs / qMax(1, m_perf.nFrame), m_perf.nFrame,
             m_perf.phyMs / qMax(1, m_perf.nPhy), m_perf.nPhy,
             m_perf.renderMs / qMax(1, m_perf.nRender), m_perf.nRender,
             m_perf.packCells, (long long)m_perf.packBytes,
@@ -1715,6 +1741,74 @@ void PaintbrushCanvasItem::refreshPowderScene()
     update();
 }
 
+QImage PaintbrushCanvasItem::bakePowderRegion(const QRect &region, double timeMs,
+                                              bool *usedGpu)
+{
+    if (usedGpu)
+        *usedGpu = false;
+    if (!m_doc || region.isEmpty())
+        return QImage();    /* the sim's palette is authoritative for existing grains; one holographic
+     * control drives the material (P0.12) */
+    m_powderPal.colors = m_powder.palette();
+    m_powderPal.holographic = m_powderParams.shimmer;
+
+    const QByteArray commitMode = qgetenv("PB_POWDER_COMMIT").trimmed();
+    const bool allowGpu =
+        m_powderGpuEnabled
+        || (!commitMode.isNull() && !commitMode.compare("gpu", Qt::CaseInsensitive));
+    if (!m_gpuRenderTried) {
+        m_gpuRenderTried = true;
+        m_gpuRender.initialize(true);
+    }
+    if (allowGpu && m_gpuRender.isReady()) {
+        pbCrashTrace("renderPowder begin");
+        QImage img = m_gpuRender.renderPowder(
+            region.size(), m_powder, m_powderPal,
+            float(region.x()), float(region.y()), 1.0f,
+            m_doc->lightRig(), m_doc->paperStock(), timeMs, /*uiDpr=*/1,
+            art::GpuRuntime::PowderOutput::MaterialLayer,
+            powderCellWindow(region));
+        pbCrashTrace("renderPowder end");
+        if (!img.isNull() && !img.size().isEmpty()) {
+            /* content sanity on real scanlines (never .color(0)): a genuinely
+             * empty region must not silently replace the material */
+            bool empty = false;
+            if (img.format() == QImage::Format_ARGB32
+                || img.format() == QImage::Format_RGBA8888
+                || img.format() == QImage::Format_RGB32) {
+                const int w = img.width(), hh = img.height();
+                const int bpl = img.bytesPerLine();
+                const uchar *p0 = img.constBits();
+                int nonZero = 0;
+                const int stepY = qMax(1, hh / 16);
+                for (int y = 0; y < hh && nonZero < 4; y += stepY) {
+                    const uchar *sl = p0 + qint64(y) * bpl;
+                    for (int x = 0; x < w; x += 3) {
+                        if (sl[x * 4 + 0] || sl[x * 4 + 1] || sl[x * 4 + 2]
+                            || sl[x * 4 + 3]) {
+                            ++nonZero;
+                            break;
+                        }
+                    }
+                }
+                empty = (nonZero == 0);
+            }
+            pbCrashTrace("GPU result validation");
+            if (!empty) {
+                if (usedGpu)
+                    *usedGpu = true;
+                m_lastPowderBakeGpu = true;
+                return img;
+            }
+        }
+    }
+    pbCrashTrace("CPU Voronoi fallback render");
+    m_lastPowderBakeGpu = false;
+    return m_powder.render(region.size(), float(region.x()), float(region.y()),
+                           1.0f, m_doc->lightRig(), m_powderPal,
+                           m_doc->paperStock(), m_doc->artScale(1.0f), timeMs);
+}
+
 void PaintbrushCanvasItem::renderPowderPreview(bool commitBake)
 {
     pbCrashTrace("renderPowderPreview enter");
@@ -1748,92 +1842,21 @@ void PaintbrushCanvasItem::renderPowderPreview(bool commitBake)
     captureBeforeRegion(u);
     ensureScratch(u);
 
-    /* Deterministic COMMIT bake: t=0 material bake. The CPU material renderer
-     * used by the live preview is the CANONICAL commit path (transparent
-     * material layer, no baked paper). The GPU powder.frag surface is an
-     * EXPERIMENTAL path only while a real-GUI parity gate proves its
-     * MATERIAL_LAYER output matches the CPU material renderer.
-     *
-     * Gate semantics (temporary containment):
-     *   PB_POWDER_COMMIT=gpu   -> GPU experimental path
-     *   everything else        -> CPU canonical path
-     */
-    QImage flakes;
+    /* Commit bake: the SAME renderer the live preview uses, so the material
+     * does not change appearance when the stroke is released. bakePowderRegion
+     * prefers the GPU powder.frag surface (premium mirror/holo material) and
+     * falls back to the CPU Voronoi only when the GPU path is unavailable. */
     bool bakedGpu = false;
-    /* render with the sim's AUTHORITATIVE palette so the committed material
-     * matches the live preview (grains deposited as new colours resolve to
-     * their true slots) */
-    m_powderPal.colors = m_powder.palette();
-    m_powderPal.holographic = m_powderParams.shimmer;
-    const QByteArray commitMode = qgetenv("PB_POWDER_COMMIT").trimmed();
-    /* GPU is opt-in (settings/env). Measured on the D3D11 harness: the GPU
-     * surface pass is ~2x SLOWER than the CPU material renderer at the
-     * interactive union sizes (256-1024 px) because of the texture upload and
-     * RGBA readback; the CPU path stays the default. The 28/28 parity harness
-     * is the quality gate when the GPU path is explicitly selected. */
-    const bool allowGpu =
-        m_powderGpuEnabled
-        || (!commitMode.isNull() && !commitMode.compare("gpu", Qt::CaseInsensitive));
-    pbCrashTrace("GpuRuntime initialize begin");
-    if (!m_gpuRenderTried) {
-        m_gpuRenderTried = true;
-        m_gpuRender.initialize(true);
+    const auto tr0 = std::chrono::steady_clock::now();
+    QImage flakes = bakePowderRegion(u, /*timeMs=*/0, &bakedGpu);
+    if (m_perf.enabled)
+    {
+        const auto tr1 = std::chrono::steady_clock::now();
+        m_perf.renderMs += std::chrono::duration<double, std::milli>(tr1 - tr0).count();
+        ++m_perf.nRender;
     }
-    pbCrashTrace("GpuRuntime initialize end");
-    if (allowGpu && m_gpuRender.isReady()) {
-        pbCrashTrace("renderPowder begin");
-        flakes = m_gpuRender.renderPowder(u.size(), m_powder, m_powderPal,
-                                          float(u.x()), float(u.y()), 1.0f,
-                                          m_doc->lightRig(), m_doc->paperStock(),
-                                          /*timeMs=*/0, /*uiDpr=*/1,
-                                          art::GpuRuntime::PowderOutput::MaterialLayer);
-        pbCrashTrace("renderPowder end");
-        /* Redo the bake semantics via the renderer result, NOT by guessing a
-         * background colour on a 32-bit image. `renderPowder` returns an opaque
-         * ARGB32 image; treat a non-null, non-empty image as a renderer success
-         * and verify content on actual scanlines/format below. */
-        if (!flakes.isNull() && !flakes.size().isEmpty()) {
-            pbCrashTrace("GPU result validation");
-            bakedGpu = true;
-            /* content sanity: a format-aware scanline probe (never .color(0)) */
-            if (flakes.format() == QImage::Format_ARGB32
-                || flakes.format() == QImage::Format_RGBA8888
-                || flakes.format() == QImage::Format_RGB32) {
-                const int h = flakes.height();
-                const int w = flakes.width();
-                const int bpl = flakes.bytesPerLine();
-                const uchar *p0 = flakes.constBits();
-                int nonZero = 0;
-                /* scan a sparse set of scanlines for any non-black pixel */
-                const int stepY = qMax(1, h / 16);
-                for (int y = 0; y < h && nonZero < 4; y += stepY) {
-                    const uchar *sl = p0 + qint64(y) * bpl;
-                    for (int x = 0; x < w; x += 3) {
-                        if (sl[x * 4 + 0] || sl[x * 4 + 1] || sl[x * 4 + 2] || sl[x * 4 + 3]) {
-                            ++nonZero;
-                            break;
-                        }
-                    }
-                }
-                if (nonZero == 0)
-                    bakedGpu = false;   /* genuinely empty frame: don't bake*/
-            }
-        }
-    }
-    if (!bakedGpu) {
-        pbCrashTrace("CPU Voronoi fallback render");
-        const auto tr0 = std::chrono::steady_clock::now();   /* P0.11 */
-        flakes = m_powder.render(u.size(), float(u.x()), float(u.y()), 1.0f,
-                                 m_doc->lightRig(), m_powderPal,
-                                 m_doc->paperStock(), m_doc->artScale(1.0f),
-                                 0);
-        if (m_perf.enabled)
-        {
-            const auto tr1 = std::chrono::steady_clock::now();
-            m_perf.renderMs += std::chrono::duration<double, std::milli>(tr1 - tr0).count();
-            ++m_perf.nRender;
-        }
-    }
+    if (!bakedGpu)
+        pbCrashTrace("commit baked on CPU");
 
     pbCrashTrace("QPainter composite");
     QPainter p(&m_scratchTile);

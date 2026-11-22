@@ -17,6 +17,7 @@ param(
     [string]$LogFile = "D:\_SATIN_AI\NAI-OS\vlc\pb_noskip.log",
     [switch]$NoBlow,
     [switch]$SkipToolSelect,
+    [int]$StepMs = 30,
     [double]$YFraction = 0.62,
     [double]$X0Fraction = 0.30,
     [double]$X1Fraction = 0.55
@@ -73,7 +74,7 @@ $steps = 40
 for ($i = 1; $i -le $steps; ++$i) {
     $x = [int]($x0 + ($x1 - $x0) * $i / $steps)
     [void][PbVerify]::SetCursorPos($x, $y)
-    Start-Sleep -Milliseconds 30
+    Start-Sleep -Milliseconds $StepMs
 }
 if (-not $NoBlow) {
     # hold still: the reference's blowOnLongPress breath
