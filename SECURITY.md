@@ -117,11 +117,20 @@ whose identity disagrees. Output:
 win64-meson\msix\msix\NAI.PaintBrush_<version>_x64.msix
 ```
 
-Installing the signed package on a clean machine requires the NAI root and
-intermediate in the **machine** stores (`LocalMachine\Root`, `LocalMachine\CA`)
-plus the leaf in `LocalMachine\TrustedPeople`. That is installer/provisioning
-work, never a build script — `Add-AppxPackage` without it fails with
-`0x800B010A`.
+Installing the signed package requires the NAI root and intermediate in the
+**machine** stores (`LocalMachine\Root`, `LocalMachine\CA`) plus the leaf in
+`LocalMachine\TrustedPeople`; `Add-AppxPackage` without them fails with
+`0x800B010A`. That provisioning is a separate, self-elevating step:
+
+```powershell
+pwsh scripts/pb-install-msix.ps1          # UAC prompt: imports the chain, installs the newest MSIX
+pwsh scripts/pb-install-msix.ps1 -TrustOnly
+pwsh scripts/pb-install-msix.ps1 -Uninstall
+```
+
+The script re-launches itself with `Start-Process -Verb RunAs` (the same
+pattern NAI OS uses), so it is one command with a UAC prompt rather than a
+manual elevated shell. The build script (`pb-build-msix.ps1`) never elevates.
 
 For development, a loose registration of the staged tree works without machine
 trust (Developer Mode):

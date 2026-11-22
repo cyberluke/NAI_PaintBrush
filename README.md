@@ -134,6 +134,13 @@ pwsh scripts/pb-build-msix.ps1 -IncludeAI     # + CUDA / matting models
 
 Output: `win64-meson\msix\msix\NAI.PaintBrush_<version>_x64.msix`.
 
+Install it (self-elevates through UAC, provisions the NAI trust chain, then
+sideloads the package):
+
+```powershell
+pwsh scripts/pb-install-msix.ps1
+```
+
 ## Run
 
 ```powershell
