@@ -42,8 +42,8 @@ glitter powder and a poster that moves.
 
 ## Download
 
-> **The signed MSIX is hosted on our R2 bucket — link in the release post.**
-<!-- RELEASE: put the R2 URL here -->
+> **Download the signed MSIX from our site** — one file, one link, no account.
+<!-- RELEASE: insert the branded download URL here. Never name the storage vendor or bucket. -->
 
 - **Package:** `NAI.PaintBrush_1.0.0.0_x64.msix`
 - **Size:** 2.4 GB (core app + SAM3 + ViTMatte + CUDA/cuDNN runtime)
