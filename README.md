@@ -4,9 +4,9 @@
 
 ### Create like nobody's watching.<br>Catch the frame everyone missed.<br>Glitter like it's couture.<br>**Make it sliving.** ✨
 
-NAI PaintBrush is an AI-assisted art studio for people who want to make
-something unforgettable: paint, layer premium glitter powder, cut yourself out
-of a video, and turn it all into a poster that moves.
+A studio built around one move: catch a moment — a frame, a photo, a sketch —
+cut out the part that matters, then make it couture with premium glitter powder
+and a poster that moves.
 
 **Paint with video. Catch real moments. Compose sliving artwork.**
 
