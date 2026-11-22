@@ -134,16 +134,16 @@ Item {
              * Declarative action data (never JS callbacks): the toolbar emits
              * triggered(action, value) and rebuild() below dispatches (P0.3). */
             out.push({ kind: "tool", iconSource: "dropzone", tip: qsTr("Glue"),
-                       checkable: true, checked: canvas.powderTool === 0,
+                       checkable: true, checked: PaintbrushCtx.powderToolIsGlue,
                        action: "powderTool", value: 0 })
             out.push({ kind: "tool", iconSource: "glitter", tip: qsTr("Glitter"),
-                       checkable: true, checked: canvas.powderTool === 1,
+                       checkable: true, checked: PaintbrushCtx.powderToolIsGlitter,
                        action: "powderTool", value: 1 })
             out.push({ kind: "tool", iconSource: "move", tip: qsTr("Push"),
-                       checkable: true, checked: canvas.powderTool === 2,
+                       checkable: true, checked: PaintbrushCtx.powderToolIsPush,
                        action: "powderTool", value: 2 })
             out.push({ kind: "tool", iconSource: "eraser", tip: qsTr("Eraser"),
-                       checkable: true, checked: canvas.powderTool === 3,
+                       checkable: true, checked: PaintbrushCtx.powderToolIsEraser,
                        action: "powderTool", value: 3 })
             out.push({ kind: "spacer" })
             out.push({ kind: "icon", iconSource: "download", tip: qsTr("Pour"),
@@ -154,10 +154,10 @@ Item {
             /* contextual options, dependent on the active subtool (P0.5: each
              * sub-tool keeps its OWN reference size range/default; Glitter adds
              * Amount; Shimmer is a single semantic control on Glitter). */
-            if (canvas.powderTool === 0)            /* Glue: width */
+            if (PaintbrushCtx.powderToolIsGlue)            /* Glue: width */
                 out.push({ kind: "slider", label: qsTr("Size"), from: 4, to: 60, stepSize: 1,
                            value: canvas.powderGlueWidth, onChange: (v) => canvas.powderGlueWidth = v })
-            else if (canvas.powderTool === 1)       /* Glitter: radius + amount + shimmer */
+            else if (PaintbrushCtx.powderToolIsGlitter)       /* Glitter: radius + amount + shimmer */
             {
                 out.push({ kind: "slider", label: qsTr("Size"), from: 6, to: 80, stepSize: 1,
                            value: canvas.powderGlitterSize, onChange: (v) => canvas.powderGlitterSize = v })
@@ -166,10 +166,10 @@ Item {
                 out.push({ kind: "slider", label: qsTr("Shimmer"), from: 0.0, to: 1, stepSize: 0.05,
                            value: canvas.glitterShimmer, onChange: (v) => canvas.glitterShimmer = v })
             }
-            else if (canvas.powderTool === 2)       /* Push: radius */
+            else if (PaintbrushCtx.powderToolIsPush)       /* Push: radius */
                 out.push({ kind: "slider", label: qsTr("Size"), from: 8, to: 60, stepSize: 1,
                            value: canvas.powderPushSize, onChange: (v) => canvas.powderPushSize = v })
-            else if (canvas.powderTool === 3)       /* Eraser: width */
+            else if (PaintbrushCtx.powderToolIsEraser)       /* Eraser: width */
                 out.push({ kind: "slider", label: qsTr("Size"), from: 8, to: 120, stepSize: 1,
                            value: canvas.powderEraserWidth, onChange: (v) => canvas.powderEraserWidth = v })
         }
