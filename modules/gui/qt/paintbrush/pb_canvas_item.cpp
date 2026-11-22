@@ -6,6 +6,8 @@
 
 #include "pb_canvas_item.hpp"
 #include "pb_document.hpp"
+#include "art/gpu/pb_powder_scene_node.hpp"
+#include "art/gpu/pb_powder_pack.hpp"
 
 #include <QSGTransformNode>
 #include <QSGSimpleTextureNode>
@@ -50,6 +52,8 @@
  * wrote stderr + fflush on EVERY event in renderPowderPreview — a hard hit in
  * the hot preview path. */
 namespace {
+
+
 std::atomic<bool> g_traceEnabled{false};
 std::atomic<bool> g_traceProbed{false};
 // Bounded in-memory ring: latest N markers only (enough for a crash tail).
@@ -919,6 +923,8 @@ void PaintbrushCanvasItem::beginArtStroke(const QPointF &local)
         qInfo("pb powder: stroke begin (grid %dx%d cell %.2f, brush %.1f, subtool %d)",
               m_powder.cellW(), m_powder.cellH(), m_powder.worldCellSize(),
               m_brushSize, int(m_powderTool));
+        m_powderModeLogged = false;
+        pbCrashTrace("powder begin");
         m_powderUnion = QRect();
         /* P1 #6: a Push gesture keeps a finger-carry across all its dabs
          * (reference carried/CLING_MAX = 6). Reset it at the stroke start. */
@@ -1034,6 +1040,9 @@ if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
         float obx = 0, oby = 0, ox2 = 0, oy2 = 0;
         const bool hasOld = m_powder.materialBoundsWorld(obx, oby, ox2, oy2);
 
+        powderPerfProbe();
+        const auto tPhy0 = std::chrono::steady_clock::now();
+
         for (int i = 0; i <= steps; ++i)
         {
             const QPointF p = len > 0.0 ? seg.pointAt(qreal(i) / steps) : fromLocal;
@@ -1070,8 +1079,28 @@ if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
                 break;
             }
         }
-        m_powder.relax();
-        m_powder.decayFlow();
+        /* Bounded relaxation: sweep only the cell window the dabs touched (and
+         * at most once per ~60 Hz frame) instead of the whole active powder
+         * region on every 8 ms input tick. The 8 ms tick is an INPUT cadence;
+         * the material settle cadence is the display cadence. */
+        const QRect dabWorld = QRectF(fromLocal, toLocal).normalized()
+                                   .adjusted(-qreal(radius) - 8.0, -qreal(radius) - 8.0,
+                                             qreal(radius) + 8.0, qreal(radius) + 8.0)
+                                   .toAlignedRect();
+        const QRect relaxCells = powderCellWindow(dabWorld);
+        const qint64 relaxNow = QDateTime::currentMSecsSinceEpoch();
+        if (relaxNow - m_lastPowderRelaxMs >= 15)
+        {
+            m_lastPowderRelaxMs = relaxNow;
+            m_powder.relax(relaxCells.isValid() ? relaxCells : QRect());
+            m_powder.decayFlow(relaxCells.isValid() ? relaxCells : QRect());
+        }
+        const auto tPhy1 = std::chrono::steady_clock::now();
+        if (m_perf.enabled)
+        {
+            m_perf.phyMs += std::chrono::duration<double, std::milli>(tPhy1 - tPhy0).count();
+            ++m_perf.nPhy;
+        }
 
         /* union the OLD and NEW physical material bounds + a presentation
          * support margin (grain radius, flake radius, contact shadow, wet-glue
@@ -1106,7 +1135,6 @@ if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
             return;
         m_powderUnion = m_powderUnion.isNull() ? affected : m_powderUnion.united(affected);
         captureBeforeRegion(affected);
-        ensureScratch(affected);
         /* live preview: a presentation clock (not wall-clock-as-material)
          * drives the holographic shimmer while drawing; the committed pass
          * (renderPowderUnion) uses phase 0 for a deterministic static result */
@@ -1114,22 +1142,79 @@ if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
         if (m_lastPowderPreviewMs > 0)
             m_powderShimmerMs += now - m_lastPowderPreviewMs;
         m_lastPowderPreviewMs = now;
+        const bool gpuLive = powderGpuLivePreview();
+        if (!m_powderModeLogged)
+        {
+            m_powderModeLogged = true;
+            qInfo("pb powder: live preview renderer = %s",
+                  gpuLive ? "gpu-qsg (zero readback)" : "cpu material");
+        }
+        {
+            char tb[64];
+            ::snprintf(tb, sizeof(tb), "pseg gpu=%d aff=%d,%d %dx%d uni=%d,%d %dx%d",
+                       gpuLive ? 1 : 0,
+                       affected.x(), affected.y(), affected.width(), affected.height(),
+                       m_powderUnion.x(), m_powderUnion.y(),
+                       m_powderUnion.width(), m_powderUnion.height());
+            pbCrashTrace(tb);
+        }
+        if (gpuLive)
+        {
+            /* ZERO-READBACK live stroke: the scene-graph node draws the union
+             * from the packed sim. Do NOT run the CPU Voronoi material render,
+             * do NOT composite into the scratch tile and do NOT mark tiles
+             * dirty here — that work (per 8 ms tick, over the whole growing
+             * union, plus a full layer-stack tile recomposite) was exactly the
+             * cost the GPU pass was supposed to remove. The authoritative
+             * raster is baked exactly once by renderPowderUnion() on release. */
+            m_strokeHadPaint = true;
+            refreshPowderScene();
+            powderPerfReport();
+            m_strokeLastDab = toLocal;
+            return;
+        }
+        /* INCREMENTAL CPU preview: render only the window this segment can
+         * change (dabs + heap/dust spill), never the whole accumulating
+         * material bounds. The scratch tile accumulates the stroke across
+         * ticks and the FULL union is baked exactly once on release, so the
+         * committed result is identical while the per-tick Voronoi render and
+         * tile recomposite shrink from O(blob) to O(brush window). */
+        const float spill = qMax<float>(radius * 2.0f + 12.0f,
+                                        m_powder.worldCellSize() * 6.0f);
+        const QRect renderRect = QRectF(fromLocal, toLocal).normalized()
+                                     .adjusted(-spill, -spill, spill, spill)
+                                     .toAlignedRect()
+                                     .intersected(layer->raster.rect())
+                                     .intersected(affected);
+        if (renderRect.isEmpty())
+        {
+            m_strokeLastDab = toLocal;
+            return;
+        }
+        ensureScratch(renderRect);
         /* render with the sim's AUTHORITATIVE palette so grains deposited as
          * new colours resolve to their true slots (never clamped to paper), and
          * ONE holographic control drives the material (P0.12) */
         m_powderPal.colors = m_powder.palette();
         m_powderPal.holographic = m_powderParams.shimmer;
-        QImage flakes = m_powder.render(affected.size(), float(affected.x()),
-                                        float(affected.y()), 1.0f,
+        const auto tr0 = std::chrono::steady_clock::now();
+        QImage flakes = m_powder.render(renderRect.size(), float(renderRect.x()),
+                                        float(renderRect.y()), 1.0f,
                                         m_doc->lightRig(), m_powderPal,
                                         m_doc->paperStock(), m_doc->artScale(1.0f),
                                         m_powderShimmerMs);
+        if (m_perf.enabled)
+        {
+            const auto tr1 = std::chrono::steady_clock::now();
+            m_perf.renderMs += std::chrono::duration<double, std::milli>(tr1 - tr0).count();
+            ++m_perf.nRender;
+        }
         {
             QPainter p(&m_scratchTile);
             p.setCompositionMode(QPainter::CompositionMode_Source);
-            p.drawImage(affected.topLeft() - m_scratchOrigin, layer->raster, affected);
+            p.drawImage(renderRect.topLeft() - m_scratchOrigin, layer->raster, renderRect);
             p.setCompositionMode(QPainter::CompositionMode_SourceOver);
-            p.drawImage(affected.topLeft() - m_scratchOrigin, flakes);
+            p.drawImage(renderRect.topLeft() - m_scratchOrigin, flakes);
             p.end();
         }
         if (m_powderTool == POWDER_ERASER)
@@ -1148,7 +1233,7 @@ if (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
         }
         if (toStringHasMaterial)
             m_strokeHadPaint = true;
-        markTilesDirty(mappedRect(affected));
+        markTilesDirty(mappedRect(renderRect));
         m_strokeLastDab = toLocal;
         return;
     }
@@ -1464,7 +1549,142 @@ CanvasLayer *PaintbrushCanvasItem::ensurePaintLayer()
     return m_doc->currentLayer();
 }
 
-void PaintbrushCanvasItem::renderPowderPreview()
+/* Whether the LIVE powder union is drawn by the zero-readback scene-graph node
+ * instead of the CPU material renderer. This is the single authority shared by
+ * the stroke path and updatePaintNode(): when it is true the CPU Voronoi
+ * render, the scratch-tile composite and the tile re-uploads must be skipped
+ * entirely (they were the cost that made native powder slower than the WebGL
+ * reference even with the GPU node present). */
+bool PaintbrushCanvasItem::powderGpuLivePreview() const
+{
+    /* The zero-readback scene-graph pass is EXPERIMENTAL and currently opt-in:
+     * its rect/packing mapping has not yet been verified against the raster
+     * path on the real QML view, so the live stroke uses the canonical CPU
+     * material preview unless PB_POWDER_GPU_LIVE=1 is set. */
+    static const bool gpuLiveOptIn = !qEnvironmentVariableIsEmpty("PB_POWDER_GPU_LIVE");
+    if (!gpuLiveOptIn)
+        return false;
+    if (!m_powderGpuEnabled || m_powderSceneBroken || !m_powderReady
+        || m_videoHarvestMode)
+        return false;
+    /* Both powder tools drive the same GlitterPowder engine and the same
+     * material layer; the scene node is tool-agnostic. */
+    if (m_tool != TOOL_GLITTER_POWDER && m_tool != TOOL_SMEAR)
+        return false;
+    if (!m_doc || m_doc->layers().isEmpty())
+        return false;
+    const CanvasLayer *cl = m_doc->currentLayer();
+    if (!cl || cl->raster.isNull())
+        return false;
+    /* The node is parented above ALL tile nodes, so it may only stand in for
+     * the current layer when that layer is the untransformed, topmost one. */
+    return cl->materialPreset == art::glitter::kPowderMaterialPreset
+           && cl->position.isNull() && qFuzzyCompare(cl->scale, 1.0)
+           && qFuzzyIsNull(cl->rotation)
+           && m_doc->currentLayerIndex() == m_doc->layers().size() - 1;
+}
+
+QRect PaintbrushCanvasItem::powderCellWindow(const QRect &layerRect) const
+{
+    const int W = m_powder.cellW(), H = m_powder.cellH();
+    if (W <= 0 || H <= 0 || layerRect.isEmpty())
+        return QRect();
+    const double cell = qMax(0.01f, m_powder.worldCellSize());
+    /* +-2 cells: the shader reads one-cell neighbours (height gradient, grain
+     * lattice jitter) and relax() sweeps with a 1-cell margin. */
+    const int x0 = qBound(0, int(std::floor(layerRect.left() / cell)) - 2, W - 1);
+    const int y0 = qBound(0, int(std::floor(layerRect.top() / cell)) - 2, H - 1);
+    const int x1 = qBound(x0, int(std::ceil(layerRect.right() / cell)) + 2, W - 1);
+    const int y1 = qBound(y0, int(std::ceil(layerRect.bottom() / cell)) + 2, H - 1);
+    return QRect(QPoint(x0, y0), QPoint(x1, y1));
+}
+
+void PaintbrushCanvasItem::powderPerfProbe()
+{
+    if (m_perf.resetTick != 0u)
+        return;
+    const QByteArray pv = qgetenv("PB_POWDER_PERF").trimmed();
+    m_perf.enabled = (pv == "1" || pv == "true");
+    m_perf.resetTick = 3u;   /* don't re-probe */
+}
+
+void PaintbrushCanvasItem::powderPerfReport()
+{
+    if (!m_perf.enabled || m_perf.nPhy + m_perf.nRender < 60)
+        return;
+    fprintf(stderr,
+            "POWDER PERF gpu=%d physics=%.2fms(%d) pack=%.2fms(%d) "
+            "pack_cells=%d pack_bytes=%lld airborne=%d dirty_px=%d\n",
+            powderGpuLivePreview() ? 1 : 0,
+            m_perf.phyMs / qMax(1, m_perf.nPhy), m_perf.nPhy,
+            m_perf.renderMs / qMax(1, m_perf.nRender), m_perf.nRender,
+            m_perf.packCells, (long long)m_perf.packBytes,
+            m_perf.airborne, m_perf.dirtyPx);
+    m_perf.reset();
+}
+
+void PaintbrushCanvasItem::refreshPowderScene()
+{
+    if (!m_doc || !m_powderReady || m_powderUnion.isEmpty())
+        return;
+    if (m_powderSceneNode && m_powderSceneNode->failed())
+    {
+        /* Never leave the user with an invisible powder tool: demote to the
+         * canonical CPU material preview for the rest of the session. */
+        m_powderSceneBroken = true;
+        qWarning("pb powder: QSG powder node failed to create its RHI resources; "
+                 "falling back to the CPU material preview");
+        return;
+    }
+    QQuickWindow *win = window();
+    const int dpr = win ? qMax(1, int(win->devicePixelRatio())) : 1;
+    const double worldPerPx = 1.0 / (qMax(0.05, m_zoom) * double(dpr));
+    const float flakeWorld = std::max(float(worldPerPx) * 4.0f,
+                                      m_powder.worldCellSize() * 0.30f);
+    /* Full-grid pack only after the node (re)created its textures; otherwise
+     * the dirty union window. */
+    const bool fullPack = m_powderSceneFullPack.exchange(false);
+    const QRect cw = fullPack
+        ? QRect(0, 0, m_powder.cellW(), m_powder.cellH())
+        : powderCellWindow(m_powderUnion);
+    if (cw.isEmpty())
+        return;
+    {
+        char tb[64];
+        ::snprintf(tb, sizeof(tb), "pack win=%d,%d %dx%d full=%d grid=%dx%d",
+                   cw.x(), cw.y(), cw.width(), cw.height(), fullPack ? 1 : 0,
+                   m_powder.cellW(), m_powder.cellH());
+        pbCrashTrace(tb);
+    }
+    m_powderPal.colors = m_powder.palette();
+    m_powderPal.holographic = m_powderParams.shimmer;
+    /* The glue field is 64 bytes per powder cell: pack it only when its
+     * revision advanced (per-frame glue uploads were the dominant cost). */
+    const bool glueChanged = fullPack
+                             || m_powder.glueRevision() != m_powderSceneGlueRev;
+    const auto tp0 = std::chrono::steady_clock::now();
+    m_powderSceneData = art::packPowderScene(
+        m_powder, m_powderPal, m_doc->lightRig(), m_doc->paperStock(),
+        worldPerPx, double(m_powderShimmerMs), flakeWorld, dpr, cw, glueChanged);
+    const auto tp1 = std::chrono::steady_clock::now();
+    if (m_perf.enabled)
+    {
+        m_perf.renderMs += std::chrono::duration<double, std::milli>(tp1 - tp0).count();
+        ++m_perf.nRender;
+        m_perf.packBytes += m_powderSceneData.simHalf.size()
+                            + m_powderSceneData.col.size()
+                            + m_powderSceneData.glue.size();
+        m_perf.packCells = qMax(m_perf.packCells,
+                                m_powderSceneData.cellW * m_powderSceneData.cellH);
+    }
+    if (glueChanged)
+        m_powderSceneGlueRev = m_powder.glueRevision();
+    m_powderSceneData.worldOrigin = QPointF(m_powderUnion.topLeft());
+    m_powderSceneDirty = m_powderSceneData.valid();
+    update();
+}
+
+void PaintbrushCanvasItem::renderPowderPreview(bool commitBake)
 {
     pbCrashTrace("renderPowderPreview enter");
     CanvasLayer *layer = m_doc ? m_doc->currentLayer() : nullptr;
@@ -1479,6 +1699,19 @@ void PaintbrushCanvasItem::renderPowderPreview()
     const QRect u = m_powderUnion.intersected(layer->raster.rect());
     if (u.isEmpty()) {
         pbCrashTrace("renderPowderPreview exit (empty union)");
+        return;
+    }
+    if (powderGpuLivePreview() && !commitBake)
+    {
+        /* ZERO-READBACK preview: the QSG powder node draws this union
+         * directly from the live simulation state. Only the undo snapshot is
+         * taken here; the authoritative layer raster is baked once on commit
+         * (renderPowderPreview(true)). The node cannot stand in when the
+         * powder layer is not the untransformed top layer, so the CPU path
+         * below remains the correct fallback. */
+        captureBeforeRegion(u);
+        m_strokeHadPaint = true;
+        refreshPowderScene();
         return;
     }
     captureBeforeRegion(u);
@@ -1596,7 +1829,7 @@ void PaintbrushCanvasItem::renderPowderPreview()
  * once) — never during a live blow's per-step preview. */
 void PaintbrushCanvasItem::renderPowderUnion()
 {
-    renderPowderPreview();
+    renderPowderPreview(true);
     CanvasLayer *layer = m_doc ? m_doc->currentLayer() : nullptr;
     if (layer && !m_powder.isEmpty())
         persistPowderStateToLayer(layer);
@@ -1689,12 +1922,8 @@ void PaintbrushCanvasItem::stepPowderBlow(float dtSec)
     if (!m_powderBlowing)
         return;
     /* P0.11: one-time PB_POWDER_PERF probe; when enabled print a compact
-     * aggregate once per ~60 physics ticks. */
-    if (m_perf.resetTick == 0u) {
-        const QByteArray pv = qgetenv("PB_POWDER_PERF").trimmed();
-        m_perf.enabled = (pv == "1" || pv == "true");
-        m_perf.resetTick = 3u;   /* don't re-probe */
-    }
+     * aggregate once per ~60 physics/pack ticks. */
+    powderPerfProbe();
     /* P0.4: physics runs at a FIXED 60 Hz reference tick via an accumulator;
      * the repaint tick (up to ~120 Hz) is only the pump. We NEVER call
      * advanceBlow(1/120). This halves the expensive physics sweeps, makes the
@@ -1740,20 +1969,20 @@ void PaintbrushCanvasItem::stepPowderBlow(float dtSec)
         if (!touch.isEmpty())
         {
             m_powderUnion = m_powderUnion.isNull() ? touch : m_powderUnion.united(touch);
-            markTilesDirty(mappedRect(touch));
+            /* the zero-readback node draws the union from the packed sim: no
+             * tile recomposite is needed during a live breath either */
+            if (!powderGpuLivePreview())
+                markTilesDirty(mappedRect(touch));
         }
     }
-    /* Adaptive preview cadence. Measured on the real renderer: the material
-     * pass costs ~5 ms at 256-512 px and ~8 ms at 1024 px, while the
-     * simulation is ~0.6 ms per pour. The old fixed 12 Hz throttle was the
-     * reason the tool felt slower than glitter. Small unions now update at
-     * 60 Hz (bounded by the physics tick), mid unions at 30 Hz and very large
-     * unions at 20 Hz so tile upload/compositing stays within budget. */
+    /* Adaptive preview cadence. The CPU material pass costs ~5 ms at 256-512 px
+     * and ~8 ms at 1024 px, so the CPU path is throttled by union size. The
+     * zero-readback GPU node only re-packs the dirty cell window + issues a
+     * partial upload, so it runs at display cadence for every union size. */
     m_powderRenderAcc += dtSec;
     const int unionArea = m_powderUnion.width() * m_powderUnion.height();
-    const double previewInterval = m_powderGpuEnabled
-        ? (unionArea <= 256 * 256 ? 1.0 / 30.0
-           : unionArea <= 768 * 768 ? 1.0 / 20.0 : 1.0 / 15.0)
+    const double previewInterval = powderGpuLivePreview()
+        ? 1.0 / 60.0
         : (unionArea <= 256 * 256 ? 1.0 / 60.0
            : unionArea <= 768 * 768 ? 1.0 / 30.0 : 1.0 / 20.0);
     if (m_powderRenderAcc >= previewInterval)
@@ -1761,15 +1990,8 @@ void PaintbrushCanvasItem::stepPowderBlow(float dtSec)
         m_powderRenderAcc = 0.0f;
         renderPowderPreview();
     }
-    /* P0.11: emit one compact POWDER PERF line per ~60 physics ticks (~1 s). */
-    if (m_perf.enabled && m_perf.nPhy >= 60)
-    {
-        fprintf(stderr, "POWDER PERF physics=%.2fms render=%.2fms airborne=%d dirty_px=%d\n",
-                m_perf.phyMs / qMax(1, m_perf.nPhy),
-                m_perf.renderMs / qMax(1, m_perf.nRender),
-                m_perf.airborne, m_perf.dirtyPx);
-        m_perf.reset();
-    }
+    /* P0.11: emit one compact POWDER PERF line per ~60 physics/render ticks. */
+    powderPerfReport();
     if (done)
     {
         /* ---- FINALIZE the breath exactly once ----
@@ -2029,8 +2251,16 @@ QSGNode *PaintbrushCanvasItem::updatePaintNode(QSGNode *oldNode,
     if (!m_doc)
     {
         m_gridNode = nullptr; /* children are freed with the old root */
+        m_powderSceneNode = nullptr;
+        m_powderSceneParent = nullptr;
         delete oldNode;
         return nullptr;
+    }
+    if (!oldNode)
+    {
+        /* The scene graph freed the whole subtree with the previous root. */
+        m_powderSceneNode = nullptr;
+        m_powderSceneParent = nullptr;
     }
 
     /* The returned top node is a container that owns the document-transform
@@ -2192,6 +2422,59 @@ QSGNode *PaintbrushCanvasItem::updatePaintNode(QSGNode *oldNode,
                 texNode->setTexture(nullptr);
                 texNode->setRect(0, 0, 0, 0);
             }
+        }
+    }
+
+    /* ---- zero-readback powder node (above the tile composite) ----------
+     * The powder's live union is drawn by powder.frag directly in this scene
+     * graph pass; the CPU readback/QPainter/tile re-upload path is skipped
+     * during the stroke. The layer raster is baked once on commit. */
+    {
+        CanvasLayer *cl = m_doc->currentLayer();
+        const bool canPublish =
+            powderGpuLivePreview() && win
+            && (m_strokeActive || m_powderBlowing)
+            && !m_powderUnion.isEmpty()
+            && cl && !cl->raster.isNull();
+
+        if (canPublish)
+        {
+            const QRect u = m_powderUnion;
+            if (!m_powderSceneParent)
+                m_powderSceneParent = new QSGTransformNode();
+            QMatrix4x4 pm;
+            pm.translate(u.x(), u.y());
+            m_powderSceneParent->setMatrix(pm);
+            /* appendChildNode also MOVES an existing child to the end, which is
+             * what keeps the powder above freshly created tile nodes. */
+            root->appendChildNode(m_powderSceneParent);
+            if (!m_powderSceneNode)
+            {
+                m_powderSceneNode = new art::PowderSceneNode();
+                m_powderSceneParent->appendChildNode(m_powderSceneNode);
+            }
+            /* Hand over the GUI-thread snapshot. NEVER pack from m_powder here:
+             * updatePaintNode() runs on the render thread while the physics
+             * mutates the sim on the GUI thread. */
+            if (m_powderSceneDirty && m_powderSceneData.valid())
+            {
+                m_powderSceneNode->setScene(m_powderSceneData);
+                m_powderSceneDirty = false;
+                pbCrashTrace("qsg setScene");
+            }
+            m_powderSceneNode->setPaintRect(QRectF(0, 0, u.width(), u.height()));
+            /* Freshly (re)created GPU resources carry no valid texels outside
+             * the per-frame window: request one full-grid pack. */
+            if (m_powderSceneNode->takeResync())
+                m_powderSceneFullPack.store(true, std::memory_order_release);
+        }
+        else if (m_powderSceneParent
+                 && m_powderSceneParent->parent() == root)
+        {
+            /* Detach but KEEP the node: its RHI textures stay resident, so the
+             * next stroke does not pay a full-grid (+ glue) re-upload. */
+            root->removeChildNode(m_powderSceneParent);
+            pbCrashTrace("qsg detach");
         }
     }
 

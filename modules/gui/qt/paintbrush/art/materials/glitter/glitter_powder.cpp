@@ -61,6 +61,8 @@ void GlitterPowder::reset(const QSize &cells, float worldCellSize, std::uint32_t
     /* full-resolution glue field: sub-res per cell, zeroed (P0.2) */
     const int gw = cells.width() * kGlueSubRes, gh = cells.height() * kGlueSubRes;
     m_glueField.fill(0, gw * gh);
+    ++m_glueRevision;
+    m_glueAny = false;
     m_particlesActive = false;
     m_blowPhase = BlowPhase::Done;
     m_blowPhaseAge = 0.0f;
@@ -282,6 +284,7 @@ void GlitterPowder::erase(float wx, float wy, float radiusWorld, float amount)
         t0 = std::max(0, t0); t1 = std::min(subH - 1, t1);
         if (s1 >= s0 && t1 >= t0)
         {
+            ++m_glueRevision;
             for (int syy = t0; syy <= t1; ++syy)
             {
                 const float wyy = (syy + 0.5f) / float(kGlueSubRes) * cell;
@@ -479,6 +482,17 @@ bool GlitterPowder::deserialize(const QByteArray &bytes)
     m_dh.clear(); m_outM.clear(); m_mIn.clear(); m_pX.clear(); m_pY.clear();
     m_inA.clear(); m_inB.clear(); m_inF.clear();
     m_blowTime = 0.0f;
+    /* the glue upload gate must observe the freshly loaded field: one O(n)
+     * scan here (load is not a per-frame path) sets "any glue" so a restored
+     * document with glue paints its glue layer without an edit. */
+    m_glueAny = false;
+    for (quint8 v : m_glueField)
+        if (v)
+        {
+            m_glueAny = true;
+            break;
+        }
+    ++m_glueRevision;
     /* airborne flakes are transient and never serialized (the canonical
      * materialState holds only the settled field) — clear the fleet + count so
      * a reload starts with nothing in the air */
@@ -677,6 +691,15 @@ void GlitterPowder::paintGlue(float wx, float wy, float radiusWorld, float cover
          * bonded survives) is unchanged; this makes Glue's adhesion real, not
          * just a visible film. */
         absorb(coarseRect);
+    }
+    /* the sub-cell glue field just changed (positive paint or a negative
+     * "eraser coverage" pass): bump its revision so the GPU pass re-uploads it
+     * once instead of every frame. */
+    if (coverage != 0.0f)
+    {
+        ++m_glueRevision;
+        if (coverage > 0.0f)
+            m_glueAny = true;
     }
 }
 

@@ -279,6 +279,12 @@ public:
     static int glueSubRes() { return kGlueSubRes; }
     bool hasGlueField() const { return !m_glueField.isEmpty(); }
     const QVector<quint8> &glueFieldBytes() const { return m_glueField; }
+    /* Monotonic revision of the sub-cell glue field + whether any glue exists.
+     * The glue field is 64 bytes per powder cell (kGlueSubRes^2); re-copying and
+     * re-uploading it every preview frame was the dominant cost of the live GPU
+     * powder pass, so consumers upload it only when this revision advances. */
+    std::uint64_t glueRevision() const { return m_glueRevision; }
+    bool hasAnyGlue() const { return m_glueAny; }
     /* World-space bounding box (minx,miny,maxx,maxy) of cells carrying any
      * loose or bonded powder, or false if the field holds no powder. */
     bool powderBoundsWorld(float &minx, float &miny, float &maxx, float &maxy) const;
@@ -362,6 +368,8 @@ private:
      * edges / wet-glue normals / bonding boundary, and persisted in state. */
     enum { kGlueSubRes = 8 };
     QVector<quint8> m_glueField;
+    std::uint64_t m_glueRevision = 1;
+    bool m_glueAny = false;
     inline int glueFieldIndex(int subX, int subY) const
     { return subY * (m_cells.width() * kGlueSubRes) + subX; }
     QRandomGenerator m_rng;

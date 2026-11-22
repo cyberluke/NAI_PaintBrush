@@ -1005,6 +1005,7 @@ Item {
     Shortcut { sequence: "T"; onActivated: paintbrushCanvas.tool = 14 }
     Shortcut { sequence: "P"; onActivated: paintbrushCanvas.tool = 16 }
     Shortcut { sequence: "L"; onActivated: paintbrushCanvas.tool = 17 }
+    Shortcut { sequence: "Shift+L"; onActivated: paintbrushCanvas.tool = 18 }
     Shortcut { sequence: "K"; onActivated: PaintbrushCtx.keepSelection() }
     Shortcut { sequence: "Ctrl+B"; onActivated: PaintbrushCtx.boost() }
     Shortcut { sequence: "M"; onActivated: bottomStrip.toggleMoodPicker() }

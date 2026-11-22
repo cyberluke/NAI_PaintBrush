@@ -19,8 +19,10 @@
 #include "art/materials/glitter/glitter_material.hpp"
 #include "art/materials/glitter/glitter_powder.hpp"
 #include "art/gpu/pb_gpu_runtime.hpp"
+#include "art/gpu/pb_powder_scene_node.hpp"
 
 #include <QQuickItem>
+#include <atomic>
 #include <QColor>
 #include <QImage>
 #include <QPainterPath>
@@ -38,6 +40,8 @@ class QSGTexture;
 class QSGSimpleTextureNode;
 
 namespace paintbrush {
+
+namespace art { class PowderSceneNode; }
 
 class PaintbrushDocument;
 class PaintbrushController;
@@ -581,6 +585,25 @@ private:
      * landed; once a stroke commits, renderPowderUnion() bakes the union
      * through the same powder.frag surface so the document + export are GPU. */
     art::GpuRuntime m_gpuRender;   /* lazily initialized; best-effort only */
+    /* Zero-readback scene-graph powder pass (live union). Owned by the QSG. */
+    art::PowderSceneNode *m_powderSceneNode = nullptr;
+    QSGTransformNode *m_powderSceneParent = nullptr;
+    /* GUI-thread packed snapshot for that node. updatePaintNode() runs on the
+     * scene-graph render thread, so it must NEVER read m_powder (the physics
+     * lives on the GUI thread); it only hands this snapshot over. */
+    art::PowderSceneData m_powderSceneData;
+    bool m_powderSceneDirty = false;
+    quint64 m_powderSceneGlueRev = 0;
+    /* Atomic: the render thread raises it when the node recreates its GPU
+     * resources; the GUI thread consumes it on the next pack. */
+    std::atomic<bool> m_powderSceneFullPack{true};
+    /* The node reported that the RHI pipeline could not be created: the rest
+     * of the session uses the CPU material preview instead of an invisible
+     * powder layer. */
+    bool m_powderSceneBroken = false;
+    /* one "live preview renderer = ..." log line per powder stroke */
+    bool m_powderModeLogged = false;
+    qint64 m_lastPowderRelaxMs = 0;      /* bounds the relax sweep to ~60 Hz */
     bool m_gpuRenderTried = false;
     bool m_powderGpuEnabled = false;
     /* Long-press breath (reference blowOnLongPress): holding a powder/smear
@@ -608,10 +631,13 @@ private:
         double phyMs = 0.0, renderMs = 0.0, frameMs = 0.0;
         int activeCells = 0, activeBlocks = 0, airborne = 0, dirtyPx = 0;
         int nPhy = 0, nRender = 0, nFrame = 0;
+        qint64 packBytes = 0;     /* packed window bytes (upload size) */
+        int packCells = 0;        /* packed window cells this report */
         double msSinceLine = 0.0;
         unsigned resetTick = 0;   /* non-zero once the env gate has been probed */
-        void reset() { phyMs = renderMs = frameMs = 0.0; nPhy = nRender = nFrame = 0;
-                       activeCells = activeBlocks = airborne = dirtyPx = 0; msSinceLine = 0.0; }
+        void reset() { phyMs = renderMs = 0.0; nPhy = nRender = nFrame = 0;
+                       activeCells = activeBlocks = airborne = dirtyPx = 0;
+                       packBytes = 0; packCells = 0; msSinceLine = 0.0; }
     } m_perf;
 QPointF m_powderHoldPos;         /* where the pointer is being held */
 bool m_powderHoldEver = false;   /* a real drag sampled (not a pure click) */
@@ -642,8 +668,25 @@ qint64 m_lastPowderPreviewMs = 0;
      * dirty, but does NOT persist material state, end a blow, or mutate undo
      * (P0 — a live breath must be able to render every frame without the
      * preview canceling itself). */
-    void renderPowderPreview();
+    void renderPowderPreview(bool commitBake = false);
     void renderPowderUnion();    /* render + persist-material (commit paths) */
+    /* True when the live powder union is drawn by the zero-readback scene-graph
+     * node: powder engine ready, GPU path enabled, and the powder material
+     * layer is the untransformed TOP layer (the node draws above all tiles, so
+     * any layer on top of it would be occluded). Both the stroke path and
+     * updatePaintNode() must agree on this; it is evaluated on the GUI thread
+     * only. */
+    bool powderGpuLivePreview() const;
+    /* Grid-space window the dirty union can touch (clamped to the sim grid). */
+    QRect powderCellWindow(const QRect &layerRect) const;
+    /* Pack the current sim into m_powderSceneData for the scene-graph node.
+     * GUI thread only. Packs just the union window; the full grid + glue are
+     * packed once after the node (re)creates its GPU resources. */
+    void refreshPowderScene();
+    /* PB_POWDER_PERF=1 telemetry: one compact aggregate per ~1 s, on the real
+     * runtime, never per frame. */
+    void powderPerfProbe();
+    void powderPerfReport();
     /* Persist the authoritative powder physical material state onto the layer
      * (materialPreset = "material.glitter.powder", materialState = serialized
      * GlitterPowder). The raster stays a cached bake. SIDE-EFFECT FREE: does
