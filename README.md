@@ -2,13 +2,13 @@
 
 ![NAI PaintBrush](docs/assets/screenshot.png)
 
-### Draw it. Add glitter. Now it's art. ✨
+### Sketch it. Gild it. Make it sliving. ✨
 
-NAI PaintBrush is AI-assisted drawing for people who want to make something
-cool: paint, add stickers and actual sparkling glitter powder, cut yourself out
-of a video, and turn the whole thing into a poster that moves.
+NAI PaintBrush is an AI-assisted art studio for people who want to make
+something unforgettable: paint, layer premium glitter powder, cut yourself out
+of a video, and turn it all into a poster that moves.
 
-**Paint with video. Harvest real moments. Compose sliving artwork.**
+**Paint with video. Catch real moments. Compose sliving artwork.**
 
 [Download](#download) · [The loop](#the-loop) · [What it does](#what-it-does) · [The AI part](#the-ai-part-honestly) · [For the nerds](#for-the-nerds)
 
@@ -16,10 +16,10 @@ of a video, and turn the whole thing into a poster that moves.
 
 ## The loop
 
-1. **Start with a sketch, a photo, or a video frame.**
-2. **Add glitter powder.** Real GPU glitter: pour it, glue it, tilt it, blow it.
-   This is the feature. You will not stop.
-3. **Dress it up.** Paper, moods, stickers, text, shapes, layers that don't
+1. **Start with a sketch, a photo, or a frame you caught from video.**
+2. **Add premium glitter powder.** Real GPU glitter: pour it, glue it, tilt it,
+   blow it. This is the feature. You will not stop.
+3. **Style it up.** Paper, moods, stickers, text, shapes, layers that don't
    wreck each other.
 4. **Steal yourself from a video.** Pick a frame, select yourself, cut it out,
    now you're a sticker.
@@ -33,7 +33,7 @@ of a video, and turn the whole thing into a poster that moves.
 
 | | |
 |---|---|
-| ✨ **Glitter powder** | A real powder simulation on the GPU: grains, glue, gravity, blow, holographic mirror flakes. Live at display rate. |
+| ✨ **Premium glitter powder** | A real powder simulation on the GPU: grains, glue, gravity, blow, holographic mirror flakes. Live at display rate. |
 | 🖌️ **Draw** | Pressure-aware brushes, spray, shapes, text, layers, transforms, and an undo that actually undoes. |
 | 🧷 **Video to sticker** | Open a video, grab a frame, select the subject with SAM3, cut it out with neural matting (ViTMatte), track it across frames. |
 | 🎞️ **Living Poster** | A time-aware renderer animates a harvested figure; preview it on the canvas, export a short poster. |
