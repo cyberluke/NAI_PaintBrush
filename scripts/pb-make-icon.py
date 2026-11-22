@@ -28,6 +28,7 @@ DEFAULT_SRC = os.path.join(HERE, "share", "icons", "nai-paintbrush.png")
 OUT_ICON = os.path.join(HERE, "share", "icons", "nai-paintbrush.ico")
 OUT_256 = os.path.join(HERE, "share", "icons", "256x256", "nai-paintbrush.png")
 OUT_16 = os.path.join(HERE, "share", "icons", "16x16", "nai-paintbrush.png")
+OUT_MSIX = os.path.join(HERE, "packaging", "msix", "Assets")
 
 
 def main() -> int:
@@ -55,7 +56,22 @@ def main() -> int:
     im.resize((256, 256), Image.LANCZOS).save(OUT_256)
     im.resize((16, 16), Image.LANCZOS).save(OUT_16)
 
-    for path in (OUT_ICON, OUT_256, OUT_16):
+    # MSIX visual assets (AppxManifest.xml -> Assets\...)
+    os.makedirs(OUT_MSIX, exist_ok=True)
+    msix = {
+        "Square44x44Logo.png": (44, 44),
+        "Square150x150Logo.png": (150, 150),
+        "StoreLogo.png": (50, 50),
+    }
+    for name, size in msix.items():
+        im.resize(size, Image.LANCZOS).save(os.path.join(OUT_MSIX, name))
+    wide = Image.new("RGBA", (310, 150), (0, 0, 0, 0))
+    wide.paste(im.resize((150, 150), Image.LANCZOS), (80, 0))
+    wide.save(os.path.join(OUT_MSIX, "Wide310x150Logo.png"))
+
+    for path in (OUT_ICON, OUT_256, OUT_16,
+                 *[os.path.join(OUT_MSIX, name) for name in msix],
+                 os.path.join(OUT_MSIX, "Wide310x150Logo.png")):
         print("%-60s %8d bytes" % (os.path.relpath(path, HERE), os.path.getsize(path)))
     return 0
 

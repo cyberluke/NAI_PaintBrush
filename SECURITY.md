@@ -97,6 +97,40 @@ $chain.Build($leaf.SignerCertificate)   # must be True
 - **Consumers:** verify SHA-256 **and** the signer thumbprint; never trust the
   hash alone.
 
+## MSIX package
+
+`pwsh scripts/pb-build-msix.ps1` builds the installable package:
+
+1. stages the runtime next to the executable (`plugins/`, `qml/`, `qtplugins/`,
+   the engine DLLs and the preparser),
+2. strips the MinGW-built binaries (except `libqt_plugin.dll`, which binutils
+   turns into a PE that signing rejects) and regenerates `plugins.dat`,
+3. signs `nai-paintbrush.exe` with the leaf,
+4. packs with `MakeAppx`,
+5. signs the `.msix` with the same leaf and verifies `signtool verify /pa /all`.
+
+The manifest `Publisher` **must equal the leaf subject exactly**
+(`CN=NAI Paint Brush, O=NANOTRIK.AI, C=US`); the script cannot sign a package
+whose identity disagrees. Output:
+
+```
+win64-meson\msix\msix\NAI.PaintBrush_<version>_x64.msix
+```
+
+Installing the signed package on a clean machine requires the NAI root and
+intermediate in the **machine** stores (`LocalMachine\Root`, `LocalMachine\CA`)
+plus the leaf in `LocalMachine\TrustedPeople`. That is installer/provisioning
+work, never a build script — `Add-AppxPackage` without it fails with
+`0x800B010A`.
+
+For development, a loose registration of the staged tree works without machine
+trust (Developer Mode):
+
+```powershell
+Add-AppxPackage -Register win64-meson\msix\stage\AppxManifest.xml
+# launch: explorer.exe shell:appsFolder\NAI.NAIPaintBrush_<pfn>!App
+```
+
 ## Rules
 
 1. `.cert/` is radioactive: no PFX or password in git, chat, logs, build

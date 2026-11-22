@@ -125,6 +125,15 @@ The executable is the VLC engine binary renamed at link time
 (`bin/meson.build`), so the process and taskbar never clash with a media
 player. No wrapper, no copy step.
 
+Installable package (signed with the product leaf, see [`SECURITY.md`](SECURITY.md)):
+
+```powershell
+pwsh scripts/pb-build-msix.ps1                # core package (~267 MB)
+pwsh scripts/pb-build-msix.ps1 -IncludeAI     # + CUDA / matting models
+```
+
+Output: `win64-meson\msix\msix\NAI.PaintBrush_<version>_x64.msix`.
+
 ## Run
 
 ```powershell

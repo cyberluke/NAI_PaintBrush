@@ -1122,6 +1122,26 @@ static void *Thread( void *obj )
     QQuickWindow::setDefaultAlphaBuffer(true);
 
     /* Start the QApplication here */
+#ifdef _WIN32
+    /* Packaged and direct runs have no launcher to export the Qt search paths.
+     * Point Qt at the qml/ and qtplugins/ directories shipped next to the
+     * executable. Must happen before QApplication loads the platform plugin. */
+    if( qEnvironmentVariableIsEmpty( "QML2_IMPORT_PATH" ) )
+    {
+        WCHAR exePath[MAX_PATH];
+        const DWORD n = GetModuleFileNameW( NULL, exePath, MAX_PATH );
+        if( n > 0 && n < MAX_PATH )
+        {
+            QString dir = QString::fromWCharArray( exePath, int( n ) );
+            dir.truncate( dir.lastIndexOf( QLatin1Char( '\\' ) ) );
+            const QByteArray qml = ( dir + QStringLiteral( "/qml" ) ).toLocal8Bit();
+            qputenv( "QML_IMPORT_PATH", qml );
+            qputenv( "QML2_IMPORT_PATH", qml );
+            qputenv( "QT_PLUGIN_PATH",
+                     ( dir + QStringLiteral( "/qtplugins" ) ).toLocal8Bit() );
+        }
+    }
+#endif
     QApplication app( argc, argv );
     app.setProperty("initialStyle", app.style()->name());
 

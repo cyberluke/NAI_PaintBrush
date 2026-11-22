@@ -44,6 +44,8 @@
 /* shell32 export used by WinMain(); MinGW gates the prototype behind
  * NTDDI_VERSION, so declare it explicitly. */
 extern HRESULT WINAPI SetCurrentProcessExplicitAppUserModelID(PCWSTR);
+/* kernel32 export used to detect an MSIX/package identity. */
+extern LONG WINAPI GetCurrentPackageFullName(UINT32 *, PWSTR);
 
 #include "../lib/libvlc_internal.h"
 
@@ -97,9 +99,14 @@ int WINAPI WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
     /* The taskbar/dock identity must be set before ANY top-level window exists
      * in the process. libvlc and Qt create hidden windows while starting up, so
      * the interface module is already too late; this is the earliest point.
-     * The binary is NAI PaintBrush in workspace mode and keeps the upstream
-     * identity in standard player mode. */
-    if( lpCmdLine != NULL && strstr( lpCmdLine, "--paintbrush" ) != NULL )
+     * A packaged (MSIX) run owns its identity through the package manifest, so
+     * the explicit AUMID is only for unpackaged runs. */
+    UINT32 packageNameLength = 0;
+    bool packaged = GetCurrentPackageFullName( &packageNameLength, NULL )
+                    != 15700L /* APPMODEL_ERROR_NO_PACKAGE */;
+    bool paintbrush = lpCmdLine != NULL
+                   && strstr( lpCmdLine, "--paintbrush" ) != NULL;
+    if( !packaged && paintbrush )
         SetCurrentProcessExplicitAppUserModelID( L"NAI.PaintBrush" );
 
     /* VLC does not change the thread locale, so gettext/libintil will use the
@@ -143,13 +150,18 @@ int WINAPI WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
     if (wargv == NULL)
         return 1;
 
-    char *argv[argc + 3];
+    char *argv[argc + 4];
     BOOL crash_handling = TRUE;
     int j = 0;
     WCHAR *lang = NULL;
 
     argv[j++] = strdup("--media-library");
     argv[j++] = strdup("--no-ignore-config");
+    /* An MSIX application entry cannot carry launch arguments, so a packaged
+     * run enters the PaintBrush workspace by default. A command line that
+     * already selects a mode is left untouched. */
+    if( packaged && !paintbrush )
+        argv[j++] = strdup("--paintbrush");
     for (int i = 1; i < argc; i++)
     {
         if(!wcscmp(wargv[i], L"--no-crashdump"))
