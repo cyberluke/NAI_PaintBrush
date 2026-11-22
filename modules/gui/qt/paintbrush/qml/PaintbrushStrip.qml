@@ -11,7 +11,7 @@
  * - Height comes from the tallest real control (32dp cell + 2 x 8dp padding)
  *   and stays constant across tool changes, so the canvas never reflows.
  * - Colour is a COMPACT control (foreground chip, background chip, recent
- *   selected colours, palette popover), not a second bar. It participates in
+ *   used colours, palette popover), not a second bar. It participates in
  *   layout only for colour-capable tools, so Object Select leaves no spacer.
  * - Keep is shown by tool CAPABILITY (Object Select) and enabled by selection
  *   state, so the verb never disappears while a mask is being refined.
@@ -173,9 +173,11 @@ Item {
                 }
             }
 
-            /* recent SELECTED colours (history, not palette content) */
+            /* recently USED colours — recorded by the controller when a
+             * stroke/fill commits, never by selecting a colour (so clicking
+             * a palette swatch cannot duplicate the palette into this row) */
             Repeater {
-                model: PaintbrushCtx.recentSelectedColors
+                model: PaintbrushCtx.recentUsedColors
                 delegate: Button {
                     Layout.preferredWidth: VLCStyle.dp(18, VLCStyle.scale)
                     Layout.preferredHeight: VLCStyle.dp(18, VLCStyle.scale)
@@ -214,6 +216,11 @@ Item {
                     Layout.preferredHeight: VLCStyle.dp(18, VLCStyle.scale)
                     padding: 0
                     focusPolicy: Qt.StrongFocus
+                    /* the swatch that IS the active foreground colour; a plain
+                     * click selects it and nothing else changes */
+                    readonly property bool isActiveColor:
+                        root.canvas
+                        ? Qt.colorEqual(root.canvas.fgColor, modelData) : false
                     Accessible.role: Accessible.Button
                     Accessible.name: qsTr("%1 palette colour %2")
                                         .arg(root.activePalette
@@ -223,8 +230,10 @@ Item {
                     background: Rectangle {
                         radius: 3
                         color: modelData
-                        border.width: paletteSwatch.activeFocus ? 2 : 1
-                        border.color: paletteSwatch.activeFocus
+                        border.width: paletteSwatch.isActiveColor
+                                      || paletteSwatch.activeFocus ? 2 : 1
+                        border.color: paletteSwatch.isActiveColor
+                                      || paletteSwatch.activeFocus
                                       ? theme.accent : theme.border
                     }
                     ToolTip.visible: hovered
@@ -417,10 +426,15 @@ Item {
                     Repeater {
                         model: paletteRow.modelData.colors
                         delegate: Button {
+                            id: popupSwatch
                             Layout.preferredWidth: VLCStyle.dp(20, VLCStyle.scale)
                             Layout.preferredHeight: VLCStyle.dp(20, VLCStyle.scale)
                             padding: 0
                             focusPolicy: Qt.StrongFocus
+                            readonly property bool isActiveColor:
+                                root.canvas
+                                ? Qt.colorEqual(root.canvas.fgColor, modelData)
+                                : false
                             Accessible.role: Accessible.Button
                             Accessible.name: qsTr("Use colour %1").arg(modelData)
                             onClicked: {
@@ -433,9 +447,11 @@ Item {
                             background: Rectangle {
                                 radius: 3
                                 color: modelData
-                                border.width: parent.activeFocus ? 2 : 1
-                                border.color: parent.activeFocus ? theme.accent
-                                                                 : theme.border
+                                border.width: popupSwatch.isActiveColor
+                                              || popupSwatch.activeFocus ? 2 : 1
+                                border.color: popupSwatch.isActiveColor
+                                              || popupSwatch.activeFocus
+                                              ? theme.accent : theme.border
                             }
                         }
                     }

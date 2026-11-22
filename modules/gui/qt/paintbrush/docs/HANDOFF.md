@@ -239,9 +239,9 @@ Render/interaction contract for that future preview:
 | **Stylus pressure** — existing tablet pressure path feeds `pressureFactor()`/bristle; precision toggle + pressure-to-opacity/min/max; native tablet acceptance pending. | `pb_canvas_item.{hpp,cpp}`, `bristle_brush.cpp`, `PaintbrushToolOptionsBar.qml` |
 | Adaptive strip baseline (one 64dp surface, RowLayout, flex sliders, intrinsic icons, clipping) | `PaintbrushStrip.qml`, `PaintbrushToolbar.qml`, `PaintbrushToolOptionsBar.qml`, `PaintbrushWorkspace.qml`; commits `57469a8b71`…`7e8faff59e`; the one-surface/implicit-width refactor is committed at `317ca0ad1b`. |
 | **Toolbar theme/icon repair** — explicit `VLCStyle.palette` on all 15 paintbrush `ColorContext`s; `Widgets.IconLabel` for VLCIcons glyph fallback (sets the icon font family); options bar refreshes on `toolCapabilitiesChanged`; canvas `toolName` + attach-time capability emission | `PaintbrushToolbar.qml`, `PaintbrushToolOptionsBar.qml`, all paintbrush `ColorContext` QML, `pb_canvas_item.hpp`, `pb_controller.cpp`; `317ca0ad1b` |
-| Compact colour group: FG/BG chips, 8 recent selected colours, palette popover over all 27 persisted palettes | `PaintbrushStrip.qml`, `b971b9f847`, `7a38f8dd63` |
+| Compact colour group: FG/BG chips, 8 recently used colours, palette popover over all 27 persisted palettes | `PaintbrushStrip.qml`, `b971b9f847`, `7a38f8dd63` |
 | Semantic capabilities: `toolUsesColor`, `toolHasPrimaryAction`, `toolIsBusy` (+ `toolCapabilitiesChanged`) | `pb_controller.{hpp,cpp}`, `43a8edc285` |
-| Honest history semantics: `recentSelectedColors` | `pb_controller.{hpp,cpp}` |
+| Recent-colour semantics: `recentUsedColors` — recorded on committed strokes/fills, never on selection; palette swatches show the active colour with an accent ring | `pb_controller.{hpp,cpp}`, `PaintbrushStrip.qml` |
 | Keyboard-operable swatches (Button, Accessible.name/role, StrongFocus, focus ring) | `67cac3e041` |
 | Palette store: 27 locked built-ins incl. Art Studio paper/stocks/18 directions, user palettes as JSON, import/export | `pb_palette_store.{hpp,cpp}`, `pb_controller_palettes.cpp`, `palettes/builtin-palettes.json`, `probes/sync-builtin-palettes.ps1` |
 | Subject model: `SubjectAsset` / `SubjectInstance` / `DerivedArtwork`, JSON persistence, cut-out PNG | `pb_subject_store.{hpp,cpp}` |
@@ -277,8 +277,10 @@ Render/interaction contract for that future preview:
    only remaining numeric comparisons are the tool rail’s active-tool identity
    (`canvas.tool === src.toolId`) and action payload values that set a subtool;
    neither is a capability decision.
-9. History is history: recent colours are *selected* colours, not palettes and
-   not painted-with.
+9. History is history: recent colours are colours a committed stroke/fill
+   actually painted with. Selecting a colour (palette swatch, eyedropper,
+   picker) changes the active colour only and never writes history, so a
+   palette cannot duplicate itself into the recent row.
 10. Settings persistence uses `config_PutPsz`/`config_PutInt` (VLC config,
     marked dirty) + `config_SaveConfigFile`. `var_Set*` is runtime-only and
     never persists. Apply returns an **empty string on success**;
