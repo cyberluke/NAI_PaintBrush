@@ -169,6 +169,11 @@ Stroke tracing is on by default and appends to `pb_stroke_trace.log`
 baseline and the remaining performance TODO live in
 [`modules/gui/qt/paintbrush/docs/PERFORMANCE_TODO.md`](modules/gui/qt/paintbrush/docs/PERFORMANCE_TODO.md).
 
+Releases are Authenticode-signed with the product leaf issued by the NAI Code
+Signing CA (`CN=NAI PaintBrush, O=NANOTRIK.AI, C=US`). See
+[`SECURITY.md`](SECURITY.md) for the thumbprint, the verification chain and the
+operator signing flow (`pwsh scripts/pb-sign.ps1`).
+
 ## Engineering evidence and limitations
 
 Recorded project checks, not tests rerun by this README change:

@@ -68,3 +68,9 @@ static-lib/
 .kilo/
 modules/gui/qt/paintbrush/.autosave/
 modules/gui/qt/paintbrush/*.npb~
+
+# Code-signing material: the product leaf PFX + its password are radioactive
+# (NAI CA contract). Only public certs/NAI-PaintBrush.cer is committed.
+.cert/
+*.pfx
+*.pfx.pwd
