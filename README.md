@@ -2,15 +2,13 @@
 
 ![NAI PaintBrush](docs/assets/screenshot.png)
 
-### You draw a blob. It becomes a masterpiece. Then you add glitter. ✨
+### Draw it. Add glitter. Now it's art. ✨
 
-No talent required. NAI PaintBrush is AI-assisted drawing for people who just
-want to make something cool: scribble, slap on stickers, spill actual sparkling
-glitter powder, cut yourself out of a video, and turn the whole thing into a
-poster that moves.
+NAI PaintBrush is AI-assisted drawing for people who want to make something
+cool: paint, add stickers and actual sparkling glitter powder, cut yourself out
+of a video, and turn the whole thing into a poster that moves.
 
-**Paint with video. Harvest real moments. Compose living artwork.**
-<br><sub>*Sliving, even.*</sub>
+**Paint with video. Harvest real moments. Compose sliving artwork.**
 
 [Download](#download) · [The loop](#the-loop) · [What it does](#what-it-does) · [The AI part](#the-ai-part-honestly) · [For the nerds](#for-the-nerds)
 
@@ -18,7 +16,7 @@ poster that moves.
 
 ## The loop
 
-1. **Draw something.** A blob. A stick figure. Your cat. It's fine.
+1. **Start with a sketch, a photo, or a video frame.**
 2. **Add glitter powder.** Real GPU glitter: pour it, glue it, tilt it, blow it.
    This is the feature. You will not stop.
 3. **Dress it up.** Paper, moods, stickers, text, shapes, layers that don't
@@ -79,8 +77,6 @@ CPU, just slower.
 - **Bring your own:** the assistant / generative actions need an
   OpenAI-compatible endpoint and your key. Drawing, glitter and stickers need
   no key.
-- **No fake hype:** the app doesn't pretend to be your mom. It just makes the
-  thing you drew actually look good.
 
 ## For the nerds
 
