@@ -2539,6 +2539,33 @@ void PaintbrushCanvasItem::strokeSegment(const QPointF &from, const QPointF &to)
     }
 }
 
+bool PaintbrushCanvasItem::hitCurrentLayer(const QPointF &canvasPos) const
+{
+    if (!m_doc)
+        return false;
+    const int index = m_doc->currentLayerIndex();
+    const CanvasLayer *layer = m_doc->layerAt(index);
+    if (!layer || !layer->visible)
+        return false;
+    if (layer->type != LAYER_IMAGE && layer->type != LAYER_TEXT &&
+        layer->type != LAYER_STICKER && layer->type != LAYER_REFERENCE &&
+        layer->type != LAYER_GENERATED)
+        return false;
+    const QRect rect = layer->raster.rect();
+    if (rect.isEmpty())
+        return false;
+    const QPoint p = layer->mapCanvasToLocal(canvasPos).toPoint();
+    if (!rect.contains(p))
+        return false;
+    /* Alpha hit test: the bounding box of a cutout is mostly empty, so a
+     * click on the transparent corner must pan, not drag. */
+    QImage rgba = layer->raster;
+    if (rgba.format() != QImage::Format_ARGB32
+        && rgba.format() != QImage::Format_ARGB32_Premultiplied)
+        rgba = rgba.convertToFormat(QImage::Format_ARGB32);
+    return qAlpha(rgba.pixel(p)) > 8;
+}
+
 void PaintbrushCanvasItem::beginStroke(const QPointF &canvasPos, bool primary)
 {
     if (!m_doc)
@@ -2669,8 +2696,18 @@ void PaintbrushCanvasItem::beginStroke(const QPointF &canvasPos, bool primary)
         break;
 
     case TOOL_PAN_ZOOM:
-        m_panning = true;
-        m_panLastItem = eventLastItemPos();
+        /* Move tool: an opaque hit on the current raster layer drags THAT
+         * layer (one undo per drag); empty canvas still pans. */
+        if (primary && hitCurrentLayer(canvasPos))
+        {
+            m_movingLayer = true;
+            emit layerMoveStarted(canvasPos);
+        }
+        else
+        {
+            m_panning = true;
+            m_panLastItem = eventLastItemPos();
+        }
         break;
 
     default:
@@ -2828,7 +2865,9 @@ void PaintbrushCanvasItem::continueStroke(const QPointF &canvasPos)
         break;
 
     case TOOL_PAN_ZOOM:
-        if (m_panning)
+        if (m_movingLayer)
+            emit layerMoveUpdated(canvasPos);
+        else if (m_panning)
         {
             const QPointF itemPos = eventLastItemPos();
             setPanOffset(m_panOffset + (itemPos - m_panLastItem));
@@ -2955,7 +2994,13 @@ void PaintbrushCanvasItem::endStroke(const QPointF &canvasPos, bool primary)
         break;
 
     case TOOL_PAN_ZOOM:
-        m_panning = false;
+        if (m_movingLayer)
+        {
+            m_movingLayer = false;
+            emit layerMoveFinished();
+        }
+        else
+            m_panning = false;
         break;
 
     default:

@@ -722,6 +722,12 @@ void PaintbrushController::setCanvasItem(QQuickItem *item)
             this, &PaintbrushController::onCanvasModified);
     connect(m_canvas, &PaintbrushCanvasItem::imageDropped,
             this, &PaintbrushController::onLayerDrop);
+    connect(m_canvas, &PaintbrushCanvasItem::layerMoveStarted,
+            this, &PaintbrushController::beginLayerMove);
+    connect(m_canvas, &PaintbrushCanvasItem::layerMoveUpdated,
+            this, &PaintbrushController::updateLayerMove);
+    connect(m_canvas, &PaintbrushCanvasItem::layerMoveFinished,
+            this, &PaintbrushController::endLayerMove);
     connect(m_canvas, &PaintbrushCanvasItem::vectorEditRequested,
             this, &PaintbrushController::beginVectorEdit);
     connect(m_canvas, &PaintbrushCanvasItem::toolChanged, this,
@@ -733,19 +739,12 @@ void PaintbrushController::setCanvasItem(QQuickItem *item)
     connect(m_canvas, &PaintbrushCanvasItem::panOffsetChanged,
             this, &PaintbrushController::vectorEditNodesChanged);
 
-    /* Track the eight most recently USED colours (history, not palette
-     * content). */
-    connect(m_canvas, &PaintbrushCanvasItem::fgColorChanged,
-            this, [this]() {
-                if (!m_canvas)
-                    return;
-                const QString name = m_canvas->fgColor().name(QColor::HexRgb);
-                m_recentColors.removeAll(name);
-                m_recentColors.prepend(name);
-                while (m_recentColors.size() > 8)
-                    m_recentColors.removeLast();
-                emit recentColorsChanged();
-            });
+    /* Recent-colour history is recorded when paint is COMMITTED (see
+     * onCanvasStrokeCommitted), not on every fgColor assignment: selecting a
+     * palette swatch, sampling with the eyedropper or accepting the colour
+     * picker must only change the active colour. Recording selection here made
+     * the palette duplicate itself into the recent row and shifted the strip
+     * under the pointer while browsing. */
 
     /* Tool changes alter which controls are relevant; QML consumes the
      * semantic capability properties, not tool ids. */
@@ -1030,6 +1029,25 @@ void PaintbrushController::openImageData(const QImage &image, const QString &nam
     triggerCompanionEvent(QStringLiteral("image-inserted"));
 }
 
+/* A vout snapshot can legitimately be a dark frame; only an all-black
+ * (failed readback) image is rejected, and the exact decoder is used then. */
+static bool frameIsNearlyBlack(const QImage &image)
+{
+    if (image.isNull())
+        return true;
+    const QImage probe = image.scaled(32, 32, Qt::IgnoreAspectRatio,
+                                      Qt::FastTransformation)
+                             .convertToFormat(QImage::Format_RGB32);
+    int maxLuma = 0;
+    for (int y = 0; y < probe.height(); ++y)
+    {
+        const QRgb *line = reinterpret_cast<const QRgb *>(probe.constScanLine(y));
+        for (int x = 0; x < probe.width(); ++x)
+            maxLuma = qMax(maxLuma, qGray(line[x]));
+    }
+    return maxLuma < 8;
+}
+
 void PaintbrushController::captureVideoFrame()
 {
     /* P0.3: the edit pipeline only needs the media session + video track —
@@ -1050,6 +1068,42 @@ void PaintbrushController::captureVideoFrame()
     {
         setStatus(QStringLiteral("No video frame is available to capture."));
         return;
+    }
+
+    /* WYSIWYG capture: the layer must be the frame the user is looking at.
+     * Freeze playback and snapshot the displayed vout at native resolution.
+     * The shared thumbnailer can only return the nearest keyframe (the
+     * 250 ms tolerance made "use this frame" land on a different frame). */
+    if (videoOutputAttached() && m_intf->p_mainPlayerController)
+    {
+        if (playerIsPlaying())
+            m_intf->p_mainPlaylistController->togglePlayPause();
+        const QImage displayed = FrameCaptureService::captureCurrentFrame(
+            m_intf->p_mainPlayerController->getPlayer());
+        if (!displayed.isNull() && !frameIsNearlyBlack(displayed))
+        {
+            const qint64 shown = FrameCaptureService::currentTimeMs(
+                m_intf->p_mainPlayerController->getPlayer());
+            m_addFrameBusy = true;
+            emit addFrameBusyChanged();
+            m_addFrameToken = QStringLiteral("addframe-snapshot-%1-%2")
+                                  .arg(QDateTime::currentMSecsSinceEpoch())
+                                  .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)
+                                           .left(8));
+            m_addFrameRequest = FrameRef{mrl, currentMediaTitle(), shown};
+            DecodedFrame snapshot;
+            snapshot.requestedMs = shown;
+            snapshot.ptsMs = shown;
+            snapshot.image = displayed;
+            snapshot.ptsVerified = true;
+            pbLogInfo(VLC_OBJECT(m_intf), "capture",
+                      "displayed snapshot %dx%d pts=%lld (the exact frame on screen)",
+                      displayed.width(), displayed.height(), (long long)shown);
+            onAddFrameDecoded(m_addFrameToken, snapshot);
+            return;
+        }
+        pbLogWarn(VLC_OBJECT(m_intf), "capture",
+                  "displayed snapshot unavailable; falling back to the exact decoder");
     }
 
     /* P0.4: ASYNC exact-frame decode — the GUI event loop must never block
@@ -1881,6 +1935,82 @@ void PaintbrushController::moveLayerTo(int from, int to)
         m_canvas->markCanvasDirty();
     emit documentChanged();
 }
+
+QPointF PaintbrushController::layerPositionOf(int index) const
+{
+    const CanvasLayer *layer = m_document.layerAt(index);
+    return layer ? layer->position : QPointF();
+}
+
+void PaintbrushController::setLayerPosition(int index, double x, double y)
+{
+    moveImageLayer(index, QPointF(x, y));
+}
+
+void PaintbrushController::beginLayerMove(const QPointF &canvasPos)
+{
+    m_layerMoveActive = false;
+    CanvasLayer *layer = m_document.currentLayer();
+    if (!layer)
+        return;
+    if (layer->type != LAYER_IMAGE && layer->type != LAYER_TEXT &&
+        layer->type != LAYER_STICKER && layer->type != LAYER_REFERENCE &&
+        layer->type != LAYER_GENERATED)
+        return;
+    m_moveLayerIndex = m_document.currentLayerIndex();
+    m_moveLayerId = layer->id;
+    m_moveBefore = layer->transform();
+    m_moveStartPos = layer->position;
+    m_moveStartCanvas = canvasPos;
+    m_layerMoveActive = true;
+}
+
+void PaintbrushController::updateLayerMove(const QPointF &canvasPos)
+{
+    if (!m_layerMoveActive)
+        return;
+    CanvasLayer *layer = m_document.layerAt(m_moveLayerIndex);
+    if (!layer || layer->id != m_moveLayerId)
+    {
+        m_layerMoveActive = false;
+        return;
+    }
+    const QPointF position = m_moveStartPos + (canvasPos - m_moveStartCanvas);
+    if (layer->position == position)
+        return;
+    /* Live move: no undo entry per mouse event. The canvas repaints from the
+     * document; a single SetTransformCommand is pushed on release. */
+    layer->position = position;
+    if (m_canvas)
+        m_canvas->markCanvasDirty();
+}
+
+void PaintbrushController::endLayerMove()
+{
+    if (!m_layerMoveActive)
+        return;
+    m_layerMoveActive = false;
+    CanvasLayer *layer = m_document.layerAt(m_moveLayerIndex);
+    if (!layer || layer->id != m_moveLayerId)
+        return;
+    const QTransform after = layer->transform();
+    if (after == m_moveBefore)
+        return;
+    SetTransformCommand cmd;
+    cmd.desc = QStringLiteral("Move layer");
+    cmd.layerId = layer->id;
+    cmd.layerIndex = m_moveLayerIndex;
+    cmd.before = m_moveBefore;
+    cmd.after = after;
+    m_undoStack.pushSetTransform(cmd);
+    if (m_canvas)
+        m_canvas->markCanvasDirty();
+    emit documentChanged();
+    setStatus(QStringLiteral("Layer moved to %1, %2")
+                  .arg(qRound(layer->position.x()))
+                  .arg(qRound(layer->position.y())));
+}
+
 void PaintbrushController::transformLayer(int index, double scale, double rotation)
 {
     CanvasLayer *layer = m_document.layerAt(index);
@@ -6156,9 +6286,27 @@ void PaintbrushController::onMediaTimer()
 
 /* --------------------------------------------------------------- signals */
 
+void PaintbrushController::rememberUsedColor(const QColor &color)
+{
+    if (!color.isValid())
+        return;
+    /* canonical #rrggbb, so palette hex in any case never duplicates a
+     * previously painted entry */
+    const QString name = color.name(QColor::HexRgb);
+    m_recentColors.removeAll(name);
+    m_recentColors.prepend(name);
+    while (m_recentColors.size() > 8)
+        m_recentColors.removeLast();
+    emit recentColorsChanged();
+}
+
 void PaintbrushController::onCanvasStrokeCommitted(const QRect &region)
 {
     Q_UNUSED(region);
+    /* The stroke used the live foreground colour; this is the only moment a
+     * colour enters the recent row. The eraser paints no foreground colour. */
+    if (m_canvas && m_canvas->tool() != TOOL_ERASER)
+        rememberUsedColor(m_canvas->fgColor());
     emit documentChanged();
 }
 

@@ -341,6 +341,47 @@ Item {
             }
         }
 
+        /* Precise spatial position (canvas pixels). Dragging with the Move
+         * tool updates the same layer position; these fields are for exact
+         * placement and for keyboard-only adjustment. */
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: VLCStyle.margin_xsmall
+
+            Widgets.LabelExt {
+                text: qsTr("X")
+                color: theme.fg.secondary
+                font.pixelSize: VLCStyle.fontSize_xsmall
+            }
+            Widgets.SpinBoxExt {
+                id: layerXSpin
+                Layout.fillWidth: true
+                from: -100000
+                to: 100000
+                value: Math.round(PaintbrushCtx.layerPositionOf(
+                                      PaintbrushCtx.document.currentLayerIndex).x)
+                onValueModified: PaintbrushCtx.setLayerPosition(
+                                     PaintbrushCtx.document.currentLayerIndex,
+                                     value, layerYSpin.value)
+            }
+            Widgets.LabelExt {
+                text: qsTr("Y")
+                color: theme.fg.secondary
+                font.pixelSize: VLCStyle.fontSize_xsmall
+            }
+            Widgets.SpinBoxExt {
+                id: layerYSpin
+                Layout.preferredWidth: VLCStyle.dp(84, VLCStyle.scale)
+                from: -100000
+                to: 100000
+                value: Math.round(PaintbrushCtx.layerPositionOf(
+                                      PaintbrushCtx.document.currentLayerIndex).y)
+                onValueModified: PaintbrushCtx.setLayerPosition(
+                                     PaintbrushCtx.document.currentLayerIndex,
+                                     layerXSpin.value, value)
+            }
+        }
+
         /* ---------------------------------------- living harvest (stage 3)
          * Motion group: Off/Subtle/Normal/Strong maps to photo-safe
          * amplitudes (0 / 0.35 / 0.65 / 1.0). The layer needs a rigged

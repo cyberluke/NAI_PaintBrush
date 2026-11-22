@@ -412,6 +412,9 @@ public:
      * one undoable operation each, persisted with the project. */
     Q_INVOKABLE void transformLayer(int index, double scale, double rotation);
     Q_INVOKABLE void moveImageLayer(int index, const QPointF &position);
+    /* Precise position read/write for the Inspector (canvas pixels). */
+    Q_INVOKABLE QPointF layerPositionOf(int index) const;
+    Q_INVOKABLE void setLayerPosition(int index, double x, double y);
 
     /* -- object selection ------------------------------------------------ */
     Q_INVOKABLE void refineObjectByText(const QString &textPrompt);
@@ -703,13 +706,14 @@ public:
                NOTIFY objectSelectionChanged FINAL)
     Q_PROPERTY(QString segmentationProgress READ segmentationProgress
                NOTIFY objectSelectionChanged FINAL)
-    /* History of recently SELECTED foreground colours. Deliberately named for
-     * what it is: selection history, not palette content and not "colours that
-     * were painted with". */
-    Q_PROPERTY(QVariantList recentSelectedColors READ recentSelectedColors
+    /* History of recently USED foreground colours. A colour enters this list
+     * only when a stroke/shape/fill is committed with it — never when it is
+     * merely selected (palette browsing, eyedropper, colour picker), so the
+     * palette never duplicates itself into this row. */
+    Q_PROPERTY(QVariantList recentUsedColors READ recentUsedColors
                NOTIFY recentColorsChanged FINAL)
 
-    QVariantList recentSelectedColors() const { return m_recentColors; }
+    QVariantList recentUsedColors() const { return m_recentColors; }
 
     /* Semantic tool capabilities. QML must not test magic tool numbers. */
     Q_PROPERTY(bool toolUsesColor READ toolUsesColor
@@ -946,6 +950,8 @@ private slots:
     void onTrackFinished(bool complete, bool cancelled, const QString &error);
     void onCompanionMessage(const QString &text, const QString &role);
     void onCanvasStrokeCommitted(const QRect &region);
+    /* Record a colour the user actually painted with (dedup, cap 8). */
+    void rememberUsedColor(const QColor &color);
     void onCanvasModified();
     void onLayerDrop(const QUrl &url, const QPointF &pos);
     void onMediaTimer();
@@ -1112,6 +1118,11 @@ private:
     void scheduleMatteRefinement(bool diagnostics = false);
     bool currentMatte(paintbrush::matte::Result *out) const;
     void updateMatteOverlay();
+    /* Move tool drag lifecycle: live positioning without undo churn, one
+     * SetTransformCommand on release. */
+    void beginLayerMove(const QPointF &canvasPos);
+    void updateLayerMove(const QPointF &canvasPos);
+    void endLayerMove();
 
     qt_intf_t *m_intf = nullptr;
     PaintbrushDocument m_document;
@@ -1157,6 +1168,13 @@ private:
     QString m_statusMessage;
     QString m_projectName;
     bool m_objectSelected = false;
+    /* layer move drag */
+    bool m_layerMoveActive = false;
+    int m_moveLayerIndex = -1;
+    int m_moveLayerId = 0;
+    QTransform m_moveBefore;
+    QPointF m_moveStartPos;
+    QPointF m_moveStartCanvas;
     QString m_objectMaskBoundsText;
     bool m_objectSelectBusy = false;
     /* forwarded segmentation state for the adaptive strip / taskbar */

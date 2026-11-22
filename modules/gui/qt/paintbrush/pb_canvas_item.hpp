@@ -337,6 +337,11 @@ void fgColorChanged();
     /* Double-click landed on a text layer: QML opens the inline text editor
      * for that layer (spec §57 — text stays truly editable). */
     void textLayerDoubleClicked(int layerIndex);
+    /* Move tool: dragging inside the current image/sticker layer moves the
+     * layer; dragging outside pans the canvas. One undo command per drag. */
+    void layerMoveStarted(QPointF canvasPos);
+    void layerMoveUpdated(QPointF canvasPos);
+    void layerMoveFinished();
 
 protected:
     QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *data) override;
@@ -411,6 +416,9 @@ private:
 
     /* -- misc ------------------------------------------------------------------ */
     void updateStatus(const QPointF &canvasPos);
+    /* True when canvasPos lands on an opaque pixel of the current
+     * image/sticker layer (the move-tool hit test). */
+    bool hitCurrentLayer(const QPointF &canvasPos) const;
     void rebuildTransformNode(QSGTransformNode *root);
     QRect tileRect(int tx, int ty) const;
     QPointF snapPoint(const QPointF &p) const;
@@ -642,6 +650,7 @@ qint64 m_lastPowderPreviewMs = 0;
 
     bool m_hovered = false;
     bool m_panning = false;
+    bool m_movingLayer = false;
     QPointF m_panLastItem;
     QPointF m_lastItemPos;
 };
