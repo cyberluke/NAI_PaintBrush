@@ -2,7 +2,7 @@
 
 ![NAI PaintBrush](docs/assets/screenshot.png)
 
-### Sketch it. Gild it. Make it sliving. ✨
+### Create like nobody's watching.<br>Catch the frame everyone missed.<br>Glitter like it's couture.<br>**Make it sliving.** ✨
 
 NAI PaintBrush is an AI-assisted art studio for people who want to make
 something unforgettable: paint, layer premium glitter powder, cut yourself out
