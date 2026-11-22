@@ -80,8 +80,13 @@ Item {
     Connections {
         target: PaintbrushCtx
         function onObjectSelectionChanged() {
-            if (PaintbrushCtx.objectSelected)
+            if (PaintbrushCtx.objectSelected) {
                 manualClosed = false
+                /* After an object extract the AI verbs are the next useful
+                 * action, so the disclosure opens with the object instead of
+                 * hiding behind "More AI actions". */
+                root.legacyActionsOpen = true
+            }
         }
     }
 

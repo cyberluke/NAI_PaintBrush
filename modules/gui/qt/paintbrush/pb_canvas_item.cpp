@@ -454,7 +454,7 @@ QString PaintbrushCanvasItem::toolName() const
     case TOOL_ROUNDED_RECT:    return QStringLiteral("Rounded rect");
     case TOOL_ELLIPSE:         return QStringLiteral("Ellipse");
     case TOOL_TEXT:            return QStringLiteral("Text");
-    case TOOL_PAN_ZOOM:        return QStringLiteral("Move canvas");
+    case TOOL_PAN_ZOOM:        return QStringLiteral("Move layer / pan");
     case TOOL_BRISTLE:         return QStringLiteral("Bristle");
     case TOOL_GLITTER:         return QStringLiteral("Glitter");
     case TOOL_GLITTER_POWDER:  return QStringLiteral("Glitter powder");
@@ -1402,6 +1402,59 @@ CanvasLayer *PaintbrushCanvasItem::ensurePowderLayer()
     return m_doc->currentLayer();
 }
 
+/* Non-destructive drawing contract: paint never lands in an extracted
+ * sticker (or a reference/generated/vector source). Additive tools get one
+ * dedicated canvas-sized "Paint" layer above the object, so:
+ *   - the extracted object keeps its own pixels/alpha;
+ *   - drawing outside the object is allowed (the paint layer is canvas-sized);
+ *   - undo can remove the stroke, and separately the auto-created layer.
+ * The layer is reused on later strokes instead of creating one per stroke. */
+CanvasLayer *PaintbrushCanvasItem::ensurePaintLayer()
+{
+    if (!m_doc)
+        return nullptr;
+    CanvasLayer *cur = m_doc->currentLayer();
+    if (cur && !cur->locked && !cur->raster.isNull()
+        && (cur->type == LAYER_RASTER || cur->type == LAYER_IMAGE))
+        return cur; /* already a normal paint/image layer */
+
+    /* Reuse the existing dedicated paint layer when present. */
+    const QList<CanvasLayer> &existing = m_doc->layers();
+    for (int i = int(existing.size()) - 1; i >= 0; --i)
+    {
+        if (existing[i].name == QStringLiteral("Paint")
+            && existing[i].type == LAYER_RASTER
+            && !existing[i].locked && !existing[i].raster.isNull())
+        {
+            m_doc->setCurrentLayerIndex(i);
+            markAllTilesDirty();
+            emit canvasModified();
+            return m_doc->currentLayer();
+        }
+    }
+
+    CanvasLayer layer = CanvasLayer::createRaster(m_doc->canvasSize(),
+                                                  QStringLiteral("Paint"));
+    if (!m_undoStack)
+        return nullptr;
+
+    InsertLayerCommand cmd;
+    cmd.desc = QStringLiteral("Paint layer");
+    QList<CanvasLayer> layers = m_doc->layers();
+    layers.append(std::move(layer));
+    cmd.index = layers.size() - 1;
+    cmd.prevCurrentIndex = m_doc->currentLayerIndex();
+    m_doc->setLayers(layers);
+    m_doc->setCurrentLayerIndex(cmd.index);
+    cmd.layer = m_doc->layerAt(cmd.index) ? *m_doc->layerAt(cmd.index)
+                                          : CanvasLayer();
+    m_undoStack->pushInsertLayer(cmd);
+    m_doc->setDirty(true);
+    markAllTilesDirty();
+    emit canvasModified();
+    return m_doc->currentLayer();
+}
+
 void PaintbrushCanvasItem::renderPowderPreview()
 {
     pbCrashTrace("renderPowderPreview enter");
@@ -2308,6 +2361,15 @@ void PaintbrushCanvasItem::ensureScratch(const QRect &localRect)
             p.setCompositionMode(QPainter::CompositionMode_Source);
             p.drawImage(m_scratchOrigin - u.topLeft(), m_scratchTile);
             p.end();
+            /* The seeded-region bookkeeping is in LAYER coordinates, but the
+             * tile origin changed. Without this translation the next
+             * ensureScratch() believes old pixels are seeded while their
+             * coordinates now point at new (transparent) tile areas — the
+             * commit then Source-blits those rows and erases rectangular
+             * holes in the layer (the "drawing leaves background rectangles"
+             * bug). */
+            if (!m_scratchSeeded.isEmpty())
+                m_scratchSeeded.translate(m_scratchOrigin - u.topLeft());
             m_scratchTile = std::move(grown);
             m_scratchOrigin = u.topLeft();
         }
@@ -2424,10 +2486,21 @@ void PaintbrushCanvasItem::commitScratch(const QString &desc)
         return;
 
     {
-        QPainter p(&layer->raster);
-        p.setCompositionMode(QPainter::CompositionMode_Source);
-        p.drawImage(m_scratchOrigin, m_scratchTile);
-        p.end();
+        /* Only the SEEDED region may be Source-blitted onto the layer. An
+         * unseeded (transparent) tile pixel must never replace real layer
+         * pixels; that was the rectangular "background hole" during a
+         * stroke. */
+        const QRect seeded = (m_scratchSeeded.isEmpty()
+                                  ? m_scratchTile.rect()
+                                  : m_scratchSeeded.translated(-m_scratchOrigin))
+                                 .intersected(m_scratchTile.rect());
+        if (!seeded.isEmpty())
+        {
+            QPainter p(&layer->raster);
+            p.setCompositionMode(QPainter::CompositionMode_Source);
+            p.drawImage(seeded.topLeft() + m_scratchOrigin, m_scratchTile, seeded);
+            p.end();
+        }
     }
 
     maskStrokeToSelectionAndAlphaLock();
@@ -2576,6 +2649,22 @@ void PaintbrushCanvasItem::beginStroke(const QPointF &canvasPos, bool primary)
     m_strokeUnion = QRect();
     m_strokeBefore.clear();
     m_prevPreviewRect = QRect();
+
+    /* Non-destructive drawing: additive paint on an extracted object goes to
+     * the dedicated canvas-sized Paint layer, never into the sticker raster.
+     * (Powder keeps its own material layer; the eraser is intentionally
+     * destructive on the layer it targets.) */
+    if (primary)
+    {
+        const bool additive =
+            m_tool == TOOL_PENCIL || m_tool == TOOL_BRUSH ||
+            m_tool == TOOL_SPRAY || m_tool == TOOL_FILL ||
+            m_tool == TOOL_LINE || m_tool == TOOL_RECTANGLE ||
+            m_tool == TOOL_ROUNDED_RECT || m_tool == TOOL_ELLIPSE ||
+            m_tool == TOOL_BRISTLE || m_tool == TOOL_GLITTER;
+        if (additive)
+            ensurePaintLayer();
+    }
 
     switch (m_tool)
     {

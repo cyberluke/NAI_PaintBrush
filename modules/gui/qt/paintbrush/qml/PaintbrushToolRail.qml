@@ -53,7 +53,7 @@ Item {
         { toolId: 12, iconSource: "rounded_rect",    tip: qsTr("Rounded Rectangle") },
         { toolId: 13, iconSource: "ellipse",         tip: qsTr("Ellipse") },
         { toolId: 14, iconSource: "text",            tip: qsTr("Text") },
-        { toolId: 15, iconSource: "move",            tip: qsTr("Move canvas") },
+        { toolId: 15, iconSource: "move",            tip: qsTr("Move layer (drag object) / pan (drag empty)") },
         { toolId: 20, iconSource: "image_search",    tip: qsTr("Ask") }
     ]
 

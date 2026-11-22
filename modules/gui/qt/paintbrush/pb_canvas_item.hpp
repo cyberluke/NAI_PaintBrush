@@ -621,6 +621,10 @@ qint64 m_lastPowderPreviewMs = 0;
      * destructively converting an arbitrary raster/image layer). Returns the
      * powder layer (may switch the current layer) and stores it in `outLayer`. */
     CanvasLayer *ensurePowderLayer();
+    /* Non-destructive drawing: return the current paintable raster layer, or
+     * create/reuse a dedicated canvas-sized "Paint" layer above the extracted
+     * sticker/reference/generated layer. */
+    CanvasLayer *ensurePaintLayer();
     /* Long-press breath helpers (reference blowOnLongPress). */
     void startPowderBlow();
     void stepPowderBlow(float dtSec);
