@@ -257,6 +257,18 @@ Item {
                 font.pixelSize: VLCStyle.fontSize_large
                 color: theme.fg.primary
             }
+            /* Undo/Redo live in the LEFT cluster: the right cluster overflows
+             * on narrower windows and silently pushed them out of view. */
+            Widgets.ButtonExt {
+                text: qsTr("Undo")
+                enabled: PaintbrushCtx.hasOpenDocument && PaintbrushCtx.canUndo
+                onClicked: PaintbrushCtx.undo()
+            }
+            Widgets.ButtonExt {
+                text: qsTr("Redo")
+                enabled: PaintbrushCtx.hasOpenDocument && PaintbrushCtx.canRedo
+                onClicked: PaintbrushCtx.redo()
+            }
 
             Item { Layout.fillWidth: true }
 
@@ -289,16 +301,7 @@ Item {
                 checked: inspectorDock.expanded
                 onClicked: inspectorDock.setOpen(!inspectorDock.expanded)
             }
-            Widgets.ButtonExt {
-                text: qsTr("Undo")
-                enabled: PaintbrushCtx.hasOpenDocument && PaintbrushCtx.canUndo
-                onClicked: PaintbrushCtx.undo()
-            }
-            Widgets.ButtonExt {
-                text: qsTr("Redo")
-                enabled: PaintbrushCtx.hasOpenDocument && PaintbrushCtx.canRedo
-                onClicked: PaintbrushCtx.redo()
-            }
+
             Widgets.IconToolButton {
                 text: VLCIcons.add
                 description: qsTr("New blank canvas")
@@ -886,10 +889,22 @@ Item {
                             if (pressed)
                                 PaintbrushCtx.playerSeekBegin()
                             else {
+                                monitorSeekThrottle.stop()
                                 PaintbrushCtx.playerSeekEnd()
                                 PaintbrushCtx.playerSeek(monitorSeek.value)
                             }
                         }
+                        /* Live scrub, throttled: the timeline has always done
+                         * this; the monitor used to seek only on release, so
+                         * moving its playhead appeared to do nothing. */
+                        onMoved: if (pressed) monitorSeekThrottle.restart()
+
+                        Timer {
+                            id: monitorSeekThrottle
+                            interval: 80
+                            onTriggered: PaintbrushCtx.playerSeek(monitorSeek.value)
+                        }
+
                         Binding {
                             target: monitorSeek
                             property: "value"
@@ -1109,7 +1124,28 @@ Item {
     Shortcut { sequence: "Ctrl+Space"; onActivated: PaintbrushCtx.playerPlayPause() }
     Shortcut { sequence: "Ctrl+U"; onActivated: PaintbrushCtx.captureVideoFrame() }
     Shortcut { sequence: "Ctrl+I"; onActivated: assistantDock.expanded = !assistantDock.expanded }
-    Shortcut { sequence: "Escape"; onActivated: { PaintbrushCtx.cancelTracking(); PaintbrushCtx.cancelGeneration(); PaintbrushCtx.cancelThumbnails() } }
+    Shortcut {
+        sequence: "Escape"
+        onActivated: {
+            /* An open Ask input owns Escape; do not also clear the canvas. */
+            if (PaintbrushCtx.askInputVisible) {
+                PaintbrushCtx.cancelAsk()
+                return
+            }
+            PaintbrushCtx.cancelTracking()
+            PaintbrushCtx.cancelGeneration()
+            PaintbrushCtx.cancelThumbnails()
+            /* Selection tools: Esc clears what is selected and returns to the
+             * Move/pointer tool (15), so the user never gets stuck in a
+             * half-finished lasso. */
+            if (paintbrushCanvas.hasSelection)
+                paintbrushCanvas.selectionClear()
+            else if (PaintbrushCtx.objectSelected)
+                PaintbrushCtx.cancelObjectSelection()
+            if (paintbrushCanvas.tool >= 1 && paintbrushCanvas.tool <= 3)
+                paintbrushCanvas.tool = 15
+        }
+    }
 
 
     /* Professional HH:MM:SS:FF timecode for the reference monitor. The frame

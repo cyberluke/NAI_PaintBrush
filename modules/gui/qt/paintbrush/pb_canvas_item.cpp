@@ -3201,7 +3201,10 @@ void PaintbrushCanvasItem::beginStroke(const QPointF &canvasPos, bool primary)
                  * point refinement */
                 m_strokeActive = true;
                 m_maskPaintActive = true;
-                m_maskPaintSubtract = false;
+                /* the cleanup panel's Add/Erase mode drives the brush; a
+                 * left press used to always add, so the panel's Erase mode
+                 * did nothing for the selection mask. */
+                m_maskPaintSubtract = m_maskPaintMode == 1;
                 m_maskPaintDirty = false;
                 m_maskPaintUnion = QRect();
                 m_maskPaintLastPos = canvasPos;

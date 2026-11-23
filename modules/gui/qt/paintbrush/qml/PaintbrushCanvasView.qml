@@ -567,9 +567,14 @@ import VLC.Paintbrush
      * auto-sent fixed prompt. */
     Rectangle {
         id: askBar
-        anchors.top: selectionBar.visible ? selectionBar.bottom : parent.top
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.margins: VLCStyle.margin_small
+        /* The monitor and the selection bar own the top CENTRE and are drawn
+         * above this item, which used to hide the Ask input behind them.
+         * Anchor to the free top-left instead, below the mask panel when it
+         * is visible (ask about a selection). */
+        anchors.top: maskPanel.visible ? maskPanel.bottom : parent.top
+        anchors.left: parent.left
+        anchors.leftMargin: VLCStyle.margin_small
+        anchors.topMargin: VLCStyle.margin_small
         height: askRow.height + VLCStyle.margin_small * 2
         /* Bounded width, NOT derived from askRow.width: askRow anchors
          * left+right to this rectangle, so reading its width here created a

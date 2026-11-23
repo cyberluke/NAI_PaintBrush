@@ -1446,6 +1446,11 @@ Item {
         id: collageDialog
         title: qsTr("Auto collage")
         modal: true
+        /* Declared inside the Inspector drawer: without an explicit overlay
+         * parent the x/y below are interpreted in the drawer's coordinate
+         * space and the dialog lands off-screen (the window dims, nothing
+         * else appears). */
+        parent: Overlay.overlay
         width: Math.min(Overlay.overlay ? Overlay.overlay.width : 640, VLCStyle.dp(480, VLCStyle.scale))
         x: Overlay.overlay ? Math.round((Overlay.overlay.width - width) / 2) : 0
         y: Overlay.overlay ? Math.round((Overlay.overlay.height - height) / 2) : 0
