@@ -30602,9 +30602,6 @@ msgstr "Danh sách quản lý tập tin"
 #~ msgid "Hide Details"
 #~ msgstr "Ẩn chi tiết"
 
-#~ msgid "Send"
-#~ msgstr "Gửi"
-
 #~ msgid ""
 #~ "%@ unexpectedly quit the last time it was run. Would you like to send a "
 #~ "crash report to %@?"
@@ -31778,9 +31775,6 @@ msgstr "Danh sách quản lý tập tin"
 
 #~ msgid "Shows more information about the available video filters."
 #~ msgstr "Hiển thị các thông tin thêm về các bộ lọc video sẵn có"
-
-#~ msgid "Blur"
-#~ msgstr "Làm mờ"
 
 #~ msgid "Adds motion blurring to the image"
 #~ msgstr "Thêm các hiệu ứng mờ của chuyển động vào hình ảnh"
@@ -33455,9 +33449,6 @@ msgstr "Danh sách quản lý tập tin"
 #~ msgstr "Làm mờ chuyển động"
 
 #, fuzzy
-#~ msgid "Effect"
-#~ msgstr "Hiệu ứng"
-
 #, fuzzy
 #~ msgid "Zoom playlist"
 #~ msgstr "danh sách phát"
@@ -34042,9 +34033,6 @@ msgstr "Danh sách quản lý tập tin"
 #~ msgstr "Chương"
 
 #, fuzzy
-#~ msgid "Speed"
-#~ msgstr "Speex"
-
 #, fuzzy
 #~ msgid "VLC media player: Open Media Files"
 #~ msgstr "Cập nhật phiên bản mới"
@@ -34475,3 +34463,2037 @@ msgstr "Danh sách quản lý tập tin"
 #, fuzzy
 #~ msgid "Remaining time: %i seconds"
 #~ msgstr "Thời gian tổng cộng/còn lại"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Creative companion — ask about your drawing"
+msgstr "Trợ lý sáng tạo — hỏi về bức vẽ của bạn"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Companion"
+msgstr "Trợ lý"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Thinking…"
+msgstr "Đang suy nghĩ…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Ready"
+msgstr "Sẵn sàng"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Clear conversation"
+msgstr "Xóa cuộc trò chuyện"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Collapse companion"
+msgstr "Thu gọn trợ lý"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Quiet"
+msgstr "Im lặng"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Buddy"
+msgstr "Buddy"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Kids"
+msgstr "Kids"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Talk"
+msgstr "Trò chuyện"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Only when I ask"
+msgstr "Chỉ khi tôi hỏi"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Talk less"
+msgstr "Ít trò chuyện hơn"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Off — the companion is hidden and never reacts."
+msgstr "Tắt — trợ lý bị ẩn và không bao giờ phản ứng."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Quiet — answers when you talk; never reacts on its own. Talk is ignored."
+msgstr "Im lặng — trả lời khi bạn trò chuyện; không bao giờ tự phản ứng. Chế độ Trò chuyện bị bỏ qua."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Buddy — reacts to your drawing according to Talk. Only when I ask means chat only; Talk less means major moments; Talk means frequent reactions."
+msgstr "Buddy — phản ứng với bức vẽ của bạn theo chế độ Trò chuyện. Chỉ khi tôi hỏi nghĩa là chỉ trò chuyện; Ít trò chuyện hơn nghĩa là những khoảnh khắc quan trọng; Trò chuyện nghĩa là phản ứng thường xuyên."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Kids — gentle, child-safe. Network AI needs the parental switch in Settings → Companion."
+msgstr "Kids — nhẹ nhàng, an toàn cho trẻ em. AI qua mạng cần bật công tắc phụ huynh trong Cài đặt → Trợ lý."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hi — I can see your canvas."
+msgstr "Chào — tôi có thể thấy khung vẽ của bạn."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Ask about the picture, or tell me what to change: “make the glitter pinker”, “switch to the brush”, “undo”."
+msgstr "Hỏi về bức tranh, hoặc cho tôi biết cần thay đổi gì: “làm cho kim tuyến hồng hơn”, “chuyển sang cọ”, “hoàn tác”."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Thought process"
+msgstr "Quá trình suy nghĩ"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Ask about your drawing…"
+msgstr "Hỏi về bức vẽ của bạn…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Companion is off"
+msgstr "Trợ lý đang tắt"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Stop the answer"
+msgstr "Dừng câu trả lời"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Enter sends · Shift+Enter makes a new line"
+msgstr "Enter để gửi · Shift+Enter để xuống dòng"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "You"
+msgstr "Bạn"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Couldn't answer"
+msgstr "Không thể trả lời"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Click to try again"
+msgstr "Nhấp để thử lại"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Object Select is not available — check Settings → Diagnostics."
+msgstr "Chọn đối tượng không khả dụng — kiểm tra Cài đặt → Chẩn đoán."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Click the person or object you want to cut out."
+msgstr "Nhấp vào người hoặc vật bạn muốn cắt ra."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pick the Object Select tool (the scan icon), then click the person you want."
+msgstr "Chọn công cụ Chọn đối tượng (biểu tượng quét), rồi nhấp vào người bạn muốn."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Drop a sticker or image on the canvas first — Boost needs source art."
+msgstr "Thả nhãn dán hoặc hình ảnh lên khung vẽ trước — Tăng cường cần có hình nguồn."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Keep"
+msgstr "Giữ"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Keep this moment in your tray"
+msgstr "Giữ khoảnh khắc này trong khay của bạn"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Boosting…"
+msgstr "Đang tăng cường…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Boost"
+msgstr "Tăng cường"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Applying the art direction…"
+msgstr "Đang áp dụng hướng nghệ thuật…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Art-direct the composition: hierarchy, depth, motion. One undo."
+msgstr "Định hướng nghệ thuật cho bố cục: thứ bậc, chiều sâu, chuyển động. Một lần hoàn tác."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Drop a sticker or image onto the canvas first — Boost needs source art."
+msgstr "Thả nhãn dán hoặc hình ảnh lên khung vẽ trước — Tăng cường cần có hình nguồn."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Undo Boost"
+msgstr "Hoàn tác Tăng cường"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Selection"
+msgstr "Vùng chọn"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Object %1"
+msgstr "Đối tượng %1"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Cut out — remove the object and fill the hole"
+msgstr "Cắt ra — xóa đối tượng và lấp chỗ trống"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Add the object to the canvas as a layer"
+msgstr "Thêm đối tượng vào canvas dưới dạng lớp"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Ask about this…"
+msgstr "Hỏi về mục này…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Track the object through the video"
+msgstr "Theo dõi đối tượng trong toàn bộ video"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Make a sticker from the object"
+msgstr "Tạo nhãn dán từ đối tượng"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Remove the object (AI fill)"
+msgstr "Xóa đối tượng (AI lấp đầy)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export the object as a PNG"
+msgstr "Xuất đối tượng dưới dạng PNG"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Copy the selected pixels"
+msgstr "Sao chép các điểm ảnh đã chọn"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Cut the selected pixels"
+msgstr "Cắt các điểm ảnh đã chọn"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Clear the selection (not just this bar)"
+msgstr "Bỏ chọn (không chỉ thanh này)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hide this bar — the selection stays"
+msgstr "Ẩn thanh này — vùng chọn vẫn giữ nguyên"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export selected object"
+msgstr "Xuất đối tượng đã chọn"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "NAI Paintbrush"
+msgstr "NAI Paintbrush"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Draw it. Cut it out. Ask it. Remix it."
+msgstr "Vẽ nó. Cắt nó ra. Hỏi nó. Phối lại nó."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Start drawing"
+msgstr "Bắt đầu vẽ"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open a picture"
+msgstr "Mở ảnh"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Capture video frame"
+msgstr "Chụp khung hình video"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Play with a video…"
+msgstr "Chơi với video…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "A video is playing — capture the current frame."
+msgstr "Video đang phát — chụp khung hình hiện tại."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Play a video in VLC first to cut objects out of it."
+msgstr "Phát video trong VLC trước để cắt đối tượng ra khỏi video."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Recent projects"
+msgstr "Dự án gần đây"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "You can also drop an image or video onto the canvas."
+msgstr "Bạn cũng có thể thả ảnh hoặc video vào canvas."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "New here? Press F1 for a plain-language guide to every tool."
+msgstr "Mới đến? Nhấn F1 để xem hướng dẫn dễ hiểu cho mọi công cụ."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open an image"
+msgstr "Mở ảnh"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Tray"
+msgstr "Khay"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "1 moment"
+msgstr "1 khoảnh khắc"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "%1 moments"
+msgstr "%1 khoảnh khắc"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Drag onto the canvas · double-click to jump to this moment"
+msgstr "Kéo vào canvas · nhấp đúp để chuyển đến khoảnh khắc này"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Unmark favorite"
+msgstr "Bỏ đánh dấu yêu thích"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Mark favorite"
+msgstr "Đánh dấu yêu thích"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Jump to this moment"
+msgstr "Chuyển đến khoảnh khắc này"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Make it living (rig this pose)"
+msgstr "Làm cho sống động (rig tư thế này)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Remove from tray"
+msgstr "Xóa khỏi khay"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Start here"
+msgstr "Bắt đầu tại đây"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "NAI Paintbrush is a small studio: paint, cut things out with AI, pour glitter, and export a picture or a living poster."
+msgstr "NAI Paintbrush là một studio nhỏ: vẽ, cắt đối tượng bằng AI, rắc kim tuyến và xuất ảnh hoặc áp phích sống động."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Everything else in this guide is one page per tool, in the same order as the tool rail."
+msgstr "Mọi thứ còn lại trong hướng dẫn này là một trang cho mỗi công cụ, theo cùng thứ tự như thanh công cụ."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "The 30-second version"
+msgstr "Phiên bản 30 giây"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pick a tool in the rail on the left. The bottom bar shows that tool's settings."
+msgstr "Chọn một công cụ ở thanh bên trái. Thanh dưới cùng hiển thị cài đặt của công cụ đó."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Drag on the canvas to make something. Undo in the top bar always takes you back."
+msgstr "Kéo trên canvas để tạo nội dung. Hoàn tác ở thanh trên cùng luôn đưa bạn trở lại."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "The two colour squares at the bottom set your paint colour and background colour."
+msgstr "Hai ô màu ở phía dưới đặt màu vẽ và màu nền của bạn."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "When it looks right, Export in the top bar saves a PNG, JPG or WebP."
+msgstr "Khi đã ưng ý, Xuất trên thanh trên sẽ lưu thành PNG, JPG hoặc WebP."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Three ways to begin"
+msgstr "Ba cách để bắt đầu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Start drawing — open a blank canvas."
+msgstr "Bắt đầu vẽ — mở khung vẽ trống."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open a picture — paint over a photo."
+msgstr "Mở ảnh — vẽ đè lên ảnh chụp."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Play a video, then capture a frame — remix a moment."
+msgstr "Phát video, rồi chụp một khung hình — phối lại một khoảnh khắc."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Where things live"
+msgstr "Mọi thứ nằm ở đâu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Left rail — the tools."
+msgstr "Thanh bên trái — các công cụ."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Bottom bar — settings for the active tool, colours, palettes and moods."
+msgstr "Thanh dưới — cài đặt cho công cụ đang dùng, màu sắc, bảng màu và tâm trạng."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Right inspector — layers, plus the AI actions for a cut-out."
+msgstr "Bảng kiểm tra bên phải — các lớp, cùng các thao tác AI cho phần tách nền."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Top bar — open, save, export, undo/redo, settings and this guide."
+msgstr "Thanh trên — mở, lưu, xuất, hoàn tác/làm lại, cài đặt và hướng dẫn này."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "F1 opens this guide at any time; Esc closes it."
+msgstr "F1 mở hướng dẫn này bất cứ lúc nào; Esc đóng nó."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Nothing here is permanent: Undo is always one click away in the top bar."
+msgstr "Không có gì ở đây là vĩnh viễn: Hoàn tác luôn chỉ cách một cú nhấp trên thanh trên."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "On-canvas bars"
+msgstr "Các thanh trên khung vẽ"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "The strips that appear only when they are useful: selection actions, Ask, text editing, the inspector and the video drawer."
+msgstr "Những thanh chỉ xuất hiện khi hữu ích: thao tác vùng chọn, Hỏi, chỉnh sửa văn bản, bảng kiểm tra và ngăn video."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "If a bar is in your way, hide it — nothing is lost, and a new selection brings it back."
+msgstr "Nếu một thanh cản trở bạn, hãy ẩn nó — không mất gì cả, và vùng chọn mới sẽ đưa nó trở lại."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Selection bar (top of the canvas)"
+msgstr "Thanh vùng chọn (phía trên khung vẽ)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Appears when you select an area or an AI subject. The label says what it acts on."
+msgstr "Xuất hiện khi bạn chọn một vùng hoặc một chủ thể AI. Nhãn cho biết nó tác động lên gì."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Object group: Cut out (removes the object and fills the hole), Add to canvas (keeps it as a layer), Make sticker, Remove object (AI fill), Export object (PNG)."
+msgstr "Nhóm đối tượng: Cắt ra (xóa đối tượng và lấp chỗ trống), Thêm vào khung vẽ (giữ lại thành một lớp), Tạo nhãn dán, Xóa đối tượng (AI lấp đầy), Xuất đối tượng (PNG)."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Selection group: Copy, Cut, Clear selection."
+msgstr "Nhóm vùng chọn: Sao chép, Cắt, Bỏ chọn."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Ask about this — asks the AI about the selected thing. Track in video — follows it through the clip."
+msgstr "Hỏi về mục này — hỏi AI về thứ đang được chọn. Theo dõi trong video — bám theo nó xuyên suốt đoạn video."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "The chevron on the right HIDES the bar and keeps your selection. The X in the selection group clears the selection itself."
+msgstr "Mũi tên chevron bên phải ẨN thanh và giữ vùng chọn của bạn. Dấu X trong nhóm vùng chọn sẽ xóa chính vùng chọn."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hover any icon for its name."
+msgstr "Rê chuột lên biểu tượng bất kỳ để xem tên."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Ask bar"
+msgstr "Thanh Hỏi"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Appears under the selection bar after Ask about this. Type a question and press Enter."
+msgstr "Xuất hiện bên dưới thanh vùng chọn sau khi chọn Hỏi về mục này. Nhập câu hỏi và nhấn Enter."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Text bar"
+msgstr "Thanh văn bản"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Appears when you add or double-click a text layer: the word, style, size, letter spacing and colour. Every change is one undo step."
+msgstr "Xuất hiện khi bạn thêm hoặc nhấp đúp vào lớp văn bản: từ ngữ, kiểu, cỡ chữ, khoảng cách chữ và màu sắc. Mỗi thay đổi là một bước hoàn tác."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Inspector (right side)"
+msgstr "Bảng kiểm tra (bên phải)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Layers tab: the layer stack with its own scrollbar, visibility, drag reorder, opacity, transform and motion."
+msgstr "Tab Lớp: chồng lớp với thanh cuộn riêng, hiển thị, kéo để sắp xếp lại, độ mờ, biến đổi và chuyển động."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "AI tab: select a subject, then find by words, remove, extract, replace background, generative fill, find product, auto collage and the matte controls."
+msgstr "Tab AI: chọn một chủ thể, rồi tìm bằng từ ngữ, xóa, trích xuất, thay nền, lấp đầy bằng AI tạo sinh, tìm sản phẩm, tự động cắt dán và các điều khiển matte."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Sections collapse; the scrollbar on the right means nothing is lost off the bottom."
+msgstr "Các mục có thể thu gọn; thanh cuộn bên phải nghĩa là không có gì bị mất ở phía dưới."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Companion (chat)"
+msgstr "Trợ lý đồng hành (chat)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Opens from the companion button in the top bar. Type and press Enter to chat; it can look at your drawing and suggest ideas."
+msgstr "Mở từ nút trợ lý đồng hành trên thanh trên. Nhập và nhấn Enter để trò chuyện; nó có thể xem bản vẽ của bạn và gợi ý ý tưởng."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "If a mode is off or Kids mode has network AI disabled, it now tells you why instead of staying silent."
+msgstr "Nếu một chế độ đang tắt hoặc chế độ Kids đã tắt AI qua mạng, giờ nó sẽ cho bạn biết lý do thay vì im lặng."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Video drawer"
+msgstr "Ngăn video"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Appears when a video is open: transport, frame capture, trim, tracked objects and the timeline under the canvas."
+msgstr "Xuất hiện khi mở video: điều khiển phát, chụp khung hình, cắt, đối tượng được theo dõi và dòng thời gian bên dưới khung vẽ."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hover an icon for its tooltip; F1 opens this guide at any time."
+msgstr "Rê chuột lên biểu tượng để xem chú thích; F1 mở hướng dẫn này bất cứ lúc nào."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Rect Select"
+msgstr "Chọn hình chữ nhật"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Marks a rectangular area so your next action only touches that part of the picture."
+msgstr "Đánh dấu một vùng hình chữ nhật để thao tác tiếp theo chỉ tác động lên phần đó của ảnh."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Cropping, moving a block of the composition, or protecting everything around it."
+msgstr "Cắt ảnh, di chuyển một khối của bố cục hoặc bảo vệ mọi thứ xung quanh nó."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Drag the box first; the inspector then shows what you can do with the area."
+msgstr "Kéo hộp trước; sau đó bảng thuộc tính sẽ hiển thị những gì bạn có thể làm với vùng này."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Freeform Select"
+msgstr "Chọn tự do"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Draws a freehand outline around anything. Close the loop and that shape becomes your selection."
+msgstr "Vẽ đường viền bằng tay quanh bất kỳ thứ gì. Khép vòng lại và hình đó sẽ trở thành vùng chọn của bạn."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Odd shapes: a hand, a shoe, a torn edge, a strand of hair."
+msgstr "Hình dạng kỳ lạ: bàn tay, chiếc giày, mép rách, một sợi tóc."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "A smooth outline gives a cleaner edge than a rushed one."
+msgstr "Đường viền mượt cho mép sạch hơn so với đường vẽ vội."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Object Select (AI)"
+msgstr "Chọn đối tượng (AI)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Paint roughly over a person or object and NAI finds the real edges for you."
+msgstr "Tô thô lên người hoặc vật thể và NAI sẽ tìm ra đường viền thật cho bạn."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Photos and video frames with a clear subject you want to cut out."
+msgstr "Ảnh và khung hình video có chủ thể rõ ràng mà bạn muốn tách ra."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How wide the marking brush is. Use a big one to cover the subject, a small one to tidy the edges."
+msgstr "Độ rộng của cọ đánh dấu. Dùng cọ lớn để phủ chủ thể, cọ nhỏ để chỉnh mép."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Soft / hard edge"
+msgstr "Mép mềm / cứng"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Soft edge feathers the cut-out; hard edge keeps it crisp. Use soft for hair and fur, hard for products and graphics."
+msgstr "Mép mềm làm mờ dần phần tách; mép cứng giữ sắc nét. Dùng mềm cho tóc và lông, cứng cho sản phẩm và đồ họa."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Mark the middle first, tidy the edges after, then press Keep."
+msgstr "Đánh dấu phần giữa trước, chỉnh mép sau, rồi nhấn Giữ."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pencil"
+msgstr "Bút chì"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "A thin, crisp line that follows your hand exactly. No softness, no fuss."
+msgstr "Nét mảnh, sắc nét bám chính xác theo tay bạn. Không mềm, không rườm rà."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Sketches, outlines, fine detail and clean line art."
+msgstr "Phác thảo, đường viền, chi tiết nhỏ và nét vẽ sạch."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Line thickness. Down to 1 for a hairline, up to 64 for bold marks."
+msgstr "Độ dày nét. Giảm đến 1 để có nét mảnh như sợi tóc, tăng đến 64 cho nét đậm."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Zoom in when you need precision — the pencil follows the zoom."
+msgstr "Phóng to khi cần chính xác — bút chì sẽ theo mức phóng to."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Brush"
+msgstr "Cọ"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "A smooth, soft-edged stroke. The everyday painting tool."
+msgstr "Nét vẽ mượt, mép mềm. Công cụ vẽ hằng ngày."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Colour, shading, blocking in shapes and gentle blending."
+msgstr "Tô màu, đổ bóng, phủ khối hình và pha trộn nhẹ nhàng."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Brush thickness. Down to 1 for detail; larger for filling areas quickly."
+msgstr "Độ dày cọ. Giảm đến 1 để vẽ chi tiết; lớn hơn để tô vùng nhanh."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "With a pen tablet, pressure changes the stroke as you press harder."
+msgstr "Với bảng vẽ bút cảm ứng, lực nhấn thay đổi nét khi bạn ấn mạnh hơn."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Eraser"
+msgstr "Tẩy"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Removes paint from the part you are working on, back to see-through."
+msgstr "Xóa màu ở phần bạn đang làm, đưa về trong suốt."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Fixing edges, opening highlights and cleaning up mistakes."
+msgstr "Sửa mép, mở sáng điểm nhấn và xóa lỗi."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How much is erased in one pass."
+msgstr "Lượng bị xóa trong một lần quét."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "It only erases the part you are on; everything underneath stays untouched."
+msgstr "Chỉ xóa phần bạn đang ở; mọi thứ bên dưới vẫn nguyên vẹn."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Fill"
+msgstr "Tô kín"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Click inside a shape to flood it with your current colour."
+msgstr "Nhấp vào bên trong hình để tô kín bằng màu hiện tại."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Flat colour blocks, backgrounds and quick recolours."
+msgstr "Mảng màu phẳng, nền và đổi màu nhanh."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "If the colour leaks outside, close the gap in the outline first."
+msgstr "Nếu màu tràn ra ngoài, hãy khép kín khoảng hở trên đường viền trước."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Eyedropper"
+msgstr "Ống hút màu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Picks a colour already on the canvas and makes it your paint colour."
+msgstr "Lấy màu đã có trên canvas và đặt làm màu vẽ của bạn."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Matching an existing shade exactly."
+msgstr "Khớp chính xác một tông màu có sẵn."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Handy for keeping a palette consistent across a piece."
+msgstr "Tiện để giữ bảng màu đồng nhất trong cả tác phẩm."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Spray"
+msgstr "Xịt"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Soft bursts of colour, like an airbrush."
+msgstr "Những đợt màu mềm, như bút phun khí."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Glow, texture, soft shading, stars and atmosphere."
+msgstr "Ánh sáng, kết cấu, đổ bóng mềm, ngôi sao và không khí."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How wide the spray cloud is."
+msgstr "Độ rộng của đám màu phun."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Flow"
+msgstr "Lưu lượng"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How much colour each pass lays down. Low is a whisper, high is a blast."
+msgstr "Lượng màu mỗi lượt vẽ để lại. Thấp thì nhẹ như thì thầm, cao thì mạnh như bùng nổ."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Short taps build up slowly; hold longer for denser colour."
+msgstr "Chấm ngắn sẽ lên màu từ từ; giữ lâu hơn để màu đậm hơn."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Bristle Paint"
+msgstr "Cọ lông"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "A textured brush with visible bristle streaks and slightly shifting colour, like real paint."
+msgstr "Cọ có vân với các vệt lông rõ nét và màu hơi biến đổi, như sơn thật."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Expressive strokes, hair, grass and fabric."
+msgstr "Nét vẽ biểu cảm, tóc, cỏ và vải."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Brush width."
+msgstr "Độ rộng cọ."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How much paint each stroke carries. Low is dry-brush, high is wet and heavy."
+msgstr "Lượng sơn mỗi nét mang theo. Thấp là cọ khô, cao là ướt và nặng."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pigment"
+msgstr "Sắc tố"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How much the colour shifts between bristles. Low is even; high is streaky and hand-made."
+msgstr "Mức màu biến đổi giữa các sợi lông. Thấp thì đều; cao thì có vệt và thủ công."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Layer two colours to get a genuinely painted, imperfect feel."
+msgstr "Xếp lớp hai màu để có cảm giác vẽ thật, không hoàn hảo."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Glitter"
+msgstr "Kim tuyến"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Scatters tiny sparkling flakes that catch the light. Each flake behaves like a little mirror."
+msgstr "Rải những mảnh lấp lánh nhỏ bắt sáng. Mỗi mảnh hoạt động như một tấm gương nhỏ."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Sparkle on clothes, makeup, posters, lettering and magical accents."
+msgstr "Lấp lánh trên quần áo, trang điểm, áp phích, chữ và điểm nhấn huyền ảo."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How wide the glitter area is."
+msgstr "Độ rộng vùng kim tuyến."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Amount"
+msgstr "Số lượng"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How much glitter falls with each pass."
+msgstr "Lượng kim tuyến rơi mỗi lượt."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Flake"
+msgstr "Mảnh"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How big each flake is. Small reads as dust, large reads as craft glitter."
+msgstr "Kích thước mỗi mảnh. Nhỏ trông như bụi, lớn trông như kim tuyến thủ công."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Shimmer"
+msgstr "Ánh lung linh"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How much white twinkle and rainbow shift. 0 is quiet metal, 1 is full disco."
+msgstr "Mức lấp lánh trắng và chuyển sắc cầu vồng. 0 là kim loại nhẹ nhàng, 1 là disco hết cỡ."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Glue"
+msgstr "Keo"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How strongly flakes stick. Raise it so glitter stays exactly where you put it."
+msgstr "Độ bám của các mảnh. Tăng lên để kim tuyến nằm đúng chỗ bạn đặt."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pour glitter over Glue when you want a shape that does not drift."
+msgstr "Rắc kim tuyến lên Keo khi bạn muốn hình không bị xê dịch."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Glitter Powder"
+msgstr "Glitter Powder"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "A real craft bench: lay glue, pour glitter, push it around and blow the loose bits away."
+msgstr "Một bàn thủ công thực thụ: phết keo, rắc kim tuyến, đẩy qua lại và thổi bay các mảnh rời."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Raised, tactile glitter that looks like actual material on paper."
+msgstr "Kim tuyến nổi, có cảm giác chạm như chất liệu thật trên giấy."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Lay a sticky base. Glitter poured on top stays where you put it."
+msgstr "Phết một lớp nền dính. Kim tuyến rắc lên trên sẽ nằm đúng chỗ bạn đặt."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Width of the glue line."
+msgstr "Độ rộng đường keo."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Sprinkle flakes onto the canvas or over a glue shape."
+msgstr "Rắc các mảnh lên canvas hoặc lên hình keo."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How wide the sprinkle area is."
+msgstr "Độ rộng vùng rắc."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How much glitter falls."
+msgstr "Lượng kim tuyến rơi."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How much rainbow sparkle the flakes carry."
+msgstr "Mức lấp lánh cầu vồng trên các mảnh."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Push"
+msgstr "Đẩy"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Nudge and smear loose glitter with your finger."
+msgstr "Dùng ngón tay đẩy và miết kim tuyến rời."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How much glitter you move at once."
+msgstr "Lượng kim tuyến bạn di chuyển mỗi lần."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pour"
+msgstr "Đổ"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Tip a whole pile of glitter onto the canvas."
+msgstr "Đổ cả một đống kim tuyến lên canvas."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Blow"
+msgstr "Thổi"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "A puff of air that moves loose glitter but leaves glued glitter alone."
+msgstr "Một luồng gió đẩy kim tuyến rời đi nhưng để yên kim tuyến đã dính keo."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Lift glitter away."
+msgstr "Nhấc kim tuyến ra."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Width of the cleaned strip."
+msgstr "Chiều rộng của dải đã làm sạch."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Glue first, pour next, blow away the excess — the same order as real craft glitter."
+msgstr "Phết keo trước, rắc tiếp, thổi bay phần thừa — đúng thứ tự như làm kim tuyến thủ công thật."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Line"
+msgstr "Đường thẳng"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Draws a straight line from where you press to where you let go."
+msgstr "Vẽ một đường thẳng từ chỗ bạn nhấn đến chỗ bạn thả tay."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Rules, stems, underlines and dividers."
+msgstr "Đường kẻ, nét dọc, gạch chân và đường phân cách."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Line thickness."
+msgstr "Độ dày đường."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Start and finish outside the canvas if you need a perfectly clean edge."
+msgstr "Bắt đầu và kết thúc bên ngoài khung vẽ nếu bạn cần mép thật sạch."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Rectangle"
+msgstr "Hình chữ nhật"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Draws a rectangle. Drag to choose its size."
+msgstr "Vẽ hình chữ nhật. Kéo để chọn kích thước."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Frames, cards, panels and colour blocks."
+msgstr "Khung, thẻ, bảng và mảng màu."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Outline thickness."
+msgstr "Độ dày viền."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Rounded Rectangle"
+msgstr "Hình chữ nhật bo góc"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "A rectangle with soft corners."
+msgstr "Hình chữ nhật với các góc mềm mại."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Buttons, stickers, frames and friendly UI-style shapes."
+msgstr "Nút, nhãn dán, khung và các hình kiểu giao diện thân thiện."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Ellipse"
+msgstr "Hình elip"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Draws an oval or a circle."
+msgstr "Vẽ hình bầu dục hoặc hình tròn."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Faces, dots, bubbles, highlights and soft shapes."
+msgstr "Khuôn mặt, chấm, bong bóng, điểm sáng và các hình mềm mại."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Adds real, editable words to the canvas. Click, type in the bar that appears, then tune the look."
+msgstr "Thêm chữ thật, có thể chỉnh sửa vào khung vẽ. Nhấp, gõ vào thanh xuất hiện, rồi tinh chỉnh diện mạo."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Titles, captions, slogans and posters."
+msgstr "Tiêu đề, chú thích, khẩu hiệu và áp phích."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Word"
+msgstr "Chữ"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "The actual text."
+msgstr "Nội dung chữ thực tế."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Style"
+msgstr "Kiểu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "The font role used for the words."
+msgstr "Vai trò phông chữ được dùng cho chữ."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How big the letters are."
+msgstr "Độ lớn của chữ."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Space between letters. Tight for headlines, loose for airy captions."
+msgstr "Khoảng cách giữa các chữ cái. Sít cho tiêu đề, thoáng cho chú thích nhẹ nhàng."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Colour"
+msgstr "Màu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "The text colour."
+msgstr "Màu chữ."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Double-click a text layer later to edit the words again."
+msgstr "Nhấp đúp vào lớp chữ sau đó để chỉnh sửa lại nội dung."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Move"
+msgstr "Di chuyển"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Drag a layer to move it. Drag empty space to pan the whole view."
+msgstr "Kéo một lớp để di chuyển. Kéo vùng trống để dịch chuyển toàn bộ khung nhìn."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Rearranging the composition without changing the artwork."
+msgstr "Sắp xếp lại bố cục mà không thay đổi tác phẩm."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Panning changes what you see, not where things are."
+msgstr "Dịch chuyển khung nhìn chỉ thay đổi những gì bạn thấy, không thay đổi vị trí các đối tượng."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Opens the NAI companion so you can describe what you want in words."
+msgstr "Mở trợ lý NAI để bạn mô tả điều mình muốn bằng lời."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Finding things, replacing backgrounds, inventing ideas and quick edits."
+msgstr "Tìm đồ vật, thay nền, sáng tạo ý tưởng và chỉnh sửa nhanh."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Say it the way you would say it to a friend — there are no special commands."
+msgstr "Cứ nói như bạn nói với bạn bè — không có lệnh đặc biệt nào."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Bars & buttons"
+msgstr "Thanh & nút"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "The controls around the canvas: colour, palettes, looks, precision helpers and the actions that save or share your work."
+msgstr "Các điều khiển quanh khung vẽ: màu, bảng màu, diện mạo, công cụ hỗ trợ chính xác và các thao tác lưu hoặc chia sẻ tác phẩm."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Bottom bar"
+msgstr "Thanh dưới"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Colour chips — the two squares show your paint colour and background colour. Click either one to change it."
+msgstr "Ô màu — hai hình vuông hiển thị màu vẽ và màu nền của bạn. Nhấp vào ô nào để đổi màu ô đó."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Palettes — ready-made colour sets. Neon is the default; open the list to see all of them."
+msgstr "Bảng màu — bộ màu có sẵn. Neon là mặc định; mở danh sách để xem tất cả."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Moods — whole looks, not just colours. Press M to open them."
+msgstr "Moods — toàn bộ diện mạo, không chỉ màu sắc. Nhấn M để mở."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Keep — saves the cut-out you just made into your tray."
+msgstr "Giữ — lưu phần vừa cắt vào khay của bạn."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Boost — NAI's one-click polish for the whole composition."
+msgstr "Tăng cường — bước trau chuốt một chạm của NAI cho toàn bộ bố cục."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Grid, Rulers, Snap, Pen pressure — visual helpers. Snap lines things up for you; Pen pressure follows your stylus."
+msgstr "Lưới, Thước, Bắt dính, Lực nhấn bút — các trợ giúp trực quan. Bắt dính giúp căn thẳng mọi thứ; Lực nhấn bút theo bút cảm ứng của bạn."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Top bar"
+msgstr "Thanh trên cùng"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Undo / Redo — step backwards and forwards through your edits."
+msgstr "Hoàn tác / Làm lại — lùi và tiến qua các chỉnh sửa của bạn."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open image / Open video — bring in a picture or a video frame to work on."
+msgstr "Mở ảnh / Mở video — đưa ảnh hoặc khung hình video vào để chỉnh sửa."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Save project — keeps layers, text and settings so you can come back later."
+msgstr "Lưu dự án — giữ lại lớp, văn bản và cài đặt để bạn quay lại sau."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export — writes a PNG, JPG or WebP you can share."
+msgstr "Xuất — tạo tệp PNG, JPG hoặc WebP để bạn chia sẻ."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Settings — NAI options for this workspace."
+msgstr "Cài đặt — tùy chọn NAI cho không gian làm việc này."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Back to VLC — returns to the player without closing your project."
+msgstr "Quay lại VLC — trở về trình phát mà không đóng dự án của bạn."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "The + and − buttons at the bottom of the tool rail zoom in and out; the frame button fits the whole picture in view."
+msgstr "Các nút + và − ở cuối thanh công cụ để phóng to và thu nhỏ; nút khung giúp vừa toàn bộ ảnh trong khung nhìn."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pick it in the tool rail, then click or drag on the canvas."
+msgstr "Chọn nó trong thanh công cụ, rồi nhấp hoặc kéo trên khung vẽ."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "NAI Paintbrush guide"
+msgstr "Hướng dẫn NAI Paintbrush"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Guide"
+msgstr "Hướng dẫn"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Everything on this screen, in plain words. Press F1 anytime."
+msgstr "Mọi thứ trên màn hình này, bằng lời lẽ dễ hiểu. Nhấn F1 bất cứ lúc nào."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Close the guide (Esc)"
+msgstr "Đóng hướng dẫn (Esc)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "WHAT IT DOES"
+msgstr "CÔNG DỤNG"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "USE IT FOR"
+msgstr "DÙNG ĐỂ"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Explain my current tool — %1"
+msgstr "Giải thích công cụ hiện tại của tôi — %1"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "CONTROLS"
+msgstr "ĐIỀU KHIỂN"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "No sliders — just click or drag on the canvas."
+msgstr "Không có thanh trượt — chỉ cần nhấp hoặc kéo trên khung vẽ."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Good to know — "
+msgstr "Điều nên biết — "
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hover any tool for its name  ·  Scroll for more  ·  F1 opens this guide  ·  Esc closes it"
+msgstr "Rê chuột lên công cụ để xem tên  ·  Cuộn để xem thêm  ·  F1 mở hướng dẫn này  ·  Esc đóng hướng dẫn"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Inspector"
+msgstr "Bảng thuộc tính"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Inspector (selection)"
+msgstr "Bảng thuộc tính (vùng chọn)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "NAI Settings (diagnostics)"
+msgstr "Cài đặt NAI (chẩn đoán)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Close inspector"
+msgstr "Đóng bảng thuộc tính"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Dismiss inspector"
+msgstr "Ẩn bảng thuộc tính"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Layers"
+msgstr "Lớp"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "AI"
+msgstr "AI"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hide layer"
+msgstr "Ẩn lớp"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Show layer"
+msgstr "Hiện lớp"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "New layer"
+msgstr "Lớp mới"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Delete layer"
+msgstr "Xóa lớp"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Duplicate layer"
+msgstr "Nhân bản lớp"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Move layer up"
+msgstr "Di chuyển lớp lên"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Move layer down"
+msgstr "Di chuyển lớp xuống"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "X"
+msgstr "X"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Y"
+msgstr "Y"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Motion"
+msgstr "Chuyển động"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Subtle"
+msgstr "Nhẹ"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Strong"
+msgstr "Mạnh"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Compare"
+msgstr "So sánh"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Static poster"
+msgstr "Poster tĩnh"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Living loop"
+msgstr "Vòng lặp sống động"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Invert selection"
+msgstr "Đảo vùng chọn"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Grow selection"
+msgstr "Mở rộng vùng chọn"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Shrink selection"
+msgstr "Thu nhỏ vùng chọn"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Feather selection"
+msgstr "Làm mềm vùng chọn"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Fill holes"
+msgstr "Lấp lỗ hổng"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Smooth selection"
+msgstr "Làm mượt vùng chọn"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Clear selection"
+msgstr "Bỏ chọn"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Crop to selection"
+msgstr "Cắt theo vùng chọn"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Nothing selected"
+msgstr "Chưa chọn gì"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pick Object Select and paint over the subject you want to work with. NAI will find its edges."
+msgstr "Chọn công cụ Chọn đối tượng và tô lên chủ thể bạn muốn xử lý. NAI sẽ tìm viền của chủ thể."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Object Select"
+msgstr "Chọn đối tượng"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Subject library"
+msgstr "Thư viện chủ thể"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Place subject on canvas"
+msgstr "Đặt chủ thể lên canvas"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Style last subject — Ink"
+msgstr "Tạo kiểu chủ thể cuối — Ink"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Derive artwork — Ink"
+msgstr "Tạo tác phẩm phái sinh — Ink"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Add contour layer (vector)"
+msgstr "Thêm lớp đường viền (vector)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Derive contour — vector"
+msgstr "Tạo đường viền phái sinh — vector"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Find by words…"
+msgstr "Tìm bằng từ khóa…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Remove object"
+msgstr "Xóa đối tượng"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Extract object"
+msgstr "Tách đối tượng"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Replace background…"
+msgstr "Thay nền…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Generative fill…"
+msgstr "Tô sinh tạo…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Find product…"
+msgstr "Tìm sản phẩm…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Auto collage…"
+msgstr "Tự động ghép ảnh…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Object Select: drag on the mask to paint it in; Alt-drag or right-drag to erase."
+msgstr "Chọn đối tượng: kéo trên mặt nạ để tô vào; Alt + kéo hoặc kéo chuột phải để xóa."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Matte"
+msgstr "Mặt nạ"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Soft edge (feathered alpha)"
+msgstr "Viền mềm (alpha mờ)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Refining the matte…"
+msgstr "Đang tinh chỉnh mặt nạ…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Matte mode"
+msgstr "Chế độ mặt nạ"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Recompute the matte and load diagnostics"
+msgstr "Tính lại mặt nạ và tải chẩn đoán"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Raw"
+msgstr "Thô"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Refined"
+msgstr "Tinh chỉnh"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Neural"
+msgstr "Nơ-ron"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Quality"
+msgstr "Chất lượng"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Balanced"
+msgstr "Cân bằng"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hide boundary and artefact controls"
+msgstr "Ẩn các điều khiển ranh giới và lỗi hiển thị"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Fine-detail recovery"
+msgstr "Khôi phục chi tiết mịn"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Colour decontamination"
+msgstr "Khử nhiễm màu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Temporal stability"
+msgstr "Độ ổn định theo thời gian"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Diagnostic view"
+msgstr "Chế độ xem chẩn đoán"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Semantic"
+msgstr "Ngữ nghĩa"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Topology"
+msgstr "Cấu trúc liên kết"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Alpha"
+msgstr "Alpha"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Foreground"
+msgstr "Tiền cảnh"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Premultiplied"
+msgstr "Nhân trước"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export diagnostics…"
+msgstr "Xuất chẩn đoán…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Likely identification"
+msgstr "Nhận dạng khả thi"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Add as text"
+msgstr "Thêm dưới dạng văn bản"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "e.g. person wearing the blue jacket"
+msgstr "ví dụ: người mặc áo khoác xanh"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Replace background"
+msgstr "Thay nền"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Describe the new background (empty = gentle gradient)"
+msgstr "Mô tả nền mới (để trống = chuyển màu nhẹ nhàng)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "e.g. sunset beach"
+msgstr "ví dụ: bãi biển hoàng hôn"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Generative fill"
+msgstr "Tô sinh tạo"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "What should fill the selection?"
+msgstr "Nên tô gì cho vùng chọn?"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Arrange the content layers into a layout. Every piece stays an editable layer."
+msgstr "Sắp xếp các lớp nội dung thành một bố cục. Mỗi phần vẫn là một lớp có thể chỉnh sửa."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Free scatter"
+msgstr "Rải tự do"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Balanced grid"
+msgstr "Lưới cân bằng"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Editorial"
+msgstr "Biên tập"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Scrapbook"
+msgstr "Sổ lưu niệm"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Previous frame"
+msgstr "Khung hình trước"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Play / pause"
+msgstr "Phát / tạm dừng"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Decoding frame…"
+msgstr "Đang giải mã khung hình…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Add frame to canvas"
+msgstr "Thêm khung hình vào khung vẽ"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Close video"
+msgstr "Đóng video"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Media"
+msgstr "Phương tiện"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Tracked objects"
+msgstr "Đối tượng được theo dõi"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Resume tracking"
+msgstr "Tiếp tục theo dõi"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pause tracking"
+msgstr "Tạm dừng theo dõi"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Cancel tracking"
+msgstr "Hủy theo dõi"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "%1 kf · %2 corr"
+msgstr "%1 kf · %2 chỉnh"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Delete track"
+msgstr "Xóa dấu vết"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Make animated sticker from a track"
+msgstr "Tạo nhãn dán động từ dấu vết"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Timeline"
+msgstr "Dòng thời gian"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Generating thumbnails…"
+msgstr "Đang tạo ảnh thu nhỏ…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Generate thumbnails"
+msgstr "Tạo ảnh thu nhỏ"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Stop generating"
+msgstr "Dừng tạo"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Animated sticker"
+msgstr "Nhãn dán động"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "%1 / %2"
+msgstr "%1 / %2"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "No keyframes"
+msgstr "Không có keyframe"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Trim"
+msgstr "Cắt"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "–"
+msgstr "–"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "of %1"
+msgstr "trên %1"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "color"
+msgstr "màu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Dim"
+msgstr "Làm tối"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Spotlight"
+msgstr "Đèn rọi"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Attach to frame"
+msgstr "Gắn vào khung hình"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Place frame on canvas"
+msgstr "Đặt khung hình lên khung vẽ"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export sequence…"
+msgstr "Xuất chuỗi…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Choose a folder for the animated sticker sequence"
+msgstr "Chọn thư mục cho chuỗi nhãn dán động"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Mood"
+msgstr "Tâm trạng"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Paper"
+msgstr "Giấy"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Headline…"
+msgstr "Tiêu đề…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Badges"
+msgstr "Huy hiệu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Choose color"
+msgstr "Chọn màu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "NAI Settings"
+msgstr "Cài đặt NAI"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "AI models"
+msgstr "Mô hình AI"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Object Select (SAM3)"
+msgstr "Chọn đối tượng (SAM3)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Not configured"
+msgstr "Chưa cấu hình"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Path to the SAM model (.ggml)"
+msgstr "Đường dẫn tới mô hình SAM (.ggml)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "CUDA runtime (sam3_cuda.dll) is not available. GPU mode will fail with a specific error; choose CPU."
+msgstr "Không có CUDA runtime (sam3_cuda.dll). Chế độ GPU sẽ gặp lỗi cụ thể; hãy chọn CPU."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "CUDA runtime present, but no usable GPU: %1"
+msgstr "Có CUDA runtime nhưng không có GPU dùng được: %1"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Requested: %1 · CUDA runtime ready · detected: %2. The actual backend is verified when the model loads."
+msgstr "Yêu cầu: %1 · CUDA runtime sẵn sàng · phát hiện: %2. Backend thực tế sẽ được xác minh khi tải mô hình."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Ask — vision model"
+msgstr "Hỏi — mô hình thị giác"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Endpoint URL (OpenAI-compatible)"
+msgstr "URL endpoint (tương thích OpenAI)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Vision model name"
+msgstr "Tên mô hình thị giác"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "e.g. gpt-4o-mini"
+msgstr "ví dụ: gpt-4o-mini"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Vision API key"
+msgstr "Khóa API thị giác"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Environment override"
+msgstr "Ghi đè bằng biến môi trường"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Stored"
+msgstr "Đã lưu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Not set"
+msgstr "Chưa đặt"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Bearer token (optional for local endpoints)"
+msgstr "Bearer token (tùy chọn cho endpoint cục bộ)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "PAINTBRUSH_VLM_API_KEY is set in the environment and overrides the key stored here."
+msgstr "PAINTBRUSH_VLM_API_KEY đã được đặt trong môi trường và sẽ ghi đè khóa được lưu ở đây."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Neural matting"
+msgstr "Tách nền bằng mạng nơ-ron"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "ViTMatte model directory"
+msgstr "Thư mục mô hình ViTMatte"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Unavailable"
+msgstr "Không khả dụng"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Directory with vitmatte-s-*.onnx + manifest.json"
+msgstr "Thư mục chứa vitmatte-s-*.onnx + manifest.json"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "AI companion"
+msgstr "Trợ lý AI"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Endpoint URL"
+msgstr "URL endpoint"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Companion model"
+msgstr "Mô hình trợ lý"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Model name"
+msgstr "Tên mô hình"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Companion API key"
+msgstr "Khóa API trợ lý"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "PAINTBRUSH_ASSISTANT_API_KEY is set in the environment and overrides the key stored here."
+msgstr "PAINTBRUSH_ASSISTANT_API_KEY đã được đặt trong môi trường và sẽ ghi đè khóa được lưu ở đây."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Keys entered here are saved in the plain-text VLC configuration file and reused on the next start. Environment variables (PAINTBRUSH_VLM_API_KEY / PAINTBRUSH_ASSISTANT_API_KEY) take precedence when set. Keys are never written to logs."
+msgstr "Các khóa nhập ở đây được lưu trong tệp cấu hình VLC dạng văn bản thuần và dùng lại ở lần khởi động sau. Biến môi trường (PAINTBRUSH_VLM_API_KEY / PAINTBRUSH_ASSISTANT_API_KEY) sẽ được ưu tiên khi được đặt. Khóa không bao giờ được ghi vào nhật ký."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Allow network AI in Kids mode"
+msgstr "Cho phép AI qua mạng trong chế độ Kids"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Parental control. Off keeps Kids mode offline; on lets it use this AI provider. Only a parent or guardian should enable it."
+msgstr "Kiểm soát của phụ huynh. Tắt sẽ giữ chế độ Kids ngoại tuyến; bật sẽ cho phép dùng nhà cung cấp AI này. Chỉ phụ huynh hoặc người giám hộ mới nên bật."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Allow network AI in Kids mode (parental control)"
+msgstr "Cho phép AI qua mạng trong chế độ Kids (kiểm soát của phụ huynh)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Image generation"
+msgstr "Tạo hình ảnh"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Image endpoint"
+msgstr "Endpoint hình ảnh"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Image API base URL, e.g. https://…/v1"
+msgstr "URL gốc API hình ảnh, ví dụ: https://…/v1"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Image model"
+msgstr "Mô hình hình ảnh"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Image model name"
+msgstr "Tên mô hình hình ảnh"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Image API key"
+msgstr "Khóa API hình ảnh"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Used by Finish the painting, Remove object, Generative fill and Replace background. Without a real image model those actions fall back to local pixel operations; Finish the painting needs a provider."
+msgstr "Được dùng bởi Hoàn thiện bức tranh, Xóa đối tượng, Tô sinh tạo và Thay nền. Nếu không có mô hình hình ảnh thực, các thao tác đó sẽ chuyển sang xử lý điểm ảnh cục bộ; Hoàn thiện bức tranh cần có nhà cung cấp."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Capabilities"
+msgstr "Khả năng"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Local heal — pixel propagation, not generative"
+msgstr "Làm lành cục bộ — lan truyền điểm ảnh, không sinh tạo"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Object tracking"
+msgstr "Theo dõi đối tượng"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Idle"
+msgstr "Rảnh"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Product lookup"
+msgstr "Tra cứu sản phẩm"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Exact-frame tolerance"
+msgstr "Dung sai khung hình chính xác"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Used by AI crops and exports. Filmstrip thumbnails accept the nearest keyframe and are labelled with its real time."
+msgstr "Được AI dùng khi cắt và xuất. Ảnh thu nhỏ của dải phim lấy khung hình then chốt gần nhất và được ghi nhãn bằng thời gian thực của khung hình đó."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Diagnostics"
+msgstr "Chẩn đoán"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Run decoder + SAM self test"
+msgstr "Chạy tự kiểm tra bộ giải mã + SAM"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Changes apply immediately — no restart needed. The AI model reloads in the background when it changes."
+msgstr "Thay đổi được áp dụng ngay — không cần khởi động lại. Mô hình AI tải lại trong nền khi có thay đổi."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hide"
+msgstr "Ẩn"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Show"
+msgstr "Hiện"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hide API key"
+msgstr "Ẩn khóa API"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Show API key"
+msgstr "Hiện khóa API"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Foreground colour"
+msgstr "Màu tiền cảnh"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Background colour"
+msgstr "Màu nền"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Use colour %1"
+msgstr "Dùng màu %1"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "%1 palette colour %2"
+msgstr "Màu %2 trong bảng màu %1"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "%1 — click to paint"
+msgstr "%1 — nhấp để vẽ"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Palettes"
+msgstr "Bảng màu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open saved palettes"
+msgstr "Mở bảng màu đã lưu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Saved palettes — active: %1"
+msgstr "Bảng màu đã lưu — đang dùng: %1"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Saved palettes"
+msgstr "Bảng màu đã lưu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Art direction: mood, paper, type, badges"
+msgstr "Chỉ đạo nghệ thuật: cảm xúc, giấy, kiểu chữ, huy hiệu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Paper, light, palette, type and badges in one look"
+msgstr "Giấy, ánh sáng, bảng màu, kiểu chữ và huy hiệu trong một diện mạo"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Boost the composition"
+msgstr "Tăng cường bố cục"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Undo the last Boost"
+msgstr "Hoàn tác lần tăng cường gần nhất"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Cancel Boost"
+msgstr "Hủy tăng cường"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Keep this cut-out"
+msgstr "Giữ hình cắt này"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Object Select is unavailable — configure the SAM model in NAI Settings."
+msgstr "Chọn đối tượng không khả dụng — hãy cấu hình mô hình SAM trong Cài đặt NAI."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Keep this cut-out in your tray"
+msgstr "Giữ hình cắt này trong khay của bạn"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Use palette %1"
+msgstr "Dùng bảng màu %1"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Word…"
+msgstr "Chữ…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Close editor"
+msgstr "Đóng trình chỉnh sửa"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Grid"
+msgstr "Lưới"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Rulers"
+msgstr "Thước"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Snap to grid"
+msgstr "Bám vào lưới"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pen pressure"
+msgstr "Áp lực bút"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Soft edge — click for a crisp boundary"
+msgstr "Cạnh mềm — nhấp để có ranh giới sắc nét"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hard edge — click for a feathered boundary"
+msgstr "Cạnh cứng — nhấp để có ranh giới mờ dần"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Move layer (drag object) / pan (drag empty)"
+msgstr "Di chuyển lớp (kéo đối tượng) / di chuyển khung nhìn (kéo vùng trống)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Zoom in"
+msgstr "Phóng to"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Zoom out"
+msgstr "Thu nhỏ"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Fit to view"
+msgstr "Vừa khung nhìn"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open a video"
+msgstr "Mở video"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Save Paintbrush project"
+msgstr "Lưu dự án Paintbrush"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export image"
+msgstr "Xuất ảnh"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export Living Poster frames (3 s, 24 fps)"
+msgstr "Xuất các khung Living Poster (3 s, 24 fps)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export Living Poster video (MP4/H.264)"
+msgstr "Xuất video Living Poster (MP4/H.264)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export Living Poster video (WebM/VP9, transparent)"
+msgstr "Xuất video Living Poster (WebM/VP9, trong suốt)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Project info"
+msgstr "Thông tin dự án"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Relink missing media…"
+msgstr "Liên kết lại media bị thiếu…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Relink source media"
+msgstr "Liên kết lại media nguồn"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open the guide (F1)"
+msgstr "Mở hướng dẫn (F1)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Plain-language guide to every tool (F1)"
+msgstr "Hướng dẫn dễ hiểu cho mọi công cụ (F1)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hide companion"
+msgstr "Ẩn trợ lý"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Show companion"
+msgstr "Hiện trợ lý"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hide inspector"
+msgstr "Ẩn bảng kiểm tra"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Show inspector"
+msgstr "Hiện bảng kiểm tra"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Undo"
+msgstr "Hoàn tác"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Redo"
+msgstr "Làm lại"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "New blank canvas"
+msgstr "Khung vẽ trống mới"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open image…"
+msgstr "Mở ảnh…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open video…"
+msgstr "Mở video…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Save project"
+msgstr "Lưu dự án"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export image…"
+msgstr "Xuất ảnh…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export Living Poster video (MP4)"
+msgstr "Xuất video Living Poster (MP4)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Living Poster export options…"
+msgstr "Tùy chọn xuất Living Poster…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Living Poster video (WebM, transparent)"
+msgstr "Video Living Poster (WebM, trong suốt)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Living Poster frames (PNG sequence, 3 s)"
+msgstr "Các khung Living Poster (chuỗi PNG, 3 s)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Back to VLC"
+msgstr "Quay lại VLC"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "SOURCE"
+msgstr "NGUỒN"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Restore monitor"
+msgstr "Khôi phục màn hình"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Theater monitor"
+msgstr "Màn hình rạp"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Stop video and release the monitor"
+msgstr "Dừng video và giải phóng màn hình"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "PTS"
+msgstr "PTS"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "FRAME "
+msgstr "KHUNG "
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "REMAIN "
+msgstr "CÒN LẠI "
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Go to start"
+msgstr "Về đầu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Go to end"
+msgstr "Về cuối"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Show monitor"
+msgstr "Hiện màn hình"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Collapse monitor"
+msgstr "Thu gọn màn hình"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Restore"
+msgstr "Khôi phục"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open copy…"
+msgstr "Mở bản sao…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "NAI PaintBrush"
+msgstr "NAI PaintBrush"
+
+
+#: modules/gui/qt/paintbrush (activated legacy translation)
+msgid "Send"
+msgstr "Gửi"
+
+#: modules/gui/qt/paintbrush (activated legacy translation)
+msgid "Blur"
+msgstr "Làm mờ"
+
+#: modules/gui/qt/paintbrush (activated legacy translation)
+msgid "Effect"
+msgstr "Hiệu ứng"
+
+#: modules/gui/qt/paintbrush (activated legacy translation)
+msgid "Speed"
+msgstr "Speex"
+
+#: modules/gui/qt/paintbrush (activated legacy translation)
+msgid "Layer %1"
+msgstr "Lớp %1"
+

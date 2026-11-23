@@ -321,7 +321,7 @@ Item {
             controls: [
                 { name: qsTr("Size"), what: qsTr("Outline thickness.") }
             ],
-            tip: qsTr("")
+            tip: ""
         },
         {
             toolId: 12,
@@ -331,7 +331,7 @@ Item {
             controls: [
                 { name: qsTr("Size"), what: qsTr("Outline thickness.") }
             ],
-            tip: qsTr("")
+            tip: ""
         },
         {
             toolId: 13,
@@ -341,7 +341,7 @@ Item {
             controls: [
                 { name: qsTr("Size"), what: qsTr("Outline thickness.") }
             ],
-            tip: qsTr("")
+            tip: ""
         },
         {
             toolId: 14,

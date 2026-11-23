@@ -87,6 +87,13 @@ QString GenerationService::defaultPrompt(Action action, const QString &userPromp
     case ACTION_MAKE_STICKER:
         return QStringLiteral("Simplify the subject into a clean cartoon sticker style. "
                               "Keep the subject recognizable, remove background noise.");
+    case ACTION_FINISH_PAINTING:
+        return userPrompt.isEmpty()
+                   ? QStringLiteral("Finish and complete this painting. Preserve the "
+                                    "existing subject, composition, palette and brushwork; "
+                                    "continue the artwork naturally. Do not add text, "
+                                    "borders or frames.")
+                   : userPrompt;
     }
     return userPrompt;
 }
@@ -109,6 +116,17 @@ CapabilityReport GenerationService::capability(Action action) const
      * "generative fill" (A4). */
     if (!m_baseUrl.isEmpty())
         return remoteGenerationReport(m_baseUrl, m_model);
+
+    if (action == ACTION_FINISH_PAINTING)
+    {
+        CapabilityReport report;
+        report.mode = CapabilityReport::Unavailable;
+        report.reason =
+            QStringLiteral("Finishing a painting needs a real image provider. "
+                           "The local heal fallback cannot invent the rest of an "
+                           "artwork.");
+        return report;
+    }
 
     if (action == ACTION_REPLACE_BACKGROUND)
     {
@@ -307,6 +325,15 @@ void GenerationService::generate(Action action, const QImage &image,
     {
         emit errorOccurred(requestId,
                            QStringLiteral("Image generation needs an image."));
+        return;
+    }
+
+    if (action == ACTION_FINISH_PAINTING && m_baseUrl.isEmpty())
+    {
+        emit errorOccurred(requestId,
+                           QStringLiteral("Finishing a painting needs an image "
+                                          "provider. Open Settings → AI and add "
+                                          "the image endpoint, model and key."));
         return;
     }
 

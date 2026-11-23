@@ -29003,9 +29003,6 @@ msgstr "Seznam správců médií"
 #~ msgid "Hide Details"
 #~ msgstr "Skrýt podrobnosti"
 
-#~ msgid "Send"
-#~ msgstr "Odeslat"
-
 #~ msgid "Click to enable fullscreen video playback."
 #~ msgstr "Kliknutím zapnete přehrávání v režimu celé obrazovky."
 
@@ -29535,3 +29532,1958 @@ msgstr "Seznam správců médií"
 #, fuzzy
 #~ msgid "Configure Media Library"
 #~ msgstr "Knihovna médií"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Creative companion — ask about your drawing"
+msgstr "Kreativní společník — zeptejte se na svou kresbu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Companion"
+msgstr "Společník"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Thinking…"
+msgstr "Přemýšlím…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Ready"
+msgstr "Připraveno"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Clear conversation"
+msgstr "Vymazat konverzaci"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Collapse companion"
+msgstr "Sbalit společníka"
+
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Quiet"
+msgstr "Ticho"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Kids"
+msgstr "Kids"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Off — the companion is hidden and never reacts."
+msgstr "Vypnuto — společník je skrytý a nikdy nereaguje."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Quiet — answers when you talk; never reacts on its own. Talk is ignored."
+msgstr "Tichý — odpovídá, když mluvíš; nikdy nereaguje sám. Mluvení je ignorováno."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Buddy — reacts to your drawing according to Talk. Only when I ask means chat only; Talk less means major moments; Talk means frequent reactions."
+msgstr "Buddy — reaguje na tvou kresbu podle nastavení Mluvit. „Jen když se zeptám“ znamená pouze chat; „Méně mluvit“ znamená důležité okamžiky; „Mluvit“ znamená časté reakce."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hi — I can see your canvas."
+msgstr "Ahoj — vidím tvoje plátno."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Ask about the picture, or tell me what to change: “make the glitter pinker”, “switch to the brush”, “undo”."
+msgstr "Zeptejte se na obrázek, nebo mi řekněte, co změnit: „udělej třpytky růžovější“, „přepni na štětec“, „zpět“."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Thought process"
+msgstr "Průběh myšlení"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Ask about your drawing…"
+msgstr "Zeptejte se na svou kresbu…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Stop the answer"
+msgstr "Zastavit odpověď"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Enter sends · Shift+Enter makes a new line"
+msgstr "Enter odešle · Shift+Enter vytvoří nový řádek"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "You"
+msgstr "Vy"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Couldn't answer"
+msgstr "Nepodařilo se odpovědět"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Click to try again"
+msgstr "Kliknutím to zkuste znovu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Object Select is not available — check Settings → Diagnostics."
+msgstr "Výběr objektu není k dispozici — zkontrolujte Nastavení → Diagnostika."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Click the person or object you want to cut out."
+msgstr "Klikněte na osobu nebo objekt, který chcete vyříznout."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pick the Object Select tool (the scan icon), then click the person you want."
+msgstr "Vyberte nástroj Výběr objektu (ikona skenování) a poté klikněte na osobu, kterou chcete."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Keep"
+msgstr "Ponechat"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Keep this moment in your tray"
+msgstr "Uchovejte si tento okamžik v zásobníku"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Boosting…"
+msgstr "Zrychlování…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Boost"
+msgstr "Vylepšit"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Art-direct the composition: hierarchy, depth, motion. One undo."
+msgstr "Umělecky veďte kompozici: hierarchie, hloubka, pohyb. Jedno vrácení zpět."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Drop a sticker or image onto the canvas first — Boost needs source art."
+msgstr "Nejprve přetáhněte na plátno samolepku nebo obrázek — Boost potřebuje zdrojovou grafiku."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Undo Boost"
+msgstr "Posílení funkce Zpět"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Selection"
+msgstr "Výběr"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Object %1"
+msgstr "Objekt %1"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Cut out — remove the object and fill the hole"
+msgstr "Vystřihnout — odstraní objekt a vyplní díru"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Add the object to the canvas as a layer"
+msgstr "Přidejte objekt na plátno jako vrstvu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Ask about this…"
+msgstr "Zeptejte se na to…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Track the object through the video"
+msgstr "Sledovat objekt ve videu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Make a sticker from the object"
+msgstr "Vytvořit samolepku z objektu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Remove the object (AI fill)"
+msgstr "Odstranit objekt (AI výplň)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export the object as a PNG"
+msgstr "Exportovat objekt jako PNG"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Copy the selected pixels"
+msgstr "Kopírovat vybrané pixely"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Cut the selected pixels"
+msgstr "Vyjmout vybrané pixely"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Clear the selection (not just this bar)"
+msgstr "Zrušit výběr (ne jen tuto lištu)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hide this bar — the selection stays"
+msgstr "Skrýt tuto lištu — výběr zůstane"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export selected object"
+msgstr "Exportovat vybraný objekt"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "NAI Paintbrush"
+msgstr "NAI Paintbrush"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Draw it. Cut it out. Ask it. Remix it."
+msgstr "Nakresli to. Vystřihni to. Zeptej se. Remixuj."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Start drawing"
+msgstr "Začít kreslit"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open a picture"
+msgstr "Otevřít obrázek"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Capture video frame"
+msgstr "Zachytit snímek videa"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Play with a video…"
+msgstr "Pohraj si s videem…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "A video is playing — capture the current frame."
+msgstr "Přehrává se video — zachyť aktuální snímek."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Play a video in VLC first to cut objects out of it."
+msgstr "Nejdřív si přehraj video ve VLC, ať z něj můžeš vystřihnout objekty."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Recent projects"
+msgstr "Nedávné projekty"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "You can also drop an image or video onto the canvas."
+msgstr "Na plátno můžeš také přetáhnout obrázek nebo video."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "New here? Press F1 for a plain-language guide to every tool."
+msgstr "Jsi tu poprvé? Stiskni F1 a otevře se srozumitelný průvodce všemi nástroji."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open an image"
+msgstr "Otevřít obrázek"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Tray"
+msgstr "Přihrádka"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "1 moment"
+msgstr "1 okamžik"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "%1 moments"
+msgstr "%1 okamžiků"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Drag onto the canvas · double-click to jump to this moment"
+msgstr "Přetáhni na plátno · dvojklikem přejdeš na tento okamžik"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Unmark favorite"
+msgstr "Odebrat z oblíbených"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Mark favorite"
+msgstr "Přidat k oblíbeným"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Jump to this moment"
+msgstr "Přejít na tento okamžik"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Make it living (rig this pose)"
+msgstr "Oživit (připravit pózu k animaci)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Remove from tray"
+msgstr "Odebrat z přihrádky"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Start here"
+msgstr "Začni zde"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "NAI Paintbrush is a small studio: paint, cut things out with AI, pour glitter, and export a picture or a living poster."
+msgstr "NAI Paintbrush je malé studio: maluj, vystřihuj věci pomocí AI, syp třpytky a exportuj obrázek nebo živý plakát."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Everything else in this guide is one page per tool, in the same order as the tool rail."
+msgstr "Zbytek tohoto průvodce má jednu stránku na nástroj, ve stejném pořadí jako lišta nástrojů."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "The 30-second version"
+msgstr "Verze na 30 sekund"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pick a tool in the rail on the left. The bottom bar shows that tool's settings."
+msgstr "Vyber nástroj v liště vlevo. Spodní lišta ukazuje nastavení daného nástroje."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Drag on the canvas to make something. Undo in the top bar always takes you back."
+msgstr "Tažením po plátně něco vytvoř. Tlačítko Zpět v horní liště tě vždy vrátí."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "The two colour squares at the bottom set your paint colour and background colour."
+msgstr "Dva barevné čtverce dole nastavují barvu malby a barvu pozadí."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "When it looks right, Export in the top bar saves a PNG, JPG or WebP."
+msgstr "Když to vypadá dobře, Export v horní liště uloží PNG, JPG nebo WebP."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Three ways to begin"
+msgstr "Tři způsoby, jak začít"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Start drawing — open a blank canvas."
+msgstr "Začni kreslit — otevři prázdné plátno."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open a picture — paint over a photo."
+msgstr "Otevři obrázek — maluj přes fotografii."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Play a video, then capture a frame — remix a moment."
+msgstr "Přehraj video, pak zachyť snímek — remixuj okamžik."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Left rail — the tools."
+msgstr "Levý panel — nástroje."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Bottom bar — settings for the active tool, colours, palettes and moods."
+msgstr "Spodní lišta — nastavení aktivního nástroje, barev, palet a nálad."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Right inspector — layers, plus the AI actions for a cut-out."
+msgstr "Pravý inspektor — vrstvy a akce AI pro výřez."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Nothing here is permanent: Undo is always one click away in the top bar."
+msgstr "Tady nic není trvalé: Zpět je vždy jen jedno kliknutí daleko v horní liště."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "On-canvas bars"
+msgstr "Pruhy na plátně"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "The strips that appear only when they are useful: selection actions, Ask, text editing, the inspector and the video drawer."
+msgstr "Lišty, které se objeví jen tehdy, když jsou užitečné: akce výběru, Ask, úpravy textu, inspektor a zásuvka videa."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "If a bar is in your way, hide it — nothing is lost, and a new selection brings it back."
+msgstr "Pokud vám lišta překáží, skryjte ji — nic se neztratí a nový výběr ji vrátí zpět."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Selection bar (top of the canvas)"
+msgstr "Lišta výběru (horní část plátna)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Appears when you select an area or an AI subject. The label says what it acts on."
+msgstr "Zobrazí se, když vyberete oblast nebo objekt AI. Popisek říká, na co působí."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Object group: Cut out (removes the object and fills the hole), Add to canvas (keeps it as a layer), Make sticker, Remove object (AI fill), Export object (PNG)."
+msgstr "Skupina objektů: Vystřihnout (odstraní objekt a vyplní díru), Přidat na plátno (zachová jako vrstvu), Vytvořit samolepku, Odstranit objekt (AI výplň), Exportovat objekt (PNG)."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Selection group: Copy, Cut, Clear selection."
+msgstr "Skupina výběru: Kopírovat, Vyjmout, Vymazat výběr."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Ask about this — asks the AI about the selected thing. Track in video — follows it through the clip."
+msgstr "Zeptat se na to — zeptá se AI na vybranou věc. Sledovat ve videu — sleduje ji v celém klipu."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "The chevron on the right HIDES the bar and keeps your selection. The X in the selection group clears the selection itself."
+msgstr "Šipka vpravo SKRYJE lištu a zachová váš výběr. X ve skupině výběru zruší samotný výběr."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hover any icon for its name."
+msgstr "Najetím myší na libovolnou ikonu zobrazíte její název."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Ask bar"
+msgstr "Panel dotazů"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Appears under the selection bar after Ask about this. Type a question and press Enter."
+msgstr "Zobrazí se pod lištou výběru po položce Zeptat se na to. Napište otázku a stiskněte Enter."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Text bar"
+msgstr "Textový panel"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Appears when you add or double-click a text layer: the word, style, size, letter spacing and colour. Every change is one undo step."
+msgstr "Zobrazí se, když přidáte textovou vrstvu nebo na ni dvakrát kliknete: slovo, styl, velikost, prostrkání a barva. Každá změna je jeden krok zpět."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Inspector (right side)"
+msgstr "Inspektor (pravá strana)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Layers tab: the layer stack with its own scrollbar, visibility, drag reorder, opacity, transform and motion."
+msgstr "Karta Vrstvy: zásobník vrstev s vlastním posuvníkem, viditelností, přetažením pro změnu pořadí, neprůhledností, transformací a pohybem."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Sections collapse; the scrollbar on the right means nothing is lost off the bottom."
+msgstr "Sekce se sbalí; posuvník vpravo znamená, že se nic neztratí za spodním okrajem."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Companion (chat)"
+msgstr "Společník (chat)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "If a mode is off or Kids mode has network AI disabled, it now tells you why instead of staying silent."
+msgstr "Pokud je některý režim vypnutý nebo má režim Kids zakázanou síťovou AI, nyní vám sdělí důvod, místo aby zůstal potichu."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Video drawer"
+msgstr "Přihrádka videa"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Appears when a video is open: transport, frame capture, trim, tracked objects and the timeline under the canvas."
+msgstr "Zobrazí se, když je otevřeno video: přehrávání, zachycení snímku, ořez, sledované objekty a časová osa pod plátnem."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hover an icon for its tooltip; F1 opens this guide at any time."
+msgstr "Najetím na ikonu zobrazíte popisek; F1 kdykoli otevře tuto příručku."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Rect Select"
+msgstr "Obdélníkový výběr"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Cropping, moving a block of the composition, or protecting everything around it."
+msgstr "Ořezávání, přesouvání bloku kompozice nebo ochrana všeho kolem něj."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Drag the box first; the inspector then shows what you can do with the area."
+msgstr "Nejprve přetáhněte rámeček; inspektor vám pak ukáže, co můžete s danou oblastí dělat."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Freeform Select"
+msgstr "Volný výběr"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Odd shapes: a hand, a shoe, a torn edge, a strand of hair."
+msgstr "Neobvyklé tvary: ruka, bota, utržený okraj, pramen vlasů."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "A smooth outline gives a cleaner edge than a rushed one."
+msgstr "Hladký obrys vytvoří čistší okraj než uspěchaný."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Object Select (AI)"
+msgstr "Výběr objektu (AI)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Paint roughly over a person or object and NAI finds the real edges for you."
+msgstr "Přetřete zhruba osobu nebo objekt a NAI za vás najde skutečné hrany."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Photos and video frames with a clear subject you want to cut out."
+msgstr "Fotografie a snímky videa s jasným objektem, který chcete vyříznout."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How wide the marking brush is. Use a big one to cover the subject, a small one to tidy the edges."
+msgstr "Jak široký je označovací štětec. Velkým pokryjte objekt, malým dolaďte hrany."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Soft / hard edge"
+msgstr "Měkká / tvrdá hrana"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Soft edge feathers the cut-out; hard edge keeps it crisp. Use soft for hair and fur, hard for products and graphics."
+msgstr "Měkká hrana zjemní okraje výřezu; tvrdá ho udrží ostrý. Měkkou použijte na vlasy a srst, tvrdou na produkty a grafiku."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Mark the middle first, tidy the edges after, then press Keep."
+msgstr "Nejprve označte střed, poté dolaďte hrany a stiskněte Ponechat."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pencil"
+msgstr "Tužka"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "A thin, crisp line that follows your hand exactly. No softness, no fuss."
+msgstr "Tenká, ostrá čára, která přesně sleduje vaši ruku. Žádná měkkost, žádné zbytečnosti."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Sketches, outlines, fine detail and clean line art."
+msgstr "Skici, obrysy, jemné detaily a čistá linka."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Line thickness. Down to 1 for a hairline, up to 64 for bold marks."
+msgstr "Tloušťka čáry. Od 1 pro vlásečnici až po 64 pro výrazné tahy."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Zoom in when you need precision — the pencil follows the zoom."
+msgstr "Přibližte, když potřebujete přesnost — tužka sleduje přiblížení."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Brush"
+msgstr "Štětec"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "A smooth, soft-edged stroke. The everyday painting tool."
+msgstr "Hladký tah s měkkými okraji. Každodenní malířský nástroj."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Colour, shading, blocking in shapes and gentle blending."
+msgstr "Barva, stínování, vyplňování tvarů a jemné prolínání."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Brush thickness. Down to 1 for detail; larger for filling areas quickly."
+msgstr "Tloušťka štětce. Od 1 pro detaily; větší pro rychlé vyplnění ploch."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "With a pen tablet, pressure changes the stroke as you press harder."
+msgstr "S grafickým tabletem se tah mění podle síly přítlaku."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Eraser"
+msgstr "Guma"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Removes paint from the part you are working on, back to see-through."
+msgstr "Odstraňuje barvu z části, na které pracujete, zpět do průhledna."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Fixing edges, opening highlights and cleaning up mistakes."
+msgstr "Opravy hran, zvýraznění světel a čištění chyb."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How much is erased in one pass."
+msgstr "Kolik se smaže jedním tahem."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "It only erases the part you are on; everything underneath stays untouched."
+msgstr "Maže jen část, na které jste; vše pod ní zůstává nedotčené."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Fill"
+msgstr "Vyplnit"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Click inside a shape to flood it with your current colour."
+msgstr "Kliknutím dovnitř tvaru ho vyplníte aktuální barvou."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Flat colour blocks, backgrounds and quick recolours."
+msgstr "Ploché barevné bloky, pozadí a rychlé přebarvení."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "If the colour leaks outside, close the gap in the outline first."
+msgstr "Pokud barva vytéká ven, nejprve uzavřete mezeru v obrysu."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Eyedropper"
+msgstr "Kapátko"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Picks a colour already on the canvas and makes it your paint colour."
+msgstr "Vezme barvu už na plátně a nastaví ji jako vaši barvu."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Matching an existing shade exactly."
+msgstr "Přesné sladění s existujícím odstínem."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Handy for keeping a palette consistent across a piece."
+msgstr "Šikovné pro udržení jednotné palety v celém díle."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Spray"
+msgstr "Sprej"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Soft bursts of colour, like an airbrush."
+msgstr "Jemné dávky barvy jako u airbrush."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Glow, texture, soft shading, stars and atmosphere."
+msgstr "Záře, textura, jemné stínování, hvězdy a atmosféra."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How wide the spray cloud is."
+msgstr "Jak široký je oblak spreje."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Flow"
+msgstr "Tok"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How much colour each pass lays down. Low is a whisper, high is a blast."
+msgstr "Kolik barvy každý tah nanese. Nízký je šepot, vysoký je výbuch."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Short taps build up slowly; hold longer for denser colour."
+msgstr "Krátká klepnutí sytí pomalu; podržte déle pro hustší barvu."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Bristle Paint"
+msgstr "Štětinová barva"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "A textured brush with visible bristle streaks and slightly shifting colour, like real paint."
+msgstr "Texturovaný štětec s viditelnými stopami štětin a mírně se měnící barvou, jako skutečná barva."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Expressive strokes, hair, grass and fabric."
+msgstr "Expresivní tahy, vlasy, tráva a látka."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Brush width."
+msgstr "Šířka štětce."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How much paint each stroke carries. Low is dry-brush, high is wet and heavy."
+msgstr "Kolik barvy každý tah přenese. Nízká hodnota je suchý štětec, vysoká je mokrá a těžká."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pigment"
+msgstr "Pigment"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How much the colour shifts between bristles. Low is even; high is streaky and hand-made."
+msgstr "Jak moc se barva mezi štětinami mění. Nízká je rovnoměrná; vysoká je pruhovaná a ručně dělaná."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Layer two colours to get a genuinely painted, imperfect feel."
+msgstr "Vrstvení dvou barev dodá skutečně malovaný, nedokonalý vzhled."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Glitter"
+msgstr "Třpytky"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Scatters tiny sparkling flakes that catch the light. Each flake behaves like a little mirror."
+msgstr "Rozsypává drobné jiskřivé vločky, které chytají světlo. Každá vločka se chová jako malé zrcátko."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Sparkle on clothes, makeup, posters, lettering and magical accents."
+msgstr "Jiskření na oblečení, make-upu, plakátech, písmu a kouzelných akcentech."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How wide the glitter area is."
+msgstr "Jak široká je oblast třpytek."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Amount"
+msgstr "Množství"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How much glitter falls with each pass."
+msgstr "Kolik třpytek spadne při každém tahu."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Flake"
+msgstr "Vločka"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How big each flake is. Small reads as dust, large reads as craft glitter."
+msgstr "Jak velká je každá vločka. Malé působí jako prach, velké jako řemeslné třpytky."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Shimmer"
+msgstr "Třpyt"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How much white twinkle and rainbow shift. 0 is quiet metal, 1 is full disco."
+msgstr "Kolik bílého jiskření a duhového posunu. 0 je tichý kov, 1 je plná diskotéka."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Glue"
+msgstr "Lepidlo"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How strongly flakes stick. Raise it so glitter stays exactly where you put it."
+msgstr "Jak silně vločky drží. Zvyšte ji, aby třpytky zůstaly přesně tam, kam je dáte."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pour glitter over Glue when you want a shape that does not drift."
+msgstr "Třpytky nasypte na Lepidlo, když chcete tvar, který se neposouvá."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Glitter Powder"
+msgstr "Glitter Powder"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "A real craft bench: lay glue, pour glitter, push it around and blow the loose bits away."
+msgstr "Opravdový řemeslný stůl: naneste lepidlo, nasypte třpytky, rozhrňte je a volné kousky odfoukněte."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Raised, tactile glitter that looks like actual material on paper."
+msgstr "Vystouplé, hmatatelné třpytky, které vypadají jako skutečný materiál na papíře."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Lay a sticky base. Glitter poured on top stays where you put it."
+msgstr "Položte lepivý základ. Třpytky nasypte navrch a zůstanou tam, kam je dáte."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Width of the glue line."
+msgstr "Šířka linie lepidla."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Sprinkle flakes onto the canvas or over a glue shape."
+msgstr "Posypte vločky na plátno nebo na tvar z lepidla."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How wide the sprinkle area is."
+msgstr "Jak široká je oblast sypání."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How much glitter falls."
+msgstr "Kolik třpytek spadne."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How much rainbow sparkle the flakes carry."
+msgstr "Kolik duhového jiskření vločky mají."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Push"
+msgstr "Posunout"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Nudge and smear loose glitter with your finger."
+msgstr "Prstem posouvejte a rozetírejte volné třpytky."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How much glitter you move at once."
+msgstr "Kolik třpytek najednou přesunete."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pour"
+msgstr "Sypat"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Tip a whole pile of glitter onto the canvas."
+msgstr "Vysypte celou hromadu třpytek na plátno."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Blow"
+msgstr "Foukat"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "A puff of air that moves loose glitter but leaves glued glitter alone."
+msgstr "Proud vzduchu, který posune volné třpytky, ale přilepené nechá na místě."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Lift glitter away."
+msgstr "Odstraňte třpytky."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Width of the cleaned strip."
+msgstr "Šířka vyčištěného pruhu."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Glue first, pour next, blow away the excess — the same order as real craft glitter."
+msgstr "Nejprve lepidlo, potom sypání, přebytek odfouknout — stejný postup jako u skutečných řemeslných třpytek."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Line"
+msgstr "Čára"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Draws a straight line from where you press to where you let go."
+msgstr "Nakreslí rovnou čáru od místa stisknutí po místo uvolnění."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Rules, stems, underlines and dividers."
+msgstr "Linky, stonky, podtržení a oddělovače."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Line thickness."
+msgstr "Tloušťka čáry."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Start and finish outside the canvas if you need a perfectly clean edge."
+msgstr "Začněte a skončete mimo plátno, pokud potřebujete dokonale čistý okraj."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Rectangle"
+msgstr "Obdélník"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Draws a rectangle. Drag to choose its size."
+msgstr "Nakreslí obdélník. Tažením zvolíte jeho velikost."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Frames, cards, panels and colour blocks."
+msgstr "Rámečky, karty, panely a barevné bloky."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Outline thickness."
+msgstr "Tloušťka obrysu."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Rounded Rectangle"
+msgstr "Zaoblený obdélník"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "A rectangle with soft corners."
+msgstr "Obdélník s jemnými rohy."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Buttons, stickers, frames and friendly UI-style shapes."
+msgstr "Tlačítka, nálepky, rámečky a přívětivé tvary ve stylu UI."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Ellipse"
+msgstr "Elipsa"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Draws an oval or a circle."
+msgstr "Nakreslí ovál nebo kruh."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Faces, dots, bubbles, highlights and soft shapes."
+msgstr "Obličeje, tečky, bubliny, zvýraznění a jemné tvary."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Adds real, editable words to the canvas. Click, type in the bar that appears, then tune the look."
+msgstr "Přidá na plátno skutečná upravitelná slova. Klikněte, napište do zobrazené lišty a potom vyladěte vzhled."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Titles, captions, slogans and posters."
+msgstr "Nadpisy, popisky, slogany a plakáty."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Word"
+msgstr "Slovo"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "The actual text."
+msgstr "Samotný text."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Style"
+msgstr "Styl"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "The font role used for the words."
+msgstr "Role písma použitá pro text."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How big the letters are."
+msgstr "Jak velká jsou písmena."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Space between letters. Tight for headlines, loose for airy captions."
+msgstr "Mezera mezi písmeny. Těsná pro nadpisy, volná pro vzdušné popisky."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Colour"
+msgstr "Barva"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "The text colour."
+msgstr "Barva textu."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Double-click a text layer later to edit the words again."
+msgstr "Později dvakrát klikněte na textovou vrstvu a slova znovu upravte."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Move"
+msgstr "Přesun"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Drag a layer to move it. Drag empty space to pan the whole view."
+msgstr "Tažením vrstvy ji přesunete. Tažením prázdného místa posunete celé zobrazení."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Rearranging the composition without changing the artwork."
+msgstr "Přeuspořádání kompozice bez změny samotného díla."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Panning changes what you see, not where things are."
+msgstr "Posouvání zobrazení mění, co vidíte, ne kde se věci nacházejí."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Opens the NAI companion so you can describe what you want in words."
+msgstr "Otevře pomocníka NAI, abyste mohli slovy popsat, co chcete."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Finding things, replacing backgrounds, inventing ideas and quick edits."
+msgstr "Hledání věcí, nahrazování pozadí, vymýšlení nápadů a rychlé úpravy."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Say it the way you would say it to a friend — there are no special commands."
+msgstr "Řekněte to tak, jak byste to řekli příteli — žádné speciální příkazy neexistují."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Bars & buttons"
+msgstr "Lišty a tlačítka"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "The controls around the canvas: colour, palettes, looks, precision helpers and the actions that save or share your work."
+msgstr "Ovládací prvky kolem plátna: barvy, palety, vzhledy, nástroje pro přesnost a akce pro uložení nebo sdílení vaší práce."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Bottom bar"
+msgstr "Spodní lišta"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Colour chips — the two squares show your paint colour and background colour. Click either one to change it."
+msgstr "Barevné vzorky — dva čtverce ukazují barvu malování a barvu pozadí. Kliknutím na jeden z nich ji změníte."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Palettes — ready-made colour sets. Neon is the default; open the list to see all of them."
+msgstr "Palety — hotové barevné sady. Neon je výchozí; otevřete seznam a uvidíte všechny."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Moods — whole looks, not just colours. Press M to open them."
+msgstr "Nálady — celkové vzhledy, ne jen barvy. Otevřete je stisknutím M."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Keep — saves the cut-out you just made into your tray."
+msgstr "Uchovat — uloží právě vytvořený výřez do vašeho zásobníku."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Boost — NAI's one-click polish for the whole composition."
+msgstr "Boost — jednoklikové vylepšení celé kompozice od NAI."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Grid, Rulers, Snap, Pen pressure — visual helpers. Snap lines things up for you; Pen pressure follows your stylus."
+msgstr "Mřížka, Pravítka, Přichytávání, Tlak pera — vizuální pomůcky. Přichytávání vám věci zarovná; Tlak pera sleduje váš stylus."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Top bar"
+msgstr "Horní lišta"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Undo / Redo — step backwards and forwards through your edits."
+msgstr "Zpět / Znovu — vracejte se a postupujte vpřed svými úpravami."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open image / Open video — bring in a picture or a video frame to work on."
+msgstr "Otevřít obrázek / Otevřít video — načtěte obrázek nebo snímek videa, na kterém budete pracovat."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Save project — keeps layers, text and settings so you can come back later."
+msgstr "Uložit projekt — uchová vrstvy, text a nastavení, abyste se k němu mohli později vrátit."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export — writes a PNG, JPG or WebP you can share."
+msgstr "Export — vytvoří PNG, JPG nebo WebP, které můžete sdílet."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Settings — NAI options for this workspace."
+msgstr "Nastavení — možnosti NAI pro tento pracovní prostor."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Back to VLC — returns to the player without closing your project."
+msgstr "Zpět do VLC — vrátí se do přehrávače, aniž by se zavřel váš projekt."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "The + and − buttons at the bottom of the tool rail zoom in and out; the frame button fits the whole picture in view."
+msgstr "Tlačítka + a − ve spodní části lišty nástrojů slouží k přiblížení a oddálení; tlačítko rámečku zobrazí celý obrázek."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pick it in the tool rail, then click or drag on the canvas."
+msgstr "Vyberte jej v liště nástrojů a poté klikněte nebo táhněte na plátně."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "NAI Paintbrush guide"
+msgstr "Průvodce NAI Paintbrush"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Guide"
+msgstr "Průvodce"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Everything on this screen, in plain words. Press F1 anytime."
+msgstr "Všechno na této obrazovce, srozumitelně. F1 stiskněte kdykoli."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Close the guide (Esc)"
+msgstr "Zavřít průvodce (Esc)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "WHAT IT DOES"
+msgstr "CO DĚLÁ"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "USE IT FOR"
+msgstr "K ČEMU SLOUŽÍ"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Explain my current tool — %1"
+msgstr "Vysvětlit můj aktuální nástroj — %1"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "CONTROLS"
+msgstr "OVLÁDÁNÍ"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "No sliders — just click or drag on the canvas."
+msgstr "Žádné posuvníky — stačí kliknout nebo táhnout na plátně."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Good to know — "
+msgstr "Je dobré vědět — "
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hover any tool for its name  ·  Scroll for more  ·  F1 opens this guide  ·  Esc closes it"
+msgstr "Najeďte myší na nástroj a uvidíte jeho název  ·  Posouváním zobrazíte více  ·  F1 otevře tohoto průvodce  ·  Esc jej zavře"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Inspector"
+msgstr "Inspektor"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Inspector (selection)"
+msgstr "Inspektor (výběr)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "NAI Settings (diagnostics)"
+msgstr "Nastavení NAI (diagnostika)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Close inspector"
+msgstr "Zavřít inspektora"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Dismiss inspector"
+msgstr "Skrýt inspektora"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Layers"
+msgstr "Vrstvy"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "AI"
+msgstr "AI"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hide layer"
+msgstr "Skrýt vrstvu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Show layer"
+msgstr "Zobrazit vrstvu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "New layer"
+msgstr "Nová vrstva"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Delete layer"
+msgstr "Odstranit vrstvu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Duplicate layer"
+msgstr "Duplikovat vrstvu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Move layer up"
+msgstr "Přesunout vrstvu nahoru"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Move layer down"
+msgstr "Přesunout vrstvu dolů"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "X"
+msgstr "X"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Y"
+msgstr "Y"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Motion"
+msgstr "Pohyb"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Subtle"
+msgstr "Jemný"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Strong"
+msgstr "Silný"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Compare"
+msgstr "Porovnat"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Static poster"
+msgstr "Statický plakát"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Living loop"
+msgstr "Živá smyčka"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Invert selection"
+msgstr "Invertovat výběr"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Grow selection"
+msgstr "Zvětšit výběr"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Shrink selection"
+msgstr "Zmenšit výběr"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Feather selection"
+msgstr "Zjemnění výběru"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Fill holes"
+msgstr "Vyplnit díry"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Smooth selection"
+msgstr "Vyhladit výběr"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Crop to selection"
+msgstr "Oříznout na výběr"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pick Object Select and paint over the subject you want to work with. NAI will find its edges."
+msgstr "Vyberte Object Select a přetřete objekt, se kterým chcete pracovat. NAI najde jeho hrany."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Object Select"
+msgstr "Výběr objektu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Subject library"
+msgstr "Knihovna motivů"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Style last subject — Ink"
+msgstr "Styl posledního motivu — Inkoust"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Add contour layer (vector)"
+msgstr "Přidat vrstvu obrysu (vektor)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Find by words…"
+msgstr "Hledat podle slov…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Remove object"
+msgstr "Odstranit objekt"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Extract object"
+msgstr "Extrahovat objekt"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Replace background…"
+msgstr "Nahradit pozadí…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Generative fill…"
+msgstr "Generativní výplň…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Find product…"
+msgstr "Najít produkt…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Auto collage…"
+msgstr "Auto koláž…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Object Select: drag on the mask to paint it in; Alt-drag or right-drag to erase."
+msgstr "Výběr objektu: tažením po masce ji namalujte; tažením s Alt nebo pravým tlačítkem mažete."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Matte"
+msgstr "Matný"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Soft edge (feathered alpha)"
+msgstr "Měkká hrana (rozostřená alfa)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Refining the matte…"
+msgstr "Vylaďování matné vrstvy…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Neural"
+msgstr "Neurální"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Quality"
+msgstr "Kvalita"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Maximum"
+msgstr "Maximum"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hide boundary and artefact controls"
+msgstr "Skrýt ovládací prvky hranic a artefaktů"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Boundary and artefact controls"
+msgstr "Ovládání hranic a artefaktů"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Boundary band (px)"
+msgstr "Hraniční pásmo (px)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Fine-detail recovery"
+msgstr "Obnova jemných detailů"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Artefact suppression"
+msgstr "Potlačení artefaktů"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Temporal stability"
+msgstr "Časová stabilita"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Diagnostic view"
+msgstr "Diagnostické zobrazení"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Semantic"
+msgstr "Sémantický"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Topology"
+msgstr "Topologie"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Trimap"
+msgstr "Trimap"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Alpha"
+msgstr "Alfa"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Foreground"
+msgstr "Popředí"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Premultiplied"
+msgstr "Přednásobené"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export diagnostics…"
+msgstr "Exportovat diagnostiku…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Likely identification"
+msgstr "Pravděpodobná identifikace"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Add as text"
+msgstr "Přidat jako text"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "%1% confident"
+msgstr "%1% jistoty"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Find by words"
+msgstr "Hledat podle slov"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Describe the object, e.g. “handbag”, “red lipstick”, “microphone”"
+msgstr "Popište objekt, např. “kabelka”, “červená rtěnka”, “mikrofon”"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Replace background"
+msgstr "Nahradit pozadí"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Describe the new background (empty = gentle gradient)"
+msgstr "Popište nové pozadí (prázdné = jemný přechod)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "e.g. sunset beach"
+msgstr "např. pláž při západu slunce"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Generative fill"
+msgstr "Generativní výplň"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "What should fill the selection?"
+msgstr "Čím má být výběr vyplněn?"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "e.g. a field of flowers"
+msgstr "např. pole květin"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Balanced grid"
+msgstr "Vyvážená mřížka"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Editorial"
+msgstr "Editoriální"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Scrapbook"
+msgstr "Výstřižkový deník"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Vertical poster"
+msgstr "Svislý plakát"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Horizontal banner"
+msgstr "Vodorovný banner"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Play / pause"
+msgstr "Přehrát / pozastavit"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Decoding frame…"
+msgstr "Dekóduji snímek…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Add frame to canvas"
+msgstr "Přidat rámeček na plátno"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Close video"
+msgstr "Zavřít video"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Media"
+msgstr "Média"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Resume tracking"
+msgstr "Obnovit sledování"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pause tracking"
+msgstr "Pozastavit sledování"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Cancel tracking"
+msgstr "Zrušit sledování"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "%1 kf · %2 corr"
+msgstr "%1 klíč. snímků · %2 kor."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Delete track"
+msgstr "Smazat stopu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Make animated sticker from a track"
+msgstr "Vytvořit animovanou nálepku ze stopy"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Timeline"
+msgstr "Časová osa"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Generating thumbnails…"
+msgstr "Generuji náhledy…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Generate thumbnails"
+msgstr "Vytvořit náhledy"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Stop generating"
+msgstr "Zastavit generování"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Animated sticker"
+msgstr "Animovaná nálepka"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "%1 / %2"
+msgstr "%1 / %2"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "No keyframes"
+msgstr "Žádné klíčové snímky"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Trim"
+msgstr "Oříznout"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "–"
+msgstr "–"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "of %1"
+msgstr "z %1"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "color"
+msgstr "barva"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Speed"
+msgstr "Rychlost"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Effect"
+msgstr "Efekt"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Blur"
+msgstr "Rozmazání"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Dim"
+msgstr "Ztmavit"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Spotlight"
+msgstr "Reflektor"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Attach to frame"
+msgstr "Připojit k rámu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Place frame on canvas"
+msgstr "Umístit rám na plátno"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export sequence…"
+msgstr "Exportovat sekvenci…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Choose a folder for the animated sticker sequence"
+msgstr "Vyberte složku pro sekvenci animované nálepky"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Mood"
+msgstr "Nálada"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Paper"
+msgstr "Papír"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Headline…"
+msgstr "Nadpis…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Badges"
+msgstr "Odznaky"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Choose color"
+msgstr "Vybrat barvu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "NAI Settings"
+msgstr "Nastavení NAI"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "AI models"
+msgstr "AI modely"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Object Select (SAM3)"
+msgstr "Výběr objektu (SAM3)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Not configured"
+msgstr "Není nakonfigurováno"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Path to the SAM model (.ggml)"
+msgstr "Cesta k modelu SAM (.ggml)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "CUDA runtime (sam3_cuda.dll) is not available. GPU mode will fail with a specific error; choose CPU."
+msgstr "CUDA runtime (sam3_cuda.dll) není k dispozici. Režim GPU selže s konkrétní chybou; zvolte CPU."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "CUDA runtime present, but no usable GPU: %1"
+msgstr "CUDA runtime je přítomen, ale není dostupné žádné použitelné GPU: %1"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Requested: %1 · CUDA runtime ready · detected: %2. The actual backend is verified when the model loads."
+msgstr "Požadováno: %1 · CUDA runtime připraven · zjištěno: %2. Skutečný backend se ověří při načtení modelu."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Ask — vision model"
+msgstr "Zeptat se — vizuální model"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Endpoint URL (OpenAI-compatible)"
+msgstr "URL koncového bodu (kompatibilní s OpenAI)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Vision model name"
+msgstr "Název vizuálního modelu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "e.g. gpt-4o-mini"
+msgstr "např. gpt-4o-mini"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Vision API key"
+msgstr "API klíč pro vizuální model"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Environment override"
+msgstr "Přepsání z prostředí"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Stored"
+msgstr "Uloženo"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Not set"
+msgstr "Nenastaveno"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Bearer token (optional for local endpoints)"
+msgstr "Bearer token (volitelné pro lokální koncové body)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "PAINTBRUSH_VLM_API_KEY is set in the environment and overrides the key stored here."
+msgstr "PAINTBRUSH_VLM_API_KEY je nastaven v prostředí a přepisuje zde uložený klíč."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Neural matting"
+msgstr "Neurální matting"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "ViTMatte model directory"
+msgstr "Adresář modelu ViTMatte"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Unavailable"
+msgstr "Nedostupné"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Directory with vitmatte-s-*.onnx + manifest.json"
+msgstr "Adresář s vitmatte-s-*.onnx + manifest.json"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "AI companion"
+msgstr "AI společník"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Endpoint URL"
+msgstr "URL koncového bodu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Companion model"
+msgstr "Model společníka"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Model name"
+msgstr "Název modelu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Companion API key"
+msgstr "API klíč společníka"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "PAINTBRUSH_ASSISTANT_API_KEY is set in the environment and overrides the key stored here."
+msgstr "PAINTBRUSH_ASSISTANT_API_KEY je nastaven v prostředí a přepisuje zde uložený klíč."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Keys entered here are saved in the plain-text VLC configuration file and reused on the next start. Environment variables (PAINTBRUSH_VLM_API_KEY / PAINTBRUSH_ASSISTANT_API_KEY) take precedence when set. Keys are never written to logs."
+msgstr "Klíče zadané zde se ukládají do konfiguračního souboru VLC v prostém textu a znovu se použijí při příštím spuštění. Proměnné prostředí (PAINTBRUSH_VLM_API_KEY / PAINTBRUSH_ASSISTANT_API_KEY) mají při nastavení přednost. Klíče se nikdy nezapisují do protokolů."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Allow network AI in Kids mode"
+msgstr "Povolit síťovou AI v režimu Kids"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Parental control. Off keeps Kids mode offline; on lets it use this AI provider. Only a parent or guardian should enable it."
+msgstr "Rodičovská kontrola. Vypnuto udržuje režim Kids offline; zapnuto mu umožní používat tohoto poskytovatele AI. Zapnout by to měl pouze rodič nebo zákonný zástupce."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Allow network AI in Kids mode (parental control)"
+msgstr "Povolit síťovou AI v režimu Kids (rodičovská kontrola)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Image generation"
+msgstr "Generování obrázků"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Image endpoint"
+msgstr "Koncový bod pro obrázky"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Image API base URL, e.g. https://…/v1"
+msgstr "Základní URL API pro obrázky, např. https://…/v1"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Image model"
+msgstr "Model pro obrázky"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Image model name"
+msgstr "Název modelu pro obrázky"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Image API key"
+msgstr "API klíč pro obrázky"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Used by Finish the painting, Remove object, Generative fill and Replace background. Without a real image model those actions fall back to local pixel operations; Finish the painting needs a provider."
+msgstr "Používá se u akcí Dokončit malbu, Odstranit objekt, Generativní výplň a Nahradit pozadí. Bez skutečného modelu pro obrázky tyto akce přecházejí na lokální pixelové operace; Dokončit malbu vyžaduje poskytovatele."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Capabilities"
+msgstr "Možnosti"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Local heal — pixel propagation, not generative"
+msgstr "Lokální retuš — šíření pixelů, ne generativní"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Object tracking"
+msgstr "Sledování objektů"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Idle"
+msgstr "Nečinné"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Product lookup"
+msgstr "Vyhledávání produktů"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Exact-frame tolerance"
+msgstr "Tolerance přesného snímku"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Used by AI crops and exports. Filmstrip thumbnails accept the nearest keyframe and are labelled with its real time."
+msgstr "Používá se u AI ořezů a exportů. Náhledy filmového pásu přijímají nejbližší klíčový snímek a jsou označeny jeho skutečným časem."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Diagnostics"
+msgstr "Diagnostika"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Run decoder + SAM self test"
+msgstr "Spustit autotest dekodéru + SAM"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Changes apply immediately — no restart needed. The AI model reloads in the background when it changes."
+msgstr "Změny se projeví okamžitě — není nutné restartovat. Model AI se při změně znovu načte na pozadí."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hide"
+msgstr "Skrýt"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Show"
+msgstr "Zobrazit"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hide API key"
+msgstr "Skrýt API klíč"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Show API key"
+msgstr "Zobrazit API klíč"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Foreground colour"
+msgstr "Barva popředí"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Background colour"
+msgstr "Barva pozadí"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Use colour %1"
+msgstr "Použít barvu %1"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "%1 palette colour %2"
+msgstr "%1 – barva palety %2"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "%1 — click to paint"
+msgstr "%1 — klikněte pro malování"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Palettes"
+msgstr "Palety"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open saved palettes"
+msgstr "Otevřít uložené palety"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Saved palettes — active: %1"
+msgstr "Uložené palety — aktivní: %1"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Saved palettes"
+msgstr "Uložené palety"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Art direction: mood, paper, type, badges"
+msgstr "Výtvarný směr: nálada, papír, typografie, odznaky"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Paper, light, palette, type and badges in one look"
+msgstr "Papír, světlo, paleta, typografie a odznaky v jednotném vzhledu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Boost the composition"
+msgstr "Vylepšit kompozici"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Undo the last Boost"
+msgstr "Vrátit poslední vylepšení"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Cancel Boost"
+msgstr "Zrušit vylepšení"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Keep this cut-out"
+msgstr "Ponechat tento výřez"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Object Select is unavailable — configure the SAM model in NAI Settings."
+msgstr "Výběr objektu není dostupný — nakonfigurujte model SAM v nastavení NAI."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Keep this cut-out in your tray"
+msgstr "Ponechat tento výřez v zásobníku"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Use palette %1"
+msgstr "Použít paletu %1"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Word…"
+msgstr "Slovo…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Close editor"
+msgstr "Zavřít editor"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Grid"
+msgstr "Mřížka"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Rulers"
+msgstr "Pravítka"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Snap to grid"
+msgstr "Přichytit k mřížce"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pen pressure"
+msgstr "Tlak pera"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Soft edge — click for a crisp boundary"
+msgstr "Měkký okraj — klikněte pro ostré ohraničení"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hard edge — click for a feathered boundary"
+msgstr "Tvrdý okraj — klikněte pro měkké ohraničení"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Move layer (drag object) / pan (drag empty)"
+msgstr "Přesunout vrstvu (tažením objektu) / posunout (tažením prázdné plochy)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Zoom in"
+msgstr "Přiblížit"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Zoom out"
+msgstr "Oddálit"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Fit to view"
+msgstr "Přizpůsobit zobrazení"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open a video"
+msgstr "Otevřít video"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Save Paintbrush project"
+msgstr "Uložit projekt Paintbrush"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export image"
+msgstr "Exportovat obrázek"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export Living Poster frames (3 s, 24 fps)"
+msgstr "Exportovat snímky Living Poster (3 s, 24 fps)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export Living Poster video (MP4/H.264)"
+msgstr "Exportovat video Living Poster (MP4/H.264)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export Living Poster video (WebM/VP9, transparent)"
+msgstr "Exportovat video Living Poster (WebM/VP9, průhledné)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Project info"
+msgstr "Informace o projektu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Relink missing media…"
+msgstr "Znovu propojit chybějící média…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Relink source media"
+msgstr "Znovu propojit zdrojová média"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open the guide (F1)"
+msgstr "Otevřít průvodce (F1)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Plain-language guide to every tool (F1)"
+msgstr "Srozumitelný průvodce všemi nástroji (F1)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hide companion"
+msgstr "Skrýt společníka"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Show companion"
+msgstr "Zobrazit společníka"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hide inspector"
+msgstr "Skrýt inspektor"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Show inspector"
+msgstr "Zobrazit inspektor"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Undo"
+msgstr "Zpět"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Redo"
+msgstr "Znovu"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "New blank canvas"
+msgstr "Nové prázdné plátno"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open image…"
+msgstr "Otevřít obrázek…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open video…"
+msgstr "Otevřít video…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Save project"
+msgstr "Uložit projekt"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export image…"
+msgstr "Exportovat obrázek…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export Living Poster video (MP4)"
+msgstr "Exportovat video Living Poster (MP4)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Living Poster export options…"
+msgstr "Možnosti exportu Living Poster…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Living Poster video (WebM, transparent)"
+msgstr "Video Living Poster (WebM, průhledné)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Living Poster frames (PNG sequence, 3 s)"
+msgstr "Snímky Living Poster (sekvence PNG, 3 s)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Back to VLC"
+msgstr "Zpět do VLC"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "SOURCE"
+msgstr "ZDROJ"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Restore monitor"
+msgstr "Obnovit monitor"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Theater monitor"
+msgstr "Divadelní monitor"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Stop video and release the monitor"
+msgstr "Zastavit video a uvolnit monitor"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "PTS"
+msgstr "PTS"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "FRAME "
+msgstr "SNÍMEK "
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "REMAIN "
+msgstr "ZBYTEK "
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Go to start"
+msgstr "Přejít na začátek"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Go to end"
+msgstr "Přejít na konec"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Show monitor"
+msgstr "Zobrazit monitor"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Collapse monitor"
+msgstr "Sbalit monitor"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Restore"
+msgstr "Obnovit"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open copy…"
+msgstr "Otevřít kopii…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "NAI PaintBrush"
+msgstr "NAI PaintBrush"
+
+
+#: modules/gui/qt/paintbrush (activated legacy translation)
+msgid "Send"
+msgstr "Odeslat"
+
+#: modules/gui/qt/paintbrush (activated legacy translation)
+msgid "Layer %1"
+msgstr "Vrstva %1"
+

@@ -54,6 +54,9 @@ Dialog {
     property string draftAssistantUrl: ""
     property string draftAssistantModel: ""
     property string draftAssistantApiKey: ""
+    property string draftImageUrl: ""
+    property string draftImageModel: ""
+    property string draftImageApiKey: ""
     property int draftPtsToleranceMs: 250
     property string applyMessage: ""
 
@@ -68,6 +71,9 @@ Dialog {
         draftAssistantUrl = PaintbrushCtx.settingsAssistantUrl
         draftAssistantModel = PaintbrushCtx.settingsAssistantModel
         draftAssistantApiKey = PaintbrushCtx.settingsAssistantApiKey
+        draftImageUrl = PaintbrushCtx.settingsImageUrl
+        draftImageModel = PaintbrushCtx.settingsImageModel
+        draftImageApiKey = PaintbrushCtx.settingsImageApiKey
         draftPtsToleranceMs = PaintbrushCtx.settingsPtsToleranceMs
         applyMessage = ""
     }
@@ -76,6 +82,14 @@ Dialog {
          * applyNaiSettings keeps its established signature. */
         PaintbrushCtx.mattingModelDir = draftMatteModelDir.trim()
         PaintbrushCtx.mattingDevice = draftMatteDevice
+        const imageAnswer = PaintbrushCtx.applyImageSettings(
+                    draftImageUrl.trim(),
+                    draftImageModel.trim(),
+                    draftImageApiKey.trim())
+        if (imageAnswer && imageAnswer.length > 0) {
+            applyMessage = imageAnswer
+            return false
+        }
         const answer = PaintbrushCtx.applyNaiSettings(
                     draftSamModel.trim(),
                     draftSamDevice.trim(),
@@ -356,6 +370,81 @@ Dialog {
                     Widgets.LabelExt {
                         Layout.fillWidth: true
                         text: qsTr("Keys entered here are saved in the plain-text VLC configuration file and reused on the next start. Environment variables (PAINTBRUSH_VLM_API_KEY / PAINTBRUSH_ASSISTANT_API_KEY) take precedence when set. Keys are never written to logs.")
+                        color: theme.fg.secondary
+                        font.pixelSize: VLCStyle.fontSize_small
+                        wrapMode: Text.WordWrap
+                    }
+
+                    /* Parental control for Kids mode. Off by default: Kids
+                     * stays local. A parent/guardian can enable the provider
+                     * here without exposing the rest of the AI settings. */
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.topMargin: VLCStyle.margin_xsmall
+                        spacing: VLCStyle.margin_small
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 2
+                            Widgets.LabelExt {
+                                Layout.fillWidth: true
+                                text: qsTr("Allow network AI in Kids mode")
+                                color: theme.fg.primary
+                                font.pixelSize: VLCStyle.fontSize_normal
+                            }
+                            Widgets.LabelExt {
+                                Layout.fillWidth: true
+                                text: qsTr("Parental control. Off keeps Kids mode offline; on lets it use this AI provider. Only a parent or guardian should enable it.")
+                                color: theme.fg.secondary
+                                font.pixelSize: VLCStyle.fontSize_small
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+                        Widgets.CheckBoxExt {
+                            text: ""
+                            checked: PaintbrushCtx.kidsNetworkAllowed
+                            onToggled: PaintbrushCtx.setKidsNetworkAllowed(checked)
+                            Accessible.name: qsTr("Allow network AI in Kids mode (parental control)")
+                        }
+                    }
+                }
+
+                /* ---------------- Image generation ----------------------- */
+                SettingsSection {
+                    title: qsTr("Image generation")
+
+                    SettingsRow {
+                        label: qsTr("Image endpoint")
+                        status: PaintbrushCtx.generationStatusText
+                        ok: PaintbrushCtx.imageProviderConfigured
+                        fieldText: root.draftImageUrl
+                        placeholder: qsTr("Image API base URL, e.g. https://…/v1")
+                        onTextEdited: root.draftImageUrl = text
+                    }
+                    SettingsRow {
+                        label: qsTr("Image model")
+                        status: ""
+                        ok: true
+                        fieldText: root.draftImageModel
+                        placeholder: qsTr("Image model name")
+                        onTextEdited: root.draftImageModel = text
+                    }
+                    SettingsRow {
+                        label: qsTr("Image API key")
+                        status: PaintbrushCtx.settingsImageApiKeyFromEnv
+                                ? qsTr("Environment override")
+                                : (root.draftImageApiKey.length > 0
+                                   ? qsTr("Stored") : qsTr("Not set"))
+                        ok: PaintbrushCtx.settingsImageApiKeyFromEnv
+                            || root.draftImageApiKey.length > 0
+                        fieldText: root.draftImageApiKey
+                        placeholder: qsTr("Bearer token (optional for local endpoints)")
+                        secret: true
+                        onTextEdited: root.draftImageApiKey = text
+                    }
+                    Widgets.LabelExt {
+                        Layout.fillWidth: true
+                        text: qsTr("Used by Finish the painting, Remove object, Generative fill and Replace background. Without a real image model those actions fall back to local pixel operations; Finish the painting needs a provider.")
                         color: theme.fg.secondary
                         font.pixelSize: VLCStyle.fontSize_small
                         wrapMode: Text.WordWrap

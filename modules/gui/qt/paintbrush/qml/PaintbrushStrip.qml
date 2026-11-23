@@ -78,6 +78,36 @@ Item {
     onCanvasChanged: resolveInitialForeground()
 
     /* The M shortcut routes here so the popover keeps one owner. */
+    /* The C++ toolName() is an internal identifier; the strip must show the
+     * translated user-facing tool name (same sources as the rail tooltips). */
+    function toolDisplayName() {
+        if (!root.canvas)
+            return ""
+        switch (root.canvas.tool) {
+        case 1: return qsTr("Rect Select")
+        case 2: return qsTr("Freeform Select")
+        case 3: return qsTr("Object Select (AI)")
+        case 4: return qsTr("Pencil")
+        case 5: return qsTr("Brush")
+        case 6: return qsTr("Eraser")
+        case 7: return qsTr("Fill")
+        case 8: return qsTr("Eyedropper")
+        case 9: return qsTr("Spray")
+        case 10: return qsTr("Line")
+        case 11: return qsTr("Rectangle")
+        case 12: return qsTr("Rounded Rectangle")
+        case 13: return qsTr("Ellipse")
+        case 14: return qsTr("Text")
+        case 15: return qsTr("Move")
+        case 16: return qsTr("Bristle Paint")
+        case 17: return qsTr("Glitter")
+        case 18: return qsTr("Glitter Powder")
+        case 19: return qsTr("Smear")
+        case 20: return qsTr("Ask")
+        default: return root.canvas.toolName
+        }
+    }
+
     function toggleMoodPicker() {
         if (moodPicker.opened)
             moodPicker.close()
@@ -120,7 +150,7 @@ Item {
             visible: root.showIdentity
             Layout.alignment: Qt.AlignVCenter
             Layout.preferredWidth: VLCStyle.dp(72, VLCStyle.scale)
-            text: root.canvas ? root.canvas.toolName : ""
+            text: root.canvas ? root.toolDisplayName() : ""
             color: theme.fg.primary
             font.pixelSize: VLCStyle.fontSize_small
             font.weight: Font.DemiBold

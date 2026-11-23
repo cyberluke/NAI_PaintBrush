@@ -114,6 +114,7 @@ class PaintbrushController : public QObject
     Q_PROPERTY(bool visionConfigured READ visionConfigured NOTIFY serviceAvailabilityChanged FINAL)
     Q_PROPERTY(QString visionUnavailableReason READ visionUnavailableReason NOTIFY serviceAvailabilityChanged FINAL)
     Q_PROPERTY(bool generationConfigured READ generationConfigured NOTIFY serviceAvailabilityChanged FINAL)
+    Q_PROPERTY(bool imageProviderConfigured READ imageProviderConfigured NOTIFY serviceAvailabilityChanged FINAL)
     Q_PROPERTY(QString generationUnavailableReason READ generationUnavailableReason NOTIFY serviceAvailabilityChanged FINAL)
     Q_PROPERTY(bool trackingAvailable READ trackingAvailable NOTIFY serviceAvailabilityChanged FINAL)
     Q_PROPERTY(QString trackingUnavailableReason READ trackingUnavailableReason NOTIFY serviceAvailabilityChanged FINAL)
@@ -175,6 +176,7 @@ class PaintbrushController : public QObject
     Q_PROPERTY(QString assistantReasoningText READ assistantReasoningText NOTIFY assistantStreamChanged FINAL)
     Q_PROPERTY(QVariantList assistantToolCalls READ assistantToolCalls NOTIFY assistantToolsChanged FINAL)
     Q_PROPERTY(bool assistantBusy READ assistantBusy NOTIFY assistantStateChanged FINAL)
+    Q_PROPERTY(bool kidsNetworkAllowed READ kidsNetworkAllowed NOTIFY companionStateChanged FINAL)
 
     Q_PROPERTY(QString currentMediaTitle READ currentMediaTitle NOTIFY mediaStateChanged FINAL)
     Q_PROPERTY(QString currentMediaMRL READ currentMediaMRL NOTIFY mediaStateChanged FINAL)
@@ -417,6 +419,10 @@ public:
     /* Image-layer transforms (scale/rotation/pivot at content center),
      * one undoable operation each, persisted with the project. */
     Q_INVOKABLE void transformLayer(int index, double scale, double rotation);
+    /* Live on-canvas gizmo gesture: one undo command on release. */
+    Q_INVOKABLE void beginLayerTransform(int index);
+    Q_INVOKABLE void updateLayerTransform(int index, double scale, double rotation);
+    Q_INVOKABLE void endLayerTransform(int index);
     Q_INVOKABLE void moveImageLayer(int index, const QPointF &position);
     /* Precise position read/write for the Inspector (canvas pixels). */
     Q_INVOKABLE QPointF layerPositionOf(int index) const;
@@ -520,6 +526,7 @@ public:
     Q_INVOKABLE void companionReset();
     Q_INVOKABLE void companionClearConversation();
     Q_INVOKABLE void cancelAssistant();
+    Q_INVOKABLE void setKidsNetworkAllowed(bool allowed);
     int companionTalkLevel() const;
     void setCompanionTalkLevel(int level);
 
@@ -551,6 +558,7 @@ public:
     bool visionConfigured() const { return m_vision.isConfigured(); }
     QString visionUnavailableReason() const { return m_vision.unavailableReason(); }
     bool generationConfigured() const { return m_generation.isConfigured(); }
+    bool imageProviderConfigured() const { return m_generation.hasProvider(); }
     QString generationUnavailableReason() const { return m_generation.unavailableReason(); }
     /* Capability-honest status text: generation reports local-heal /
      * local-blur / remote-generation(model) / unavailable(reason) from its
@@ -643,6 +651,7 @@ public:
     QString assistantReasoningText() const { return m_assistantReasoningText; }
     QVariantList assistantToolCalls() const { return m_assistantToolCalls; }
     bool assistantBusy() const { return m_assistantBusy; }
+    bool kidsNetworkAllowed() const { return m_companion.networkAllowed(); }
 
     QString currentMediaTitle() const;
     QString currentMediaMRL() const;
@@ -692,16 +701,20 @@ public:
     Q_PROPERTY(QString settingsVlmModel READ settingsVlmModel NOTIFY settingsChanged FINAL)
     Q_PROPERTY(QString settingsAssistantUrl READ settingsAssistantUrl NOTIFY settingsChanged FINAL)
     Q_PROPERTY(QString settingsAssistantModel READ settingsAssistantModel NOTIFY settingsChanged FINAL)
+    Q_PROPERTY(QString settingsImageUrl READ settingsImageUrl NOTIFY settingsChanged FINAL)
+    Q_PROPERTY(QString settingsImageModel READ settingsImageModel NOTIFY settingsChanged FINAL)
     /* Persisted API keys — exactly what the VLC config stores, never the
      * environment override (see settings*ApiKeyFromEnv). The Settings dialog
      * edits these so a key survives Apply and a restart. */
     Q_PROPERTY(QString settingsVlmApiKey READ settingsVlmApiKey NOTIFY settingsChanged FINAL)
     Q_PROPERTY(QString settingsAssistantApiKey READ settingsAssistantApiKey NOTIFY settingsChanged FINAL)
+    Q_PROPERTY(QString settingsImageApiKey READ settingsImageApiKey NOTIFY settingsChanged FINAL)
     /* True when PAINTBRUSH_VLM_API_KEY / PAINTBRUSH_ASSISTANT_API_KEY is set
      * in the environment; it overrides the stored key at request time, so the
      * dialog must say so rather than pretend the field is in charge. */
     Q_PROPERTY(bool settingsVlmApiKeyFromEnv READ settingsVlmApiKeyFromEnv NOTIFY settingsChanged FINAL)
     Q_PROPERTY(bool settingsAssistantApiKeyFromEnv READ settingsAssistantApiKeyFromEnv NOTIFY settingsChanged FINAL)
+    Q_PROPERTY(bool settingsImageApiKeyFromEnv READ settingsImageApiKeyFromEnv NOTIFY settingsChanged FINAL)
     Q_PROPERTY(int settingsPtsToleranceMs READ settingsPtsToleranceMs NOTIFY settingsChanged FINAL)
     Q_PROPERTY(bool settingsSecretsPresent READ settingsSecretsPresent NOTIFY settingsChanged FINAL)
     /* CUDA runtime DLL presence (LoadLibrary only, no CUDA init). The live
@@ -805,10 +818,14 @@ public:
     QString settingsVlmModel() const;
     QString settingsAssistantUrl() const;
     QString settingsAssistantModel() const;
+    QString settingsImageUrl() const;
+    QString settingsImageModel() const;
     QString settingsVlmApiKey() const;
     QString settingsAssistantApiKey() const;
+    QString settingsImageApiKey() const;
     bool settingsVlmApiKeyFromEnv() const;
     bool settingsAssistantApiKeyFromEnv() const;
+    bool settingsImageApiKeyFromEnv() const;
     int settingsPtsToleranceMs() const;
     /* True when any secret (API key) is configured, from the environment or
      * the config. The dialog uses it for the companion/vision status text;
@@ -833,6 +850,11 @@ public:
                                          const QString &assistantModel,
                                          const QString &assistantApiKey,
                                          int ptsToleranceMs);
+    /* Image generation/editing provider (finish, remove, fill, background).
+     * Separate call so the established applyNaiSettings signature is stable. */
+    Q_INVOKABLE QString applyImageSettings(const QString &baseUrl,
+                                           const QString &model,
+                                           const QString &apiKey);
     Q_INVOKABLE void clearRestartRequired();
 
     /* -- art-direction palettes -----------------------------------------
@@ -911,6 +933,8 @@ signals:
     void vectorEditNodesChanged();
     void recentColorsChanged();
     void documentChanged();
+    /* live transform during a Move-tool gizmo drag (one undo on release) */
+    void layerTransformChanged();
     void serviceAvailabilityChanged();
     void objectSelectionChanged();
     void objectMaskEdgeChanged();
@@ -924,6 +948,8 @@ signals:
     void assistantStreamChanged();
     void assistantToolsChanged();
     void assistantStateChanged();
+    /* a spontaneous companion observation was appended to the chat */
+    void proactiveMessageArrived();
     void mediaStateChanged();
     void thumbnailsChanged();
     void recoveryStateChanged();
@@ -1048,6 +1074,11 @@ private:
     QByteArray assistantToolsJson() const;
     QVariantMap executeAssistantTool(const QString &name,
                                      const QString &arguments);
+    /* Finish the current painting through the image provider; empty on a
+     * successful start, otherwise a user-facing error. */
+    QString finishPainting(const QString &prompt);
+    /* Resolve a layer reference by index or case-insensitive name. */
+    int assistantLayerIndex(const QString &reference) const;
     void pushRecentProject(const QString &path);
     void buildTrackObject();
     void triggerCompanionEvent(const QString &event);
@@ -1213,6 +1244,10 @@ private:
     int m_moveLayerIndex = -1;
     int m_moveLayerId = 0;
     QTransform m_moveBefore;
+    bool m_layerTransformActive = false;
+    int m_layerTransformIndex = -1;
+    int m_layerTransformId = 0;
+    QTransform m_layerTransformBefore;
     QPointF m_moveStartPos;
     QPointF m_moveStartCanvas;
     QString m_objectMaskBoundsText;
@@ -1238,6 +1273,7 @@ private:
     QString m_visionUncertainty;
     bool m_visionHasResult = false;
     QString m_generationRequestId;
+    QString m_generationDesc = QStringLiteral("AI result");
     /* Ask tool input state (P1#11) */
     bool m_askInputVisible = false;
     QString m_askInputPlaceholder;

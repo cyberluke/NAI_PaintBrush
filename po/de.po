@@ -30972,9 +30972,6 @@ msgstr "Media Manager-Liste"
 #~ msgid "Hide Details"
 #~ msgstr "Details ausblenden"
 
-#~ msgid "Send"
-#~ msgstr "Senden"
-
 #~ msgid ""
 #~ "%@ unexpectedly quit the last time it was run. Would you like to send a "
 #~ "crash report to %@?"
@@ -32497,3 +32494,2089 @@ msgstr "Media Manager-Liste"
 
 #~ msgid "Streaming Output"
 #~ msgstr "Streaming-Ausgabe"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Creative companion — ask about your drawing"
+msgstr "Kreativer Begleiter — stelle Fragen zu deiner Zeichnung"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Companion"
+msgstr "Begleiter"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Thinking…"
+msgstr "Denkt nach…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Ready"
+msgstr "Bereit"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Clear conversation"
+msgstr "Unterhaltung löschen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Collapse companion"
+msgstr "Begleiter einklappen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Quiet"
+msgstr "Ruhig"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Buddy"
+msgstr "Buddy"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Kids"
+msgstr "Kids"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Talk"
+msgstr "Sprechen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Only when I ask"
+msgstr "Nur wenn ich frage"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Talk less"
+msgstr "Weniger sprechen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Off — the companion is hidden and never reacts."
+msgstr "Aus — der Begleiter ist ausgeblendet und reagiert nie."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Quiet — answers when you talk; never reacts on its own. Talk is ignored."
+msgstr "Ruhig — antwortet, wenn du sprichst; reagiert nie von selbst. Sprechen wird ignoriert."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Buddy — reacts to your drawing according to Talk. Only when I ask means chat only; Talk less means major moments; Talk means frequent reactions."
+msgstr "Buddy — reagiert je nach Sprechen auf deine Zeichnung. Nur wenn ich frage bedeutet nur Chat; Weniger sprechen bedeutet wichtige Momente; Sprechen bedeutet häufige Reaktionen."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Kids — gentle, child-safe. Network AI needs the parental switch in Settings → Companion."
+msgstr "Kids — sanft, kindersicher. Netzwerk-AI benötigt den Elternschalter in Einstellungen → Begleiter."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hi — I can see your canvas."
+msgstr "Hi — ich sehe deine Leinwand."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Ask about the picture, or tell me what to change: “make the glitter pinker”, “switch to the brush”, “undo”."
+msgstr "Stelle Fragen zum Bild oder sag mir, was ich ändern soll: “Mach den Glitzer pinker”, “Wechsle zum Pinsel”, “Rückgängig”."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Thought process"
+msgstr "Gedankengang"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Ask about your drawing…"
+msgstr "Stelle Fragen zu deiner Zeichnung…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Companion is off"
+msgstr "Begleiter ist aus"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Stop the answer"
+msgstr "Antwort stoppen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Enter sends · Shift+Enter makes a new line"
+msgstr "Enter sendet · Shift+Enter erzeugt eine neue Zeile"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "You"
+msgstr "Du"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Couldn't answer"
+msgstr "Konnte nicht antworten"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Click to try again"
+msgstr "Klicken, um es erneut zu versuchen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Object Select is not available — check Settings → Diagnostics."
+msgstr "Objektauswahl ist nicht verfügbar — prüfe Einstellungen → Diagnose."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Click the person or object you want to cut out."
+msgstr "Klicke die Person oder das Objekt an, das du ausschneiden möchtest."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pick the Object Select tool (the scan icon), then click the person you want."
+msgstr "Wähle das Werkzeug Objektauswahl (das Scan-Symbol) und klicke dann die gewünschte Person an."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Drop a sticker or image on the canvas first — Boost needs source art."
+msgstr "Lege zuerst einen Sticker oder ein Bild auf der Leinwand ab — Boost braucht Quellgrafik."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Keep"
+msgstr "Behalten"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Keep this moment in your tray"
+msgstr "Diesen Moment in deiner Ablage behalten"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Boosting…"
+msgstr "Boost läuft…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Boost"
+msgstr "Verstärken"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Applying the art direction…"
+msgstr "Art Direction wird angewendet…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Art-direct the composition: hierarchy, depth, motion. One undo."
+msgstr "Komposition künstlerisch ausrichten: Hierarchie, Tiefe, Bewegung. Ein Rückgängig."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Drop a sticker or image onto the canvas first — Boost needs source art."
+msgstr "Lege zuerst einen Sticker oder ein Bild auf der Leinwand ab — Boost braucht Quellgrafik."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Undo Boost"
+msgstr "Boost rückgängig"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Selection"
+msgstr "Auswahl"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Object %1"
+msgstr "Objekt %1"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Cut out — remove the object and fill the hole"
+msgstr "Ausschneiden – Objekt entfernen und Loch füllen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Add the object to the canvas as a layer"
+msgstr "Objekt als Ebene zur Leinwand hinzufügen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Ask about this…"
+msgstr "Dazu fragen…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Track the object through the video"
+msgstr "Objekt durch das Video verfolgen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Make a sticker from the object"
+msgstr "Sticker aus dem Objekt erstellen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Remove the object (AI fill)"
+msgstr "Objekt entfernen (AI-Füllung)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export the object as a PNG"
+msgstr "Objekt als PNG exportieren"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Copy the selected pixels"
+msgstr "Ausgewählte Pixel kopieren"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Cut the selected pixels"
+msgstr "Ausgewählte Pixel ausschneiden"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Clear the selection (not just this bar)"
+msgstr "Auswahl aufheben (nicht nur diese Leiste)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hide this bar — the selection stays"
+msgstr "Diese Leiste ausblenden – die Auswahl bleibt erhalten"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export selected object"
+msgstr "Ausgewähltes Objekt exportieren"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "NAI Paintbrush"
+msgstr "NAI Paintbrush"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Draw it. Cut it out. Ask it. Remix it."
+msgstr "Zeichne es. Schneide es aus. Frag es. Remixe es."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Start drawing"
+msgstr "Zeichnen starten"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open a picture"
+msgstr "Bild öffnen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Capture video frame"
+msgstr "Videoframe aufnehmen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Play with a video…"
+msgstr "Mit einem Video spielen…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "A video is playing — capture the current frame."
+msgstr "Ein Video läuft – aktuellen Frame aufnehmen."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Play a video in VLC first to cut objects out of it."
+msgstr "Spiele zuerst ein Video in VLC ab, um Objekte daraus auszuschneiden."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Recent projects"
+msgstr "Letzte Projekte"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "You can also drop an image or video onto the canvas."
+msgstr "Du kannst auch ein Bild oder Video auf die Leinwand ziehen."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "New here? Press F1 for a plain-language guide to every tool."
+msgstr "Neu hier? Drücke F1 für eine Anleitung in einfacher Sprache zu jedem Werkzeug."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open an image"
+msgstr "Bild öffnen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Tray"
+msgstr "Ablage"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "1 moment"
+msgstr "1 Moment"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "%1 moments"
+msgstr "%1 Momente"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Drag onto the canvas · double-click to jump to this moment"
+msgstr "Auf die Leinwand ziehen · Doppelklick, um zu diesem Moment zu springen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Unmark favorite"
+msgstr "Favorit entfernen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Mark favorite"
+msgstr "Als Favorit markieren"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Jump to this moment"
+msgstr "Zu diesem Moment springen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Make it living (rig this pose)"
+msgstr "Lebendig machen (diese Pose riggen)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Remove from tray"
+msgstr "Aus der Ablage entfernen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Start here"
+msgstr "Hier starten"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "NAI Paintbrush is a small studio: paint, cut things out with AI, pour glitter, and export a picture or a living poster."
+msgstr "NAI Paintbrush ist ein kleines Studio: malen, Dinge mit AI ausschneiden, Glitter Powder streuen und ein Bild oder ein lebendiges Poster exportieren."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Everything else in this guide is one page per tool, in the same order as the tool rail."
+msgstr "Alles andere in dieser Anleitung ist eine Seite pro Werkzeug, in derselben Reihenfolge wie die Werkzeugleiste."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "The 30-second version"
+msgstr "Die 30-Sekunden-Version"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pick a tool in the rail on the left. The bottom bar shows that tool's settings."
+msgstr "Wähle links in der Leiste ein Werkzeug. Die untere Leiste zeigt die Einstellungen dieses Werkzeugs."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Drag on the canvas to make something. Undo in the top bar always takes you back."
+msgstr "Ziehe auf der Leinwand, um etwas zu erstellen. Rückgängig in der oberen Leiste bringt dich immer zurück."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "The two colour squares at the bottom set your paint colour and background colour."
+msgstr "Die beiden Farbquadrate unten legen deine Mal- und Hintergrundfarbe fest."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "When it looks right, Export in the top bar saves a PNG, JPG or WebP."
+msgstr "Wenn es gut aussieht, speichert Export in der oberen Leiste als PNG, JPG oder WebP."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Three ways to begin"
+msgstr "Drei Wege, um loszulegen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Start drawing — open a blank canvas."
+msgstr "Zeichnen starten – öffne eine leere Arbeitsfläche."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open a picture — paint over a photo."
+msgstr "Ein Bild öffnen – über ein Foto malen."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Play a video, then capture a frame — remix a moment."
+msgstr "Spiele ein Video ab und halte dann ein Einzelbild fest – remixe einen Moment."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Where things live"
+msgstr "Wo alles zu finden ist"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Left rail — the tools."
+msgstr "Linke Leiste – die Werkzeuge."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Bottom bar — settings for the active tool, colours, palettes and moods."
+msgstr "Untere Leiste – Einstellungen für das aktive Werkzeug, Farben, Paletten und Stimmungen."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Right inspector — layers, plus the AI actions for a cut-out."
+msgstr "Rechter Inspektor – Ebenen sowie die KI-Aktionen für eine Freistellung."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Top bar — open, save, export, undo/redo, settings and this guide."
+msgstr "Obere Leiste – Öffnen, Speichern, Exportieren, Rückgängig/Wiederholen, Einstellungen und diese Anleitung."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "F1 opens this guide at any time; Esc closes it."
+msgstr "F1 öffnet diese Anleitung jederzeit; Esc schließt sie."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Nothing here is permanent: Undo is always one click away in the top bar."
+msgstr "Nichts hier ist endgültig: Rückgängig ist in der oberen Leiste immer nur einen Klick entfernt."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "On-canvas bars"
+msgstr "Leisten auf der Arbeitsfläche"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "The strips that appear only when they are useful: selection actions, Ask, text editing, the inspector and the video drawer."
+msgstr "Die Leisten, die nur erscheinen, wenn sie nützlich sind: Auswahlaktionen, Fragen, Textbearbeitung, der Inspektor und die Video-Schublade."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "If a bar is in your way, hide it — nothing is lost, and a new selection brings it back."
+msgstr "Wenn eine Leiste im Weg ist, blende sie aus – nichts geht verloren, und eine neue Auswahl bringt sie zurück."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Selection bar (top of the canvas)"
+msgstr "Auswahlleiste (oben auf der Arbeitsfläche)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Appears when you select an area or an AI subject. The label says what it acts on."
+msgstr "Erscheint, wenn du einen Bereich oder ein KI-Motiv auswählst. Die Beschriftung zeigt, worauf sie sich bezieht."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Object group: Cut out (removes the object and fills the hole), Add to canvas (keeps it as a layer), Make sticker, Remove object (AI fill), Export object (PNG)."
+msgstr "Objektgruppe: Freistellen (entfernt das Objekt und füllt die Lücke), Zur Arbeitsfläche hinzufügen (behält es als Ebene), Sticker erstellen, Objekt entfernen (KI-Füllung), Objekt exportieren (PNG)."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Selection group: Copy, Cut, Clear selection."
+msgstr "Auswahlgruppe: Kopieren, Ausschneiden, Auswahl aufheben."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Ask about this — asks the AI about the selected thing. Track in video — follows it through the clip."
+msgstr "Dazu fragen – fragt die KI nach dem ausgewählten Objekt. Im Video verfolgen – folgt ihm durch den Clip."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "The chevron on the right HIDES the bar and keeps your selection. The X in the selection group clears the selection itself."
+msgstr "Der Pfeil rechts BLENDET die Leiste AUS und behält deine Auswahl. Das X in der Auswahlgruppe hebt die Auswahl selbst auf."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hover any icon for its name."
+msgstr "Fahre mit der Maus über ein Symbol, um seinen Namen zu sehen."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Ask bar"
+msgstr "Fragen-Leiste"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Appears under the selection bar after Ask about this. Type a question and press Enter."
+msgstr "Erscheint unter der Auswahlleiste nach „Dazu fragen“. Gib eine Frage ein und drücke Enter."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Text bar"
+msgstr "Textleiste"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Appears when you add or double-click a text layer: the word, style, size, letter spacing and colour. Every change is one undo step."
+msgstr "Erscheint, wenn du eine Textebene hinzufügst oder doppelklickst: Wort, Stil, Größe, Zeichenabstand und Farbe. Jede Änderung ist ein Rückgängig-Schritt."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Inspector (right side)"
+msgstr "Inspektor (rechte Seite)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Layers tab: the layer stack with its own scrollbar, visibility, drag reorder, opacity, transform and motion."
+msgstr "Tab „Ebenen“: der Ebenenstapel mit eigenem Scrollbalken, Sichtbarkeit, Ziehen zum Umsortieren, Deckkraft, Transformation und Bewegung."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "AI tab: select a subject, then find by words, remove, extract, replace background, generative fill, find product, auto collage and the matte controls."
+msgstr "Tab „KI“: Wähle ein Motiv und nutze dann Suche nach Worten, Entfernen, Extrahieren, Hintergrund ersetzen, generative Füllung, Produkt finden, Auto-Collage und die Matte-Steuerung."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Sections collapse; the scrollbar on the right means nothing is lost off the bottom."
+msgstr "Bereiche lassen sich einklappen; der Scrollbalken rechts zeigt, dass unten nichts verloren geht."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Companion (chat)"
+msgstr "Begleiter (Chat)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Opens from the companion button in the top bar. Type and press Enter to chat; it can look at your drawing and suggest ideas."
+msgstr "Öffnet sich über die Begleiter-Schaltfläche in der oberen Leiste. Tippe und drücke Enter zum Chatten; er kann sich deine Zeichnung ansehen und Ideen vorschlagen."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "If a mode is off or Kids mode has network AI disabled, it now tells you why instead of staying silent."
+msgstr "Wenn ein Modus aus ist oder im Kids-Modus die Netzwerk-KI deaktiviert wurde, sagt es dir jetzt warum, statt stumm zu bleiben."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Video drawer"
+msgstr "Video-Schublade"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Appears when a video is open: transport, frame capture, trim, tracked objects and the timeline under the canvas."
+msgstr "Erscheint, wenn ein Video geöffnet ist: Wiedergabesteuerung, Einzelbildaufnahme, Zuschneiden, verfolgte Objekte und die Zeitleiste unter der Arbeitsfläche."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hover an icon for its tooltip; F1 opens this guide at any time."
+msgstr "Fahre mit der Maus über ein Symbol, um den Tooltip zu sehen; F1 öffnet diese Anleitung jederzeit."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Rect Select"
+msgstr "Rechteckauswahl"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Marks a rectangular area so your next action only touches that part of the picture."
+msgstr "Markiert einen rechteckigen Bereich, sodass deine nächste Aktion nur diesen Teil des Bildes betrifft."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Cropping, moving a block of the composition, or protecting everything around it."
+msgstr "Zuschneiden, einen Block der Komposition verschieben oder alles drumherum schützen."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Drag the box first; the inspector then shows what you can do with the area."
+msgstr "Ziehe zuerst den Rahmen auf; der Inspektor zeigt dann, was du mit dem Bereich machen kannst."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Freeform Select"
+msgstr "Freihand-Auswahl"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Draws a freehand outline around anything. Close the loop and that shape becomes your selection."
+msgstr "Zeichnet eine Freihandkontur um beliebige Objekte. Schließe die Schleife, und diese Form wird deine Auswahl."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Odd shapes: a hand, a shoe, a torn edge, a strand of hair."
+msgstr "Ungewöhnliche Formen: eine Hand, ein Schuh, eine ausgefranste Kante, eine Haarsträhne."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "A smooth outline gives a cleaner edge than a rushed one."
+msgstr "Eine glatte Kontur ergibt eine sauberere Kante als eine hastige."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Object Select (AI)"
+msgstr "Objektauswahl (AI)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Paint roughly over a person or object and NAI finds the real edges for you."
+msgstr "Male grob über eine Person oder ein Objekt, und NAI findet die echten Kanten für dich."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Photos and video frames with a clear subject you want to cut out."
+msgstr "Fotos und Videobilder mit einem klaren Motiv, das du freistellen möchtest."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How wide the marking brush is. Use a big one to cover the subject, a small one to tidy the edges."
+msgstr "Wie breit der Markierungspinsel ist. Nimm einen großen, um das Motiv abzudecken, und einen kleinen, um die Kanten zu säubern."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Soft / hard edge"
+msgstr "Weiche / harte Kante"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Soft edge feathers the cut-out; hard edge keeps it crisp. Use soft for hair and fur, hard for products and graphics."
+msgstr "Weiche Kanten federn den Ausschnitt ab; harte Kanten halten ihn scharf. Nimm weich für Haare und Fell, hart für Produkte und Grafiken."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Mark the middle first, tidy the edges after, then press Keep."
+msgstr "Markiere zuerst die Mitte, säubere danach die Kanten und drücke dann auf Behalten."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pencil"
+msgstr "Stift"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "A thin, crisp line that follows your hand exactly. No softness, no fuss."
+msgstr "Eine dünne, klare Linie, die deiner Hand exakt folgt. Keine Weichheit, kein Schnickschnack."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Sketches, outlines, fine detail and clean line art."
+msgstr "Skizzen, Umrisse, feine Details und saubere Lineart."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Line thickness. Down to 1 for a hairline, up to 64 for bold marks."
+msgstr "Linienstärke. Bis auf 1 für eine Haarlinie, bis zu 64 für kräftige Striche."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Zoom in when you need precision — the pencil follows the zoom."
+msgstr "Zoome hinein, wenn du Präzision brauchst – der Stift folgt dem Zoom."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Brush"
+msgstr "Pinsel"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "A smooth, soft-edged stroke. The everyday painting tool."
+msgstr "Ein glatter, weich auslaufender Strich. Das Malwerkzeug für jeden Tag."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Colour, shading, blocking in shapes and gentle blending."
+msgstr "Farbe, Schattierung, Flächen anlegen und sanftes Verblenden."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Brush thickness. Down to 1 for detail; larger for filling areas quickly."
+msgstr "Pinselstärke. Bis auf 1 für Details; größer, um Flächen schnell zu füllen."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "With a pen tablet, pressure changes the stroke as you press harder."
+msgstr "Mit einem Grafiktablett verändert sich der Strich je nach Druck."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Eraser"
+msgstr "Radierer"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Removes paint from the part you are working on, back to see-through."
+msgstr "Entfernt Farbe aus dem Bereich, an dem du arbeitest, bis wieder Transparenz entsteht."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Fixing edges, opening highlights and cleaning up mistakes."
+msgstr "Kanten korrigieren, Highlights freilegen und Fehler ausbessern."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How much is erased in one pass."
+msgstr "Wie viel bei einem Durchgang radiert wird."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "It only erases the part you are on; everything underneath stays untouched."
+msgstr "Es radiert nur den Bereich, an dem du arbeitest; alles darunter bleibt unberührt."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Fill"
+msgstr "Füllen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Click inside a shape to flood it with your current colour."
+msgstr "Klicke in eine Form, um sie mit deiner aktuellen Farbe zu füllen."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Flat colour blocks, backgrounds and quick recolours."
+msgstr "Flache Farbflächen, Hintergründe und schnelles Umfärben."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "If the colour leaks outside, close the gap in the outline first."
+msgstr "Wenn die Farbe nach außen läuft, schließe zuerst die Lücke in der Kontur."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Eyedropper"
+msgstr "Pipette"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Picks a colour already on the canvas and makes it your paint colour."
+msgstr "Nimmt eine bereits auf der Leinwand vorhandene Farbe auf und macht sie zu deiner Malfarbe."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Matching an existing shade exactly."
+msgstr "Einen vorhandenen Farbton exakt treffen."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Handy for keeping a palette consistent across a piece."
+msgstr "Praktisch, um eine Palette über ein ganzes Werk hinweg konsistent zu halten."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Spray"
+msgstr "Sprühpinsel"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Soft bursts of colour, like an airbrush."
+msgstr "Weiche Farbstöße, wie mit einer Airbrush."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Glow, texture, soft shading, stars and atmosphere."
+msgstr "Leuchten, Textur, weiche Schattierung, Sterne und Atmosphäre."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How wide the spray cloud is."
+msgstr "Wie breit die Sprühwolke ist."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Flow"
+msgstr "Fluss"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How much colour each pass lays down. Low is a whisper, high is a blast."
+msgstr "Wie viel Farbe jeder Durchgang aufträgt. Niedrig ist ein Hauch, hoch ein Schwall."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Short taps build up slowly; hold longer for denser colour."
+msgstr "Kurzes Tippen trägt langsam auf; länger halten für dichtere Farbe."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Bristle Paint"
+msgstr "Borstenpinsel"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "A textured brush with visible bristle streaks and slightly shifting colour, like real paint."
+msgstr "Ein strukturierter Pinsel mit sichtbaren Borstenstrichen und leicht wechselnder Farbe, wie bei echter Farbe."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Expressive strokes, hair, grass and fabric."
+msgstr "Ausdrucksstarke Striche, Haare, Gras und Stoff."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Brush width."
+msgstr "Pinselbreite."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How much paint each stroke carries. Low is dry-brush, high is wet and heavy."
+msgstr "Wie viel Farbe jeder Strich trägt. Niedrig = trockener Pinsel, hoch = nass und schwer."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pigment"
+msgstr "Pigment"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How much the colour shifts between bristles. Low is even; high is streaky and hand-made."
+msgstr "Wie stark die Farbe zwischen den Borsten variiert. Niedrig ist gleichmäßig; hoch ist streifig und handgemacht."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Layer two colours to get a genuinely painted, imperfect feel."
+msgstr "Schichte zwei Farben übereinander für ein echtes, unperfektes Malgefühl."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Glitter"
+msgstr "Glitzer"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Scatters tiny sparkling flakes that catch the light. Each flake behaves like a little mirror."
+msgstr "Verstreut winzige funkelnde Flocken, die das Licht einfangen. Jede Flocke wirkt wie ein kleiner Spiegel."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Sparkle on clothes, makeup, posters, lettering and magical accents."
+msgstr "Glanz auf Kleidung, Make-up, Postern, Schriftzügen und magischen Akzenten."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How wide the glitter area is."
+msgstr "Wie breit der Glitzerbereich ist."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Amount"
+msgstr "Menge"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How much glitter falls with each pass."
+msgstr "Wie viel Glitzer bei jedem Durchgang fällt."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Flake"
+msgstr "Flocke"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How big each flake is. Small reads as dust, large reads as craft glitter."
+msgstr "Wie groß jede Flocke ist. Klein wirkt wie Staub, groß wie Bastelglitzer."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Shimmer"
+msgstr "Schimmer"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How much white twinkle and rainbow shift. 0 is quiet metal, 1 is full disco."
+msgstr "Wie viel weißes Funkeln und Regenbogenwechsel. 0 ist ruhiges Metall, 1 ist volle Disco."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Glue"
+msgstr "Kleber"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How strongly flakes stick. Raise it so glitter stays exactly where you put it."
+msgstr "Wie stark die Flocken haften. Erhöhe den Wert, damit Glitzer genau dort bleibt, wo du ihn platzierst."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pour glitter over Glue when you want a shape that does not drift."
+msgstr "Streue Glitzer über Kleber, wenn du eine Form willst, die nicht verrutscht."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Glitter Powder"
+msgstr "Glitter Powder"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "A real craft bench: lay glue, pour glitter, push it around and blow the loose bits away."
+msgstr "Eine echte Bastelwerkbank: Kleber auftragen, Glitzer aufstreuen, ihn herumschieben und die losen Reste wegpusten."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Raised, tactile glitter that looks like actual material on paper."
+msgstr "Erhabener, fühlbarer Glitzer, der wie echtes Material auf Papier aussieht."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Lay a sticky base. Glitter poured on top stays where you put it."
+msgstr "Lege eine klebrige Basis an. Darauf gestreuter Glitzer bleibt, wo du ihn platzierst."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Width of the glue line."
+msgstr "Breite der Kleberlinie."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Sprinkle flakes onto the canvas or over a glue shape."
+msgstr "Streue Flocken auf die Leinwand oder über eine Kleberform."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How wide the sprinkle area is."
+msgstr "Wie breit der Streubereich ist."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How much glitter falls."
+msgstr "Wie viel Glitzer fällt."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How much rainbow sparkle the flakes carry."
+msgstr "Wie viel Regenbogenfunkeln die Flocken haben."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Push"
+msgstr "Schieben"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Nudge and smear loose glitter with your finger."
+msgstr "Losen Glitzer mit dem Finger verschieben und verstreichen."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How much glitter you move at once."
+msgstr "Wie viel Glitzer du auf einmal bewegst."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pour"
+msgstr "Schütten"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Tip a whole pile of glitter onto the canvas."
+msgstr "Schütte einen ganzen Haufen Glitzer auf die Leinwand."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Blow"
+msgstr "Pusten"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "A puff of air that moves loose glitter but leaves glued glitter alone."
+msgstr "Ein Luftstoß, der losen Glitzer bewegt, aber geklebten Glitzer unberührt lässt."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Lift glitter away."
+msgstr "Glitzer abheben."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Width of the cleaned strip."
+msgstr "Breite des gereinigten Streifens."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Glue first, pour next, blow away the excess — the same order as real craft glitter."
+msgstr "Erst kleben, dann streuen, überschüssiges wegpusten – dieselbe Reihenfolge wie bei echtem Bastelglitzer."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Line"
+msgstr "Linie"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Draws a straight line from where you press to where you let go."
+msgstr "Zeichnet eine gerade Linie von der Stelle, an der du drückst, bis dorthin, wo du loslässt."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Rules, stems, underlines and dividers."
+msgstr "Linien, Striche, Unterstreichungen und Trennlinien."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Line thickness."
+msgstr "Linienstärke."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Start and finish outside the canvas if you need a perfectly clean edge."
+msgstr "Beginne und ende außerhalb der Leinwand, wenn du eine perfekt saubere Kante brauchst."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Rectangle"
+msgstr "Rechteck"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Draws a rectangle. Drag to choose its size."
+msgstr "Zeichnet ein Rechteck. Ziehe, um die Größe festzulegen."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Frames, cards, panels and colour blocks."
+msgstr "Rahmen, Karten, Panels und Farbflächen."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Outline thickness."
+msgstr "Konturstärke."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Rounded Rectangle"
+msgstr "Abgerundetes Rechteck"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "A rectangle with soft corners."
+msgstr "Ein Rechteck mit weichen Ecken."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Buttons, stickers, frames and friendly UI-style shapes."
+msgstr "Buttons, Sticker, Rahmen und freundliche Formen im UI-Stil."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Ellipse"
+msgstr "Ellipse"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Draws an oval or a circle."
+msgstr "Zeichnet ein Oval oder einen Kreis."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Faces, dots, bubbles, highlights and soft shapes."
+msgstr "Gesichter, Punkte, Sprechblasen, Highlights und weiche Formen."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Adds real, editable words to the canvas. Click, type in the bar that appears, then tune the look."
+msgstr "Fügt echte, bearbeitbare Wörter zur Leinwand hinzu. Klicke, tippe in die erscheinende Leiste und passe dann das Aussehen an."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Titles, captions, slogans and posters."
+msgstr "Titel, Bildunterschriften, Slogans und Poster."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Word"
+msgstr "Wort"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "The actual text."
+msgstr "Der eigentliche Text."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Style"
+msgstr "Stil"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "The font role used for the words."
+msgstr "Die Schriftart-Rolle, die für die Wörter verwendet wird."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "How big the letters are."
+msgstr "Wie groß die Buchstaben sind."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Space between letters. Tight for headlines, loose for airy captions."
+msgstr "Abstand zwischen den Buchstaben. Eng für Überschriften, locker für luftige Bildunterschriften."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Colour"
+msgstr "Farbe"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "The text colour."
+msgstr "Die Textfarbe."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Double-click a text layer later to edit the words again."
+msgstr "Doppelklicke später auf eine Textebene, um die Wörter erneut zu bearbeiten."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Move"
+msgstr "Bewegen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Drag a layer to move it. Drag empty space to pan the whole view."
+msgstr "Ziehe eine Ebene, um sie zu bewegen. Ziehe in den leeren Bereich, um die gesamte Ansicht zu verschieben."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Rearranging the composition without changing the artwork."
+msgstr "Die Komposition neu anordnen, ohne das Kunstwerk zu verändern."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Panning changes what you see, not where things are."
+msgstr "Das Verschieben der Ansicht ändert, was du siehst, nicht wo die Dinge liegen."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Opens the NAI companion so you can describe what you want in words."
+msgstr "Öffnet den NAI-Begleiter, damit du beschreiben kannst, was du möchtest."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Finding things, replacing backgrounds, inventing ideas and quick edits."
+msgstr "Dinge finden, Hintergründe ersetzen, Ideen entwickeln und schnelle Bearbeitungen."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Say it the way you would say it to a friend — there are no special commands."
+msgstr "Sag es so, wie du es einem Freund sagen würdest – es gibt keine speziellen Befehle."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Bars & buttons"
+msgstr "Leisten & Buttons"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "The controls around the canvas: colour, palettes, looks, precision helpers and the actions that save or share your work."
+msgstr "Die Bedienelemente rund um die Leinwand: Farbe, Paletten, Looks, Präzisionshilfen und die Aktionen zum Speichern oder Teilen deiner Arbeit."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Bottom bar"
+msgstr "Untere Leiste"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Colour chips — the two squares show your paint colour and background colour. Click either one to change it."
+msgstr "Farbfelder – die beiden Quadrate zeigen deine Malfarbe und Hintergrundfarbe. Klicke auf eines, um es zu ändern."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Palettes — ready-made colour sets. Neon is the default; open the list to see all of them."
+msgstr "Paletten – fertige Farbsets. Neon ist die Standardeinstellung; öffne die Liste, um alle zu sehen."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Moods — whole looks, not just colours. Press M to open them."
+msgstr "Stimmungen – ganze Looks, nicht nur Farben. Drücke M, um sie zu öffnen."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Keep — saves the cut-out you just made into your tray."
+msgstr "Behalten — speichert den gerade erstellten Ausschnitt in deiner Ablage."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Boost — NAI's one-click polish for the whole composition."
+msgstr "Boost — der Ein-Klick-Feinschliff von NAI für die gesamte Komposition."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Grid, Rulers, Snap, Pen pressure — visual helpers. Snap lines things up for you; Pen pressure follows your stylus."
+msgstr "Raster, Lineale, Einrasten, Stiftdruck — visuelle Helfer. Einrasten richtet Dinge für dich aus; Stiftdruck folgt deinem Eingabestift."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Top bar"
+msgstr "Obere Leiste"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Undo / Redo — step backwards and forwards through your edits."
+msgstr "Rückgängig / Wiederholen — gehe in deinen Bearbeitungen vor und zurück."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open image / Open video — bring in a picture or a video frame to work on."
+msgstr "Bild öffnen / Video öffnen — lade ein Bild oder ein Videobild zur Bearbeitung."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Save project — keeps layers, text and settings so you can come back later."
+msgstr "Projekt speichern — behält Ebenen, Text und Einstellungen, damit du später zurückkehren kannst."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export — writes a PNG, JPG or WebP you can share."
+msgstr "Exportieren — schreibt eine PNG-, JPG- oder WebP-Datei, die du teilen kannst."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Settings — NAI options for this workspace."
+msgstr "Einstellungen — NAI-Optionen für diesen Arbeitsbereich."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Back to VLC — returns to the player without closing your project."
+msgstr "Zurück zu VLC — kehrt zum Player zurück, ohne dein Projekt zu schließen."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "The + and − buttons at the bottom of the tool rail zoom in and out; the frame button fits the whole picture in view."
+msgstr "Die Schaltflächen + und − unten in der Werkzeugleiste vergrößern und verkleinern die Ansicht; die Rahmen-Schaltfläche passt das ganze Bild in die Ansicht ein."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pick it in the tool rail, then click or drag on the canvas."
+msgstr "Wähle es in der Werkzeugleiste aus und klicke oder ziehe dann auf der Leinwand."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "NAI Paintbrush guide"
+msgstr "NAI Paintbrush-Anleitung"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Guide"
+msgstr "Anleitung"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Everything on this screen, in plain words. Press F1 anytime."
+msgstr "Alles auf diesem Bildschirm, einfach erklärt. Drücke jederzeit F1."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Close the guide (Esc)"
+msgstr "Anleitung schließen (Esc)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "WHAT IT DOES"
+msgstr "WAS ES MACHT"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "USE IT FOR"
+msgstr "WOFÜR DU ES VERWENDEST"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Explain my current tool — %1"
+msgstr "Mein aktuelles Werkzeug erklären — %1"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "CONTROLS"
+msgstr "STEUERUNG"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "No sliders — just click or drag on the canvas."
+msgstr "Keine Schieberegler — klicke einfach auf die Leinwand oder ziehe darauf."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Good to know — "
+msgstr "Gut zu wissen — "
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hover any tool for its name  ·  Scroll for more  ·  F1 opens this guide  ·  Esc closes it"
+msgstr "Fahre mit dem Zeiger über ein Werkzeug, um seinen Namen zu sehen  ·  Scrolle für mehr  ·  F1 öffnet diese Anleitung  ·  Esc schließt sie"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Inspector"
+msgstr "Inspektor"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Inspector (selection)"
+msgstr "Inspektor (Auswahl)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "NAI Settings (diagnostics)"
+msgstr "NAI-Einstellungen (Diagnose)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Close inspector"
+msgstr "Inspektor schließen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Dismiss inspector"
+msgstr "Inspektor ausblenden"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Layers"
+msgstr "Ebenen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "AI"
+msgstr "AI"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hide layer"
+msgstr "Ebene ausblenden"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Show layer"
+msgstr "Ebene einblenden"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "New layer"
+msgstr "Neue Ebene"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Delete layer"
+msgstr "Ebene löschen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Duplicate layer"
+msgstr "Ebene duplizieren"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Move layer up"
+msgstr "Ebene nach oben verschieben"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Move layer down"
+msgstr "Ebene nach unten verschieben"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "X"
+msgstr "X"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Y"
+msgstr "Y"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Motion"
+msgstr "Bewegung"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Subtle"
+msgstr "Dezent"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Strong"
+msgstr "Stark"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Compare"
+msgstr "Vergleichen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Static poster"
+msgstr "Statisches Poster"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Living loop"
+msgstr "Lebendige Schleife"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Invert selection"
+msgstr "Auswahl umkehren"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Grow selection"
+msgstr "Auswahl erweitern"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Shrink selection"
+msgstr "Auswahl verkleinern"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Feather selection"
+msgstr "Auswahl weichzeichnen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Fill holes"
+msgstr "Löcher füllen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Smooth selection"
+msgstr "Auswahl glätten"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Clear selection"
+msgstr "Auswahl aufheben"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Crop to selection"
+msgstr "Auf Auswahl zuschneiden"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Nothing selected"
+msgstr "Nichts ausgewählt"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pick Object Select and paint over the subject you want to work with. NAI will find its edges."
+msgstr "Wähle Objektauswahl und male über das Motiv, mit dem du arbeiten möchtest. NAI findet die Kanten."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Object Select"
+msgstr "Objektauswahl"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Subject library"
+msgstr "Motivbibliothek"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Place subject on canvas"
+msgstr "Motiv auf Leinwand platzieren"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Style last subject — Ink"
+msgstr "Letztes Motiv stylen — Ink"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Derive artwork — Ink"
+msgstr "Kunstwerk ableiten — Ink"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Add contour layer (vector)"
+msgstr "Konturebene hinzufügen (Vektor)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Derive contour — vector"
+msgstr "Kontur ableiten — Vektor"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Find by words…"
+msgstr "Nach Wörtern suchen…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Remove object"
+msgstr "Objekt entfernen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Extract object"
+msgstr "Objekt extrahieren"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Replace background…"
+msgstr "Hintergrund ersetzen…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Generative fill…"
+msgstr "Generative Füllung…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Find product…"
+msgstr "Produkt suchen…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Auto collage…"
+msgstr "Auto-Collage…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Object Select: drag on the mask to paint it in; Alt-drag or right-drag to erase."
+msgstr "Objektauswahl: Auf der Maske ziehen, um sie einzumalen; Alt-Ziehen oder Ziehen mit rechts zum Radieren."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Matte"
+msgstr "Matte"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Soft edge (feathered alpha)"
+msgstr "Weiche Kante (weiches Alpha)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Refining the matte…"
+msgstr "Matte wird verfeinert…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Matte mode"
+msgstr "Matte-Modus"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Recompute the matte and load diagnostics"
+msgstr "Matte neu berechnen und Diagnose laden"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Raw"
+msgstr "Roh"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Refined"
+msgstr "Verfeinert"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Neural"
+msgstr "Neuronal"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Quality"
+msgstr "Qualität"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Balanced"
+msgstr "Ausgewogen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Maximum"
+msgstr "Maximal"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hide boundary and artefact controls"
+msgstr "Rand- und Artefakt-Steuerelemente ausblenden"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Boundary and artefact controls"
+msgstr "Rand- und Artefakt-Steuerelemente"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Boundary band (px)"
+msgstr "Randband (px)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Fine-detail recovery"
+msgstr "Feindetail-Wiederherstellung"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Artefact suppression"
+msgstr "Artefaktunterdrückung"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Enclosed-hole recovery"
+msgstr "Wiederherstellung eingeschlossener Löcher"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Colour decontamination"
+msgstr "Farbdekontaminierung"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Temporal stability"
+msgstr "Zeitliche Stabilität"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Diagnostic view"
+msgstr "Diagnoseansicht"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Semantic"
+msgstr "Semantisch"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Topology"
+msgstr "Topologie"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Trimap"
+msgstr "Trimap"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Alpha"
+msgstr "Alpha"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Foreground"
+msgstr "Vordergrund"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Premultiplied"
+msgstr "Prämultipliziert"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export diagnostics…"
+msgstr "Diagnose exportieren…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Likely identification"
+msgstr "Wahrscheinliche Identifikation"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Add as text"
+msgstr "Als Text hinzufügen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "%1% confident"
+msgstr "%1% sicher"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Find by words"
+msgstr "Nach Wörtern suchen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Describe the object, e.g. “handbag”, “red lipstick”, “microphone”"
+msgstr "Beschreiben Sie das Objekt, z. B. “Handtasche”, “roter Lippenstift”, “Mikrofon”"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "e.g. person wearing the blue jacket"
+msgstr "z. B. Person in der blauen Jacke"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Replace background"
+msgstr "Hintergrund ersetzen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Describe the new background (empty = gentle gradient)"
+msgstr "Beschreiben Sie den neuen Hintergrund (leer = sanfter Farbverlauf)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "e.g. sunset beach"
+msgstr "z. B. Strand bei Sonnenuntergang"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Generative fill"
+msgstr "Generatives Füllen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "What should fill the selection?"
+msgstr "Womit soll die Auswahl gefüllt werden?"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "e.g. a field of flowers"
+msgstr "z. B. ein Blumenfeld"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Auto collage"
+msgstr "Auto-Collage"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Arrange the content layers into a layout. Every piece stays an editable layer."
+msgstr "Ordnen Sie die Inhaltsebenen in einem Layout an. Jedes Element bleibt eine bearbeitbare Ebene."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Free scatter"
+msgstr "Freies Verteilen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Balanced grid"
+msgstr "Ausgewogenes Raster"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Editorial"
+msgstr "Editorial"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Scrapbook"
+msgstr "Scrapbook"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Vertical poster"
+msgstr "Vertikales Poster"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Horizontal banner"
+msgstr "Horizontales Banner"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Previous frame"
+msgstr "Vorheriges Einzelbild"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Play / pause"
+msgstr "Abspielen / Pause"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Decoding frame…"
+msgstr "Einzelbild wird dekodiert…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Add frame to canvas"
+msgstr "Frame zur Leinwand hinzufügen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Close video"
+msgstr "Video schließen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Media"
+msgstr "Medien"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Tracked objects"
+msgstr "Verfolgte Objekte"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Resume tracking"
+msgstr "Verfolgung fortsetzen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pause tracking"
+msgstr "Verfolgung pausieren"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Cancel tracking"
+msgstr "Verfolgung abbrechen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "%1 kf · %2 corr"
+msgstr "%1 KF · %2 Korr"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Delete track"
+msgstr "Track löschen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Make animated sticker from a track"
+msgstr "Animierten Sticker aus einem Track erstellen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Timeline"
+msgstr "Zeitleiste"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Generating thumbnails…"
+msgstr "Miniaturansichten werden erstellt…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Generate thumbnails"
+msgstr "Miniaturansichten erstellen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Stop generating"
+msgstr "Erstellung stoppen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Animated sticker"
+msgstr "Animierter Sticker"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "%1 / %2"
+msgstr "%1 / %2"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "No keyframes"
+msgstr "Keine Keyframes"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Trim"
+msgstr "Zuschneiden"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "–"
+msgstr "–"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "of %1"
+msgstr "von %1"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "color"
+msgstr "Farbe"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Speed"
+msgstr "Geschwindigkeit"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Effect"
+msgstr "Effekt"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Blur"
+msgstr "Weichzeichnen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Dim"
+msgstr "Abdunkeln"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Spotlight"
+msgstr "Spotlight"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Attach to frame"
+msgstr "An Frame anheften"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Place frame on canvas"
+msgstr "Frame auf Leinwand platzieren"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export sequence…"
+msgstr "Sequenz exportieren…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Choose a folder for the animated sticker sequence"
+msgstr "Ordner für die animierte Sticker-Sequenz auswählen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Mood"
+msgstr "Stimmung"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Paper"
+msgstr "Papier"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Headline…"
+msgstr "Überschrift…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Badges"
+msgstr "Badges"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Choose color"
+msgstr "Farbe auswählen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "NAI Settings"
+msgstr "NAI-Einstellungen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "AI models"
+msgstr "AI-Modelle"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Object Select (SAM3)"
+msgstr "Objektauswahl (SAM3)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Not configured"
+msgstr "Nicht konfiguriert"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Path to the SAM model (.ggml)"
+msgstr "Pfad zum SAM-Modell (.ggml)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "CUDA runtime (sam3_cuda.dll) is not available. GPU mode will fail with a specific error; choose CPU."
+msgstr "CUDA-Laufzeit (sam3_cuda.dll) ist nicht verfügbar. Der GPU-Modus schlägt mit einem bestimmten Fehler fehl; wähle CPU."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "CUDA runtime present, but no usable GPU: %1"
+msgstr "CUDA-Laufzeit vorhanden, aber keine nutzbare GPU: %1"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Requested: %1 · CUDA runtime ready · detected: %2. The actual backend is verified when the model loads."
+msgstr "Angefordert: %1 · CUDA-Laufzeit bereit · erkannt: %2. Das tatsächliche Backend wird beim Laden des Modells überprüft."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Ask — vision model"
+msgstr "Fragen — Vision-Modell"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Endpoint URL (OpenAI-compatible)"
+msgstr "Endpoint-URL (OpenAI-kompatibel)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Vision model name"
+msgstr "Vision-Modellname"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "e.g. gpt-4o-mini"
+msgstr "z. B. gpt-4o-mini"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Vision API key"
+msgstr "Vision-API-Schlüssel"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Environment override"
+msgstr "Umgebungs-Override"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Stored"
+msgstr "Gespeichert"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Not set"
+msgstr "Nicht gesetzt"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Bearer token (optional for local endpoints)"
+msgstr "Bearer-Token (optional für lokale Endpunkte)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "PAINTBRUSH_VLM_API_KEY is set in the environment and overrides the key stored here."
+msgstr "PAINTBRUSH_VLM_API_KEY ist in der Umgebung gesetzt und überschreibt den hier gespeicherten Schlüssel."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Neural matting"
+msgstr "Neuronales Matting"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "ViTMatte model directory"
+msgstr "ViTMatte-Modellverzeichnis"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Unavailable"
+msgstr "Nicht verfügbar"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Directory with vitmatte-s-*.onnx + manifest.json"
+msgstr "Verzeichnis mit vitmatte-s-*.onnx + manifest.json"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "AI companion"
+msgstr "AI-Begleiter"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Endpoint URL"
+msgstr "Endpoint-URL"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Companion model"
+msgstr "Begleiter-Modell"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Model name"
+msgstr "Modellname"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Companion API key"
+msgstr "Begleiter-API-Schlüssel"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "PAINTBRUSH_ASSISTANT_API_KEY is set in the environment and overrides the key stored here."
+msgstr "PAINTBRUSH_ASSISTANT_API_KEY ist in der Umgebung gesetzt und überschreibt den hier gespeicherten Schlüssel."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Keys entered here are saved in the plain-text VLC configuration file and reused on the next start. Environment variables (PAINTBRUSH_VLM_API_KEY / PAINTBRUSH_ASSISTANT_API_KEY) take precedence when set. Keys are never written to logs."
+msgstr "Hier eingegebene Schlüssel werden in der Klartext-Konfigurationsdatei von VLC gespeichert und beim nächsten Start wiederverwendet. Umgebungsvariablen (PAINTBRUSH_VLM_API_KEY / PAINTBRUSH_ASSISTANT_API_KEY) haben Vorrang, wenn sie gesetzt sind. Schlüssel werden niemals in Protokolle geschrieben."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Allow network AI in Kids mode"
+msgstr "Netzwerk-AI im Kids-Modus erlauben"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Parental control. Off keeps Kids mode offline; on lets it use this AI provider. Only a parent or guardian should enable it."
+msgstr "Elterliche Kontrolle. Aus hält den Kids-Modus offline; An erlaubt ihm, diesen AI-Anbieter zu nutzen. Nur ein Elternteil oder Erziehungsberechtigter sollte dies aktivieren."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Allow network AI in Kids mode (parental control)"
+msgstr "Netzwerk-AI im Kids-Modus erlauben (elterliche Kontrolle)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Image generation"
+msgstr "Bildgenerierung"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Image endpoint"
+msgstr "Bild-Endpunkt"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Image API base URL, e.g. https://…/v1"
+msgstr "Basis-URL der Bild-API, z. B. https://…/v1"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Image model"
+msgstr "Bildmodell"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Image model name"
+msgstr "Bildmodellname"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Image API key"
+msgstr "Bild-API-Schlüssel"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Used by Finish the painting, Remove object, Generative fill and Replace background. Without a real image model those actions fall back to local pixel operations; Finish the painting needs a provider."
+msgstr "Wird von „Gemälde fertigstellen“, „Objekt entfernen“, „Generative Füllung“ und „Hintergrund ersetzen“ verwendet. Ohne ein echtes Bildmodell fallen diese Aktionen auf lokale Pixeloperationen zurück; „Gemälde fertigstellen“ benötigt einen Anbieter."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Capabilities"
+msgstr "Funktionen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Local heal — pixel propagation, not generative"
+msgstr "Lokales Heilen — Pixelausbreitung, nicht generativ"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Object tracking"
+msgstr "Objektverfolgung"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Idle"
+msgstr "Inaktiv"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Product lookup"
+msgstr "Produktsuche"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Exact-frame tolerance"
+msgstr "Toleranz für exakte Frames"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Used by AI crops and exports. Filmstrip thumbnails accept the nearest keyframe and are labelled with its real time."
+msgstr "Wird von AI-Zuschnitten und Exporten verwendet. Filmstreifen-Miniaturansichten übernehmen das nächstgelegene Keyframe und werden mit dessen tatsächlicher Zeit beschriftet."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Diagnostics"
+msgstr "Diagnose"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Run decoder + SAM self test"
+msgstr "Decoder- und SAM-Selbsttest ausführen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Changes apply immediately — no restart needed. The AI model reloads in the background when it changes."
+msgstr "Änderungen werden sofort übernommen — kein Neustart nötig. Das AI-Modell wird im Hintergrund neu geladen, wenn es sich ändert."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hide"
+msgstr "Ausblenden"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Show"
+msgstr "Anzeigen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hide API key"
+msgstr "API-Schlüssel ausblenden"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Show API key"
+msgstr "API-Schlüssel anzeigen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Foreground colour"
+msgstr "Vordergrundfarbe"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Background colour"
+msgstr "Hintergrundfarbe"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Use colour %1"
+msgstr "Farbe %1 verwenden"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "%1 palette colour %2"
+msgstr "%1 Palettenfarbe %2"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "%1 — click to paint"
+msgstr "%1 — zum Malen anklicken"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Palettes"
+msgstr "Paletten"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open saved palettes"
+msgstr "Gespeicherte Paletten öffnen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Saved palettes — active: %1"
+msgstr "Gespeicherte Paletten — aktiv: %1"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Saved palettes"
+msgstr "Gespeicherte Paletten"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Art direction: mood, paper, type, badges"
+msgstr "Art Direction: Stimmung, Papier, Schrift, Badges"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Paper, light, palette, type and badges in one look"
+msgstr "Papier, Licht, Palette, Schrift und Badges in einem Look"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Boost the composition"
+msgstr "Komposition verstärken"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Undo the last Boost"
+msgstr "Letzten Boost rückgängig machen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Cancel Boost"
+msgstr "Boost abbrechen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Keep this cut-out"
+msgstr "Diesen Freisteller behalten"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Object Select is unavailable — configure the SAM model in NAI Settings."
+msgstr "Objektauswahl ist nicht verfügbar — konfiguriere das SAM-Modell in den NAI-Einstellungen."
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Keep this cut-out in your tray"
+msgstr "Diesen Freisteller in deiner Ablage behalten"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Use palette %1"
+msgstr "Palette %1 verwenden"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Word…"
+msgstr "Wort…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Close editor"
+msgstr "Editor schließen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Grid"
+msgstr "Raster"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Rulers"
+msgstr "Lineale"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Snap to grid"
+msgstr "Am Raster einrasten"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Pen pressure"
+msgstr "Stiftdruck"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Soft edge — click for a crisp boundary"
+msgstr "Weiche Kante — klicken für eine scharfe Begrenzung"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hard edge — click for a feathered boundary"
+msgstr "Harte Kante — klicken für eine weichgezeichnete Begrenzung"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Move layer (drag object) / pan (drag empty)"
+msgstr "Ebene bewegen (Objekt ziehen) / Ansicht verschieben (leere Fläche ziehen)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Zoom in"
+msgstr "Vergrößern"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Zoom out"
+msgstr "Verkleinern"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Fit to view"
+msgstr "An Ansicht anpassen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open a video"
+msgstr "Video öffnen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Save Paintbrush project"
+msgstr "Paintbrush-Projekt speichern"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export image"
+msgstr "Bild exportieren"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export Living Poster frames (3 s, 24 fps)"
+msgstr "Living-Poster-Frames exportieren (3 s, 24 fps)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export Living Poster video (MP4/H.264)"
+msgstr "Living-Poster-Video exportieren (MP4/H.264)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export Living Poster video (WebM/VP9, transparent)"
+msgstr "Living-Poster-Video exportieren (WebM/VP9, transparent)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Project info"
+msgstr "Projektinfo"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Relink missing media…"
+msgstr "Fehlende Medien neu verknüpfen…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Relink source media"
+msgstr "Quellmedien neu verknüpfen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open the guide (F1)"
+msgstr "Anleitung öffnen (F1)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Plain-language guide to every tool (F1)"
+msgstr "Verständliche Anleitung zu jedem Werkzeug (F1)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hide companion"
+msgstr "Begleiter ausblenden"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Show companion"
+msgstr "Begleiter einblenden"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Hide inspector"
+msgstr "Inspektor ausblenden"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Show inspector"
+msgstr "Inspektor einblenden"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Undo"
+msgstr "Rückgängig"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Redo"
+msgstr "Wiederholen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "New blank canvas"
+msgstr "Neue leere Leinwand"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open image…"
+msgstr "Bild öffnen…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open video…"
+msgstr "Video öffnen…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Save project"
+msgstr "Projekt speichern"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export image…"
+msgstr "Bild exportieren…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Export Living Poster video (MP4)"
+msgstr "Living-Poster-Video exportieren (MP4)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Living Poster export options…"
+msgstr "Living-Poster-Exportoptionen…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Living Poster video (WebM, transparent)"
+msgstr "Living-Poster-Video (WebM, transparent)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Living Poster frames (PNG sequence, 3 s)"
+msgstr "Living-Poster-Frames (PNG-Sequenz, 3 s)"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Back to VLC"
+msgstr "Zurück zu VLC"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "SOURCE"
+msgstr "QUELLE"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Restore monitor"
+msgstr "Monitor wiederherstellen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Theater monitor"
+msgstr "Theatermonitor"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Stop video and release the monitor"
+msgstr "Video stoppen und Monitor freigeben"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "PTS"
+msgstr "PTS"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "FRAME "
+msgstr "FRAME "
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "REMAIN "
+msgstr "VERBLEIBEND "
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Go to start"
+msgstr "Zum Anfang"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Go to end"
+msgstr "Zum Ende"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Show monitor"
+msgstr "Monitor einblenden"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Collapse monitor"
+msgstr "Monitor einklappen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Restore"
+msgstr "Wiederherstellen"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "Open copy…"
+msgstr "Kopie öffnen…"
+
+#: modules/gui/qt/paintbrush (auto-translated)
+msgid "NAI PaintBrush"
+msgstr "NAI PaintBrush"
+
+
+#: modules/gui/qt/paintbrush (activated legacy translation)
+msgid "Send"
+msgstr "Senden"
+
+#: modules/gui/qt/paintbrush (activated legacy translation)
+msgid "Layer %1"
+msgstr "Ebene %1"
+

@@ -17,6 +17,7 @@
 #include <QMutex>
 #include <QMutexLocker>
 #include <QRandomGenerator>
+#include <QCoreApplication>
 
 namespace paintbrush {
 
@@ -139,7 +140,8 @@ void PaintbrushDocument::resetDocument(const QSize &size)
     }
 
     /* Start with one empty raster layer, like Paintbrush does. */
-    m_layers.append(CanvasLayer::createRaster(m_canvasSize, QStringLiteral("Layer 1")));
+    m_layers.append(CanvasLayer::createRaster(
+        m_canvasSize, QCoreApplication::translate("Paintbrush", "Layer %1").arg(1)));
     m_layers[0].id = m_nextLayerId++;
     m_currentLayerIndex = 0;
 

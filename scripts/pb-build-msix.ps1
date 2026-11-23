@@ -102,6 +102,20 @@ foreach ($dll in @((Join-Path $build 'lib\libvlc.dll'),
     $copied++
 }
 
+# gettext catalogs: compile from po/ immediately before staging so the package
+# can never ship a stale or mixed .mo set; the flat runtime resolves
+# <base>\locale beside the executable.
+try {
+    & (Join-Path $PSScriptRoot 'pb-i18n-compile.ps1') | ForEach-Object { Write-Host $_ }
+} catch {
+    throw "i18n catalog compile failed: $($_.Exception.Message)"
+}
+$localeSrc = Join-Path $build 'src\locale'
+if (-not (Test-Path -LiteralPath $localeSrc)) {
+    throw "Compiled gettext catalogs not found: $localeSrc"
+}
+Copy-Item -LiteralPath $localeSrc -Destination (Join-Path $stage 'locale') -Recurse -Force
+
 # plugins: VLC discovers <libvlc dir>\plugins (config_GetSysPath) and the cache
 $pluginDir = Join-Path $stage 'plugins'
 New-Item -ItemType Directory -Path $pluginDir -Force | Out-Null

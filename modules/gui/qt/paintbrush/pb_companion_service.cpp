@@ -8,6 +8,8 @@
 #include "pb_assistant_service.hpp"
 #include "pb_common.hpp"
 
+#include <vlc_configuration.h>
+
 #include <QDateTime>
 
 namespace paintbrush {
@@ -29,6 +31,7 @@ void CompanionService::configure(vlc_object_t *obj)
     /* Kids mode keeps content local unless a responsible adult explicitly
      * enables network AI. */
     m_networkAllowed = pbConfigBool(obj, "paintbrush-kids-network");
+    m_talkLevel = qBound(0, pbConfigInt(obj, "paintbrush-companion-talk"), 2);
 }
 
 void CompanionService::setAssistantService(AssistantService *assistant)
@@ -64,6 +67,8 @@ void CompanionService::setTalkLevel(int level)
     if (m_talkLevel == level)
         return;
     m_talkLevel = level;
+    if (m_obj)
+        config_PutInt("paintbrush-companion-talk", level);
 }
 
 bool CompanionService::analysisAllowed() const

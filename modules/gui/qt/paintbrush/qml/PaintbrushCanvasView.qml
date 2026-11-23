@@ -44,11 +44,22 @@ import VLC.Paintbrush
             return 10000
         }
 
-        ColorContext {
-            palette: VLCStyle.palette
-            id: theme
-            colorSet: ColorContext.View
+    ColorContext {
+        palette: VLCStyle.palette
+        id: theme
+        colorSet: ColorContext.View
+    }
+
+    /* Selecting the Ask tool must do something visible immediately: open the
+     * compact Ask input instead of silently arming a tool whose only effect
+     * used to require a canvas click. */
+    Connections {
+        target: canvas
+        function onToolChanged(t) {
+            if (t === 20)
+                PaintbrushCtx.beginAsk()
         }
+    }
 
         Component.onCompleted: {
             canvas.parent = root
@@ -161,6 +172,241 @@ import VLC.Paintbrush
                        : Qt.darker(theme.bg.primary, 1.06)
             }
         }
+
+    /* On-canvas transform gizmo for the Move tool: 4 aspect-locked corner
+     * handles + a rotate handle. One undo command per gesture; the layer
+     * itself updates live through the controller's gesture API. */
+    Item {
+        id: transformGizmo
+
+        anchors.fill: parent
+        z: 6
+
+        property int revision: 0
+        property bool dragging: false
+        property real boxX: 0
+        property real boxY: 0
+        property real boxW: 0
+        property real boxH: 0
+        property real boxRot: 0
+        property real startW: 0
+        property real startH: 0
+        property real startScale: 1
+        property real previewScale: 1
+        property real startRot: 0
+        property real previewRot: 0
+        property real startDist: 1
+        property real startAngle: 0
+        property real centerX: 0
+        property real centerY: 0
+
+        readonly property var overlayData: {
+            transformGizmo.revision
+            canvas.zoom
+            canvas.panOffset
+            return canvas.layerGizmo(PaintbrushCtx.document.currentLayerIndex)
+        }
+        readonly property int gizmoLayerIndex:
+            (overlayData && overlayData.index !== undefined) ? overlayData.index : -1
+
+        visible: canvas.tool === 15 && gizmoLayerIndex >= 0
+                 && !PaintbrushCtx.askInputVisible
+
+        function syncFromOverlay() {
+            if (dragging || !overlayData || overlayData.index === undefined)
+                return
+            boxX = overlayData.x
+            boxY = overlayData.y
+            boxW = overlayData.width
+            boxH = overlayData.height
+            boxRot = overlayData.rotation
+            previewScale = overlayData.scale
+            previewRot = overlayData.rotation
+        }
+        onOverlayDataChanged: syncFromOverlay()
+        Component.onCompleted: syncFromOverlay()
+
+        Connections {
+            target: PaintbrushCtx
+            function onDocumentChanged() {
+                transformGizmo.revision++
+                if (!transformGizmo.dragging)
+                    Qt.callLater(transformGizmo.syncFromOverlay)
+            }
+            function onLayerTransformChanged() {
+                transformGizmo.revision++
+                if (!transformGizmo.dragging)
+                    Qt.callLater(transformGizmo.syncFromOverlay)
+            }
+        }
+
+        Item {
+            id: gizmoBox
+
+            x: transformGizmo.boxX
+            y: transformGizmo.boxY
+            width: transformGizmo.boxW
+            height: transformGizmo.boxH
+            rotation: transformGizmo.boxRot
+            transformOrigin: Item.Center
+            visible: transformGizmo.gizmoLayerIndex >= 0
+
+            Rectangle {
+                anchors.fill: parent
+                color: "transparent"
+                border.width: 1
+                border.color: theme.accent
+                antialiasing: true
+            }
+
+            Repeater {
+                model: [ { ax: 0, ay: 0, cursor: Qt.SizeFDiagCursor },
+                         { ax: 1, ay: 0, cursor: Qt.SizeBDiagCursor },
+                         { ax: 0, ay: 1, cursor: Qt.SizeBDiagCursor },
+                         { ax: 1, ay: 1, cursor: Qt.SizeFDiagCursor } ]
+
+                delegate: Rectangle {
+                    required property var modelData
+
+                    width: 14
+                    height: 14
+                    radius: 2
+                    x: modelData.ax * gizmoBox.width - width / 2
+                    y: modelData.ay * gizmoBox.height - height / 2
+                    color: theme.bg.primary
+                    border.width: 2
+                    border.color: theme.accent
+
+                    HoverHandler { cursorShape: modelData.cursor }
+
+                    DragHandler {
+                        id: resizeDrag
+                        target: null
+
+                        onActiveChanged: {
+                            if (active) {
+                                transformGizmo.dragging = true
+                                transformGizmo.startW = transformGizmo.boxW
+                                transformGizmo.startH = transformGizmo.boxH
+                                transformGizmo.startScale = transformGizmo.previewScale
+                                transformGizmo.previewRot = transformGizmo.boxRot
+                                transformGizmo.centerX = transformGizmo.boxX
+                                                          + transformGizmo.boxW / 2
+                                transformGizmo.centerY = transformGizmo.boxY
+                                                          + transformGizmo.boxH / 2
+                                const p = parent.mapToItem(transformGizmo,
+                                                           resizeDrag.centroid.position)
+                                transformGizmo.startDist = Math.max(
+                                    1, Math.hypot(p.x - transformGizmo.centerX,
+                                                  p.y - transformGizmo.centerY))
+                                PaintbrushCtx.beginLayerTransform(
+                                    transformGizmo.gizmoLayerIndex)
+                            } else {
+                                PaintbrushCtx.endLayerTransform(
+                                    transformGizmo.gizmoLayerIndex)
+                                transformGizmo.dragging = false
+                                transformGizmo.revision++
+                                Qt.callLater(transformGizmo.syncFromOverlay)
+                            }
+                        }
+                        onActiveTranslationChanged: {
+                            if (!active || !transformGizmo.dragging)
+                                return
+                            const p = parent.mapToItem(transformGizmo,
+                                                       resizeDrag.centroid.position)
+                            const dist = Math.hypot(p.x - transformGizmo.centerX,
+                                                    p.y - transformGizmo.centerY)
+                            const s = Math.max(0.05, Math.min(
+                                10, transformGizmo.startScale
+                                    * dist / transformGizmo.startDist))
+                            const ratio = s / transformGizmo.startScale
+                            const w = transformGizmo.startW * ratio
+                            const h = transformGizmo.startH * ratio
+                            transformGizmo.boxW = w
+                            transformGizmo.boxH = h
+                            transformGizmo.boxX = transformGizmo.centerX - w / 2
+                            transformGizmo.boxY = transformGizmo.centerY - h / 2
+                            transformGizmo.previewScale = s
+                            PaintbrushCtx.updateLayerTransform(
+                                transformGizmo.gizmoLayerIndex, s,
+                                transformGizmo.previewRot)
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                width: 1
+                height: 30
+                x: gizmoBox.width / 2 - width / 2
+                y: -30
+                color: theme.accent
+            }
+
+            Rectangle {
+                width: 16
+                height: 16
+                radius: 8
+                x: gizmoBox.width / 2 - width / 2
+                y: -44
+                color: theme.accent
+                border.width: 2
+                border.color: theme.bg.primary
+
+                HoverHandler { cursorShape: Qt.CrossCursor }
+
+                DragHandler {
+                    id: rotateDrag
+                    target: null
+
+                    onActiveChanged: {
+                        if (active) {
+                            transformGizmo.dragging = true
+                            transformGizmo.startScale = transformGizmo.previewScale
+                            transformGizmo.startRot = transformGizmo.boxRot
+                            transformGizmo.centerX = transformGizmo.boxX
+                                                      + transformGizmo.boxW / 2
+                            transformGizmo.centerY = transformGizmo.boxY
+                                                      + transformGizmo.boxH / 2
+                            const p = parent.mapToItem(transformGizmo,
+                                                       rotateDrag.centroid.position)
+                            transformGizmo.startAngle = Math.atan2(
+                                p.y - transformGizmo.centerY,
+                                p.x - transformGizmo.centerX)
+                            PaintbrushCtx.beginLayerTransform(
+                                transformGizmo.gizmoLayerIndex)
+                        } else {
+                            PaintbrushCtx.endLayerTransform(
+                                transformGizmo.gizmoLayerIndex)
+                            transformGizmo.dragging = false
+                            transformGizmo.revision++
+                            Qt.callLater(transformGizmo.syncFromOverlay)
+                        }
+                    }
+                    onActiveTranslationChanged: {
+                        if (!active || !transformGizmo.dragging)
+                            return
+                        const p = parent.mapToItem(transformGizmo,
+                                                   rotateDrag.centroid.position)
+                        const angle = Math.atan2(p.y - transformGizmo.centerY,
+                                                 p.x - transformGizmo.centerX)
+                        let rot = transformGizmo.startRot
+                                  + (angle - transformGizmo.startAngle)
+                                    * 180 / Math.PI
+                        if (rot > 180)
+                            rot -= 360
+                        if (rot < -180)
+                            rot += 360
+                        transformGizmo.boxRot = rot
+                        transformGizmo.previewRot = rot
+                        PaintbrushCtx.updateLayerTransform(
+                            transformGizmo.gizmoLayerIndex,
+                            transformGizmo.startScale, rot)
+                    }
+                }
+            }
+        }
+    }
 
     /* contextual toolbar: selection / object actions */
     Rectangle {

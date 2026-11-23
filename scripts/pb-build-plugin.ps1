@@ -12,6 +12,13 @@ if ($code -eq 0) {
     $env:PATH = (Join-Path $root 'win64-meson\bin') + ';' + (Join-Path $root 'win64-meson\lib') + ';' + (Join-Path $root 'win64-meson\src') + ';' + $env:PATH
     & (Join-Path $root 'win64-meson\bin\vlc-cache-gen.exe') (Join-Path $root 'win64-meson\modules') 2>&1 | ForEach-Object { "$_" } | Select-Object -Last 2
     Write-Output ("plugins.dat: " + (Get-Item (Join-Path $root 'win64-meson\modules\plugins.dat')).LastWriteTime)
+    try {
+        & (Join-Path $root 'scripts\pb-i18n-compile.ps1') | ForEach-Object { "$_" }
+    } catch {
+        Write-Output ("I18N_EXIT=failed: " + $_.Exception.Message)
+        Write-Output "NINJA_EXIT=$code"
+        exit 1
+    }
 }
 Write-Output "NINJA_EXIT=$code"
 exit $code

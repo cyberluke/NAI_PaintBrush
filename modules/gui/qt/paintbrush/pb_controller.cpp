@@ -29,6 +29,7 @@ extern "C" __declspec(dllimport) HRESULT WINAPI
 #endif
 #include <QFileInfo>
 #include <QClipboard>
+#include <QCoreApplication>
 #include <QGuiApplication>
 #include <QMimeData>
 #include <QStandardPaths>
@@ -1799,9 +1800,10 @@ void PaintbrushController::redo()
 
 void PaintbrushController::newLayer()
 {
-    CanvasLayer layer = CanvasLayer::createRaster(m_document.canvasSize(),
-                                                  QStringLiteral("Layer %1")
-                                                      .arg(m_document.layerCount() + 1));
+    CanvasLayer layer = CanvasLayer::createRaster(
+        m_document.canvasSize(),
+        QCoreApplication::translate("Paintbrush", "Layer %1")
+            .arg(m_document.layerCount() + 1));
     InsertLayerCommand cmd;
     cmd.desc = QStringLiteral("Add layer");
     QList<CanvasLayer> layers = m_document.layers();
@@ -2019,6 +2021,7 @@ void PaintbrushController::updateLayerMove(const QPointF &canvasPos)
     layer->position = position;
     if (m_canvas)
         m_canvas->markCanvasDirty();
+    emit layerTransformChanged();
 }
 
 void PaintbrushController::endLayerMove()
@@ -2078,6 +2081,71 @@ void PaintbrushController::transformLayer(int index, double scale, double rotati
     if (m_canvas)
         m_canvas->markCanvasDirty();
     emit documentChanged();
+}
+
+void PaintbrushController::beginLayerTransform(int index)
+{
+    if (m_layerTransformActive)
+        return;
+    CanvasLayer *layer = m_document.layerAt(index);
+    if (!layer || layer->locked)
+        return;
+    if (layer->type != LAYER_IMAGE && layer->type != LAYER_TEXT &&
+        layer->type != LAYER_STICKER && layer->type != LAYER_REFERENCE &&
+        layer->type != LAYER_GENERATED)
+        return;
+    m_layerTransformActive = true;
+    m_layerTransformIndex = index;
+    m_layerTransformId = layer->id;
+    m_layerTransformBefore = layer->transform();
+}
+
+void PaintbrushController::updateLayerTransform(int index, double scale,
+                                                double rotation)
+{
+    if (!m_layerTransformActive || index != m_layerTransformIndex)
+        return;
+    CanvasLayer *layer = m_document.layerAt(index);
+    if (!layer || layer->id != m_layerTransformId)
+    {
+        m_layerTransformActive = false;
+        return;
+    }
+    const float s = float(qBound(0.01, scale, 64.0));
+    const float r = float(qBound(-360.0, rotation, 360.0));
+    if (qFuzzyCompare(layer->scale, s) && qFuzzyCompare(layer->rotation, r))
+        return;
+    /* Live preview: no undo entry per mouse event; endLayerTransform() pushes
+     * exactly one SetTransformCommand. */
+    layer->scale = s;
+    layer->rotation = r;
+    if (m_canvas)
+        m_canvas->markCanvasDirty();
+    emit layerTransformChanged();
+}
+
+void PaintbrushController::endLayerTransform(int index)
+{
+    if (!m_layerTransformActive || index != m_layerTransformIndex)
+        return;
+    m_layerTransformActive = false;
+    CanvasLayer *layer = m_document.layerAt(index);
+    if (!layer || layer->id != m_layerTransformId)
+        return;
+    const QTransform after = layer->transform();
+    if (after == m_layerTransformBefore)
+        return;
+    SetTransformCommand cmd;
+    cmd.desc = QStringLiteral("Resize / rotate layer");
+    cmd.layerId = layer->id;
+    cmd.layerIndex = index;
+    cmd.before = m_layerTransformBefore;
+    cmd.after = after;
+    m_undoStack.pushSetTransform(cmd);
+    if (m_canvas)
+        m_canvas->markCanvasDirty();
+    emit documentChanged();
+    setStatus(QStringLiteral("Layer resized / rotated."));
 }
 
 void PaintbrushController::moveImageLayer(int index, const QPointF &position)
@@ -5466,11 +5534,13 @@ void PaintbrushController::onGenerationResult(const QString &requestId,
 {
     if (requestId != m_generationRequestId)
         return;
-    addResultLayer(result, QStringLiteral("AI result"));
+    const QString description = m_generationDesc;
+    addResultLayer(result, description);
+    m_generationDesc = QStringLiteral("AI result");
     if (m_canvas)
         m_canvas->markCanvasDirty();
     emit generationStateChanged();
-    setStatus(QStringLiteral("AI result added as a new layer"));
+    setStatus(QStringLiteral("%1 added as a new layer").arg(description));
     triggerCompanionEvent(QStringLiteral("ai-result"));
 }
 
@@ -5516,7 +5586,8 @@ void PaintbrushController::companionAsk(const QString &question)
     {
         appendAssistantMessage(QStringLiteral("system"),
             QStringLiteral("Kids mode is offline, so the companion cannot answer "
-                           "yet. A grown-up can enable network AI in Settings → AI."));
+                           "yet. A grown-up can enable “Allow network AI in Kids "
+                           "mode” in Settings → Companion."));
         return;
     }
     if (m_assistantBusy)
@@ -5758,6 +5829,18 @@ void PaintbrushController::setCompanionTalkLevel(int level)
     emit companionStateChanged();
 }
 
+void PaintbrushController::setKidsNetworkAllowed(bool allowed)
+{
+    m_companion.setNetworkAllowed(allowed);
+    config_PutInt("paintbrush-kids-network", allowed ? 1 : 0);
+    emit companionStateChanged();
+    emit serviceAvailabilityChanged();
+    setStatus(allowed
+                  ? QStringLiteral("Kids mode network AI is on.")
+                  : QStringLiteral("Kids mode is offline; a grown-up can turn "
+                                   "network AI on in Settings → Companion."));
+}
+
 void PaintbrushController::setCompanionMode(int mode)
 {
     m_companion.setMode(mode);
@@ -5770,6 +5853,10 @@ void PaintbrushController::setCompanionMode(int mode)
 void PaintbrushController::onCompanionMessage(const QString &text, const QString &role)
 {
     appendAssistantMessage(role, text);
+    /* A spontaneous observation: the dock may surface the conversation so the
+     * user actually sees it (the product goal is a companion that reacts to
+     * the drawing, not a hidden log). */
+    emit proactiveMessageArrived();
 }
 
 void PaintbrushController::appendAssistantMessage(const QString &role,
@@ -5791,15 +5878,68 @@ void PaintbrushController::appendAssistantMessage(const QString &role,
 
 QString PaintbrushController::assistantSystemPrompt() const
 {
+    QString modeLine;
+    switch (m_companion.mode())
+    {
+    case CompanionService::MODE_OFF:
+        modeLine = QStringLiteral("Mode: Off — the companion is disabled; if you "
+                                  "are somehow reached, say so.");
+        break;
+    case CompanionService::MODE_QUIET:
+        modeLine = QStringLiteral("Mode: Quiet — answer only when spoken to; "
+                                  "never volunteer observations.");
+        break;
+    case CompanionService::MODE_KIDS:
+        modeLine = QStringLiteral("Mode: Kids — gentle, simple and child-safe; "
+                                  "no scary or adult content.");
+        break;
+    case CompanionService::MODE_BUDDY:
+    default:
+        modeLine = QStringLiteral("Mode: Buddy — warm, playful and concise.");
+        break;
+    }
+
+    QString talkLine;
+    switch (m_companion.talkLevel())
+    {
+    case 0:
+        talkLine = QStringLiteral("Talk: only when asked — no spontaneous remarks.");
+        break;
+    case 1:
+        talkLine = QStringLiteral("Talk: less — react only to major moments.");
+        break;
+    default:
+        talkLine = QStringLiteral("Talk: talk — react often, but never spam.");
+        break;
+    }
+
     return QStringLiteral(
-        "You are the NAI Paintbrush companion, a friendly creative assistant "
-        "inside a painting and collage app. You can see the current canvas "
-        "image. Keep answers short, warm and practical, in the user's language. "
-        "When the user asks you to change the editor, call one of the provided "
-        "tools instead of only describing what to do. Never claim you changed "
-        "something unless a tool result confirms it. If a request is ambiguous, "
-        "ask one short question. Do not mention internal parameter names, "
-        "renderers, APIs or code.");
+               "You are the NAI Paintbrush companion, a friendly creative "
+               "assistant inside a painting and collage app. You can see the "
+               "current canvas image. Keep answers short, warm and practical, "
+               "in the user's language. ")
+        + modeLine + QLatin1Char(' ') + talkLine + QLatin1Char(' ')
+        + QStringLiteral(
+              "When the user asks you to change the editor, call one of the "
+              "provided tools instead of only describing what to do. Never "
+              "claim you changed something unless a tool result confirms it. "
+              "If a request is ambiguous, ask one short question. Do not "
+              "mention internal parameter names, renderers, APIs or code. "
+              "Capability facts you must not contradict: "
+              "(1) Object Select creates an AI subject mask. It does NOT "
+              "select brush strokes, circles or shapes, and it does NOT grab "
+              "or move pieces. "
+              "(2) The Move tool drags a whole layer. Individual strokes on "
+              "the same raster layer cannot be moved separately. Use "
+              "list_layers; if the pieces are separate layers, move_layer can "
+              "rearrange them. If they share one layer, explain that they must "
+              "be separated first. "
+              "(3) Async tools (finish_painting, remove_object, "
+              "generative_fill, replace_background, find_by_words, "
+              "find_product) only START work; say the result will appear, "
+              "never that it is already done. "
+              "(4) If no tool covers the request, say so and give the manual "
+              "step.");
 }
 
 QByteArray PaintbrushController::assistantToolsJson() const
@@ -5845,10 +5985,11 @@ QByteArray PaintbrushController::assistantToolsJson() const
     };
 
     QJsonArray toolEnum;
-    for (const char *name : {"pencil", "brush", "eraser", "fill", "spray",
-                             "line", "rectangle", "ellipse", "text", "move",
-                             "glitter", "glitter_powder", "object_select",
-                             "eyedropper"})
+    for (const char *name : {"rect_select", "freeform_select", "object_select",
+                             "pencil", "brush", "eraser", "fill", "eyedropper",
+                             "spray", "bristle", "glitter", "glitter_powder",
+                             "line", "rectangle", "rounded_rectangle",
+                             "ellipse", "text", "move", "smear"})
         toolEnum.append(QString::fromLatin1(name));
 
     QJsonArray powderEnum;
@@ -5889,8 +6030,169 @@ QByteArray PaintbrushController::assistantToolsJson() const
                       QStringLiteral("Read the current tool, colour, layer and "
                                      "selection so you can answer accurately."),
                       QJsonObject(), QJsonArray()));
+    tools.append(make(QStringLiteral("finish_painting"),
+                      QStringLiteral("Start an AI pass that finishes and completes "
+                                     "the current painting. The result appears as "
+                                     "a new layer; the tool only STARTS it."),
+                      QJsonObject{{QStringLiteral("prompt"),
+                                   stringProp(QStringLiteral("Optional direction, "
+                                                             "e.g. 'add a calm sunset "
+                                                             "background'."))}},
+                      QJsonArray()));
+    tools.append(make(QStringLiteral("list_layers"),
+                      QStringLiteral("List every layer with index, name, type, "
+                                     "visibility, position and opacity. Call this "
+                                     "before moving or selecting a layer."),
+                      QJsonObject(), QJsonArray()));
+    tools.append(make(QStringLiteral("select_layer"),
+                      QStringLiteral("Make a layer current (by index or name)."),
+                      QJsonObject{{QStringLiteral("layer"),
+                                   stringProp(QStringLiteral("Layer name or index."))}},
+                      required(QStringLiteral("layer"))));
+    tools.append(make(QStringLiteral("move_layer"),
+                      QStringLiteral("Move a whole layer by dx/dy document pixels. "
+                                     "This moves the layer, never an individual "
+                                     "stroke inside a raster layer."),
+                      QJsonObject{{QStringLiteral("layer"),
+                                   stringProp(QStringLiteral("Layer name or index."))},
+                                  {QStringLiteral("dx"),
+                                   numberProp(QStringLiteral("Horizontal offset."),
+                                              -100000, 100000)},
+                                  {QStringLiteral("dy"),
+                                   numberProp(QStringLiteral("Vertical offset."),
+                                              -100000, 100000)}},
+                      QJsonArray{QStringLiteral("layer"), QStringLiteral("dx"),
+                                 QStringLiteral("dy")}));
+    tools.append(make(QStringLiteral("set_layer_opacity"),
+                      QStringLiteral("Set a layer's opacity (0..1)."),
+                      QJsonObject{{QStringLiteral("layer"),
+                                   stringProp(QStringLiteral("Layer name or index."))},
+                                  {QStringLiteral("opacity"),
+                                   numberProp(QStringLiteral("0 transparent, 1 opaque."),
+                                              0.0, 1.0)}},
+                      QJsonArray{QStringLiteral("layer"), QStringLiteral("opacity")}));
+    tools.append(make(QStringLiteral("transform_layer"),
+                      QStringLiteral("Scale and rotate a whole layer."),
+                      QJsonObject{{QStringLiteral("layer"),
+                                   stringProp(QStringLiteral("Layer name or index."))},
+                                  {QStringLiteral("scale"),
+                                   numberProp(QStringLiteral("Scale factor."),
+                                              0.05, 10.0)},
+                                  {QStringLiteral("rotation"),
+                                   numberProp(QStringLiteral("Degrees."),
+                                              -180.0, 180.0)}},
+                      QJsonArray{QStringLiteral("layer"), QStringLiteral("scale"),
+                                 QStringLiteral("rotation")}));
+    tools.append(make(QStringLiteral("new_layer"),
+                      QStringLiteral("Create a new empty paint layer."),
+                      QJsonObject(), QJsonArray()));
+    tools.append(make(QStringLiteral("duplicate_layer"),
+                      QStringLiteral("Duplicate a layer."),
+                      QJsonObject{{QStringLiteral("layer"),
+                                   stringProp(QStringLiteral("Layer name or index."))}},
+                      required(QStringLiteral("layer"))));
+    tools.append(make(QStringLiteral("extract_object"),
+                      QStringLiteral("Extract the selected AI subject as its own "
+                                     "layer."),
+                      QJsonObject(), QJsonArray()));
+    tools.append(make(QStringLiteral("make_sticker"),
+                      QStringLiteral("Turn the selected AI subject into a sticker."),
+                      QJsonObject(), QJsonArray()));
+    tools.append(make(QStringLiteral("add_object_to_canvas"),
+                      QStringLiteral("Add the selected AI subject to the canvas "
+                                     "as an image layer."),
+                      QJsonObject(), QJsonArray()));
+    tools.append(make(QStringLiteral("cut_out_object"),
+                      QStringLiteral("Cut the selected AI subject out, filling the "
+                                     "hole behind it."),
+                      QJsonObject(), QJsonArray()));
+    tools.append(make(QStringLiteral("remove_object"),
+                      QStringLiteral("Start AI removal of the selected subject. "
+                                     "The tool only STARTS it."),
+                      QJsonObject{{QStringLiteral("prompt"),
+                                   stringProp(QStringLiteral("Optional instruction."))}},
+                      QJsonArray()));
+    tools.append(make(QStringLiteral("generative_fill"),
+                      QStringLiteral("Start an AI fill of the current canvas "
+                                     "selection. The tool only STARTS it."),
+                      QJsonObject{{QStringLiteral("prompt"),
+                                   stringProp(QStringLiteral("What should appear "
+                                                             "in the selection?"))}},
+                      QJsonArray()));
+    tools.append(make(QStringLiteral("replace_background"),
+                      QStringLiteral("Start an AI background replacement behind "
+                                     "the selected subject. The tool only STARTS "
+                                     "it."),
+                      QJsonObject{{QStringLiteral("prompt"),
+                                   stringProp(QStringLiteral("New background "
+                                                             "description."))}},
+                      QJsonArray()));
+    tools.append(make(QStringLiteral("find_by_words"),
+                      QStringLiteral("Start an AI search for an object described "
+                                     "in words and select it."),
+                      QJsonObject{{QStringLiteral("prompt"),
+                                   stringProp(QStringLiteral("e.g. 'the red handbag'."))}},
+                      required(QStringLiteral("prompt"))));
+    tools.append(make(QStringLiteral("find_product"),
+                      QStringLiteral("Start a product lookup for the selected "
+                                     "subject."),
+                      QJsonObject(), QJsonArray()));
+    QJsonArray collageEnum;
+    for (const char *p : {"free", "grid", "editorial", "scrapbook", "poster",
+                          "banner"})
+        collageEnum.append(QString::fromLatin1(p));
+    tools.append(make(QStringLiteral("auto_collage"),
+                      QStringLiteral("Arrange the content layers into a layout."),
+                      QJsonObject{{QStringLiteral("preset"),
+                                   stringProp(QStringLiteral("Layout preset."),
+                                              collageEnum)}},
+                      required(QStringLiteral("preset"))));
+    tools.append(make(QStringLiteral("boost"),
+                      QStringLiteral("Apply the app's one-click composition boost."),
+                      QJsonObject(), QJsonArray()));
 
     return QJsonDocument(tools).toJson(QJsonDocument::Compact);
+}
+
+int PaintbrushController::assistantLayerIndex(const QString &reference) const
+{
+    const QString ref = reference.trimmed();
+    const QList<CanvasLayer> &layers = m_document.layers();
+    bool numeric = false;
+    const int index = ref.toInt(&numeric);
+    if (numeric && index >= 0 && index < layers.size())
+        return index;
+    if (!ref.isEmpty())
+    {
+        for (int i = 0; i < layers.size(); ++i)
+        {
+            if (layers.at(i).name.compare(ref, Qt::CaseInsensitive) == 0)
+                return i;
+        }
+    }
+    return -1;
+}
+
+QString PaintbrushController::finishPainting(const QString &prompt)
+{
+    if (!m_generation.hasProvider())
+        return QStringLiteral(
+            "Finishing a painting needs an image provider. Open Settings → AI "
+            "and add the image endpoint, model and key.");
+    if (!m_canvas)
+        return QStringLiteral("The canvas is not ready.");
+    if (m_generation.isBusy())
+        return QStringLiteral("The image engine is busy; wait for the current "
+                              "AI result before starting another one.");
+
+    m_generationDesc = QStringLiteral("AI finish");
+    m_generationRequestId =
+        QStringLiteral("finish-%1").arg(QDateTime::currentMSecsSinceEpoch());
+    m_generation.generate(GenerationService::ACTION_FINISH_PAINTING,
+                          flattenedPreview(), QImage(), prompt,
+                          m_generationRequestId);
+    setStatus(QStringLiteral("Finishing the painting…"));
+    return QString();
 }
 
 QVariantMap PaintbrushController::executeAssistantTool(const QString &name,
@@ -5935,11 +6237,14 @@ QVariantMap PaintbrushController::executeAssistantTool(const QString &name,
             {QStringLiteral("fill"), TOOL_FILL},
             {QStringLiteral("eyedropper"), TOOL_EYEDROPPER},
             {QStringLiteral("spray"), TOOL_SPRAY},
+            {QStringLiteral("bristle"), TOOL_BRISTLE},
             {QStringLiteral("line"), TOOL_LINE},
             {QStringLiteral("rectangle"), TOOL_RECTANGLE},
+            {QStringLiteral("rounded_rectangle"), TOOL_ROUNDED_RECT},
             {QStringLiteral("ellipse"), TOOL_ELLIPSE},
             {QStringLiteral("text"), TOOL_TEXT},
             {QStringLiteral("move"), TOOL_PAN_ZOOM},
+            {QStringLiteral("smear"), TOOL_SMEAR},
             {QStringLiteral("glitter"), TOOL_GLITTER},
             {QStringLiteral("glitter_powder"), TOOL_GLITTER_POWDER},
         };
@@ -5947,7 +6252,10 @@ QVariantMap PaintbrushController::executeAssistantTool(const QString &name,
             return fail(QStringLiteral("Unknown tool '%1'.").arg(tool));
         m_canvas->setTool(ids.value(tool));
         m_canvas->update();
-        return ok(QStringLiteral("Tool: %1").arg(tool));
+        QString display = tool;
+        display.replace(QLatin1Char('_'), QLatin1Char(' '));
+        setStatus(QStringLiteral("Companion selected the %1 tool.").arg(display));
+        return ok(QStringLiteral("Tool: %1").arg(display));
     }
     if (name == QStringLiteral("set_color"))
     {
@@ -5957,6 +6265,7 @@ QVariantMap PaintbrushController::executeAssistantTool(const QString &name,
             return fail(QStringLiteral("'%1' is not a valid colour.").arg(hex));
         m_canvas->setFgColor(color);
         m_canvas->update();
+        setStatus(QStringLiteral("Companion set the colour to %1.").arg(color.name()));
         return ok(QStringLiteral("Colour: %1").arg(color.name()));
     }
     if (name == QStringLiteral("set_brush_size"))
@@ -5968,6 +6277,8 @@ QVariantMap PaintbrushController::executeAssistantTool(const QString &name,
         const double size = qBound(1.0, requested, 160.0);
         m_canvas->setBrushSize(size);
         m_canvas->update();
+        setStatus(QStringLiteral("Companion set the brush size to %1 px.")
+                      .arg(qRound(size)));
         return ok(QStringLiteral("Brush size: %1 px").arg(qRound(size)));
     }
     if (name == QStringLiteral("set_powder_subtool"))
@@ -5991,6 +6302,7 @@ QVariantMap PaintbrushController::executeAssistantTool(const QString &name,
             m_canvas->setPowderTool(ids.value(sub));
         }
         m_canvas->update();
+        setStatus(QStringLiteral("Companion selected Glitter Powder: %1.").arg(sub));
         return ok(QStringLiteral("Glitter Powder: %1").arg(sub));
     }
     if (name == QStringLiteral("undo"))
@@ -6020,6 +6332,222 @@ QVariantMap PaintbrushController::executeAssistantTool(const QString &name,
         return ok(QStringLiteral("Canvas state read."),
                   QString::fromUtf8(QJsonDocument(state).toJson(
                       QJsonDocument::Compact)));
+    }
+    if (name == QStringLiteral("finish_painting"))
+    {
+        const QString error =
+            finishPainting(args.value(QStringLiteral("prompt")).toString());
+        if (!error.isEmpty())
+            return fail(error);
+        return ok(QStringLiteral("Started finishing the painting. The result "
+                                 "will appear as a new layer."));
+    }
+    if (name == QStringLiteral("list_layers"))
+    {
+        auto typeName = [](int type) {
+            switch (type)
+            {
+            case LAYER_RASTER: return QStringLiteral("raster");
+            case LAYER_IMAGE: return QStringLiteral("image");
+            case LAYER_TEXT: return QStringLiteral("text");
+            case LAYER_STICKER: return QStringLiteral("sticker");
+            case LAYER_REFERENCE: return QStringLiteral("reference");
+            case LAYER_GENERATED: return QStringLiteral("generated");
+            default: return QStringLiteral("layer");
+            }
+        };
+        QJsonArray array;
+        const QList<CanvasLayer> &layers = m_document.layers();
+        for (int i = 0; i < layers.size(); ++i)
+        {
+            const CanvasLayer &layer = layers.at(i);
+            QJsonObject item;
+            item[QStringLiteral("index")] = i;
+            item[QStringLiteral("name")] = layer.name;
+            item[QStringLiteral("type")] = typeName(layer.type);
+            item[QStringLiteral("visible")] = layer.visible;
+            item[QStringLiteral("locked")] = layer.locked;
+            item[QStringLiteral("opacity")] = layer.opacity;
+            item[QStringLiteral("x")] = layer.position.x();
+            item[QStringLiteral("y")] = layer.position.y();
+            item[QStringLiteral("width")] = layer.raster.width();
+            item[QStringLiteral("height")] = layer.raster.height();
+            item[QStringLiteral("current")] =
+                (i == m_document.currentLayerIndex());
+            array.append(item);
+        }
+        return ok(QStringLiteral("Layer list."),
+                  QString::fromUtf8(QJsonDocument(array).toJson(
+                      QJsonDocument::Compact)));
+    }
+    if (name == QStringLiteral("select_layer"))
+    {
+        const QString reference = args.value(QStringLiteral("layer")).toString();
+        const int index = assistantLayerIndex(reference);
+        if (index < 0)
+            return fail(QStringLiteral("No layer matches '%1'.").arg(reference));
+        setCurrentLayer(index);
+        const CanvasLayer *layer = m_document.layerAt(index);
+        return ok(QStringLiteral("Selected layer %1.")
+                      .arg(layer ? layer->name : reference));
+    }
+    if (name == QStringLiteral("move_layer"))
+    {
+        const QString reference = args.value(QStringLiteral("layer")).toString();
+        const int index = assistantLayerIndex(reference);
+        const CanvasLayer *layer = m_document.layerAt(index);
+        if (!layer)
+            return fail(QStringLiteral("No layer matches '%1'.").arg(reference));
+        const double dx = args.value(QStringLiteral("dx")).toDouble();
+        const double dy = args.value(QStringLiteral("dy")).toDouble();
+        setLayerPosition(index, layer->position.x() + dx,
+                         layer->position.y() + dy);
+        setStatus(QStringLiteral("Moved layer %1.").arg(layer->name));
+        return ok(QStringLiteral("Moved layer %1 by (%2, %3).")
+                      .arg(layer->name).arg(qRound(dx)).arg(qRound(dy)));
+    }
+    if (name == QStringLiteral("set_layer_opacity"))
+    {
+        const QString reference = args.value(QStringLiteral("layer")).toString();
+        const int index = assistantLayerIndex(reference);
+        const CanvasLayer *layer = m_document.layerAt(index);
+        if (!layer)
+            return fail(QStringLiteral("No layer matches '%1'.").arg(reference));
+        const double opacity =
+            qBound(0.0, args.value(QStringLiteral("opacity")).toDouble(1.0), 1.0);
+        setLayerOpacity(index, opacity);
+        return ok(QStringLiteral("Layer %1 opacity set to %2.")
+                      .arg(layer->name).arg(qRound(opacity * 100)));
+    }
+    if (name == QStringLiteral("transform_layer"))
+    {
+        const QString reference = args.value(QStringLiteral("layer")).toString();
+        const int index = assistantLayerIndex(reference);
+        const CanvasLayer *layer = m_document.layerAt(index);
+        if (!layer)
+            return fail(QStringLiteral("No layer matches '%1'.").arg(reference));
+        const double scale =
+            qBound(0.05, args.value(QStringLiteral("scale")).toDouble(1.0), 10.0);
+        const double rotation =
+            qBound(-180.0, args.value(QStringLiteral("rotation")).toDouble(0.0),
+                   180.0);
+        transformLayer(index, scale, rotation);
+        return ok(QStringLiteral("Transformed layer %1 (%2%, %3°).")
+                      .arg(layer->name).arg(qRound(scale * 100))
+                      .arg(qRound(rotation)));
+    }
+    if (name == QStringLiteral("new_layer"))
+    {
+        newLayer();
+        return ok(QStringLiteral("Created a new layer."));
+    }
+    if (name == QStringLiteral("duplicate_layer"))
+    {
+        const QString reference = args.value(QStringLiteral("layer")).toString();
+        const int index = assistantLayerIndex(reference);
+        if (index < 0)
+            return fail(QStringLiteral("No layer matches '%1'.").arg(reference));
+        duplicateLayer(index);
+        return ok(QStringLiteral("Duplicated the layer."));
+    }
+    if (name == QStringLiteral("extract_object"))
+    {
+        if (!objectSelected())
+            return fail(QStringLiteral("Select a subject first with Object Select."));
+        extractObject();
+        return ok(QStringLiteral("Extracted the subject."));
+    }
+    if (name == QStringLiteral("make_sticker"))
+    {
+        if (!objectSelected())
+            return fail(QStringLiteral("Select a subject first with Object Select."));
+        makeSticker();
+        return ok(QStringLiteral("Made a sticker from the subject."));
+    }
+    if (name == QStringLiteral("add_object_to_canvas"))
+    {
+        if (!objectSelected())
+            return fail(QStringLiteral("Select a subject first with Object Select."));
+        addObjectToCanvas();
+        return ok(QStringLiteral("Added the subject to the canvas."));
+    }
+    if (name == QStringLiteral("cut_out_object"))
+    {
+        if (!objectSelected())
+            return fail(QStringLiteral("Select a subject first with Object Select."));
+        cutOutObject();
+        return ok(QStringLiteral("Cut the subject out."));
+    }
+    if (name == QStringLiteral("remove_object"))
+    {
+        if (!objectSelected())
+            return fail(QStringLiteral("Select a subject first with Object Select."));
+        if (!m_generation.capability(GenerationService::ACTION_REMOVE_OBJECT)
+                 .isUsable())
+            return fail(QStringLiteral("AI object removal is not available."));
+        removeObject(args.value(QStringLiteral("prompt")).toString());
+        return ok(QStringLiteral("Started removing the subject. The result "
+                                 "will appear as a new layer."));
+    }
+    if (name == QStringLiteral("generative_fill"))
+    {
+        if (!m_canvas->hasSelection())
+            return fail(QStringLiteral("Select a region first."));
+        if (!m_generation.capability(GenerationService::ACTION_GENERATIVE_FILL)
+                 .isUsable())
+            return fail(QStringLiteral("Generative fill is not available."));
+        generativeFill(args.value(QStringLiteral("prompt")).toString());
+        return ok(QStringLiteral("Started the generative fill. The result "
+                                 "will appear as a new layer."));
+    }
+    if (name == QStringLiteral("replace_background"))
+    {
+        if (!objectSelected())
+            return fail(QStringLiteral("Select a subject first with Object Select."));
+        if (!m_generation.capability(GenerationService::ACTION_REPLACE_BACKGROUND)
+                 .isUsable())
+            return fail(QStringLiteral("Background replacement is not available."));
+        replaceBackground(args.value(QStringLiteral("prompt")).toString());
+        return ok(QStringLiteral("Started replacing the background. The result "
+                                 "will appear as a new layer."));
+    }
+    if (name == QStringLiteral("find_by_words"))
+    {
+        const QString prompt = args.value(QStringLiteral("prompt")).toString();
+        if (prompt.isEmpty())
+            return fail(QStringLiteral("Describe what to find."));
+        if (!m_segmentation.isConfigured())
+            return fail(QStringLiteral("Object Select is not available."));
+        refineObjectByText(prompt);
+        return ok(QStringLiteral("Started finding '%1'.").arg(prompt));
+    }
+    if (name == QStringLiteral("find_product"))
+    {
+        if (!objectSelected())
+            return fail(QStringLiteral("Select a subject first with Object Select."));
+        if (!lookupAvailable())
+            return fail(QStringLiteral("Product lookup is not available."));
+        findProduct();
+        return ok(QStringLiteral("Started the product lookup."));
+    }
+    if (name == QStringLiteral("auto_collage"))
+    {
+        const QString preset = args.value(QStringLiteral("preset")).toString()
+                                   .toLower();
+        static const QHash<QString, int> presets = {
+            {QStringLiteral("free"), 0}, {QStringLiteral("grid"), 1},
+            {QStringLiteral("editorial"), 2}, {QStringLiteral("scrapbook"), 3},
+            {QStringLiteral("poster"), 4}, {QStringLiteral("banner"), 5},
+        };
+        if (!presets.contains(preset))
+            return fail(QStringLiteral("Unknown collage preset '%1'.").arg(preset));
+        autoCollage(presets.value(preset));
+        return ok(QStringLiteral("Arranged the collage (%1).").arg(preset));
+    }
+    if (name == QStringLiteral("boost"))
+    {
+        boost();
+        return ok(QStringLiteral("Applied the composition boost."));
     }
     return fail(QStringLiteral("Unknown tool '%1'.").arg(name));
 }
@@ -6478,6 +7006,14 @@ QString PaintbrushController::settingsAssistantModel() const
 {
     return pbConfigString(VLC_OBJECT(m_intf), "paintbrush-assistant-model");
 }
+QString PaintbrushController::settingsImageUrl() const
+{
+    return pbConfigString(VLC_OBJECT(m_intf), "paintbrush-image-base-url");
+}
+QString PaintbrushController::settingsImageModel() const
+{
+    return pbConfigString(VLC_OBJECT(m_intf), "paintbrush-image-model");
+}
 QString PaintbrushController::settingsVlmApiKey() const
 {
     return pbStoredApiKey(VLC_OBJECT(m_intf), "paintbrush-vlm-api-key");
@@ -6486,6 +7022,10 @@ QString PaintbrushController::settingsAssistantApiKey() const
 {
     return pbStoredApiKey(VLC_OBJECT(m_intf), "paintbrush-assistant-api-key");
 }
+QString PaintbrushController::settingsImageApiKey() const
+{
+    return pbStoredApiKey(VLC_OBJECT(m_intf), "paintbrush-image-api-key");
+}
 bool PaintbrushController::settingsVlmApiKeyFromEnv() const
 {
     return pbApiKeyFromEnvironment("PAINTBRUSH_VLM_API_KEY");
@@ -6493,6 +7033,10 @@ bool PaintbrushController::settingsVlmApiKeyFromEnv() const
 bool PaintbrushController::settingsAssistantApiKeyFromEnv() const
 {
     return pbApiKeyFromEnvironment("PAINTBRUSH_ASSISTANT_API_KEY");
+}
+bool PaintbrushController::settingsImageApiKeyFromEnv() const
+{
+    return pbApiKeyFromEnvironment("PAINTBRUSH_IMAGE_API_KEY");
 }
 int PaintbrushController::settingsPtsToleranceMs() const
 {
@@ -6508,6 +7052,28 @@ QString PaintbrushController::trackingStatusText() const
         return QStringLiteral("Ready");
     const QString r = trackingUnavailableReason();
     return r.isEmpty() ? QStringLiteral("Unavailable") : r;
+}
+
+QString PaintbrushController::applyImageSettings(const QString &baseUrl,
+                                                 const QString &model,
+                                                 const QString &apiKey)
+{
+    const QString url = baseUrl.trimmed();
+    const QString name = model.trimmed();
+    const QString key = apiKey.trimmed();
+    config_PutPsz("paintbrush-image-base-url", url.toUtf8().constData());
+    config_PutPsz("paintbrush-image-model", name.toUtf8().constData());
+    config_PutPsz("paintbrush-image-api-key", key.toUtf8().constData());
+    if (config_SaveConfigFile(m_intf) != 0)
+        return QStringLiteral("Could not save the image provider settings.");
+    m_generation.configure(VLC_OBJECT(m_intf));
+    emit settingsChanged();
+    emit serviceAvailabilityChanged();
+    emit generationStateChanged();
+    setStatus(url.isEmpty()
+                  ? QStringLiteral("Image provider cleared; local fallbacks only.")
+                  : QStringLiteral("Image provider applied."));
+    return QString();
 }
 
 QString PaintbrushController::applyNaiSettings(const QString &samModel,

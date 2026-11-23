@@ -25,6 +25,8 @@
 #include <atomic>
 #include <QColor>
 #include <QImage>
+#include <QRegion>
+#include <QVariantMap>
 #include <QPainterPath>
 #include <QPointF>
 #include <QHash>
@@ -215,6 +217,10 @@ public:
     Q_INVOKABLE QImage currentObjectMask() const;
     Q_INVOKABLE void cancelObjectSelection();
     Q_INVOKABLE QRectF objectMaskBounds() const;
+    /* On-canvas transform gizmo data for the Move tool: the movable layer's
+     * unrotated box in ITEM coordinates plus its rotation/scale. Empty when
+     * the layer is not a movable object layer. */
+    Q_INVOKABLE QVariantMap layerGizmo(int index) const;
     Q_INVOKABLE void setObjectSelectBusy(bool busy);
 
     /* Freehand mask refinement: paint add (true) or subtract (false) into
@@ -535,7 +541,7 @@ private:
      * region delta on stroke end */
     QImage m_scratchTile;
     QPoint m_scratchOrigin;
-    QRect m_scratchSeeded;
+    QRegion m_scratchSeeded;
     QPointF m_strokeSmooth;          /* stabilized sample (local coords) */
     QPointF m_strokeLastDab;         /* last dab position (local coords) */
     QVector<QPointF> m_stabilizer;   /* recent samples for smoothing */

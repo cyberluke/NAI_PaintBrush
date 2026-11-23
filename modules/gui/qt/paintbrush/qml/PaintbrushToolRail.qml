@@ -80,6 +80,35 @@ Item {
         toolBar.items = out
     }
 
+    /* Keep the active cell visible: the AI can select a tool that lives below
+     * the fold, and a highlight the user cannot see is indistinguishable from
+     * "the assistant did nothing". */
+    function revealActiveTool()
+    {
+        if (!toolBar || !toolBar.items || toolBar.items.length === 0)
+            return
+        let index = -1
+        for (let i = 0; i < toolBar.items.length; ++i) {
+            if (toolBar.items[i].toolId === canvas.tool) {
+                index = i
+                break
+            }
+        }
+        if (index < 0)
+            return
+        const cols = toolBar.columns > 0 ? toolBar.columns : 2
+        const row = Math.floor(index / cols)
+        const cell = toolBar.cell
+        const y = row * (cell + toolBar.spacing)
+        const content = scroll.contentItem
+        if (!content)
+            return
+        const maxY = Math.max(0, content.contentHeight - scroll.height)
+        content.contentY = Math.max(0, Math.min(maxY,
+                                                 y - (scroll.height - cell) / 2))
+    }
+    Component.onCompleted: Qt.callLater(revealActiveTool)
+
     Rectangle {
         anchors.fill: parent
         color: theme.bg.primary
@@ -147,6 +176,9 @@ Item {
 
     Connections {
         target: canvas
-        function onToolChanged(t) { rebuildItems() }
+        function onToolChanged(t) {
+            rebuildItems()
+            Qt.callLater(revealActiveTool)
+        }
     }
 }

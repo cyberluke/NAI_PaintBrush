@@ -38,11 +38,16 @@ pacman -S --needed \
   mingw-w64-x86_64-gcc mingw-w64-x86_64-meson mingw-w64-x86_64-ninja \
   mingw-w64-x86_64-pkgconf mingw-w64-x86_64-cmake mingw-w64-x86_64-nasm \
   mingw-w64-x86_64-python mingw-w64-x86_64-lua mingw-w64-x86_64-gettext \
+  gettext \
   mingw-w64-x86_64-libarchive mingw-w64-x86_64-zlib mingw-w64-x86_64-libpng \
   mingw-w64-x86_64-libjpeg-turbo mingw-w64-x86_64-freetype \
   mingw-w64-x86_64-fribidi mingw-w64-x86_64-harfbuzz \
   mingw-w64-x86_64-opencv mingw-w64-x86_64-protobuf
 ```
+
+The MSYS2 `gettext` package (`gettext`, without the mingw prefix) provides
+`/usr/bin/msgfmt.exe`; `scripts/pb-i18n-compile.ps1` uses it to build the
+paintbrush catalogs after each plugin build and before MSIX staging.
 
 ## Contrib (prebuilt)
 

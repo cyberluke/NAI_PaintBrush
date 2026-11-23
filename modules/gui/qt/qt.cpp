@@ -509,6 +509,9 @@ vlc_module_begin ()
                             PB_COMPANION_MODE_TEXT, PB_COMPANION_MODE_LONGTEXT )
     add_integer_with_range( "paintbrush-companion-min-interval", 30, 5, 600,
                             PB_COMPANION_INTERVAL_TEXT, nullptr )
+    add_integer_with_range( "paintbrush-companion-talk", 2, 0, 2,
+                            N_( "Companion talk level" ),
+                            N_( "0 = only when asked, 1 = talk less, 2 = talk normally." ) )
     add_bool( "paintbrush-companion-voice", false, PB_COMPANION_VOICE_TEXT, nullptr )
     add_bool( "paintbrush-kids-network", false, PB_ENABLED_TEXT, nullptr )
 

@@ -224,11 +224,35 @@ Item {
                 ComboBox {
                     Layout.preferredWidth: VLCStyle.dp(128, VLCStyle.scale)
                     visible: root.canChat
+                    enabled: root.canChat && PaintbrushCtx.companionMode !== 1
                     model: [qsTr("Only when I ask"), qsTr("Talk less"), qsTr("Talk")]
                     currentIndex: PaintbrushCtx.companionTalkLevel
                     onActivated: PaintbrushCtx.companionTalkLevel = currentIndex
                     font.pixelSize: VLCStyle.fontSize_small
                 }
+            }
+
+            /* The mode/talk model, in the UI where the question is asked:
+             * Quiet is answer-only, and Talk is ignored there. */
+            Widgets.LabelExt {
+                Layout.fillWidth: true
+                text: {
+                    switch (PaintbrushCtx.companionMode) {
+                    case 0:
+                        return qsTr("Off — the companion is hidden and never reacts.")
+                    case 1:
+                        return qsTr("Quiet — answers when you talk; never reacts on its own. Talk is ignored.")
+                    case 2:
+                        return qsTr("Buddy — reacts to your drawing according to Talk. Only when I ask means chat only; Talk less means major moments; Talk means frequent reactions.")
+                    case 3:
+                        return qsTr("Kids — gentle, child-safe. Network AI needs the parental switch in Settings → Companion.")
+                    default:
+                        return ""
+                    }
+                }
+                color: theme.fg.secondary
+                font.pixelSize: VLCStyle.fontSize_small
+                wrapMode: Text.WordWrap
             }
 
             Rectangle {
@@ -513,6 +537,17 @@ Item {
                 function onAssistantStreamChanged() { conversationList.scrollToEnd() }
                 function onAssistantToolsChanged() { conversationList.scrollToEnd() }
                 function onCompanionStateChanged() { conversationList.scrollToEnd() }
+                function onProactiveMessageArrived() {
+                    /* The product goal: the companion reacts to the drawing.
+                     * Surface the message instead of writing it to a closed
+                     * drawer. Quiet and "only when asked" never get here. */
+                    if ((PaintbrushCtx.companionMode === 2
+                         || PaintbrushCtx.companionMode === 3)
+                        && PaintbrushCtx.companionTalkLevel > 0) {
+                        root.expanded = true
+                        root.follow = true
+                    }
+                }
             }
 
             /* input */

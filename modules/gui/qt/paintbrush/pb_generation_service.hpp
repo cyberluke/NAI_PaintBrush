@@ -46,7 +46,11 @@ public:
         ACTION_REMOVE_OBJECT = 0,
         ACTION_GENERATIVE_FILL,
         ACTION_REPLACE_BACKGROUND,
-        ACTION_MAKE_STICKER
+        ACTION_MAKE_STICKER,
+        /* Whole-canvas img2img: continue/finish an unfinished painting.
+         * Requires a real provider (there is no honest local fallback for
+         * inventing the rest of an artwork). */
+        ACTION_FINISH_PAINTING
     };
     Q_ENUM(Action)
 
