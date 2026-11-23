@@ -2211,30 +2211,30 @@ QString PaintbrushController::generationStatusText() const
     switch (report.mode)
     {
     case CapabilityReport::RemoteGeneration:
-        return QStringLiteral("Remote generation (%1)")
-            .arg(report.modelName.isEmpty() ? QStringLiteral("default model")
+        return pbTr("Remote generation (%1)")
+            .arg(report.modelName.isEmpty() ? pbTr("default model")
                                             : report.modelName);
     case CapabilityReport::LocalHeal:
-        return QStringLiteral("Local heal — pixel propagation, not generative");
+        return pbTr("Local heal — pixel propagation, not generative");
     case CapabilityReport::LocalBlur:
-        return QStringLiteral("Local blur — pixel filter, not generative");
+        return pbTr("Local blur — pixel filter, not generative");
     case CapabilityReport::Unavailable:
         break;
     }
     return m_generation.unavailableReason().isEmpty()
-               ? QStringLiteral("Unavailable")
+               ? pbTr("Unavailable")
                : m_generation.unavailableReason();
 }
 
 QString PaintbrushController::visionStatusText() const
 {
     if (m_vision.isConfigured())
-        return QStringLiteral("Ready (%1)")
-            .arg(m_vision.model().isEmpty() ? QStringLiteral("default model")
+        return pbTr("Ready (%1)")
+            .arg(m_vision.model().isEmpty() ? pbTr("default model")
                                             : m_vision.model());
     return m_vision.unavailableReason().isEmpty()
-               ? QStringLiteral("Unconfigured")
-               : QStringLiteral("Unconfigured — %1")
+               ? pbTr("Unconfigured")
+               : pbTr("Unconfigured — %1")
                      .arg(m_vision.unavailableReason());
 }
 
@@ -2248,11 +2248,11 @@ QString PaintbrushController::segmentationStatusText() const
     if (m_segmentation.isConfigured())
     {
         if (!m_segmentation.backend().isEmpty())
-            return QStringLiteral("Ready · %1 · %2")
+            return pbTr("Ready · %1 · %2")
                 .arg(m_segmentation.backend(), m_segmentation.deviceName());
-        return QStringLiteral("Ready");
+        return pbTr("Ready");
     }
-    return QStringLiteral("Unavailable");
+    return pbTr("Unavailable");
 }
 
 bool PaintbrushController::samGpuBackendLinked() const
@@ -7129,9 +7129,9 @@ int PaintbrushController::settingsPtsToleranceMs() const
 QString PaintbrushController::trackingStatusText() const
 {
     if (trackingAvailable())
-        return QStringLiteral("Ready");
+        return pbTr("Ready");
     const QString r = trackingUnavailableReason();
-    return r.isEmpty() ? QStringLiteral("Unavailable") : r;
+    return r.isEmpty() ? pbTr("Unavailable") : r;
 }
 
 QString PaintbrushController::applyImageSettings(const QString &baseUrl,
@@ -7180,12 +7180,11 @@ QString PaintbrushController::applyLanguage(const QString &code)
     const QString stored = value ? QString::fromUtf8(value) : QString();
     free(value);
     if (stored != language)
-        return QStringLiteral(
+        return pbTr(
             "The language could not be written to the VLC configuration.");
     if (config_SaveConfigFile(m_intf) != 0)
-        return QStringLiteral(
-            "The language could not be saved to the VLC configuration "
-            "file.");
+        return pbTr(
+            "The language could not be saved to the VLC configuration file.");
 
     /* Live switch: export the language, invalidate the gettext catalog cache
      * and ask the QML engine to re-evaluate its qsTr bindings. */
@@ -7197,9 +7196,14 @@ QString PaintbrushController::applyLanguage(const QString &code)
     }
 
     emit settingsChanged();
+    /* The engine retranslation refreshed every qsTr() binding. These signals
+     * refresh the bindings that read translated text from C++ getters, which
+     * Qt does not know are translations. */
+    emit serviceAvailabilityChanged();
+    emit mattingStateChanged();
     setStatus(language.isEmpty()
-                  ? QStringLiteral("System interface language applied.")
-                  : QStringLiteral("Interface language applied."));
+                  ? pbTr("System interface language applied.")
+                  : pbTr("Interface language applied."));
     return QString();
 }
 

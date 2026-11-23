@@ -58,7 +58,7 @@ void GenerationService::configure(vlc_object_t *obj)
          * generative — capability() reports local-heal / local-blur and the
          * UI must present them as such (A3/A4). */
         m_unavailableReason =
-            QStringLiteral("No image provider configured — the local heal / blur "
+            pbTr("No image provider configured — the local heal / blur "
                            "fallback is active (pixel operations, not generative).");
         emit availabilityChanged(true, m_unavailableReason);
         return;
@@ -132,13 +132,13 @@ CapabilityReport GenerationService::capability(Action action) const
     {
         return localGenerationReport(
             CapabilityReport::LocalBlur,
-            QStringLiteral("No image provider configured — local box-blur "
+            pbTr("No image provider configured — local box-blur "
                            "background replace is active. This is a pixel "
                            "filter, not a generative model."));
     }
     return localGenerationReport(
         CapabilityReport::LocalHeal,
-        QStringLiteral("No image provider configured — local onion-peel "
+        pbTr("No image provider configured — local onion-peel "
                        "inpaint heal is active. This is pixel propagation, "
                        "not a generative model."));
 }

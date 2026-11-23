@@ -28,6 +28,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QRegion>
+#include <QCoreApplication>
 
 #ifdef HAVE_CONFIG_H
 # include "config.h"
@@ -36,6 +37,14 @@
 #include <vlc_common.h>
 
 struct vlc_player_t;
+
+/* User-facing PaintBrush strings. The Qt translator is gettext-backed, so the
+ * context is informational only; the msgids live in the paintbrush sections of
+ * the po/ catalogs and follow the live interface language. */
+inline QString pbTr(const char *msgid)
+{
+    return QCoreApplication::translate("Paintbrush", msgid);
+}
 
 namespace paintbrush {
 

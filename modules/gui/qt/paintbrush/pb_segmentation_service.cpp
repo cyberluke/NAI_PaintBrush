@@ -65,13 +65,13 @@ void SegmentationService::configure(vlc_object_t *obj)
     if (m_modelPath.isEmpty())
     {
         setAvailability(false,
-                        QStringLiteral("Object Select is unavailable: SAM model is not configured."));
+                        pbTr("Object Select is unavailable: SAM model is not configured."));
         return;
     }
     if (!QFileInfo::exists(m_modelPath))
     {
         setAvailability(false,
-                        QStringLiteral("Object Select is unavailable: SAM model file not found: %1")
+                        pbTr("Object Select is unavailable: SAM model file not found: %1")
                             .arg(m_modelPath));
         return;
     }
@@ -290,7 +290,7 @@ bool SegmentationService::ensureModelLoaded()
         pbLogWarn(m_obj, "segmentation", "model: load FAILED: %s",
                   qUtf8Printable(detail));
         setAvailability(false,
-                        QStringLiteral("Object Select is unavailable: %1")
+                        pbTr("Object Select is unavailable: %1")
                             .arg(detail));
         setState(STATE_FAILED);
         emit errorOccurred(detail);

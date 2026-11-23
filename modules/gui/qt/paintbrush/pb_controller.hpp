@@ -118,6 +118,9 @@ class PaintbrushController : public QObject
     Q_PROPERTY(QString generationUnavailableReason READ generationUnavailableReason NOTIFY serviceAvailabilityChanged FINAL)
     Q_PROPERTY(bool trackingAvailable READ trackingAvailable NOTIFY serviceAvailabilityChanged FINAL)
     Q_PROPERTY(QString trackingUnavailableReason READ trackingUnavailableReason NOTIFY serviceAvailabilityChanged FINAL)
+    /* Capability status text for the NAI Settings "Object tracking" row
+     * (positive text when green, the service reason otherwise). */
+    Q_PROPERTY(QString trackingStatusText READ trackingStatusText NOTIFY serviceAvailabilityChanged FINAL)
     /* Neural matting / rotoscoping surface (Object Select refinement). */
     Q_PROPERTY(bool mattingNeuralAvailable READ mattingNeuralAvailable NOTIFY mattingStateChanged FINAL)
     Q_PROPERTY(QString mattingBackendText READ mattingBackendText NOTIFY mattingStateChanged FINAL)

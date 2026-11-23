@@ -22,12 +22,18 @@
 # include "config.h"
 #endif
 
+/* gettext must see <locale.h> untouched so that it defines its LC_MESSAGES
+ * emulation (the message-only category used below to invalidate the resolved
+ * catalog cache). Keep this include ahead of every VLC header. */
+#ifdef ENABLE_NLS
+# include <libintl.h>
+#endif
+
 #include <vlc_common.h>
 #include <vlc_configuration.h>
 #include "modules/modules.h"
 
 #ifdef ENABLE_NLS
-# include <libintl.h>
 # include <vlc_charset.h>
 #endif
 
@@ -72,6 +78,27 @@ int vlc_bindtextdomain (const char *domain)
 #endif
 
     return 0;
+}
+
+/**
+ * Re-resolves the plugin text domain from the process environment.
+ *
+ * gettext caches the resolved catalog after the first successful lookup, so
+ * exporting a new LANG/LANGUAGE value is not enough to switch the interface
+ * language at runtime. Re-running setlocale() on the message category drops
+ * that cache; only LC_MESSAGES changes, so numeric and character formatting
+ * keep the process locale.
+ *
+ * Exported for the Qt interface, whose Settings language picker switches the
+ * language live. The QML engine is retranslated by the caller.
+ */
+VLC_API void vlc_textdomain_refresh(void);
+
+void vlc_textdomain_refresh(void)
+{
+#if defined (ENABLE_NLS)
+    libintl_setlocale (LC_MESSAGES, "");
+#endif
 }
 
 /**

@@ -54,13 +54,13 @@ void TrackingService::configure(vlc_object_t *obj)
 
     if (m_modelPath.isEmpty())
     {
-        setAvailable(false, QStringLiteral("Tracking is unavailable: SAM model is not configured."));
+        setAvailable(false, pbTr("Tracking is unavailable: SAM model is not configured."));
         return;
     }
     if (!QFileInfo::exists(m_modelPath))
     {
         setAvailable(false,
-                     QStringLiteral("Tracking is unavailable: SAM model file not found: %1")
+                     pbTr("Tracking is unavailable: SAM model file not found: %1")
                          .arg(m_modelPath));
         return;
     }

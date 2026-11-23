@@ -63,7 +63,7 @@ void VisionService::configure(vlc_object_t *obj)
     if (m_baseUrl.isEmpty())
     {
         m_unavailableReason =
-            QStringLiteral("Ask about this is unavailable: vision endpoint is not configured.");
+            pbTr("Ask about this is unavailable: vision endpoint is not configured.");
         emit availabilityChanged(false, m_unavailableReason);
         return;
     }

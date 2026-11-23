@@ -40339,3 +40339,91 @@ msgid "Layer %1"
 msgstr "Vrstva %1"
 
 
+
+# NAI PaintBrush C++ status strings (Settings capability rows)
+
+msgid "Remote generation (%1)"
+msgstr "Vzdialené generovanie (%1)"
+
+msgid "default model"
+msgstr "predvolený model"
+
+msgid "Local blur — pixel filter, not generative"
+msgstr "Lokálne rozostrenie — pixelový filter, nie generatívne"
+
+msgid "Ready (%1)"
+msgstr "Pripravený (%1)"
+
+msgid "Unconfigured"
+msgstr "Nie je nakonfigurované"
+
+msgid "Unconfigured — %1"
+msgstr "Nie je nakonfigurované — %1"
+
+msgid "Ready · %1 · %2"
+msgstr "Pripravený · %1 · %2"
+
+msgid "Neural matting is idle."
+msgstr "Neurálne maskovanie je nečinné."
+
+msgid "neural matting runtime is not installed"
+msgstr "behové prostredie neurálneho maskovania nie je nainštalované"
+
+msgid "neural runtime ready"
+msgstr "Neurálne behové prostredie pripravené"
+
+msgid "GPU matting was requested but CUDA is not available"
+msgstr "Bolo vyžiadané GPU maskovanie, ale CUDA nie je dostupná"
+
+msgid "Refining matte (neural)…"
+msgstr "Spresňovanie masky (neurálne)…"
+
+msgid "Refining matte…"
+msgstr "Spresňovanie masky…"
+
+msgid "Matte refinement failed: empty mask."
+msgstr "Spresnenie masky zlyhalo: prázdna maska."
+
+msgid "Neural matte ready — %1 (%2 ms)"
+msgstr "Neurálna maska pripravená — %1 (%2 ms)"
+
+msgid "Matte ready — %1"
+msgstr "Maska pripravená — %1"
+
+msgid "Tracking is unavailable: SAM model is not configured."
+msgstr "Sledovanie nie je dostupné: model SAM nie je nakonfigurovaný."
+
+msgid "Tracking is unavailable: SAM model file not found: %1"
+msgstr "Sledovanie nie je dostupné: súbor modelu SAM sa nenašiel: %1"
+
+msgid "Ask about this is unavailable: vision endpoint is not configured."
+msgstr "Funkcia Opýtať sa na toto nie je dostupná: koncový bod videnia nie je nakonfigurovaný."
+
+msgid "Object lookup is unavailable: no chat gateway is configured."
+msgstr "Vyhľadávanie objektov nie je dostupné: nie je nakonfigurovaná brána chatu."
+
+msgid "Object Select is unavailable: SAM model is not configured."
+msgstr "Výber objektu nie je dostupný: model SAM nie je nakonfigurovaný."
+
+msgid "Object Select is unavailable: SAM model file not found: %1"
+msgstr "Výber objektu nie je dostupný: súbor modelu SAM sa nenašiel: %1"
+
+msgid "Object Select is unavailable: %1"
+msgstr "Výber objektu nie je dostupný: %1"
+
+msgid "No image provider configured — the local heal / blur fallback is active (pixel operations, not generative)."
+msgstr "Nie je nakonfigurovaný žiadny poskytovateľ obrázkov — je aktívna lokálna záložná oprava / rozostrenie (pixelové operácie, nie generatívne)."
+
+# NAI PaintBrush C++ status strings (Settings capability rows)
+
+msgid "Interface language applied."
+msgstr "Jazyk rozhrania bol použitý."
+
+msgid "System interface language applied."
+msgstr "Bol použitý systémový jazyk rozhrania."
+
+msgid "The language could not be written to the VLC configuration."
+msgstr "Jazyk sa nepodarilo zapísať do konfigurácie VLC."
+
+msgid "The language could not be saved to the VLC configuration file."
+msgstr "Jazyk sa nepodarilo uložiť do konfiguračného súboru VLC."

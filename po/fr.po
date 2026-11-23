@@ -39206,3 +39206,91 @@ msgid "Layer %1"
 msgstr "Calque %1"
 
 
+
+# NAI PaintBrush C++ status strings (Settings capability rows)
+
+msgid "Remote generation (%1)"
+msgstr "Génération distante (%1)"
+
+msgid "default model"
+msgstr "modèle par défaut"
+
+msgid "Local blur — pixel filter, not generative"
+msgstr "Flou local — filtre de pixels, non génératif"
+
+msgid "Ready (%1)"
+msgstr "Prêt (%1)"
+
+msgid "Unconfigured"
+msgstr "Non configuré"
+
+msgid "Unconfigured — %1"
+msgstr "Non configuré — %1"
+
+msgid "Ready · %1 · %2"
+msgstr "Prêt · %1 · %2"
+
+msgid "Neural matting is idle."
+msgstr "Le détourage neuronal est inactif."
+
+msgid "neural matting runtime is not installed"
+msgstr "l'environnement d'exécution du détourage neuronal n'est pas installé"
+
+msgid "neural runtime ready"
+msgstr "Environnement neuronal prêt"
+
+msgid "GPU matting was requested but CUDA is not available"
+msgstr "Le détourage GPU a été demandé, mais CUDA n'est pas disponible"
+
+msgid "Refining matte (neural)…"
+msgstr "Affinage du masque (neuronal)…"
+
+msgid "Refining matte…"
+msgstr "Affinage du masque…"
+
+msgid "Matte refinement failed: empty mask."
+msgstr "Échec de l'affinage du masque : masque vide."
+
+msgid "Neural matte ready — %1 (%2 ms)"
+msgstr "Masque neuronal prêt — %1 (%2 ms)"
+
+msgid "Matte ready — %1"
+msgstr "Masque prêt — %1"
+
+msgid "Tracking is unavailable: SAM model is not configured."
+msgstr "Le suivi est indisponible : le modèle SAM n'est pas configuré."
+
+msgid "Tracking is unavailable: SAM model file not found: %1"
+msgstr "Le suivi est indisponible : fichier du modèle SAM introuvable : %1"
+
+msgid "Ask about this is unavailable: vision endpoint is not configured."
+msgstr "Poser une question à ce sujet est indisponible : le point de terminaison de vision n'est pas configuré."
+
+msgid "Object lookup is unavailable: no chat gateway is configured."
+msgstr "La recherche d'objets est indisponible : aucune passerelle de chat n'est configurée."
+
+msgid "Object Select is unavailable: SAM model is not configured."
+msgstr "La sélection d'objet est indisponible : le modèle SAM n'est pas configuré."
+
+msgid "Object Select is unavailable: SAM model file not found: %1"
+msgstr "La sélection d'objet est indisponible : fichier du modèle SAM introuvable : %1"
+
+msgid "Object Select is unavailable: %1"
+msgstr "La sélection d'objet est indisponible : %1"
+
+msgid "No image provider configured — the local heal / blur fallback is active (pixel operations, not generative)."
+msgstr "Aucun fournisseur d'images configuré — la correction locale / le flou de secours est actif (opérations sur pixels, non génératif)."
+
+# NAI PaintBrush C++ status strings (Settings capability rows)
+
+msgid "Interface language applied."
+msgstr "Langue de l'interface appliquée."
+
+msgid "System interface language applied."
+msgstr "Langue d'interface système appliquée."
+
+msgid "The language could not be written to the VLC configuration."
+msgstr "La langue n'a pas pu être écrite dans la configuration de VLC."
+
+msgid "The language could not be saved to the VLC configuration file."
+msgstr "La langue n'a pas pu être enregistrée dans le fichier de configuration de VLC."

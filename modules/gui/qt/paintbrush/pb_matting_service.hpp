@@ -21,6 +21,7 @@
 #include <QHash>
 #include <QImage>
 #include <QString>
+#include <QStringList>
 
 #include <atomic>
 #include <deque>
@@ -119,6 +120,9 @@ private:
     void workerLoop();
     void runJob(const Job &job);
     void setStatus(const QString &status);
+    /* Status whose text follows the live interface language: the msgid is
+     * stored and translated on read, arguments are applied afterwards. */
+    void setStatusMsgid(const char *msgid, const QStringList &args = {});
     void setBusy(bool busy);
     bool ensureRuntime(QString *error);
     int presetSizeFor(matte::Quality quality) const;
@@ -143,6 +147,8 @@ private:
     quint64 m_activeId = 0;
     std::atomic<bool> m_cancelRequested{false};
     mutable QString m_status;
+    const char *m_statusMsgid = nullptr;
+    QStringList m_statusArgs;
 
     bool m_neuralProbed = false;
     bool m_neuralAvailable = false;

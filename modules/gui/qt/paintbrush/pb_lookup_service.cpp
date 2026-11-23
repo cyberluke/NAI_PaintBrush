@@ -53,7 +53,7 @@ void LookupService::configure(vlc_object_t *obj)
         m_configured = false;
         m_providerName = QStringLiteral("none");
         m_unavailableReason =
-            QStringLiteral("Object lookup is unavailable: no chat gateway is configured.");
+            pbTr("Object lookup is unavailable: no chat gateway is configured.");
         emit availabilityChanged(false, m_unavailableReason);
         return;
     }

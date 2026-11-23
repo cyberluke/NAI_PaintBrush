@@ -36498,3 +36498,91 @@ msgid "Layer %1"
 msgstr "Lớp %1"
 
 
+
+# NAI PaintBrush C++ status strings (Settings capability rows)
+
+msgid "Remote generation (%1)"
+msgstr "Tạo sinh từ xa (%1)"
+
+msgid "default model"
+msgstr "mô hình mặc định"
+
+msgid "Local blur — pixel filter, not generative"
+msgstr "Làm mờ cục bộ — bộ lọc điểm ảnh, không sinh tạo"
+
+msgid "Ready (%1)"
+msgstr "Sẵn sàng (%1)"
+
+msgid "Unconfigured"
+msgstr "Chưa được cấu hình"
+
+msgid "Unconfigured — %1"
+msgstr "Chưa được cấu hình — %1"
+
+msgid "Ready · %1 · %2"
+msgstr "Sẵn sàng · %1 · %2"
+
+msgid "Neural matting is idle."
+msgstr "Tách nền bằng mạng nơ-ron đang rảnh."
+
+msgid "neural matting runtime is not installed"
+msgstr "môi trường chạy tách nền bằng mạng nơ-ron chưa được cài đặt"
+
+msgid "neural runtime ready"
+msgstr "Môi trường nơ-ron sẵn sàng"
+
+msgid "GPU matting was requested but CUDA is not available"
+msgstr "Đã yêu cầu tách nền bằng GPU nhưng CUDA không khả dụng"
+
+msgid "Refining matte (neural)…"
+msgstr "Đang tinh chỉnh mặt nạ (mạng nơ-ron)…"
+
+msgid "Refining matte…"
+msgstr "Đang tinh chỉnh mặt nạ…"
+
+msgid "Matte refinement failed: empty mask."
+msgstr "Tinh chỉnh mặt nạ thất bại: mặt nạ trống."
+
+msgid "Neural matte ready — %1 (%2 ms)"
+msgstr "Mặt nạ nơ-ron sẵn sàng — %1 (%2 ms)"
+
+msgid "Matte ready — %1"
+msgstr "Mặt nạ sẵn sàng — %1"
+
+msgid "Tracking is unavailable: SAM model is not configured."
+msgstr "Theo dõi không khả dụng: mô hình SAM chưa được cấu hình."
+
+msgid "Tracking is unavailable: SAM model file not found: %1"
+msgstr "Theo dõi không khả dụng: không tìm thấy tệp mô hình SAM: %1"
+
+msgid "Ask about this is unavailable: vision endpoint is not configured."
+msgstr "Hỏi về mục này không khả dụng: điểm cuối thị giác chưa được cấu hình."
+
+msgid "Object lookup is unavailable: no chat gateway is configured."
+msgstr "Tra cứu đối tượng không khả dụng: chưa cấu hình cổng trò chuyện."
+
+msgid "Object Select is unavailable: SAM model is not configured."
+msgstr "Chọn đối tượng không khả dụng: mô hình SAM chưa được cấu hình."
+
+msgid "Object Select is unavailable: SAM model file not found: %1"
+msgstr "Chọn đối tượng không khả dụng: không tìm thấy tệp mô hình SAM: %1"
+
+msgid "Object Select is unavailable: %1"
+msgstr "Chọn đối tượng không khả dụng: %1"
+
+msgid "No image provider configured — the local heal / blur fallback is active (pixel operations, not generative)."
+msgstr "Chưa cấu hình nhà cung cấp hình ảnh — đang dùng phương án dự phòng làm lành / làm mờ cục bộ (thao tác điểm ảnh, không sinh tạo)."
+
+# NAI PaintBrush C++ status strings (Settings capability rows)
+
+msgid "Interface language applied."
+msgstr "Đã áp dụng ngôn ngữ giao diện."
+
+msgid "System interface language applied."
+msgstr "Đã áp dụng ngôn ngữ giao diện hệ thống."
+
+msgid "The language could not be written to the VLC configuration."
+msgstr "Không thể ghi ngôn ngữ vào cấu hình VLC."
+
+msgid "The language could not be saved to the VLC configuration file."
+msgstr "Không thể lưu ngôn ngữ vào tệp cấu hình VLC."

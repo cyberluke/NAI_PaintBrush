@@ -48,7 +48,7 @@ MattingService::MattingService(QObject *parent)
     qRegisterMetaType<paintbrush::matte::Result>("paintbrush::matte::Result");
     qRegisterMetaType<paintbrush::matte::FrameIdentity>("paintbrush::matte::FrameIdentity");
     m_modelDir = defaultModelDir();
-    setStatus(QStringLiteral("Neural matting is idle."));
+    setStatusMsgid("Neural matting is idle.");
 }
 
 MattingService::~MattingService()
@@ -121,7 +121,7 @@ void MattingService::configure(vlc_object_t *obj)
     m_backendText = caps.backend;
     m_unavailableReason = m_neuralAvailable ? QString() : caps.detail;
     if (!m_neuralAvailable && m_unavailableReason.isEmpty())
-        m_unavailableReason = QStringLiteral("neural matting runtime is not installed");
+        m_unavailableReason = pbTr("neural matting runtime is not installed");
     emit availabilityChanged();
 }
 
@@ -139,7 +139,7 @@ QString MattingService::backendText() const
 {
     if (!m_backendText.isEmpty())
         return m_backendText;
-    return neuralAvailable() ? QStringLiteral("neural runtime ready")
+    return neuralAvailable() ? pbTr("neural runtime ready")
                              : unavailableReason();
 }
 
@@ -243,7 +243,7 @@ bool MattingService::ensureRuntime(QString *error)
     if (m_deviceTier == 1 && !caps.cudaAvailable)
     {
         if (error)
-            *error = QStringLiteral("GPU matting was requested but CUDA is not available");
+            *error = pbTr("GPU matting was requested but CUDA is not available");
         return false;
     }
     if (m_deviceTier != 2 && !caps.cudaAvailable && !caps.cpuAvailable)
@@ -422,16 +422,16 @@ void MattingService::runJob(const Job &job)
     if (superseded || m_cancelRequested.load())
         return;
 
-    setStatus(job.mode == matte::Mode::Neural
-                  ? QStringLiteral("Refining matte (neural)…")
-                  : QStringLiteral("Refining matte…"));
+    setStatusMsgid(job.mode == matte::Mode::Neural
+                       ? "Refining matte (neural)…"
+                       : "Refining matte…");
 
     matte::Result result = matte::refineDeterministic(job.inputs, job.parameters);
     if (!result.isValid())
     {
         emit refineFailed(job.id, QStringLiteral("The selected mask produced no matte."));
         setBusy(false);
-        setStatus(QStringLiteral("Matte refinement failed: empty mask."));
+        setStatusMsgid("Matte refinement failed: empty mask.");
         return;
     }
 
@@ -538,12 +538,12 @@ void MattingService::runJob(const Job &job)
         }
     }
 
-    const QString status = result.backend.startsWith(QStringLiteral("CUDA"))
-        ? QStringLiteral("Neural matte ready — %1 (%2 ms)")
-              .arg(result.backend)
-              .arg(result.inferenceMs, 0, 'f', 1)
-        : QStringLiteral("Matte ready — %1").arg(result.backend);
-    setStatus(status);
+    if (result.backend.startsWith(QStringLiteral("CUDA")))
+        setStatusMsgid("Neural matte ready — %1 (%2 ms)",
+                       { result.backend,
+                         QString::number(result.inferenceMs, 'f', 1) });
+    else
+        setStatusMsgid("Matte ready — %1", { result.backend });
     logInfo("matte ready: %s unknown=%.3f holesFilled=%d artifactsRemoved=%d",
             result.backend.toUtf8().constData(),
             result.trimapUnknownFraction,
@@ -559,8 +559,21 @@ void MattingService::setStatus(const QString &status)
     {
         QMutexLocker lock(&m_mutex);
         m_status = status;
+        m_statusMsgid = nullptr;
+        m_statusArgs.clear();
     }
     emit statusChanged(status);
+}
+
+void MattingService::setStatusMsgid(const char *msgid, const QStringList &args)
+{
+    {
+        QMutexLocker lock(&m_mutex);
+        m_statusMsgid = msgid;
+        m_statusArgs = args;
+        m_status.clear();
+    }
+    emit statusChanged(statusText());
 }
 
 bool MattingService::isBusy() const
@@ -572,6 +585,14 @@ bool MattingService::isBusy() const
 QString MattingService::statusText() const
 {
     QMutexLocker lock(&m_mutex);
+    if (m_statusMsgid != nullptr)
+    {
+        /* Translated on read: the interface language can change at runtime. */
+        QString text = pbTr(m_statusMsgid);
+        for (const QString &arg : m_statusArgs)
+            text = text.arg(arg);
+        return text;
+    }
     return m_status;
 }
 

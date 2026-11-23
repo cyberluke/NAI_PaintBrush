@@ -25,12 +25,6 @@
 # include "config.h"
 #endif
 
-/* Must precede any C library locale header: libintl defines LC_MESSAGES only
- * while <locale.h> has not been pulled in yet. */
-#ifdef ENABLE_NLS
-# include <libintl.h>
-#endif
-
 #include <qconfig.h>
 #include <QtPlugin>
 #include <QQuickStyle>
@@ -126,10 +120,12 @@ extern "C" char **environ;
 #include <vlc_player.h>
 #include <vlc_threads.h>
 #include <vlc_messages.h>
-#include <vlc_charset.h>
-#include <vlc_configuration.h>
 
 #include "paintbrush/pb_i18n.hpp"
+
+/* Exported by libvlccore (src/modules/textdomain.c): drops gettext's resolved
+ * catalog so the next lookup follows LANG/LANGUAGE. */
+extern "C" void vlc_textdomain_refresh(void);
 
 #include <QQuickWindow>
 #include <QOpenGLContext> // Available in Qt GUI, no need for Qt OpenGL module
@@ -780,32 +776,6 @@ static inline void triggerQuit()
 namespace paintbrush {
 namespace i18n {
 
-/* The Qt interface resolves its own gettext domain instead of calling
- * vlc_gettext(). libvlccore embeds gettext statically, and a module cannot
- * invalidate that instance's resolved-catalog cache — which the Settings
- * language picker must do to switch the interface live. The plugin links its
- * own (static) gettext for exactly that reason; results are identical for the
- * same .mo files and environment. */
-#ifdef ENABLE_NLS
-static const char *pbGettext(const char *msgid)
-{
-    return *msgid ? dgettext(PACKAGE_NAME, msgid) : msgid;
-}
-
-static const char *pbNgettext(const char *msgid, const char *plural,
-                              unsigned long n)
-{
-    return *msgid ? dngettext(PACKAGE_NAME, msgid, plural, n) : msgid;
-}
-#else
-static const char *pbGettext(const char *msgid) { return msgid; }
-static const char *pbNgettext(const char *msgid, const char *plural,
-                              unsigned long n)
-{
-    return n == 1 ? msgid : plural;
-}
-#endif
-
 void setInterfaceLanguage(const QByteArray &code)
 {
     if (code.isEmpty())
@@ -818,12 +788,9 @@ void setInterfaceLanguage(const QByteArray &code)
         qputenv("LANG", code);
         qputenv("LANGUAGE", code);
     }
-#ifdef ENABLE_NLS
-    /* gettext caches the catalog after the first successful lookup; re-running
-     * setlocale on the message category invalidates it. LC_MESSAGES only, so
-     * numeric and ctype formatting keep the C locale the process has used. */
-    libintl_setlocale(LC_MESSAGES, "");
-#endif
+    /* libvlccore owns the in-tree gettext catalog (shared by the Qt widgets
+     * and this translator); ask it to drop the cached locale. */
+    vlc_textdomain_refresh();
 }
 
 } /* namespace i18n */
@@ -843,9 +810,8 @@ public:
     {
         Q_UNUSED(context);
 
-        const char* text = (n >= 0 && disambiguation != nullptr)
-                               ? paintbrush::i18n::pbNgettext(sourceText, disambiguation, n)
-                               : paintbrush::i18n::pbGettext(sourceText);
+        const char* text = (n >= 0 && disambiguation != nullptr) ? vlc_ngettext(sourceText, disambiguation, n)
+                                                                 : vlc_gettext(sourceText);
 
         assert(text);
         return QString::fromUtf8(text);
@@ -1219,22 +1185,6 @@ static void *Thread( void *obj )
      * bin/winvlc.c), so export it before Qt is constructed and the translator
      * is installed. An empty value keeps the system locale. */
     {
-#ifdef ENABLE_NLS
-        /* Bind the interface plugin's own gettext instance to the shipped
-         * catalogs (same resolution textdomain.c performs for libvlccore). */
-        char *localePath = config_GetSysPath( VLC_LOCALE_DIR, NULL );
-        if( localePath != NULL )
-        {
-            char *localPath = ToLocale( localePath );
-            if( localPath != NULL )
-            {
-                bindtextdomain( PACKAGE_NAME, localPath );
-                LocaleFree( localPath );
-            }
-            bind_textdomain_codeset( PACKAGE_NAME, "UTF-8" );
-            free( localePath );
-        }
-#endif
         char *lang = var_InheritString( p_intf, "paintbrush-language" );
         if( lang != NULL )
         {

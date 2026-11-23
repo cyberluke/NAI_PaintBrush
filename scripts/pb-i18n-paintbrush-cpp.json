@@ -1,0 +1,255 @@
+{
+  "Remote generation (%1)": {
+    "cs": "Vzdálené generování (%1)",
+    "sk": "Vzdialené generovanie (%1)",
+    "vi": "Tạo sinh từ xa (%1)",
+    "fr": "Génération distante (%1)",
+    "de": "Remote-Generierung (%1)",
+    "it": "Generazione remota (%1)",
+    "es": "Generación remota (%1)"
+  },
+  "default model": {
+    "cs": "výchozí model",
+    "sk": "predvolený model",
+    "vi": "mô hình mặc định",
+    "fr": "modèle par défaut",
+    "de": "Standardmodell",
+    "it": "modello predefinito",
+    "es": "modelo predeterminado"
+  },
+  "Local blur — pixel filter, not generative": {
+    "cs": "Lokální rozostření — pixelový filtr, ne generativní",
+    "sk": "Lokálne rozostrenie — pixelový filter, nie generatívne",
+    "vi": "Làm mờ cục bộ — bộ lọc điểm ảnh, không sinh tạo",
+    "fr": "Flou local — filtre de pixels, non génératif",
+    "de": "Lokale Weichzeichnung — Pixelfilter, nicht generativ",
+    "it": "Sfocatura locale — filtro pixel, non generativo",
+    "es": "Desenfoque local — filtro de píxeles, no generativo"
+  },
+  "Ready (%1)": {
+    "cs": "Připraveno (%1)",
+    "sk": "Pripravený (%1)",
+    "vi": "Sẵn sàng (%1)",
+    "fr": "Prêt (%1)",
+    "de": "Bereit (%1)",
+    "it": "Pronto (%1)",
+    "es": "Listo (%1)"
+  },
+  "Unconfigured": {
+    "cs": "Není nakonfigurováno",
+    "sk": "Nie je nakonfigurované",
+    "vi": "Chưa được cấu hình",
+    "fr": "Non configuré",
+    "de": "Nicht konfiguriert",
+    "it": "Non configurato",
+    "es": "Sin configurar"
+  },
+  "Unconfigured — %1": {
+    "cs": "Není nakonfigurováno — %1",
+    "sk": "Nie je nakonfigurované — %1",
+    "vi": "Chưa được cấu hình — %1",
+    "fr": "Non configuré — %1",
+    "de": "Nicht konfiguriert — %1",
+    "it": "Non configurato — %1",
+    "es": "Sin configurar — %1"
+  },
+  "Ready · %1 · %2": {
+    "cs": "Připraveno · %1 · %2",
+    "sk": "Pripravený · %1 · %2",
+    "vi": "Sẵn sàng · %1 · %2",
+    "fr": "Prêt · %1 · %2",
+    "de": "Bereit · %1 · %2",
+    "it": "Pronto · %1 · %2",
+    "es": "Listo · %1 · %2"
+  },
+  "Neural matting is idle.": {
+    "cs": "Neurální matting je nečinný.",
+    "sk": "Neurálne maskovanie je nečinné.",
+    "vi": "Tách nền bằng mạng nơ-ron đang rảnh.",
+    "fr": "Le détourage neuronal est inactif.",
+    "de": "Neuronales Matting ist inaktiv.",
+    "it": "Il matting neurale è inattivo.",
+    "es": "El recorte neural está inactivo."
+  },
+  "neural matting runtime is not installed": {
+    "cs": "běhové prostředí neurálního mattingu není nainstalováno",
+    "sk": "behové prostredie neurálneho maskovania nie je nainštalované",
+    "vi": "môi trường chạy tách nền bằng mạng nơ-ron chưa được cài đặt",
+    "fr": "l'environnement d'exécution du détourage neuronal n'est pas installé",
+    "de": "Laufzeit für neuronales Matting ist nicht installiert",
+    "it": "il runtime del matting neurale non è installato",
+    "es": "el entorno de ejecución del recorte neural no está instalado"
+  },
+  "neural runtime ready": {
+    "cs": "Neurální běhové prostředí připraveno",
+    "sk": "Neurálne behové prostredie pripravené",
+    "vi": "Môi trường nơ-ron sẵn sàng",
+    "fr": "Environnement neuronal prêt",
+    "de": "Neuronale Laufzeit bereit",
+    "it": "Runtime neurale pronto",
+    "es": "Entorno neuronal listo"
+  },
+  "GPU matting was requested but CUDA is not available": {
+    "cs": "Bylo vyžádáno GPU matting, ale CUDA není dostupná",
+    "sk": "Bolo vyžiadané GPU maskovanie, ale CUDA nie je dostupná",
+    "vi": "Đã yêu cầu tách nền bằng GPU nhưng CUDA không khả dụng",
+    "fr": "Le détourage GPU a été demandé, mais CUDA n'est pas disponible",
+    "de": "GPU-Matting wurde angefordert, aber CUDA ist nicht verfügbar",
+    "it": "È stato richiesto il matting GPU, ma CUDA non è disponibile",
+    "es": "Se solicitó el recorte por GPU, pero CUDA no está disponible"
+  },
+  "Refining matte (neural)…": {
+    "cs": "Upřesňování masky (neurální)…",
+    "sk": "Spresňovanie masky (neurálne)…",
+    "vi": "Đang tinh chỉnh mặt nạ (mạng nơ-ron)…",
+    "fr": "Affinage du masque (neuronal)…",
+    "de": "Freistellung wird verfeinert (neuronal)…",
+    "it": "Raffinamento della mascheratura (neurale)…",
+    "es": "Refinando la máscara (neural)…"
+  },
+  "Refining matte…": {
+    "cs": "Upřesňování masky…",
+    "sk": "Spresňovanie masky…",
+    "vi": "Đang tinh chỉnh mặt nạ…",
+    "fr": "Affinage du masque…",
+    "de": "Freistellung wird verfeinert…",
+    "it": "Raffinamento della mascheratura…",
+    "es": "Refinando la máscara…"
+  },
+  "Matte refinement failed: empty mask.": {
+    "cs": "Upřesnění masky selhalo: prázdná maska.",
+    "sk": "Spresnenie masky zlyhalo: prázdna maska.",
+    "vi": "Tinh chỉnh mặt nạ thất bại: mặt nạ trống.",
+    "fr": "Échec de l'affinage du masque : masque vide.",
+    "de": "Verfeinerung der Freistellung fehlgeschlagen: leere Maske.",
+    "it": "Raffinamento della mascheratura non riuscito: maschera vuota.",
+    "es": "Error al refinar la máscara: máscara vacía."
+  },
+  "Neural matte ready — %1 (%2 ms)": {
+    "cs": "Neurální maska připravena — %1 (%2 ms)",
+    "sk": "Neurálna maska pripravená — %1 (%2 ms)",
+    "vi": "Mặt nạ nơ-ron sẵn sàng — %1 (%2 ms)",
+    "fr": "Masque neuronal prêt — %1 (%2 ms)",
+    "de": "Neuronale Freistellung bereit — %1 (%2 ms)",
+    "it": "Mascheratura neurale pronta — %1 (%2 ms)",
+    "es": "Máscara neural lista — %1 (%2 ms)"
+  },
+  "Matte ready — %1": {
+    "cs": "Maska připravena — %1",
+    "sk": "Maska pripravená — %1",
+    "vi": "Mặt nạ sẵn sàng — %1",
+    "fr": "Masque prêt — %1",
+    "de": "Freistellung bereit — %1",
+    "it": "Mascheratura pronta — %1",
+    "es": "Máscara lista — %1"
+  },
+  "Tracking is unavailable: SAM model is not configured.": {
+    "cs": "Sledování není dostupné: model SAM není nakonfigurován.",
+    "sk": "Sledovanie nie je dostupné: model SAM nie je nakonfigurovaný.",
+    "vi": "Theo dõi không khả dụng: mô hình SAM chưa được cấu hình.",
+    "fr": "Le suivi est indisponible : le modèle SAM n'est pas configuré.",
+    "de": "Verfolgung ist nicht verfügbar: SAM-Modell ist nicht konfiguriert.",
+    "it": "Il tracciamento non è disponibile: il modello SAM non è configurato.",
+    "es": "El seguimiento no está disponible: el modelo SAM no está configurado."
+  },
+  "Tracking is unavailable: SAM model file not found: %1": {
+    "cs": "Sledování není dostupné: soubor modelu SAM nebyl nalezen: %1",
+    "sk": "Sledovanie nie je dostupné: súbor modelu SAM sa nenašiel: %1",
+    "vi": "Theo dõi không khả dụng: không tìm thấy tệp mô hình SAM: %1",
+    "fr": "Le suivi est indisponible : fichier du modèle SAM introuvable : %1",
+    "de": "Verfolgung ist nicht verfügbar: SAM-Modell-Datei nicht gefunden: %1",
+    "it": "Il tracciamento non è disponibile: file del modello SAM non trovato: %1",
+    "es": "El seguimiento no está disponible: no se encontró el archivo del modelo SAM: %1"
+  },
+  "Ask about this is unavailable: vision endpoint is not configured.": {
+    "cs": "Funkce Zeptejte se na to není dostupná: koncový bod pro vidění není nakonfigurován.",
+    "sk": "Funkcia Opýtať sa na toto nie je dostupná: koncový bod videnia nie je nakonfigurovaný.",
+    "vi": "Hỏi về mục này không khả dụng: điểm cuối thị giác chưa được cấu hình.",
+    "fr": "Poser une question à ce sujet est indisponible : le point de terminaison de vision n'est pas configuré.",
+    "de": "Dazu fragen ist nicht verfügbar: Der Vision-Endpunkt ist nicht konfiguriert.",
+    "it": "Chiedi informazioni su questo non è disponibile: l'endpoint di visione non è configurato.",
+    "es": "Preguntar sobre esto no está disponible: el endpoint de visión no está configurado."
+  },
+  "Object lookup is unavailable: no chat gateway is configured.": {
+    "cs": "Vyhledávání objektů není dostupné: není nakonfigurována brána chatu.",
+    "sk": "Vyhľadávanie objektov nie je dostupné: nie je nakonfigurovaná brána chatu.",
+    "vi": "Tra cứu đối tượng không khả dụng: chưa cấu hình cổng trò chuyện.",
+    "fr": "La recherche d'objets est indisponible : aucune passerelle de chat n'est configurée.",
+    "de": "Objektbestimmung ist nicht verfügbar: kein Chat-Gateway konfiguriert.",
+    "it": "La ricerca oggetti non è disponibile: nessun gateway chat configurato.",
+    "es": "La búsqueda de objetos no está disponible: no hay una puerta de enlace de chat configurada."
+  },
+  "Object Select is unavailable: SAM model is not configured.": {
+    "cs": "Výběr objektu není dostupný: model SAM není nakonfigurován.",
+    "sk": "Výber objektu nie je dostupný: model SAM nie je nakonfigurovaný.",
+    "vi": "Chọn đối tượng không khả dụng: mô hình SAM chưa được cấu hình.",
+    "fr": "La sélection d'objet est indisponible : le modèle SAM n'est pas configuré.",
+    "de": "Objektauswahl ist nicht verfügbar: SAM-Modell ist nicht konfiguriert.",
+    "it": "La selezione oggetto non è disponibile: il modello SAM non è configurato.",
+    "es": "La selección de objeto no está disponible: el modelo SAM no está configurado."
+  },
+  "Object Select is unavailable: SAM model file not found: %1": {
+    "cs": "Výběr objektu není dostupný: soubor modelu SAM nebyl nalezen: %1",
+    "sk": "Výber objektu nie je dostupný: súbor modelu SAM sa nenašiel: %1",
+    "vi": "Chọn đối tượng không khả dụng: không tìm thấy tệp mô hình SAM: %1",
+    "fr": "La sélection d'objet est indisponible : fichier du modèle SAM introuvable : %1",
+    "de": "Objektauswahl ist nicht verfügbar: SAM-Modell-Datei nicht gefunden: %1",
+    "it": "La selezione oggetto non è disponibile: file del modello SAM non trovato: %1",
+    "es": "La selección de objeto no está disponible: no se encontró el archivo del modelo SAM: %1"
+  },
+  "Object Select is unavailable: %1": {
+    "cs": "Výběr objektu není dostupný: %1",
+    "sk": "Výber objektu nie je dostupný: %1",
+    "vi": "Chọn đối tượng không khả dụng: %1",
+    "fr": "La sélection d'objet est indisponible : %1",
+    "de": "Objektauswahl ist nicht verfügbar: %1",
+    "it": "La selezione oggetto non è disponibile: %1",
+    "es": "La selección de objeto no está disponible: %1"
+  },
+  "No image provider configured — the local heal / blur fallback is active (pixel operations, not generative).": {
+    "cs": "Není nakonfigurován žádný poskytovatel obrázků — je aktivní lokální záložní retuš / rozostření (pixelové operace, ne generativní).",
+    "sk": "Nie je nakonfigurovaný žiadny poskytovateľ obrázkov — je aktívna lokálna záložná oprava / rozostrenie (pixelové operácie, nie generatívne).",
+    "vi": "Chưa cấu hình nhà cung cấp hình ảnh — đang dùng phương án dự phòng làm lành / làm mờ cục bộ (thao tác điểm ảnh, không sinh tạo).",
+    "fr": "Aucun fournisseur d'images configuré — la correction locale / le flou de secours est actif (opérations sur pixels, non génératif).",
+    "de": "Kein Bildanbieter konfiguriert — der lokale Heilen-/Weichzeichnen-Fallback ist aktiv (Pixeloperationen, nicht generativ).",
+    "it": "Nessun provider di immagini configurato — è attivo il fallback locale di ritocco / sfocatura (operazioni sui pixel, non generativo).",
+    "es": "No hay ningún proveedor de imágenes configurado — está activo el respaldo local de retoque / desenfoque (operaciones de píxeles, no generativo)."
+  }
+,
+  "Interface language applied.": {
+    "cs": "Jazyk rozhraní byl použit.",
+    "sk": "Jazyk rozhrania bol použitý.",
+    "vi": "Đã áp dụng ngôn ngữ giao diện.",
+    "fr": "Langue de l'interface appliquée.",
+    "de": "Oberflächensprache angewendet.",
+    "it": "Lingua dell'interfaccia applicata.",
+    "es": "Idioma de la interfaz aplicado."
+  },
+  "System interface language applied.": {
+    "cs": "Byl použit systémový jazyk rozhraní.",
+    "sk": "Bol použitý systémový jazyk rozhrania.",
+    "vi": "Đã áp dụng ngôn ngữ giao diện hệ thống.",
+    "fr": "Langue d'interface système appliquée.",
+    "de": "Systemsprache der Oberfläche angewendet.",
+    "it": "Lingua dell'interfaccia di sistema applicata.",
+    "es": "Idioma de interfaz del sistema aplicado."
+  },
+  "The language could not be written to the VLC configuration.": {
+    "cs": "Jazyk se nepodařilo zapsat do konfigurace VLC.",
+    "sk": "Jazyk sa nepodarilo zapísať do konfigurácie VLC.",
+    "vi": "Không thể ghi ngôn ngữ vào cấu hình VLC.",
+    "fr": "La langue n'a pas pu être écrite dans la configuration de VLC.",
+    "de": "Die Sprache konnte nicht in die VLC-Konfiguration geschrieben werden.",
+    "it": "Non è stato possibile scrivere la lingua nella configurazione di VLC.",
+    "es": "No se pudo escribir el idioma en la configuración de VLC."
+  },
+  "The language could not be saved to the VLC configuration file.": {
+    "cs": "Jazyk se nepodařilo uložit do konfiguračního souboru VLC.",
+    "sk": "Jazyk sa nepodarilo uložiť do konfiguračného súboru VLC.",
+    "vi": "Không thể lưu ngôn ngữ vào tệp cấu hình VLC.",
+    "fr": "La langue n'a pas pu être enregistrée dans le fichier de configuration de VLC.",
+    "de": "Die Sprache konnte nicht in der VLC-Konfigurationsdatei gespeichert werden.",
+    "it": "Non è stato possibile salvare la lingua nel file di configurazione di VLC.",
+    "es": "No se pudo guardar el idioma en el archivo de configuración de VLC."
+  }
+}
