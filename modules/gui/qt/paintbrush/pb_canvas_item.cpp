@@ -2709,9 +2709,12 @@ QRect PaintbrushCanvasItem::mappedRect(const QRect &localRect) const
     return tf.mapRect(QRectF(localRect)).toAlignedRect().adjusted(-2, -2, 2, 2);
 }
 
-/* Grow the per-stroke scratch tile to cover `localRect`, seeding the
- * untouched portion with the real layer content so dabs (SourceOver paint
- * and Clear erase) produce exactly what painting the layer directly would. */
+/* Grow the per-stroke scratch tile to cover `localRect`, seeding every newly
+ * exposed tile area from the real layer so dabs (SourceOver paint and Clear
+ * erase) produce exactly what painting the layer directly would. Seeding each
+ * newly allocated/grown tile once (instead of per dab) keeps the tile fully
+ * seeded, so commitScratch() can blit it in one pass and long strokes do not
+ * accumulate QRegion band work. */
 void PaintbrushCanvasItem::ensureScratch(const QRect &localRect)
 {
     if (!m_doc)
@@ -2724,12 +2727,13 @@ void PaintbrushCanvasItem::ensureScratch(const QRect &localRect)
     if (need.isEmpty())
         return;
 
+    QRegion newlySeeded;
     if (m_scratchTile.isNull())
     {
         m_scratchTile = QImage(need.size(), QImage::Format_ARGB32);
         m_scratchTile.fill(Qt::transparent);
         m_scratchOrigin = need.topLeft();
-        m_scratchSeeded = QRegion();
+        newlySeeded = QRegion(need);
     }
     else
     {
@@ -2745,32 +2749,23 @@ void PaintbrushCanvasItem::ensureScratch(const QRect &localRect)
             p.end();
             /* m_scratchSeeded is kept in LAYER coordinates. Changing the tile
              * origin does not move layer coordinates, so it must NOT be
-             * translated here. The commit subtracts the origin exactly once;
-             * translating here as well double-offset the seeded rect and
-             * Source-blitted transparent tile gaps over existing paint (the
-             * rectangular hole through a brush line). */
+             * translated here. */
             m_scratchTile = std::move(grown);
             m_scratchOrigin = u.topLeft();
+            newlySeeded = QRegion(u) - QRegion(cur);
         }
     }
 
-    /* seed only the areas that have not been seeded yet */
-    const QRegion unseeded = m_scratchSeeded.isEmpty()
-                                 ? QRegion(need)
-                                 : QRegion(need) - m_scratchSeeded;
-    if (!unseeded.isEmpty())
+    /* Seed only areas that did not exist before; painted dabs inside the old
+     * tile are preserved and never overwritten. */
+    if (!newlySeeded.isEmpty())
     {
         QPainter p(&m_scratchTile);
         p.setCompositionMode(QPainter::CompositionMode_Source);
-        for (const QRect &r : unseeded)
-        {
-            const QRect rLocal = r.intersected(need);
-            if (rLocal.isEmpty())
-                continue;
-            p.drawImage(rLocal.topLeft() - m_scratchOrigin, layer->raster, rLocal);
-        }
+        for (const QRect &r : newlySeeded)
+            p.drawImage(r.topLeft() - m_scratchOrigin, layer->raster, r);
         p.end();
-        m_scratchSeeded = m_scratchSeeded.united(QRegion(need));
+        m_scratchSeeded = m_scratchSeeded.united(newlySeeded);
     }
 }
 
@@ -2896,24 +2891,12 @@ void PaintbrushCanvasItem::commitScratch(const QString &desc)
         return;
 
     {
-        /* Only the SEEDED region may be Source-blitted onto the layer. A
-         * QRegion (not a bounding rect) matters: fast strokes and disjoint
-         * powder windows leave unseeded gaps inside the bounding box, and
-         * Source-blitting those transparent gaps erased real layer pixels —
-         * the rectangular background hole through a brush line. */
-        const QRegion seeded =
-            (m_scratchSeeded.isEmpty()
-                 ? QRegion(m_scratchTile.rect())
-                 : m_scratchSeeded.translated(-m_scratchOrigin)
-                       .intersected(QRegion(m_scratchTile.rect())));
-        if (!seeded.isEmpty())
-        {
-            QPainter p(&layer->raster);
-            p.setCompositionMode(QPainter::CompositionMode_Source);
-            for (const QRect &r : seeded)
-                p.drawImage(r.topLeft() + m_scratchOrigin, m_scratchTile, r);
-            p.end();
-        }
+        /* ensureScratch() seeds every allocated/grown tile area from the layer,
+         * so the whole tile is safe to Source-blit in one pass. */
+        QPainter p(&layer->raster);
+        p.setCompositionMode(QPainter::CompositionMode_Source);
+        p.drawImage(m_scratchOrigin, m_scratchTile);
+        p.end();
     }
 
     maskStrokeToSelectionAndAlphaLock();
@@ -5024,6 +5007,11 @@ void PaintbrushCanvasItem::dropEvent(QDropEvent *event)
 void PaintbrushCanvasItem::markCanvasDirty()
 {
     markAllTilesDirty();
+}
+
+void PaintbrushCanvasItem::markRectDirty(const QRect &canvasRect_)
+{
+    markTilesDirty(canvasRect_);
 }
 
 void PaintbrushCanvasItem::setAnimTime(qint64 timeMs)

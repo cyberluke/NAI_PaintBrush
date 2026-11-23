@@ -11,6 +11,7 @@
 #include "pb_frame_capture.hpp"
 #include "pb_export.hpp"
 #include "pb_common.hpp"
+#include "pb_i18n.hpp"
 #include "gpu/pb_sam3.h"
 
 #include <QQuickItem>
@@ -31,6 +32,7 @@ extern "C" __declspec(dllimport) HRESULT WINAPI
 #include <QClipboard>
 #include <QCoreApplication>
 #include <QGuiApplication>
+#include <QQmlEngine>
 #include <QMimeData>
 #include <QStandardPaths>
 #include <QDir>
@@ -2053,7 +2055,7 @@ void PaintbrushController::endLayerMove()
 void PaintbrushController::transformLayer(int index, double scale, double rotation)
 {
     CanvasLayer *layer = m_document.layerAt(index);
-    if (!layer)
+    if (!layer || layer->locked)
         return;
     /* P0.5: any raster-bearing layer carries transform semantics — the
      * renderer composites LAYER_REFERENCE / LAYER_GENERATED exactly like
@@ -2098,6 +2100,7 @@ void PaintbrushController::beginLayerTransform(int index)
     m_layerTransformIndex = index;
     m_layerTransformId = layer->id;
     m_layerTransformBefore = layer->transform();
+    m_layerTransformLast = m_layerTransformBefore;
 }
 
 void PaintbrushController::updateLayerTransform(int index, double scale,
@@ -2116,21 +2119,41 @@ void PaintbrushController::updateLayerTransform(int index, double scale,
     if (qFuzzyCompare(layer->scale, s) && qFuzzyCompare(layer->rotation, r))
         return;
     /* Live preview: no undo entry per mouse event; endLayerTransform() pushes
-     * exactly one SetTransformCommand. */
+     * exactly one SetTransformCommand. Invalidate only the layer's previous and
+     * new transformed bounds — a full-canvas re-composite per pointer move is
+     * wasteful on a 4K canvas. */
+    const QRectF rasterRect(layer->raster.rect());
+    const QRect beforeRect = m_layerTransformLast.mapRect(rasterRect)
+                                 .toAlignedRect().adjusted(-2, -2, 2, 2);
     layer->scale = s;
     layer->rotation = r;
+    const QTransform now = layer->transform();
+    m_layerTransformLast = now;
     if (m_canvas)
-        m_canvas->markCanvasDirty();
+    {
+        const QRect afterRect = now.mapRect(rasterRect)
+                                    .toAlignedRect().adjusted(-2, -2, 2, 2);
+        m_canvas->markRectDirty(beforeRect.united(afterRect));
+    }
     emit layerTransformChanged();
 }
 
 void PaintbrushController::endLayerTransform(int index)
 {
-    if (!m_layerTransformActive || index != m_layerTransformIndex)
+    Q_UNUSED(index);
+    if (!m_layerTransformActive)
         return;
+    /* The QML may pass a different current layer than the one the gesture
+     * started on (selection/layer changes mid-drag). Always end the stored
+     * gesture and clear the active flag, then commit it against the layer it
+     * actually started on. */
+    const int gestureIndex = m_layerTransformIndex;
+    CanvasLayer *layer = m_document.layerAt(gestureIndex);
+    const bool sameLayer = layer && layer->id == m_layerTransformId;
     m_layerTransformActive = false;
-    CanvasLayer *layer = m_document.layerAt(index);
-    if (!layer || layer->id != m_layerTransformId)
+    m_layerTransformIndex = -1;
+    m_layerTransformId = 0;
+    if (!sameLayer)
         return;
     const QTransform after = layer->transform();
     if (after == m_layerTransformBefore)
@@ -2138,7 +2161,7 @@ void PaintbrushController::endLayerTransform(int index)
     SetTransformCommand cmd;
     cmd.desc = QStringLiteral("Resize / rotate layer");
     cmd.layerId = layer->id;
-    cmd.layerIndex = index;
+    cmd.layerIndex = gestureIndex;
     cmd.before = m_layerTransformBefore;
     cmd.after = after;
     m_undoStack.pushSetTransform(cmd);
@@ -2151,7 +2174,7 @@ void PaintbrushController::endLayerTransform(int index)
 void PaintbrushController::moveImageLayer(int index, const QPointF &position)
 {
     CanvasLayer *layer = m_document.layerAt(index);
-    if (!layer)
+    if (!layer || layer->locked)
         return;
     /* P0.5: see transformLayer — raster-bearing reference/generated layers
      * are moveable just like image/sticker layers. */
@@ -2578,6 +2601,10 @@ void PaintbrushController::submitAsk(const QString &question)
                      m_visionConversationId);
         setStatus(QStringLiteral("Asking about this frame…"));
     }
+    /* Leave Ask mode so selecting the rail cell again is a fresh tool change
+     * and starts a new question. */
+    if (m_canvas)
+        m_canvas->setTool(TOOL_NONE);
 }
 
 void PaintbrushController::cancelAsk()
@@ -2587,6 +2614,8 @@ void PaintbrushController::cancelAsk()
         m_askInputVisible = false;
         emit askInputChanged();
     }
+    if (m_canvas)
+        m_canvas->setTool(TOOL_NONE);
 }
 
 void PaintbrushController::onMaskRefineStarted(const QImage &mask)
@@ -5234,6 +5263,12 @@ void PaintbrushController::removeObject(const QString &prompt)
         setStatus(m_generation.unavailableReason());
         return;
     }
+    if (m_generation.isBusy())
+    {
+        setStatus(QStringLiteral("An AI generation is already running; "
+                                 "wait for it to finish."));
+        return;
+    }
     if (m_objectMask.isNull())
     {
         setStatus(QStringLiteral("Select an object first."));
@@ -5252,6 +5287,12 @@ void PaintbrushController::generativeFill(const QString &prompt)
     if (!m_generation.isConfigured())
     {
         setStatus(m_generation.unavailableReason());
+        return;
+    }
+    if (m_generation.isBusy())
+    {
+        setStatus(QStringLiteral("An AI generation is already running; "
+                                 "wait for it to finish."));
         return;
     }
     if (!m_canvas || !m_canvas->hasSelection())
@@ -5274,6 +5315,12 @@ void PaintbrushController::replaceBackground(const QString &prompt)
     if (!m_generation.isConfigured())
     {
         setStatus(m_generation.unavailableReason());
+        return;
+    }
+    if (m_generation.isBusy())
+    {
+        setStatus(QStringLiteral("An AI generation is already running; "
+                                 "wait for it to finish."));
         return;
     }
     if (m_objectMask.isNull())
@@ -5537,6 +5584,7 @@ void PaintbrushController::onGenerationResult(const QString &requestId,
     const QString description = m_generationDesc;
     addResultLayer(result, description);
     m_generationDesc = QStringLiteral("AI result");
+    m_generationRequestId.clear();
     if (m_canvas)
         m_canvas->markCanvasDirty();
     emit generationStateChanged();
@@ -5547,7 +5595,10 @@ void PaintbrushController::onGenerationResult(const QString &requestId,
 void PaintbrushController::onGenerationError(const QString &requestId,
                                              const QString &message)
 {
-    Q_UNUSED(requestId);
+    if (requestId != m_generationRequestId)
+        return;
+    m_generationRequestId.clear();
+    m_generationDesc = QStringLiteral("AI result");
     setStatus(message);
     emit generationStateChanged();
 }
@@ -6398,6 +6449,14 @@ QVariantMap PaintbrushController::executeAssistantTool(const QString &name,
         const CanvasLayer *layer = m_document.layerAt(index);
         if (!layer)
             return fail(QStringLiteral("No layer matches '%1'.").arg(reference));
+        if (layer->locked)
+            return fail(QStringLiteral("Layer '%1' is locked.").arg(layer->name));
+        if (layer->type != LAYER_IMAGE && layer->type != LAYER_TEXT &&
+            layer->type != LAYER_STICKER && layer->type != LAYER_REFERENCE &&
+            layer->type != LAYER_GENERATED)
+            return fail(QStringLiteral("Layer '%1' can't be moved; only image, "
+                                       "text, sticker, reference and generated "
+                                       "layers move.").arg(layer->name));
         const double dx = args.value(QStringLiteral("dx")).toDouble();
         const double dy = args.value(QStringLiteral("dy")).toDouble();
         setLayerPosition(index, layer->position.x() + dx,
@@ -6426,6 +6485,14 @@ QVariantMap PaintbrushController::executeAssistantTool(const QString &name,
         const CanvasLayer *layer = m_document.layerAt(index);
         if (!layer)
             return fail(QStringLiteral("No layer matches '%1'.").arg(reference));
+        if (layer->locked)
+            return fail(QStringLiteral("Layer '%1' is locked.").arg(layer->name));
+        if (layer->type != LAYER_IMAGE && layer->type != LAYER_TEXT &&
+            layer->type != LAYER_STICKER && layer->type != LAYER_REFERENCE &&
+            layer->type != LAYER_GENERATED)
+            return fail(QStringLiteral("Layer '%1' can't be transformed; only "
+                                       "image, text, sticker, reference and "
+                                       "generated layers transform.").arg(layer->name));
         const double scale =
             qBound(0.05, args.value(QStringLiteral("scale")).toDouble(1.0), 10.0);
         const double rotation =
@@ -6485,6 +6552,9 @@ QVariantMap PaintbrushController::executeAssistantTool(const QString &name,
         if (!m_generation.capability(GenerationService::ACTION_REMOVE_OBJECT)
                  .isUsable())
             return fail(QStringLiteral("AI object removal is not available."));
+        if (m_generation.isBusy())
+            return fail(QStringLiteral("An AI generation is already running; "
+                                       "wait for it to finish."));
         removeObject(args.value(QStringLiteral("prompt")).toString());
         return ok(QStringLiteral("Started removing the subject. The result "
                                  "will appear as a new layer."));
@@ -6496,6 +6566,9 @@ QVariantMap PaintbrushController::executeAssistantTool(const QString &name,
         if (!m_generation.capability(GenerationService::ACTION_GENERATIVE_FILL)
                  .isUsable())
             return fail(QStringLiteral("Generative fill is not available."));
+        if (m_generation.isBusy())
+            return fail(QStringLiteral("An AI generation is already running; "
+                                       "wait for it to finish."));
         generativeFill(args.value(QStringLiteral("prompt")).toString());
         return ok(QStringLiteral("Started the generative fill. The result "
                                  "will appear as a new layer."));
@@ -6507,6 +6580,9 @@ QVariantMap PaintbrushController::executeAssistantTool(const QString &name,
         if (!m_generation.capability(GenerationService::ACTION_REPLACE_BACKGROUND)
                  .isUsable())
             return fail(QStringLiteral("Background replacement is not available."));
+        if (m_generation.isBusy())
+            return fail(QStringLiteral("An AI generation is already running; "
+                                       "wait for it to finish."));
         replaceBackground(args.value(QStringLiteral("prompt")).toString());
         return ok(QStringLiteral("Started replacing the background. The result "
                                  "will appear as a new layer."));
@@ -7026,6 +7102,10 @@ QString PaintbrushController::settingsImageApiKey() const
 {
     return pbStoredApiKey(VLC_OBJECT(m_intf), "paintbrush-image-api-key");
 }
+QString PaintbrushController::settingsLanguage() const
+{
+    return pbConfigString(VLC_OBJECT(m_intf), "paintbrush-language");
+}
 bool PaintbrushController::settingsVlmApiKeyFromEnv() const
 {
     return pbApiKeyFromEnvironment("PAINTBRUSH_VLM_API_KEY");
@@ -7061,11 +7141,24 @@ QString PaintbrushController::applyImageSettings(const QString &baseUrl,
     const QString url = baseUrl.trimmed();
     const QString name = model.trimmed();
     const QString key = apiKey.trimmed();
+    /* Snapshot the live values so a failed save cannot leave the UI and the
+     * running service disagreeing with each other. */
+    const QString previousUrl = settingsImageUrl();
+    const QString previousModel = settingsImageModel();
+    const QString previousKey = settingsImageApiKey();
     config_PutPsz("paintbrush-image-base-url", url.toUtf8().constData());
     config_PutPsz("paintbrush-image-model", name.toUtf8().constData());
     config_PutPsz("paintbrush-image-api-key", key.toUtf8().constData());
     if (config_SaveConfigFile(m_intf) != 0)
+    {
+        config_PutPsz("paintbrush-image-base-url",
+                      previousUrl.toUtf8().constData());
+        config_PutPsz("paintbrush-image-model",
+                      previousModel.toUtf8().constData());
+        config_PutPsz("paintbrush-image-api-key",
+                      previousKey.toUtf8().constData());
         return QStringLiteral("Could not save the image provider settings.");
+    }
     m_generation.configure(VLC_OBJECT(m_intf));
     emit settingsChanged();
     emit serviceAvailabilityChanged();
@@ -7073,6 +7166,40 @@ QString PaintbrushController::applyImageSettings(const QString &baseUrl,
     setStatus(url.isEmpty()
                   ? QStringLiteral("Image provider cleared; local fallbacks only.")
                   : QStringLiteral("Image provider applied."));
+    return QString();
+}
+
+QString PaintbrushController::applyLanguage(const QString &code)
+{
+    const QString language = code.trimmed();
+    /* The interface language is a PaintBrush option registered by the Qt
+     * module, so the choice survives a restart. */
+    config_PutPsz("paintbrush-language", language.toUtf8().constData());
+    /* config_PutPsz silently no-ops for an unregistered option; read back. */
+    char *value = config_GetPsz("paintbrush-language");
+    const QString stored = value ? QString::fromUtf8(value) : QString();
+    free(value);
+    if (stored != language)
+        return QStringLiteral(
+            "The language could not be written to the VLC configuration.");
+    if (config_SaveConfigFile(m_intf) != 0)
+        return QStringLiteral(
+            "The language could not be saved to the VLC configuration "
+            "file.");
+
+    /* Live switch: export the language, invalidate the gettext catalog cache
+     * and ask the QML engine to re-evaluate its qsTr bindings. */
+    paintbrush::i18n::setInterfaceLanguage(language.toUtf8());
+    if (m_canvas)
+    {
+        if (QQmlEngine *engine = qmlEngine(m_canvas))
+            engine->retranslate();
+    }
+
+    emit settingsChanged();
+    setStatus(language.isEmpty()
+                  ? QStringLiteral("System interface language applied.")
+                  : QStringLiteral("Interface language applied."));
     return QString();
 }
 

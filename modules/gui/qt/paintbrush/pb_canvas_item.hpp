@@ -302,6 +302,7 @@ public:
 
     /* -- painting entry points used by the controller ------------------------ */
     void markCanvasDirty();          /* full re-composite */
+    void markRectDirty(const QRect &canvasRect); /* targeted tile invalidation */
 
     /* -- Living Showroom: the canonical time axis ------------------------ */
     /* The canvas composites living layers at this document time. Static

@@ -716,6 +716,7 @@ public:
     Q_PROPERTY(bool settingsAssistantApiKeyFromEnv READ settingsAssistantApiKeyFromEnv NOTIFY settingsChanged FINAL)
     Q_PROPERTY(bool settingsImageApiKeyFromEnv READ settingsImageApiKeyFromEnv NOTIFY settingsChanged FINAL)
     Q_PROPERTY(int settingsPtsToleranceMs READ settingsPtsToleranceMs NOTIFY settingsChanged FINAL)
+    Q_PROPERTY(QString settingsLanguage READ settingsLanguage NOTIFY settingsChanged FINAL)
     Q_PROPERTY(bool settingsSecretsPresent READ settingsSecretsPresent NOTIFY settingsChanged FINAL)
     /* CUDA runtime DLL presence (LoadLibrary only, no CUDA init). The live
      * adapter probe is refreshed when Settings opens so a missing DLL or a
@@ -823,6 +824,7 @@ public:
     QString settingsVlmApiKey() const;
     QString settingsAssistantApiKey() const;
     QString settingsImageApiKey() const;
+    QString settingsLanguage() const;
     bool settingsVlmApiKeyFromEnv() const;
     bool settingsAssistantApiKeyFromEnv() const;
     bool settingsImageApiKeyFromEnv() const;
@@ -855,6 +857,11 @@ public:
     Q_INVOKABLE QString applyImageSettings(const QString &baseUrl,
                                            const QString &model,
                                            const QString &apiKey);
+    /* Persist the VLC interface language ('language' config key; empty =
+     * system locale). The translator is installed at process start, so the
+     * new language takes effect after restarting NAI PaintBrush. Returns an
+     * EMPTY string on success or a real failure message. */
+    Q_INVOKABLE QString applyLanguage(const QString &code);
     Q_INVOKABLE void clearRestartRequired();
 
     /* -- art-direction palettes -----------------------------------------
@@ -1248,6 +1255,7 @@ private:
     int m_layerTransformIndex = -1;
     int m_layerTransformId = 0;
     QTransform m_layerTransformBefore;
+    QTransform m_layerTransformLast;
     QPointF m_moveStartPos;
     QPointF m_moveStartCanvas;
     QString m_objectMaskBoundsText;

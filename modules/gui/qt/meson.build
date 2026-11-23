@@ -1402,11 +1402,26 @@ if qt6_dep.found()
 
     # TODO support qmlcachegen
 
+    # The PaintBrush settings switch the interface language at runtime, which
+    # needs a gettext instance whose resolved-catalog cache can be invalidated
+    # from the plugin (libvlccore's own copy is statically embedded and not
+    # exportable). Link the static gettext/iconv so the plugin owns that
+    # instance without adding a runtime DLL dependency.
+    paintbrush_intl_deps = [intl_dep]
+    intl_static_dep = cc.find_library('intl', static: true, required: false)
+    if intl_static_dep.found()
+        iconv_static_dep = cc.find_library('iconv', static: true, required: false)
+        if iconv_static_dep.found()
+            paintbrush_intl_deps = [intl_static_dep, iconv_static_dep]
+        endif
+    endif
+
     vlc_modules += {
         'name' : 'qt',
         'sources' : [qt6pre_files, qt6pre_qrc, shader_targets, shaders_processed, qt_sources, qt_plugin_sources],
         'extra_files' : [shader_files],
-        'dependencies' : [qt_extra_deps, qt6_dep, corefoundation_dep, paintbrush_extra_deps],
+        'dependencies' : [qt_extra_deps, qt6_dep, corefoundation_dep,
+                          paintbrush_extra_deps] + paintbrush_intl_deps,
         'include_directories' : qt_include_dir,
         'c_args' : qt_extra_flags,
         'cpp_args' : [qt_extra_flags, qt_cppargs, paintbrush_extra_cppargs],

@@ -572,6 +572,10 @@ Item {
             property bool expanded: false
             property bool collapsed: false
             property real userWidth: -1
+            /* Free position after a header drag; -1 keeps the monitor centered
+             * over the canvas stage (both axes) for every new video. */
+            property real panelX: -1
+            property real panelY: -1
 
             readonly property int bezel: Math.max(1, VLCStyle.dp(1, VLCStyle.scale))
             readonly property int headerHeight: Math.round(VLCStyle.dp(38, VLCStyle.scale))
@@ -593,13 +597,25 @@ Item {
                                                 ? PaintbrushCtx.playerVideoSize.width
                                                   / PaintbrushCtx.playerVideoSize.height
                                                 : 16 / 9
-            /* The monitor may never cover the media drawer/timeline. */
+            /* The stage the monitor floats over and its safe bottom edge. The
+             * monitor may never cover the media drawer/timeline, and the cap
+             * deliberately does NOT depend on y: the centered y depends on
+             * height, so a y-dependent cap would create a binding loop. */
+            readonly property real stageX: mainRow.x + canvasHost.x
+            readonly property real stageY: mainRow.y + canvasHost.y
+            readonly property real stageWidth: canvasHost.width
+            readonly property real stageHeight: canvasHost.height
             readonly property real bottomLimit: (mediaDrawer.visible ? mediaDrawer.y
                                                                      : bottomChrome.y)
                                                 - VLCStyle.margin_xsmall
-            readonly property real maxPanelHeight: Math.max(headerHeight + transportHeight
-                                                            + VLCStyle.dp(140, VLCStyle.scale),
-                                                            bottomLimit - y)
+            /* Safe vertical area: from the top of the stage down to the
+             * media drawer/timeline edge. Centering happens inside this
+             * area, so a centered monitor never covers the drawer and the
+             * first drag cannot make it jump to satisfy the clamp. */
+            readonly property real safeHeight: Math.max(headerHeight + transportHeight
+                                                        + VLCStyle.dp(140, VLCStyle.scale),
+                                                        bottomLimit - stageY)
+            readonly property real maxPanelHeight: safeHeight - VLCStyle.margin_normal
             readonly property real chromeHeight: headerHeight + statusHeight
                                                  + scrubHeight + transportHeight
             readonly property real maxVideoHeight: Math.max(VLCStyle.dp(120, VLCStyle.scale),
@@ -626,10 +642,14 @@ Item {
                        : Math.min(headerHeight + videoHeight + statusHeight
                                   + scrubHeight + transportHeight,
                                   maxPanelHeight))
+            /* Centered over the canvas stage by default; the header drag
+             * stores an explicit free position instead. */
             x: expanded ? VLCStyle.margin_large
-                        : mainRow.x + canvasHost.x + VLCStyle.margin_normal
+                        : (panelX >= 0 ? panelX
+                                       : stageX + Math.round((stageWidth - width) / 2))
             y: expanded ? VLCStyle.margin_large
-                        : mainRow.y + canvasHost.y + VLCStyle.margin_normal
+                        : (panelY >= 0 ? panelY
+                                       : stageY + Math.round((safeHeight - height) / 2))
 
             color: "#08080a"
             radius: Math.max(1, VLCStyle.dp(2, VLCStyle.scale))
@@ -647,11 +667,39 @@ Item {
                 anchors.fill: parent
                 spacing: 0
 
-                /* header: source identity + technical readout */
+                /* header: source identity + technical readout, and the drag
+                 * surface that moves the whole monitor. Drags that start on
+                 * the transport buttons stay buttons; everything else in the
+                 * header (tally, title, resolution, fps) moves the panel. */
                 Rectangle {
+                    id: playerHeader
                     Layout.fillWidth: true
                     Layout.preferredHeight: playerPanel.headerHeight
                     color: "#121216"
+
+                    DragHandler {
+                        id: panelDrag
+                        target: null
+                        enabled: !playerPanel.expanded
+                        cursorShape: active ? Qt.ClosedHandCursor
+                                            : Qt.OpenHandCursor
+                        property point grabStart: Qt.point(0, 0)
+                        onActiveChanged: if (active)
+                            grabStart = Qt.point(playerPanel.x, playerPanel.y)
+                        onTranslationChanged: {
+                            const minX = playerPanel.stageX
+                            const maxX = Math.max(minX, playerPanel.stageX
+                                                       + playerPanel.stageWidth
+                                                       - playerPanel.width)
+                            const minY = playerPanel.stageY
+                            const maxY = Math.max(minY, playerPanel.bottomLimit
+                                                       - playerPanel.height)
+                            playerPanel.panelX = Math.max(minX,
+                                Math.min(maxX, grabStart.x + translation.x))
+                            playerPanel.panelY = Math.max(minY,
+                                Math.min(maxY, grabStart.y + translation.y))
+                        }
+                    }
 
                     RowLayout {
                         anchors.fill: parent
@@ -969,6 +1017,9 @@ Item {
                         playerPanel.expanded = false
                         playerPanel.collapsed = false
                         playerPanel.userWidth = -1
+                        /* every freshly opened video starts centered again */
+                        playerPanel.panelX = -1
+                        playerPanel.panelY = -1
                     }
                 }
             }

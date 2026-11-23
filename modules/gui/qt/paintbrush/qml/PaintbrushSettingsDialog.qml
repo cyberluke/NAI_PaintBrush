@@ -37,6 +37,14 @@ Dialog {
     modal: true
     closePolicy: Popup.CloseOnEscape
     padding: 0
+    /* No stock title bar: the custom header below carries the identity, so
+     * the dialog is not framed by a duplicate title. */
+    header: null
+
+    /* Centered on the workspace when opened. Dragging the header writes x/y
+     * imperatively, which intentionally replaces these bindings. */
+    x: parent ? Math.round((parent.width - width) / 2) : 0
+    y: parent ? Math.round((parent.height - height) / 2) : 0
 
     width: Math.min(VLCStyle.dp(680, VLCStyle.scale),
                     (parent ? parent.width : 900) - VLCStyle.margin_normal * 2)
@@ -58,6 +66,7 @@ Dialog {
     property string draftImageModel: ""
     property string draftImageApiKey: ""
     property int draftPtsToleranceMs: 250
+    property string draftLanguage: ""
     property string applyMessage: ""
 
     function resetDraft() {
@@ -75,8 +84,17 @@ Dialog {
         draftImageModel = PaintbrushCtx.settingsImageModel
         draftImageApiKey = PaintbrushCtx.settingsImageApiKey
         draftPtsToleranceMs = PaintbrushCtx.settingsPtsToleranceMs
+        draftLanguage = PaintbrushCtx.settingsLanguage
         applyMessage = ""
     }
+    /* paintbrush-language values; empty = system locale. The native names are
+     * intentionally not translated — a language picker should name each
+     * language in that language. */
+    readonly property var languageCodes: ["", "cs", "sk", "vi", "fr", "de", "it", "es"]
+    readonly property var languageNames: [
+        qsTr("System default"), "Čeština", "Slovenčina", "Tiếng Việt",
+        "Français", "Deutsch", "Italiano", "Español"
+    ]
     function apply() {
         /* Matting settings are applied through their own live properties so
          * applyNaiSettings keeps its established signature. */
@@ -104,6 +122,7 @@ Dialog {
             applyMessage = answer          /* keep open: the user must see it */
             return false
         }
+        /* The language is already live (applied on selection). */
         applyMessage = ""
         close()
         return true
@@ -146,11 +165,32 @@ Dialog {
     contentItem: ColumnLayout {
         spacing: 0
 
-        /* ---- header --------------------------------------------------- */
+        /* ---- header (also the drag surface) --------------------------- */
         Rectangle {
+            id: headerBar
             Layout.fillWidth: true
             implicitHeight: headerRow.implicitHeight + VLCStyle.margin_normal * 2
             color: "transparent"
+
+            DragHandler {
+                id: dialogDrag
+                target: null
+                cursorShape: active ? Qt.ClosedHandCursor
+                                    : Qt.OpenHandCursor
+                property point grabStart: Qt.point(0, 0)
+                onActiveChanged: if (active)
+                    grabStart = Qt.point(root.x, root.y)
+                onTranslationChanged: {
+                    const maxX = Math.max(0, (root.parent ? root.parent.width
+                                                          : root.width) - root.width)
+                    const maxY = Math.max(0, (root.parent ? root.parent.height
+                                                          : root.height) - root.height)
+                    root.x = Math.max(0, Math.min(maxX,
+                                                  grabStart.x + translation.x))
+                    root.y = Math.max(0, Math.min(maxY,
+                                                  grabStart.y + translation.y))
+                }
+            }
 
             RowLayout {
                 id: headerRow
@@ -192,6 +232,37 @@ Dialog {
             ColumnLayout {
                 width: parent.width
                 spacing: VLCStyle.margin_normal
+
+                /* ---------------- Interface ------------------------------ */
+                SettingsSection {
+                    title: qsTr("Interface")
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: VLCStyle.margin_xsmall
+                        Widgets.LabelExt {
+                            text: qsTr("Language")
+                            color: theme.fg.primary
+                            font.pixelSize: VLCStyle.fontSize_normal
+                            Layout.fillWidth: true
+                        }
+                        ComboBox {
+                            model: root.languageNames
+                            currentIndex: Math.max(0, root.languageCodes.indexOf(root.draftLanguage))
+                            /* Apply on selection: the controller persists the
+                             * choice, exports the locale and retranslates the
+                             * QML engine, so the whole interface switches
+                             * immediately — no Apply or restart needed. */
+                            onActivated: {
+                                root.draftLanguage = root.languageCodes[currentIndex]
+                                const answer = PaintbrushCtx.applyLanguage(root.draftLanguage)
+                                if (answer && answer.length > 0)
+                                    root.applyMessage = answer
+                            }
+                            Layout.preferredWidth: VLCStyle.dp(180, VLCStyle.scale)
+                        }
+                    }
+                }
 
                 /* ---------------- AI Models ------------------------------- */
                 SettingsSection {
