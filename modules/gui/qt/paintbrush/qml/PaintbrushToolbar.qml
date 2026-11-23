@@ -221,7 +221,17 @@ Item {
                              cell.modelData.onChange(value)
             }
             Widgets.LabelExt {
-                text: (cell.isSlider && cell.modelData) ? (Math.round(sld.value)) : ""
+                /* Readout precision follows the slider step.  A 0..1 float
+                 * control (Shimmer / Glue) must never print "0" or "1" for
+                 * every position: Math.round() collapsed 20 steps into two
+                 * visible values and made the control look binary. */
+                text: {
+                    if (!cell.isSlider || !cell.modelData)
+                        return ""
+                    const step = cell.modelData.stepSize ?? 0.05
+                    const decimals = step >= 1 ? 0 : (step >= 0.1 ? 1 : 2)
+                    return Number(sld.value).toFixed(decimals)
+                }
                 color: theme.fg.secondary
                 font.pixelSize: VLCStyle.fontSize_small
             }

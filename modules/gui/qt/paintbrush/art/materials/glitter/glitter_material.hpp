@@ -126,11 +126,19 @@ public:
     /* Render the glitter into an RGBA surface covering `canvasRectWorldBuffer`.
      * `outOriginWorld`/`worldPerPx` convert device pixels <-> world space.
      * Uses the shared rig for the faceted specular response. Deterministic
-     * from seed + the stored grain state (screen == export). */
+     * from seed + the stored grain state (screen == export). `shimmer`
+     * (0..1, from setShimmer / the persisted material state) scales the
+     * faceted specular sparkle and the iridescent hue shift. */
     QImage render(const QSize &outSize, float outOriginWorldX,
                   float outOriginWorldY, float worldPerPx,
                   const ArtLightRig &rig,
                   const PaperStock *paper, const ArtScale &scale) const;
+
+    /* Faceted-specular sparkle strength 0..1 (1 = full white twinkle and
+     * iridescence). Persisted with the material state so an export re-render
+     * reproduces the committed raster. */
+    float shimmer() const { return m_shimmer; }
+    void setShimmer(float v) { m_shimmer = qBound(0.0f, v, 1.0f); }
 
     /* -- inspection (harness / diagnostics) ------------------------------ */
     int grainCount() const;
@@ -176,6 +184,10 @@ private:
     float m_worldCellSize = 1.0f;
     QVector<Cell> m_grid;    /* dense, bounded */
     QVector<PaletteSlot> m_palette;
+    /* Render-only material parameter persisted with the grain state. The
+     * default is the reference look, so a state deserialized from an older
+     * file (no trailing float) renders exactly as before. */
+    float m_shimmer = 0.55f;
 };
 
 /* Convenience: compute world cell size for a glitter material so flakes keep a

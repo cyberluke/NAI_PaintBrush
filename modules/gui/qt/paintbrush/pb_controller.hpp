@@ -170,6 +170,11 @@ class PaintbrushController : public QObject
     Q_PROPERTY(bool companionThinking READ companionThinking NOTIFY companionStateChanged FINAL)
     Q_PROPERTY(QVariantList assistantMessages READ assistantMessages NOTIFY companionStateChanged FINAL)
     Q_PROPERTY(int companionTalkLevel READ companionTalkLevel WRITE setCompanionTalkLevel NOTIFY companionStateChanged FINAL)
+    /* live streaming chat state for the companion dock */
+    Q_PROPERTY(QString assistantStreamingText READ assistantStreamingText NOTIFY assistantStreamChanged FINAL)
+    Q_PROPERTY(QString assistantReasoningText READ assistantReasoningText NOTIFY assistantStreamChanged FINAL)
+    Q_PROPERTY(QVariantList assistantToolCalls READ assistantToolCalls NOTIFY assistantToolsChanged FINAL)
+    Q_PROPERTY(bool assistantBusy READ assistantBusy NOTIFY assistantStateChanged FINAL)
 
     Q_PROPERTY(QString currentMediaTitle READ currentMediaTitle NOTIFY mediaStateChanged FINAL)
     Q_PROPERTY(QString currentMediaMRL READ currentMediaMRL NOTIFY mediaStateChanged FINAL)
@@ -514,6 +519,7 @@ public:
     Q_INVOKABLE void setCompanionMode(int mode);
     Q_INVOKABLE void companionReset();
     Q_INVOKABLE void companionClearConversation();
+    Q_INVOKABLE void cancelAssistant();
     int companionTalkLevel() const;
     void setCompanionTalkLevel(int level);
 
@@ -633,6 +639,10 @@ public:
     int companionMode() const { return m_companion.mode(); }
     bool companionThinking() const { return m_companion.isThinking(); }
     QVariantList assistantMessages() const { return m_assistantMessages; }
+    QString assistantStreamingText() const { return m_assistantStreamingText; }
+    QString assistantReasoningText() const { return m_assistantReasoningText; }
+    QVariantList assistantToolCalls() const { return m_assistantToolCalls; }
+    bool assistantBusy() const { return m_assistantBusy; }
 
     QString currentMediaTitle() const;
     QString currentMediaMRL() const;
@@ -807,12 +817,13 @@ public:
     bool settingsSecretsPresent() const { return m_settingsSecretsPresent; }
     bool settingsRestartRequired() const { return m_settingsRestartRequired; }
     /* Apply NAI settings. Persists into the VLC config layer with config_Put*
-     * (and saves the file immediately), hot-applies what is safe (API keys
-     * and the PTS tolerance), and sets settingsRestartRequired for
-     * model/endpoint changes. Stored secrets are shown only in the Settings
-     * field itself and are never logged. Returns a failure message, or an
-     * EMPTY string on success — a restart notice is a separate state, not a
-     * failure. */
+     * (and saves the file immediately) and HOT-APPLIES every change: endpoint
+     * and key services are reconfigured in place; a changed SAM model/device
+     * releases the cached model and restarts the segmentation worker, with the
+     * new model loading on the next AI action. There is no restart state —
+     * settingsRestartRequired is kept false for API compatibility. Stored
+     * secrets are never logged. Returns a failure message, or an EMPTY string
+     * on success. */
     Q_INVOKABLE QString applyNaiSettings(const QString &samModel,
                                          const QString &samDevice,
                                          const QString &vlmUrl,
@@ -910,6 +921,9 @@ signals:
     void visionStateChanged();
     void generationStateChanged();
     void companionStateChanged();
+    void assistantStreamChanged();
+    void assistantToolsChanged();
+    void assistantStateChanged();
     void mediaStateChanged();
     void thumbnailsChanged();
     void recoveryStateChanged();
@@ -953,6 +967,21 @@ private slots:
                          float confidence);
     void onTrackFinished(bool complete, bool cancelled, const QString &error);
     void onCompanionMessage(const QString &text, const QString &role);
+    /* streaming companion chat */
+    void onAssistantStreamStarted(const QString &conversationId);
+    void onAssistantStreamRoundStarted(const QString &conversationId);
+    void onAssistantContentDelta(const QString &conversationId,
+                                 const QString &text);
+    void onAssistantReasoningDelta(const QString &conversationId,
+                                   const QString &text);
+    void onAssistantToolCallStarted(const QString &conversationId,
+                                    const QString &id, const QString &name);
+    void onAssistantToolCallsReady(const QString &conversationId,
+                                   const QVariantList &calls);
+    void onAssistantStreamFinished(const QString &conversationId,
+                                   const QString &text);
+    void onAssistantStreamError(const QString &conversationId,
+                                const QString &message);
     void onCanvasStrokeCommitted(const QRect &region);
     /* Record a colour the user actually painted with (dedup, cap 8). */
     void rememberUsedColor(const QColor &color);
@@ -1013,6 +1042,12 @@ private:
     void sanitizeSelectedTrack();
     void updateObjectSelection();
     void appendAssistantMessage(const QString &role, const QString &text);
+    /* Companion streaming: system prompt + OpenAI tool definitions, and the
+     * in-process executor for the tools the model may call. */
+    QString assistantSystemPrompt() const;
+    QByteArray assistantToolsJson() const;
+    QVariantMap executeAssistantTool(const QString &name,
+                                     const QString &arguments);
     void pushRecentProject(const QString &path);
     void buildTrackObject();
     void triggerCompanionEvent(const QString &event);
@@ -1124,7 +1159,7 @@ private:
     void updateMatteOverlay();
     /* Move tool drag lifecycle: live positioning without undo churn, one
      * SetTransformCommand on release. */
-    void beginLayerMove(const QPointF &canvasPos);
+    void beginLayerMove(int layerIndex, const QPointF &canvasPos);
     void updateLayerMove(const QPointF &canvasPos);
     void endLayerMove();
 
@@ -1287,6 +1322,11 @@ private:
     QMetaObject::Connection m_selfTestErrConn;
 
     QVariantList m_assistantMessages;
+    QString m_assistantStreamingText;
+    QString m_assistantReasoningText;
+    QVariantList m_assistantToolCalls;
+    bool m_assistantBusy = false;
+    QString m_assistantConversationId;
     QVariantList m_lookupMatches;
     QString m_companionModeOffReason;
     /* recovery autosave state */

@@ -352,40 +352,42 @@ void PaintbrushCanvasItem::setPowderTool(int t)
 void PaintbrushCanvasItem::setPowderGlueWidth(qreal v)
 {
     if (qFuzzyCompare(v, m_powderGlueWidth)) return;
-    m_powderGlueWidth = qBound<qreal>(4.0, v, 60.0);
+    m_powderGlueWidth = qBound<qreal>(1.0, v, 60.0);
     emit powderSizeChanged();
 }
 void PaintbrushCanvasItem::setPowderGlitterSize(qreal v)
 {
     if (qFuzzyCompare(v, m_powderGlitterSize)) return;
-    m_powderGlitterSize = qBound<qreal>(6.0, v, 80.0);
+    m_powderGlitterSize = qBound<qreal>(1.0, v, 80.0);
     emit powderSizeChanged();
 }
 void PaintbrushCanvasItem::setPowderPushSize(qreal v)
 {
     if (qFuzzyCompare(v, m_powderPushSize)) return;
-    m_powderPushSize = qBound<qreal>(8.0, v, 60.0);
+    m_powderPushSize = qBound<qreal>(1.0, v, 60.0);
     emit powderSizeChanged();
 }
 void PaintbrushCanvasItem::setPowderEraserWidth(qreal v)
 {
     if (qFuzzyCompare(v, m_powderEraserWidth)) return;
-    m_powderEraserWidth = qBound<qreal>(8.0, v, 120.0);
+    m_powderEraserWidth = qBound<qreal>(1.0, v, 120.0);
     emit powderEraserWidthChanged();
 }
 
 /* Physics radius for the active powder sub-tool. Glue/Eraser store a VISIBLE
  * WIDTH (radius = width/2); Glitter/Push store a REFERENCE RADIUS directly
- * (P0.5 semantics — never divide all four by two). */
+ * (P0.5 semantics — never divide all four by two). The floor is 1 world unit
+ * (0.5 radius for width-based tools) so the UI range genuinely starts at 1
+ * instead of silently behaving like the old 2/3/4 minimum. */
 float PaintbrushCanvasItem::powderSubRadius() const
 {
     switch (m_powderTool)
     {
-    case POWDER_GLUE:    return float(qMax<qreal>(2.0, m_powderGlueWidth)   * 0.5);
-    case POWDER_PUSH:    return float(qMax<qreal>(4.0, m_powderPushSize));
-    case POWDER_ERASER:  return float(qMax<qreal>(4.0, m_powderEraserWidth) * 0.5);
+    case POWDER_GLUE:    return float(qMax<qreal>(1.0, m_powderGlueWidth)   * 0.5);
+    case POWDER_PUSH:    return float(qMax<qreal>(1.0, m_powderPushSize));
+    case POWDER_ERASER:  return float(qMax<qreal>(1.0, m_powderEraserWidth) * 0.5);
     case POWDER_GLITTER:
-    default:             return float(qMax<qreal>(3.0, m_powderGlitterSize));
+    default:             return float(qMax<qreal>(1.0, m_powderGlitterSize));
     }
 }
 
@@ -541,7 +543,7 @@ void PaintbrushCanvasItem::updateCursor()
         /* the cursor shows the real affected footprint: the powder workbench
          * uses the active sub-tool's own radius (P0.5), not the generic brush */
         const qreal r = (m_tool == TOOL_GLITTER_POWDER || m_tool == TOOL_SMEAR)
-                        ? qMax<qreal>(3.0, qreal(powderSubRadius()) * m_zoom)
+                        ? qMax<qreal>(1.0, qreal(powderSubRadius()) * m_zoom)
                         : qMax<qreal>(3.0, m_brushSize * 0.5 * m_zoom);
         const int sizeL = int(qCeil(r * 2 + 8));      /* logical px */
         const int sizePx = int(qCeil(sizeL * dpr));
@@ -835,6 +837,11 @@ void PaintbrushCanvasItem::setGlitterShimmer(qreal v)
         return;
     m_glitterParams.shimmer = float(v);
     m_powderParams.shimmer = float(v);
+    /* The grain material renders from GlitterState, so the live/committed
+     * glitter must carry the same value: shimmer scales the faceted specular
+     * sparkle + iridescent hue shift in GlitterState::render(). Without this
+     * the slider only affected Glitter POWDER and did nothing for Glitter. */
+    m_glitterState.setShimmer(float(v));
     /* P0.12: ONE semantic holographic control. The UI value is the SAME value
      * the render pipeline consumes (CPU fallback + GPU uHolo via the render
      * palette). Keep m_powderPal.holographic in lockstep so a later
@@ -948,6 +955,9 @@ void PaintbrushCanvasItem::beginArtStroke(const QPointF &local)
         float cell = art::glitter::glitterWorldCellSize(m_glitterParams, kGlitterFlakeWorld);
         const QSize cells = boundedArtGrid(layer->raster.size(), cell, 2 * 1024 * 1024);
         m_glitterState.reset(cells, cell);
+        /* reset() drops the material params; stamp the live UI shimmer so the
+         * stroke's preview, commit and persisted materialState all agree. */
+        m_glitterState.setShimmer(float(m_glitterParams.shimmer));
         m_glitterLast = local;
         m_glitterUnion = QRect();
         artStrokeSegment(local, local);
@@ -2262,9 +2272,13 @@ void PaintbrushCanvasItem::compositeTile(int tx, int ty, QImage &tile) const
         QPainter p(&tile);
         p.setClipRect(tile.rect());
         p.setCompositionMode(QPainter::CompositionMode_SourceOver);
-        /* dark tint outside the selection */
+        /* dark tint outside the selection. BOTH the tile rect and the
+         * selection must be in the same (tile-local) space: the old code put
+         * the rect in canvas coordinates and subtracted a tile-local path, so
+         * only the origin tile (top-left) ever dimmed — the visible "dark
+         * square" at the canvas corner. */
         QPainterPath outside;
-        outside.addRect(r);
+        outside.addRect(QRectF(0, 0, r.width(), r.height()));
         outside = outside.subtracted(sel.translated(-r.topLeft()));
         p.fillPath(outside, QColor(0, 0, 0, 60));
         QPen pen(QColor(255, 255, 255), 1, Qt::DashLine);
@@ -2980,31 +2994,36 @@ void PaintbrushCanvasItem::strokeSegment(const QPointF &from, const QPointF &to)
     }
 }
 
-bool PaintbrushCanvasItem::hitCurrentLayer(const QPointF &canvasPos) const
+int PaintbrushCanvasItem::topMovableLayerAt(const QPointF &canvasPos) const
 {
     if (!m_doc)
-        return false;
-    const int index = m_doc->currentLayerIndex();
-    const CanvasLayer *layer = m_doc->layerAt(index);
-    if (!layer || !layer->visible)
-        return false;
-    if (layer->type != LAYER_IMAGE && layer->type != LAYER_TEXT &&
-        layer->type != LAYER_STICKER && layer->type != LAYER_REFERENCE &&
-        layer->type != LAYER_GENERATED)
-        return false;
-    const QRect rect = layer->raster.rect();
-    if (rect.isEmpty())
-        return false;
-    const QPoint p = layer->mapCanvasToLocal(canvasPos).toPoint();
-    if (!rect.contains(p))
-        return false;
-    /* Alpha hit test: the bounding box of a cutout is mostly empty, so a
-     * click on the transparent corner must pan, not drag. */
-    QImage rgba = layer->raster;
-    if (rgba.format() != QImage::Format_ARGB32
-        && rgba.format() != QImage::Format_ARGB32_Premultiplied)
-        rgba = rgba.convertToFormat(QImage::Format_ARGB32);
-    return qAlpha(rgba.pixel(p)) > 8;
+        return -1;
+    /* Topmost first: the object the user actually sees under the cursor wins,
+     * even when another layer is selected in the inspector. This is the whole
+     * point of "drag the object" — a placed sticker must be grabbable without
+     * first hunting for its layer. Locked layers are skipped (they must not
+     * move); transparent corners still pan. */
+    const QList<CanvasLayer> &layers = m_doc->layers();
+    for (int i = layers.size() - 1; i >= 0; --i)
+    {
+        const CanvasLayer &layer = layers[i];
+        if (!layer.visible || layer.locked || layer.raster.isNull())
+            continue;
+        if (layer.type != LAYER_IMAGE && layer.type != LAYER_TEXT &&
+            layer.type != LAYER_STICKER && layer.type != LAYER_REFERENCE &&
+            layer.type != LAYER_GENERATED)
+            continue;
+        const QPoint p = layer.mapCanvasToLocal(canvasPos).toPoint();
+        if (!layer.raster.rect().contains(p))
+            continue;
+        QImage rgba = layer.raster;
+        if (rgba.format() != QImage::Format_ARGB32
+            && rgba.format() != QImage::Format_ARGB32_Premultiplied)
+            rgba = rgba.convertToFormat(QImage::Format_ARGB32);
+        if (qAlpha(rgba.pixel(p)) > 8)
+            return i;
+    }
+    return -1;
 }
 
 void PaintbrushCanvasItem::beginStroke(const QPointF &canvasPos, bool primary)
@@ -3153,18 +3172,20 @@ void PaintbrushCanvasItem::beginStroke(const QPointF &canvasPos, bool primary)
         break;
 
     case TOOL_PAN_ZOOM:
-        /* Move tool: an opaque hit on the current raster layer drags THAT
-         * layer (one undo per drag); empty canvas still pans. */
-        if (primary && hitCurrentLayer(canvasPos))
+        /* Move tool: the topmost opaque object under the cursor is grabbed and
+         * made current; empty canvas still pans. */
+        if (primary)
         {
-            m_movingLayer = true;
-            emit layerMoveStarted(canvasPos);
+            const int hitLayer = topMovableLayerAt(canvasPos);
+            if (hitLayer >= 0)
+            {
+                m_movingLayer = true;
+                emit layerMoveStarted(hitLayer, canvasPos);
+                break;
+            }
         }
-        else
-        {
-            m_panning = true;
-            m_panLastItem = eventLastItemPos();
-        }
+        m_panning = true;
+        m_panLastItem = eventLastItemPos();
         break;
 
     default:

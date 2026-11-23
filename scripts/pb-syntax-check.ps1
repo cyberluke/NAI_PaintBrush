@@ -25,7 +25,16 @@ $inc = @('-I', $stub, '-I', $pb, '-I', (Join-Path $root 'modules\gui\qt'),
          '-I', "$qt\include\qt6", '-I', "$qt\include\qt6\QtCore",
          '-I', "$qt\include\qt6\QtGui", '-I', "$qt\include\qt6\QtNetwork",
          '-I', "$qt\include\qt6\QtQuick", '-I', "$qt\include\qt6\QtQml",
+         '-I', "$qt\include\qt6\QtWidgets",
          '-I', "$qt\include\qt6\QtQmlIntegration")
+
+# <rhi/qshader.h> lives in the versioned QtGui private include tree.
+$qtGuiVer = Get-ChildItem "$qt\include\qt6\QtGui" -Directory -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match '^\d+\.\d+\.\d+$' } |
+    Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
+if ($qtGuiVer -and (Test-Path (Join-Path $qtGuiVer.FullName 'QtGui\rhi\qshader.h'))) {
+    $inc += @('-I', (Join-Path $qtGuiVer.FullName 'QtGui'))
+}
 
 $failed = 0
 foreach ($f in $Files) {

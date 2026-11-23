@@ -47,13 +47,35 @@ Item {
     /* Saved palettes are REAL buttons in this strip, not only a popover:
      * the active palette renders as direct swatch buttons, and the library
      * popover switches which palette is active. */
-    property int activePaletteIndex: 0
+    /* Neon is the product default (index 4 in builtin-palettes.json);
+     * a saved palette selection still wins at runtime. */
+    property int activePaletteIndex: 4
     readonly property var palettes: PaintbrushCtx.paletteList()
     readonly property var activePalette:
         palettes && palettes.length > 0
             ? palettes[Math.max(0, Math.min(activePaletteIndex,
                                             palettes.length - 1))]
             : null
+
+    /* The canvas' untouched default is black. The shipped default palette
+     * (Neon Stage) leads with its neon accent, so opening the workspace must
+     * select that first swatch: the initial paint colour is a real colour,
+     * never black. A non-black colour already on the canvas always wins. */
+    property bool _initialColorResolved: false
+    function resolveInitialForeground() {
+        if (_initialColorResolved || !canvas)
+            return
+        const current = canvas.fgColor
+        if (Math.max(current.r, current.g, current.b) > 0.12) {
+            _initialColorResolved = true
+            return
+        }
+        if (activePalette && activePalette.colors && activePalette.colors.length > 0)
+            canvas.fgColor = activePalette.colors[0]
+        _initialColorResolved = true
+    }
+    Component.onCompleted: resolveInitialForeground()
+    onCanvasChanged: resolveInitialForeground()
 
     /* The M shortcut routes here so the popover keeps one owner. */
     function toggleMoodPicker() {

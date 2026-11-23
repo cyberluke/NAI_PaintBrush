@@ -793,7 +793,8 @@ QImage GpuRuntime::renderGlitter(const QSize &outSize,
         float keyColor[4];                         /* 112 */
         float toothShade, absorption;              /* 128 */
         float viewW, viewH;                        /* 136 */
-        float pad2[2];                             /* 144 */
+        float shimmer;                             /* 144 sparkle gain */
+        float pad2[3];                             /* 148 */
     };                                             /* 160 */
     GlitterUb ub;
     memset(&ub, 0, sizeof(ub));
@@ -814,6 +815,8 @@ QImage GpuRuntime::renderGlitter(const QSize &outSize,
     ub.absorption = absorption;
     ub.viewW = float(outSize.width());
     ub.viewH = float(outSize.height());
+    /* Same normalization as the CPU golden: 0.55 == 1.0, 0 = no sparkle. */
+    ub.shimmer = qBound(0.0f, state.shimmer() / 0.55f, 1.8f);
     u->updateDynamicBuffer(m_pipelines->glitterUb, 0, sizeof(ub), &ub);
 
     QRhiCommandBuffer *cb = nullptr;

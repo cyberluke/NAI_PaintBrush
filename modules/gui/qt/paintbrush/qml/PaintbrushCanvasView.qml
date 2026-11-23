@@ -166,6 +166,14 @@ import VLC.Paintbrush
     Rectangle {
         id: selectionBar
 
+        /* the user can hide the bar without losing the selection; a new
+         * selection/object re-reveals it */
+        property bool dismissed: false
+        readonly property bool wanted: (canvas.hasSelection
+                                        || PaintbrushCtx.objectSelected)
+                                       && !PaintbrushCtx.welcomeVisible
+                                       && !dismissed
+
         anchors.top: parent.top
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.margins: VLCStyle.margin_small
@@ -176,7 +184,7 @@ import VLC.Paintbrush
         color: theme.bg.primary
         border.width: 1
         border.color: theme.border
-        visible: (canvas.hasSelection || PaintbrushCtx.objectSelected) && !PaintbrushCtx.welcomeVisible
+        visible: wanted
 
         RowLayout {
             id: selectionBarRow
@@ -184,21 +192,23 @@ import VLC.Paintbrush
             spacing: VLCStyle.margin_xsmall
 
             Widgets.LabelExt {
-                text: canvas.hasSelection ? qsTr("Selection")
-                                          : qsTr("Object %1").arg(PaintbrushCtx.objectMaskBoundsText)
+                text: canvas.hasSelection
+                      ? qsTr("Selection")
+                      : qsTr("Object %1").arg(PaintbrushCtx.objectMaskBoundsText)
                 color: theme.fg.primary
-                font.pixelSize: VLCStyle.fontSize_small
+                font.pixelSize: VLCStyle.fontSize_normal
+                font.bold: true
                 visible: text.length > 0
             }
 
             Widgets.IconToolButton {
-                description: qsTr("Cut out")
+                description: qsTr("Cut out — remove the object and fill the hole")
                 text: VLCIcons.del
                 visible: PaintbrushCtx.objectSelected
                 onClicked: PaintbrushCtx.cutOutObject()
             }
             Widgets.IconToolButton {
-                description: qsTr("Add to canvas")
+                description: qsTr("Add the object to the canvas as a layer")
                 text: VLCIcons.add
                 visible: PaintbrushCtx.objectSelected
                 onClicked: PaintbrushCtx.addObjectToCanvas()
@@ -210,47 +220,82 @@ import VLC.Paintbrush
                 onClicked: PaintbrushCtx.beginAsk()
             }
             Widgets.IconToolButton {
-                description: qsTr("Track in video")
+                description: qsTr("Track the object through the video")
                 text: VLCIcons.play
                 visible: PaintbrushCtx.objectSelected && PaintbrushCtx.playerHasVideo
                 onClicked: PaintbrushCtx.trackObject(0, 24)
             }
             Widgets.IconToolButton {
-                description: qsTr("Make sticker")
+                description: qsTr("Make a sticker from the object")
                 text: VLCIcons.add
                 visible: PaintbrushCtx.objectSelected
                 onClicked: PaintbrushCtx.makeSticker()
             }
             Widgets.IconToolButton {
-                description: qsTr("Remove object")
+                description: qsTr("Remove the object (AI fill)")
                 text: VLCIcons.remove
                 visible: PaintbrushCtx.objectSelected
                 onClicked: PaintbrushCtx.removeObject("")
             }
             Widgets.IconToolButton {
-                description: qsTr("Export object PNG")
+                description: qsTr("Export the object as a PNG")
                 text: VLCIcons.ic_fluent_arrow_download_24_regular
                 visible: PaintbrushCtx.objectSelected
                 onClicked: exportObjectDialog.open()
             }
 
+            Rectangle {
+                width: 1
+                height: VLCStyle.dp(22, VLCStyle.scale)
+                color: theme.border
+                visible: canvas.hasSelection && PaintbrushCtx.objectSelected
+            }
+
             Widgets.IconToolButton {
-                description: qsTr("Copy")
+                description: qsTr("Copy the selected pixels")
                 text: VLCIcons.ic_fluent_document_copy_24_regular
                 visible: canvas.hasSelection
                 onClicked: canvas.copySelection()
             }
             Widgets.IconToolButton {
-                description: qsTr("Cut")
+                description: qsTr("Cut the selected pixels")
                 text: VLCIcons.del
                 visible: canvas.hasSelection
                 onClicked: canvas.cutSelection()
             }
             Widgets.IconToolButton {
-                description: qsTr("Clear selection")
+                description: qsTr("Clear the selection (not just this bar)")
                 text: VLCIcons.clear
                 visible: canvas.hasSelection
                 onClicked: canvas.selectionClear()
+            }
+
+            Rectangle {
+                width: 1
+                height: VLCStyle.dp(22, VLCStyle.scale)
+                color: theme.border
+            }
+
+            /* distinct from Clear: hides the toolbar, keeps the selection */
+            Widgets.IconToolButton {
+                description: qsTr("Hide this bar — the selection stays")
+                text: VLCIcons.ic_fluent_chevron_up_24
+                onClicked: selectionBar.dismissed = true
+            }
+        }
+
+        Connections {
+            target: canvas
+            function onSelectionChanged(hasSel) {
+                if (hasSel)
+                    selectionBar.dismissed = false
+            }
+        }
+        Connections {
+            target: PaintbrushCtx
+            function onObjectSelectionChanged() {
+                if (PaintbrushCtx.objectSelected)
+                    selectionBar.dismissed = false
             }
         }
     }

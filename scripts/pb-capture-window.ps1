@@ -30,6 +30,15 @@
   the capture (e.g. "o" to switch to Object Select). Used to verify tool-state
   UI without a human at the keyboard.
 
+.PARAMETER ClickX
+  Optional window-relative X (physical px) to click after settling. Use with
+  ClickY to exercise a QML control that has no accessible name (tool rail
+  cells). The cursor is moved back to the canvas afterwards so no tooltip
+  obscures the capture.
+
+.PARAMETER ClickY
+  Optional window-relative Y (physical px) for ClickX.
+
 .PARAMETER Method
   PrintWindow (default) captures the QML window only. Screen captures the
   window rect from the desktop and therefore includes separate native
@@ -43,6 +52,8 @@ param(
     [int]$WaitSeconds = 9,
     [string[]]$ExtraArgs = @(),
     [string]$Keys = "",
+    [int]$ClickX = -1,
+    [int]$ClickY = -1,
     [ValidateSet("PrintWindow", "Screen")]
     [string]$Method = "PrintWindow",
     [string]$SamModel = "",
@@ -82,6 +93,8 @@ public class PbWin32 {
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr a, int x, int y, int cx, int cy, uint f);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int n);
+  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+  [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, IntPtr e);
   [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr ctx);
   [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr ctx);
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
@@ -174,12 +187,43 @@ try {
         Start-Sleep -Milliseconds 600
     }
 
+    # The paintbrush window may restore minimized from the last session; a
+    # PrintWindow of a minimized window is a taskbar-sized thumbnail. Always
+    # restore it before measuring, and maximize if it is still small.
+    [void][PbWin32]::ShowWindow($target, 9)     # SW_RESTORE
+    [void][PbWin32]::SetForegroundWindow($target)
+    Start-Sleep -Milliseconds 600
+
     $r = New-Object PbWin32+RECT
     [void][PbWin32]::GetWindowRect($target, [ref]$r)
     $w = $r.Right - $r.Left
     $hgt = $r.Bottom - $r.Top
+    if ($w -lt 1600 -or $hgt -lt 900) {
+        [void][PbWin32]::ShowWindow($target, 3) # SW_MAXIMIZE
+        Start-Sleep -Milliseconds 800
+        [void][PbWin32]::GetWindowRect($target, [ref]$r)
+        $w = $r.Right - $r.Left
+        $hgt = $r.Bottom - $r.Top
+    }
     if ($w -le 0 -or $hgt -le 0) {
         throw "Window has invalid size ${w}x${hgt}"
+    }
+
+    if ($ClickX -ge 0 -and $ClickY -ge 0) {
+        [void][PbWin32]::ShowWindow($target, 9)     # SW_RESTORE
+        [void][PbWin32]::SetForegroundWindow($target)
+        Start-Sleep -Milliseconds 400
+        [void][PbWin32]::SetCursorPos($r.Left + $ClickX, $r.Top + $ClickY)
+        Start-Sleep -Milliseconds 150
+        [PbWin32]::mouse_event(0x0002, 0, 0, 0, [IntPtr]::Zero)  # left down
+        Start-Sleep -Milliseconds 80
+        [PbWin32]::mouse_event(0x0004, 0, 0, 0, [IntPtr]::Zero)  # left up
+        Start-Sleep -Milliseconds 250
+        # park the cursor over the canvas so a rail tooltip cannot cover the
+        # strip being verified
+        [void][PbWin32]::SetCursorPos($r.Left + [int]($w * 0.62),
+                                      $r.Top + [int]($hgt * 0.45))
+        Start-Sleep -Milliseconds 800
     }
 
     Add-Type -AssemblyName System.Drawing

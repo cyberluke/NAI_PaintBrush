@@ -1,7 +1,5 @@
 # NAI Paintbrush — HANDOFF (the lamp)
 
-> Durable continuation state. **This is the only authoritative lamp.**
-> Read this first after a context reset.
 >
 > Contract: `docs/ADAPTIVE_UI_AND_SUBJECTS.md` (partially implemented; its
 > status line lists what is real and what is still pending).

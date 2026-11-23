@@ -16,16 +16,16 @@ import VLC.Paintbrush
 
 /* The NAI Paintbrush workspace — canvas-first (A35).
  *
- * Layout budget (startup state: contextual inspector drawer and companion
- * pill both collapsed):
+ * Layout budget (startup state: inspector drawer open, companion pill
+ * collapsed):
  *   canvas width = W - toolRail = W - 92dp
  *   => canvas >= 0.75 * W for any W >= 368dp (and the tool rail is the only
  *      fixed-width chrome in the row).
- * The inspector is a contextual drawer anchored to the right edge that is
- * closed by default and opens only when the active selection needs it;
- * the companion is a small avatar pill, collapsed by default, that never
- * occupies layout width. Top bar (Media/AI/Save actions), iconic tool rail,
- * central canvas and bottom palette strip complete the surface. */
+ * The inspector is a drawer anchored to the right edge that floats over the
+ * canvas; it is open by default (layers are a primary surface) and can be
+ * collapsed from its fold button or the topbar toggle. Top bar (Media/AI/Save
+ * actions), iconic tool rail, central canvas and bottom palette strip complete
+ * the surface. */
 Item {
     id: root
 
@@ -260,6 +260,17 @@ Item {
 
             Item { Layout.fillWidth: true }
 
+            /* the guide is a first-class workspace surface: a labelled CTA,
+             * not a hidden icon, with F1 as the shortcut */
+            Widgets.ButtonExt {
+                text: qsTr("Help")
+                Accessible.name: qsTr("Open the guide (F1)")
+                ToolTip.visible: hovered
+                ToolTip.delay: 600
+                ToolTip.text: qsTr("Plain-language guide to every tool (F1)")
+                onClicked: helpOverlay.show()
+            }
+
             Widgets.IconToolButton {
                 text: VLCIcons.info
                 description: assistantDock.expanded ? qsTr("Hide companion")
@@ -277,6 +288,16 @@ Item {
                 checkable: true
                 checked: inspectorDock.expanded
                 onClicked: inspectorDock.setOpen(!inspectorDock.expanded)
+            }
+            Widgets.ButtonExt {
+                text: qsTr("Undo")
+                enabled: PaintbrushCtx.hasOpenDocument && PaintbrushCtx.canUndo
+                onClicked: PaintbrushCtx.undo()
+            }
+            Widgets.ButtonExt {
+                text: qsTr("Redo")
+                enabled: PaintbrushCtx.hasOpenDocument && PaintbrushCtx.canRedo
+                onClicked: PaintbrushCtx.redo()
             }
             Widgets.IconToolButton {
                 text: VLCIcons.add
@@ -467,8 +488,8 @@ Item {
         }
     }
 
-    /* contextual inspector drawer: closed by default, opens when the active
-     * selection needs it; floats over the right edge of the canvas row */
+    /* inspector drawer: open by default (layers are primary); floats over the
+     * right edge of the canvas row and can be collapsed by the user */
     PaintbrushInspectorDock {
         id: inspectorDock
 
@@ -505,6 +526,21 @@ Item {
          * instead of a fixed height, so the timeline never overflows */
         height: visible ? implicitHeight : 0
         visible: PaintbrushCtx.playerHasVideo
+    }
+
+    /* Plain-language guide (F1 / Help). Sits above every dock; its left list
+     * reuses the real tool rail cells so icon, order and names never drift. */
+    PaintbrushHelp {
+        id: helpOverlay
+        anchors.fill: parent
+        tools: toolRail.toolCells
+        activeToolId: paintbrushCanvas.tool
+    }
+
+    Shortcut {
+        sequence: "F1"
+        context: Qt.WindowShortcut
+        onActivated: helpOverlay.toggle()
     }
 
     /* ---- REFERENCE MONITOR (VLC VideoSurface + professional transport) ----

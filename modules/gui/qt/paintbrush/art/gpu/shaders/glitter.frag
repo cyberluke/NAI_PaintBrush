@@ -30,8 +30,11 @@ layout(std140, binding = 0) uniform ubuf {
     vec4 uKeyColor;
     float uToothShade;
     float uAbsorption;
+    vec2 uViewSize;      // unused here; keeps the block layout identical to the vertex stage
+    float uShimmer;      // sparkle gain (1.0 = reference look)
     float uPad2;
     float uPad3;
+    float uPad4;
 };
 
 layout(location = 0) out vec4 fragColor;
@@ -146,14 +149,15 @@ void main()
     float spec = pow(ndh, uSpecExp);
 
     vec3 base = vColor.rgb;
-    // holographic hue shift: ~30% of grains (CPU: artHashUnitf(gi,33) > 0.7)
+    // holographic hue shift: ~30% of grains (CPU: artHashUnitf(gi,33) > 0.7),
+    // scaled by shimmer exactly like the CPU golden (0.55 = reference look)
     float holo = artHashUnitf(gi, 33u);
-    if (holo > 0.7)
+    if (holo > 0.7 && uShimmer > 0.0)
     {
         vec3 hsv = rgb2hsv(base);
         if (hsv.z > 1e-6)
         {
-            float shift = (ndh - 0.5) * 120.0 * (holo - 0.7) * 3.3;
+            float shift = (ndh - 0.5) * 120.0 * (holo - 0.7) * 3.3 * uShimmer;
             hsv.x = mod(hsv.x + shift, 360.0);
             base = hsv2rgb(hsv);
         }
@@ -165,7 +169,7 @@ void main()
 
     float kd = (uAmbient * 0.75 + diff * uKeyIntensity * 1.1) * tooth * sink;
     float glint = spec * uKeyIntensity * (vBonded >= 0.5 ? 1.6 : 2.0);
-    float flash = glint > 0.55 ? (glint - 0.55) * 2.2 : 0.0;
+    float flash = (glint > 0.55 ? (glint - 0.55) * 2.2 : 0.0) * uShimmer;
 
     vec3 key = uKeyColor.rgb;
     vec3 col = clamp(base * kd * key + glint * 0.35 * key + flash, 0.0, 1.0);

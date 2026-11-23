@@ -31,7 +31,10 @@ layout(std140, binding = 0) uniform ubuf {
     float uToothShade;
     float uAbsorption;
     vec2 uViewSize;      // output size in device px (pixel -> clip mapping)
+    float uShimmer;      // sparkle gain (1.0 = reference look)
     float uPad2;
+    float uPad3;
+    float uPad4;
 };
 
 layout(location = 0) out vec2 vLocal;

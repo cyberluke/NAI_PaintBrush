@@ -405,6 +405,10 @@ QImage GlitterState::render(const QSize &outSize, float outOriginWorldX,
     const float pxPerWorld = 1.0f / worldPerPx;
     /* flake radius in world units: a cell is ~2.2 flakes wide */
     const float flakeRWorld = cs / 2.2f * 0.5f;
+    /* Shimmer gain normalized to the reference look (0.55 == 1.0). This keeps
+     * existing documents and the CPU/GPU golden identical at the default while
+     * making the control do real work: 0 = no twinkle/iridescence, 1 = ~1.8x. */
+    const float sparkle = qBound(0.0f, m_shimmer / 0.55f, 1.8f);
 
     /* visible cell range */
     const float visW = outSize.width() * worldPerPx;
@@ -474,15 +478,16 @@ QImage GlitterState::render(const QSize &outSize, float outOriginWorldX,
                     QColor base = slot.color;
                     float hr = base.redF(), hg = base.greenF(), hb = base.blueF();
                     /* iridescence: shift hue by facet angle; strength from the
-                     * hash so neighbouring flakes differ */
+                     * hash so neighbouring flakes differ, scaled by shimmer */
                     const float holo = artHashUnitf(gi, 33u);
-                    if (holo > 0.7f)
+                    if (holo > 0.7f && sparkle > 0.0f)
                     {
                         int h, s, v, a;
                         base.getHsv(&h, &s, &v, &a);
                         if (h >= 0)
                         {
-                            const int shift = int((ndh - 0.5f) * 120.0f * (holo - 0.7f) * 3.3f);
+                            const int shift = int((ndh - 0.5f) * 120.0f
+                                                  * (holo - 0.7f) * 3.3f * sparkle);
                             QColor hc = QColor::fromHsv((h + shift + 360) % 360, s, v);
                             hr = hc.redF(); hg = hc.greenF(); hb = hc.blueF();
                         }
@@ -500,7 +505,8 @@ QImage GlitterState::render(const QSize &outSize, float outOriginWorldX,
                      * flash near white (the glitter "twinkle"); most only
                      * carry a tinted sheen. */
                     const float glint = spec * light.keyIntensity * (g.bonded ? 1.6f : 2.0f);
-                    const float flash = glint > 0.55f ? (glint - 0.55f) * 2.2f : 0.0f;
+                    const float flash = (glint > 0.55f ? (glint - 0.55f) * 2.2f : 0.0f)
+                                        * sparkle;
 
                     const float kr = light.key.redF(), kg = light.key.greenF(), kb = light.key.blueF();
                     float r = qBound(0.0f, hr * kd * kr + glint * 0.35f * kr + flash, 1.0f);
@@ -584,6 +590,9 @@ QByteArray GlitterState::serialize() const
                << quint8(g.slot) << g.bonded;
         }
     }
+    /* Trailing render parameter (GLT1 files written before this field simply
+     * end after the cells and load with the reference default). */
+    ds << float(m_shimmer);
     return out;
 }
 
@@ -623,6 +632,13 @@ bool GlitterState::deserialize(const QByteArray &bytes)
         }
         if (ds.status() != QDataStream::Ok)
             return false;
+    }
+    if (ds.status() == QDataStream::Ok && ds.device() && ds.device()->bytesAvailable() >= 4)
+    {
+        float shimmer = 0.55f;
+        ds >> shimmer;
+        if (ds.status() == QDataStream::Ok)
+            setShimmer(shimmer);
     }
     return ds.status() == QDataStream::Ok;
 }

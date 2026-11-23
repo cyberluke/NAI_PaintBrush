@@ -158,6 +158,22 @@ PaintbrushController::PaintbrushController(qt_intf_t *intf, QObject *parent)
 
     connect(&m_assistant, &AssistantService::availabilityChanged,
             this, [this](bool, const QString &) { emit serviceAvailabilityChanged(); });
+    connect(&m_assistant, &AssistantService::streamStarted,
+            this, &PaintbrushController::onAssistantStreamStarted);
+    connect(&m_assistant, &AssistantService::streamRoundStarted,
+            this, &PaintbrushController::onAssistantStreamRoundStarted);
+    connect(&m_assistant, &AssistantService::contentDelta,
+            this, &PaintbrushController::onAssistantContentDelta);
+    connect(&m_assistant, &AssistantService::reasoningDelta,
+            this, &PaintbrushController::onAssistantReasoningDelta);
+    connect(&m_assistant, &AssistantService::toolCallStarted,
+            this, &PaintbrushController::onAssistantToolCallStarted);
+    connect(&m_assistant, &AssistantService::toolCallsReady,
+            this, &PaintbrushController::onAssistantToolCallsReady);
+    connect(&m_assistant, &AssistantService::streamFinished,
+            this, &PaintbrushController::onAssistantStreamFinished);
+    connect(&m_assistant, &AssistantService::streamError,
+            this, &PaintbrushController::onAssistantStreamError);
 
     connect(&m_lookup, &LookupService::lookupResult,
             this, [this](int, const QVariantList &matches) {
@@ -185,6 +201,7 @@ PaintbrushController::PaintbrushController(qt_intf_t *intf, QObject *parent)
             this, &PaintbrushController::sanitizeSelectedTrack);
 
     m_companion.setAssistantService(&m_assistant);
+    m_assistant.setToolDefinitions(assistantToolsJson());
 
     connect(&m_undoStack, &UndoStack::canUndoChanged,
             this, &PaintbrushController::canUndoChanged);
@@ -1958,17 +1975,25 @@ void PaintbrushController::setLayerPosition(int index, double x, double y)
     moveImageLayer(index, QPointF(x, y));
 }
 
-void PaintbrushController::beginLayerMove(const QPointF &canvasPos)
+void PaintbrushController::beginLayerMove(int layerIndex, const QPointF &canvasPos)
 {
     m_layerMoveActive = false;
-    CanvasLayer *layer = m_document.currentLayer();
-    if (!layer)
+    CanvasLayer *layer = m_document.layerAt(layerIndex);
+    if (!layer || layer->locked)
         return;
     if (layer->type != LAYER_IMAGE && layer->type != LAYER_TEXT &&
         layer->type != LAYER_STICKER && layer->type != LAYER_REFERENCE &&
         layer->type != LAYER_GENERATED)
         return;
-    m_moveLayerIndex = m_document.currentLayerIndex();
+    /* The object under the cursor becomes the current layer, so the inspector
+     * follows the thing being dragged (a sticker placed on top of another
+     * selected layer is still grabbable). */
+    if (m_document.currentLayerIndex() != layerIndex)
+    {
+        m_document.setCurrentLayerIndex(layerIndex);
+        emit documentChanged();
+    }
+    m_moveLayerIndex = layerIndex;
     m_moveLayerId = layer->id;
     m_moveBefore = layer->transform();
     m_moveStartPos = layer->position;
@@ -5473,25 +5498,253 @@ void PaintbrushController::companionNotifyEvent(const QString &event)
 
 void PaintbrushController::companionAsk(const QString &question)
 {
+    const QString q = question.trimmed();
+    if (q.isEmpty())
+        return;
+
+    /* No more silent drops: every refusal is a visible message in the chat. */
     if (m_companion.mode() == CompanionService::MODE_OFF)
     {
+        appendAssistantMessage(QStringLiteral("system"),
+            QStringLiteral("The companion is off. Choose Quiet, Buddy or Kids "
+                           "in this panel to start chatting."));
         setStatus(QStringLiteral("Turn the companion on to chat about your drawing."));
         return;
     }
-    appendAssistantMessage(QStringLiteral("user"), question);
-    m_companion.ask(question, flattenedPreview());
+    if (m_companion.mode() == CompanionService::MODE_KIDS
+        && !m_companion.networkAllowed())
+    {
+        appendAssistantMessage(QStringLiteral("system"),
+            QStringLiteral("Kids mode is offline, so the companion cannot answer "
+                           "yet. A grown-up can enable network AI in Settings → AI."));
+        return;
+    }
+    if (m_assistantBusy)
+    {
+        setStatus(QStringLiteral("The companion is still answering — press Stop "
+                                 "or wait for it to finish."));
+        return;
+    }
+    if (!m_assistant.isConfigured())
+    {
+        appendAssistantMessage(QStringLiteral("error"),
+            m_assistant.unavailableReason().isEmpty()
+                ? QStringLiteral("The AI endpoint is not configured. Open "
+                                 "Settings → AI and enter the endpoint, model and key.")
+                : m_assistant.unavailableReason());
+        return;
+    }
+
+    appendAssistantMessage(QStringLiteral("user"), q);
+    m_assistantConversationId = QStringLiteral("companion");
+    m_assistantBusy = true;
+    emit assistantStateChanged();
+    /* Direct streaming call: the CompanionService wrapper remains for
+     * proactive observations, but a user chat is a full streaming turn with
+     * reasoning and tools. */
+    m_assistant.chatStreaming(q, flattenedPreview(), m_assistantConversationId,
+                              assistantSystemPrompt());
+}
+
+void PaintbrushController::onAssistantStreamStarted(const QString &conversationId)
+{
+    m_assistantConversationId = conversationId;
+    m_assistantStreamingText.clear();
+    m_assistantReasoningText.clear();
+    m_assistantToolCalls.clear();
+    m_assistantBusy = true;
+    emit assistantStreamChanged();
+    emit assistantToolsChanged();
+    emit assistantStateChanged();
+}
+
+void PaintbrushController::onAssistantStreamRoundStarted(
+    const QString &conversationId)
+{
+    if (conversationId != m_assistantConversationId)
+        return;
+    m_assistantStreamingText.clear();
+    m_assistantReasoningText.clear();
+    m_assistantBusy = true;
+    emit assistantStreamChanged();
+    emit assistantStateChanged();
+}
+
+void PaintbrushController::onAssistantContentDelta(const QString &conversationId,
+                                                   const QString &text)
+{
+    if (conversationId != m_assistantConversationId || text.isEmpty())
+        return;
+    m_assistantStreamingText += text;
+    emit assistantStreamChanged();
+}
+
+void PaintbrushController::onAssistantReasoningDelta(const QString &conversationId,
+                                                     const QString &text)
+{
+    if (conversationId != m_assistantConversationId || text.isEmpty())
+        return;
+    m_assistantReasoningText += text;
+    emit assistantStreamChanged();
+}
+
+void PaintbrushController::onAssistantToolCallStarted(
+    const QString &conversationId, const QString &id, const QString &name)
+{
+    if (conversationId != m_assistantConversationId)
+        return;
+    for (int i = 0; i < m_assistantToolCalls.size(); ++i)
+    {
+        QVariantMap call = m_assistantToolCalls.at(i).toMap();
+        if (call.value(QStringLiteral("id")).toString() == id)
+        {
+            call[QStringLiteral("name")] = name;
+            m_assistantToolCalls[i] = call;
+            emit assistantToolsChanged();
+            return;
+        }
+    }
+    m_assistantToolCalls.append(QVariantMap{
+        {QStringLiteral("id"), id},
+        {QStringLiteral("name"), name},
+        {QStringLiteral("arguments"), QString()},
+        {QStringLiteral("status"), QStringLiteral("running")},
+        {QStringLiteral("summary"), QString()},
+    });
+    emit assistantToolsChanged();
+}
+
+void PaintbrushController::onAssistantToolCallsReady(
+    const QString &conversationId, const QVariantList &calls)
+{
+    if (conversationId != m_assistantConversationId)
+        return;
+
+    /* Any text before the tool call is a real assistant preamble, not the
+     * answer; keep it as a message while the tools run. */
+    if (!m_assistantStreamingText.trimmed().isEmpty())
+    {
+        appendAssistantMessage(QStringLiteral("assistant"),
+                               m_assistantStreamingText);
+        m_assistantStreamingText.clear();
+        emit assistantStreamChanged();
+    }
+
+    QVariantList chips;
+    QVariantList results;
+    for (const QVariant &value : calls)
+    {
+        const QVariantMap call = value.toMap();
+        const QString callId = call.value(QStringLiteral("id")).toString();
+        const QString name = call.value(QStringLiteral("name")).toString();
+        const QString args = call.value(QStringLiteral("arguments")).toString();
+        const QVariantMap result = executeAssistantTool(name, args);
+        const bool ok = result.value(QStringLiteral("ok")).toBool();
+        chips.append(QVariantMap{
+            {QStringLiteral("id"), callId},
+            {QStringLiteral("name"), name},
+            {QStringLiteral("arguments"), args},
+            {QStringLiteral("status"),
+             ok ? QStringLiteral("done") : QStringLiteral("error")},
+            {QStringLiteral("summary"), result.value(QStringLiteral("summary"))},
+        });
+
+        QJsonObject content;
+        content[QStringLiteral("ok")] = ok;
+        content[QStringLiteral("detail")] =
+            result.value(QStringLiteral("detail")).toString();
+        if (!ok)
+            content[QStringLiteral("error")] =
+                result.value(QStringLiteral("detail")).toString();
+        results.append(QVariantMap{
+            {QStringLiteral("tool_call_id"), callId},
+            {QStringLiteral("content"),
+             QString::fromUtf8(QJsonDocument(content).toJson(
+                 QJsonDocument::Compact))},
+        });
+    }
+    m_assistantToolCalls = chips;
+    emit assistantToolsChanged();
+    m_assistant.submitToolResults(conversationId, results);
+}
+
+void PaintbrushController::onAssistantStreamFinished(
+    const QString &conversationId, const QString &text)
+{
+    if (conversationId != m_assistantConversationId)
+        return;
+    if (!text.isEmpty())
+        appendAssistantMessage(QStringLiteral("assistant"), text);
+    m_assistantStreamingText.clear();
+    m_assistantReasoningText.clear();
+    m_assistantToolCalls.clear();
+    m_assistantBusy = false;
+    emit assistantStreamChanged();
+    emit assistantToolsChanged();
+    emit assistantStateChanged();
+    setStatus(QStringLiteral("Companion answered."));
+}
+
+void PaintbrushController::onAssistantStreamError(
+    const QString &conversationId, const QString &message)
+{
+    if (conversationId != m_assistantConversationId)
+        return;
+    /* Keep a partial answer if one arrived, then show the real error instead
+     * of leaving the "hi" bubble unanswered. */
+    if (!m_assistantStreamingText.trimmed().isEmpty())
+        appendAssistantMessage(QStringLiteral("assistant"),
+                               m_assistantStreamingText);
+    appendAssistantMessage(QStringLiteral("error"),
+                           message.isEmpty()
+                               ? QStringLiteral("The AI endpoint did not answer.")
+                               : message);
+    m_assistantStreamingText.clear();
+    m_assistantReasoningText.clear();
+    m_assistantToolCalls.clear();
+    m_assistantBusy = false;
+    emit assistantStreamChanged();
+    emit assistantToolsChanged();
+    emit assistantStateChanged();
+}
+
+void PaintbrushController::cancelAssistant()
+{
+    if (!m_assistantBusy)
+        return;
+    m_assistant.cancelStreaming(m_assistantConversationId);
+    if (!m_assistantStreamingText.trimmed().isEmpty())
+        appendAssistantMessage(QStringLiteral("assistant"),
+                               m_assistantStreamingText);
+    m_assistantStreamingText.clear();
+    m_assistantReasoningText.clear();
+    m_assistantToolCalls.clear();
+    m_assistantBusy = false;
+    emit assistantStreamChanged();
+    emit assistantToolsChanged();
+    emit assistantStateChanged();
+    setStatus(QStringLiteral("Companion stopped."));
 }
 
 void PaintbrushController::companionReset()
 {
-    m_companion.resetConversation();
-    emit companionStateChanged();
+    companionClearConversation();
 }
 
 void PaintbrushController::companionClearConversation()
 {
     m_companion.resetConversation();
+    m_assistant.resetConversation();
+    m_assistantMessages.clear();
+    m_assistantStreamingText.clear();
+    m_assistantReasoningText.clear();
+    m_assistantToolCalls.clear();
+    m_assistantBusy = false;
+    m_assistantConversationId.clear();
     emit companionStateChanged();
+    emit assistantStreamChanged();
+    emit assistantToolsChanged();
+    emit assistantStateChanged();
 }
 
 int PaintbrushController::companionTalkLevel() const
@@ -5508,6 +5761,8 @@ void PaintbrushController::setCompanionTalkLevel(int level)
 void PaintbrushController::setCompanionMode(int mode)
 {
     m_companion.setMode(mode);
+    config_PutInt("paintbrush-companion-mode",
+                  qBound(0, mode, int(CompanionService::MODE_KIDS)));
     emit companionStateChanged();
     emit serviceAvailabilityChanged();
 }
@@ -5529,6 +5784,244 @@ void PaintbrushController::appendAssistantMessage(const QString &role,
         m_assistantMessages.removeFirst();
     emit assistantMessageAppended(role, text);
     emit companionStateChanged();
+    emit assistantStateChanged();
+}
+
+/* --------------------------------------------------------- assistant tools */
+
+QString PaintbrushController::assistantSystemPrompt() const
+{
+    return QStringLiteral(
+        "You are the NAI Paintbrush companion, a friendly creative assistant "
+        "inside a painting and collage app. You can see the current canvas "
+        "image. Keep answers short, warm and practical, in the user's language. "
+        "When the user asks you to change the editor, call one of the provided "
+        "tools instead of only describing what to do. Never claim you changed "
+        "something unless a tool result confirms it. If a request is ambiguous, "
+        "ask one short question. Do not mention internal parameter names, "
+        "renderers, APIs or code.");
+}
+
+QByteArray PaintbrushController::assistantToolsJson() const
+{
+    auto make = [](const QString &name, const QString &description,
+                   const QJsonObject &properties, const QJsonArray &required) {
+        QJsonObject params;
+        params[QStringLiteral("type")] = QStringLiteral("object");
+        params[QStringLiteral("properties")] = properties;
+        if (!required.isEmpty())
+            params[QStringLiteral("required")] = required;
+        QJsonObject fn;
+        fn[QStringLiteral("name")] = name;
+        fn[QStringLiteral("description")] = description;
+        fn[QStringLiteral("parameters")] = params;
+        QJsonObject tool;
+        tool[QStringLiteral("type")] = QStringLiteral("function");
+        tool[QStringLiteral("function")] = fn;
+        return tool;
+    };
+    auto stringProp = [](const QString &description,
+                         const QJsonArray &enumValues = QJsonArray()) {
+        QJsonObject p;
+        p[QStringLiteral("type")] = QStringLiteral("string");
+        p[QStringLiteral("description")] = description;
+        if (!enumValues.isEmpty())
+            p[QStringLiteral("enum")] = enumValues;
+        return p;
+    };
+    auto numberProp = [](const QString &description, double minimum,
+                         double maximum) {
+        QJsonObject p;
+        p[QStringLiteral("type")] = QStringLiteral("number");
+        p[QStringLiteral("description")] = description;
+        p[QStringLiteral("minimum")] = minimum;
+        p[QStringLiteral("maximum")] = maximum;
+        return p;
+    };
+    auto required = [](const QString &name) {
+        QJsonArray a;
+        a.append(name);
+        return a;
+    };
+
+    QJsonArray toolEnum;
+    for (const char *name : {"pencil", "brush", "eraser", "fill", "spray",
+                             "line", "rectangle", "ellipse", "text", "move",
+                             "glitter", "glitter_powder", "object_select",
+                             "eyedropper"})
+        toolEnum.append(QString::fromLatin1(name));
+
+    QJsonArray powderEnum;
+    for (const char *name : {"glue", "glitter", "push", "eraser", "pour", "blow"})
+        powderEnum.append(QString::fromLatin1(name));
+
+    QJsonArray tools;
+    tools.append(make(QStringLiteral("set_tool"),
+                      QStringLiteral("Switch the active paint tool."),
+                      QJsonObject{{QStringLiteral("tool"),
+                                   stringProp(QStringLiteral("Tool name."),
+                                              toolEnum)}},
+                      required(QStringLiteral("tool"))));
+    tools.append(make(QStringLiteral("set_color"),
+                      QStringLiteral("Set the paint colour from a hex value."),
+                      QJsonObject{{QStringLiteral("hex"),
+                                   stringProp(QStringLiteral("CSS hex, e.g. #FF2E9A."))}},
+                      required(QStringLiteral("hex"))));
+    tools.append(make(QStringLiteral("set_brush_size"),
+                      QStringLiteral("Set the active brush size in document pixels."),
+                      QJsonObject{{QStringLiteral("size"),
+                                   numberProp(QStringLiteral("Size in pixels."),
+                                              1.0, 160.0)}},
+                      required(QStringLiteral("size"))));
+    tools.append(make(QStringLiteral("set_powder_subtool"),
+                      QStringLiteral("Choose a Glitter Powder bench tool, or pour/blow once."),
+                      QJsonObject{{QStringLiteral("subtool"),
+                                   stringProp(QStringLiteral("Powder action."),
+                                              powderEnum)}},
+                      required(QStringLiteral("subtool"))));
+    tools.append(make(QStringLiteral("undo"),
+                      QStringLiteral("Undo the last edit."),
+                      QJsonObject(), QJsonArray()));
+    tools.append(make(QStringLiteral("redo"),
+                      QStringLiteral("Redo the last undone edit."),
+                      QJsonObject(), QJsonArray()));
+    tools.append(make(QStringLiteral("get_canvas_state"),
+                      QStringLiteral("Read the current tool, colour, layer and "
+                                     "selection so you can answer accurately."),
+                      QJsonObject(), QJsonArray()));
+
+    return QJsonDocument(tools).toJson(QJsonDocument::Compact);
+}
+
+QVariantMap PaintbrushController::executeAssistantTool(const QString &name,
+                                                       const QString &arguments)
+{
+    auto fail = [](const QString &why) {
+        return QVariantMap{{QStringLiteral("ok"), false},
+                           {QStringLiteral("summary"), why},
+                           {QStringLiteral("detail"), why}};
+    };
+    auto ok = [](const QString &summary, const QString &detail = QString()) {
+        return QVariantMap{{QStringLiteral("ok"), true},
+                           {QStringLiteral("summary"), summary},
+                           {QStringLiteral("detail"),
+                            detail.isEmpty() ? summary : detail}};
+    };
+
+    if (!m_canvas)
+        return fail(QStringLiteral("The canvas is not ready yet."));
+
+    QJsonObject args;
+    if (!arguments.trimmed().isEmpty())
+    {
+        QJsonParseError error;
+        const QJsonDocument doc =
+            QJsonDocument::fromJson(arguments.toUtf8(), &error);
+        if (error.error != QJsonParseError::NoError || !doc.isObject())
+            return fail(QStringLiteral("The tool arguments were not valid JSON."));
+        args = doc.object();
+    }
+
+    if (name == QStringLiteral("set_tool"))
+    {
+        const QString tool = args.value(QStringLiteral("tool")).toString().toLower();
+        static const QHash<QString, int> ids = {
+            {QStringLiteral("rect_select"), TOOL_RECT_SELECT},
+            {QStringLiteral("freeform_select"), TOOL_FREEFORM_SELECT},
+            {QStringLiteral("object_select"), TOOL_OBJECT_SELECT},
+            {QStringLiteral("pencil"), TOOL_PENCIL},
+            {QStringLiteral("brush"), TOOL_BRUSH},
+            {QStringLiteral("eraser"), TOOL_ERASER},
+            {QStringLiteral("fill"), TOOL_FILL},
+            {QStringLiteral("eyedropper"), TOOL_EYEDROPPER},
+            {QStringLiteral("spray"), TOOL_SPRAY},
+            {QStringLiteral("line"), TOOL_LINE},
+            {QStringLiteral("rectangle"), TOOL_RECTANGLE},
+            {QStringLiteral("ellipse"), TOOL_ELLIPSE},
+            {QStringLiteral("text"), TOOL_TEXT},
+            {QStringLiteral("move"), TOOL_PAN_ZOOM},
+            {QStringLiteral("glitter"), TOOL_GLITTER},
+            {QStringLiteral("glitter_powder"), TOOL_GLITTER_POWDER},
+        };
+        if (!ids.contains(tool))
+            return fail(QStringLiteral("Unknown tool '%1'.").arg(tool));
+        m_canvas->setTool(ids.value(tool));
+        m_canvas->update();
+        return ok(QStringLiteral("Tool: %1").arg(tool));
+    }
+    if (name == QStringLiteral("set_color"))
+    {
+        const QString hex = args.value(QStringLiteral("hex")).toString();
+        const QColor color(hex);
+        if (!color.isValid())
+            return fail(QStringLiteral("'%1' is not a valid colour.").arg(hex));
+        m_canvas->setFgColor(color);
+        m_canvas->update();
+        return ok(QStringLiteral("Colour: %1").arg(color.name()));
+    }
+    if (name == QStringLiteral("set_brush_size"))
+    {
+        const double requested =
+            args.value(QStringLiteral("size")).toDouble(-1.0);
+        if (requested < 0.0)
+            return fail(QStringLiteral("The brush size is missing."));
+        const double size = qBound(1.0, requested, 160.0);
+        m_canvas->setBrushSize(size);
+        m_canvas->update();
+        return ok(QStringLiteral("Brush size: %1 px").arg(qRound(size)));
+    }
+    if (name == QStringLiteral("set_powder_subtool"))
+    {
+        const QString sub = args.value(QStringLiteral("subtool")).toString().toLower();
+        m_canvas->setTool(TOOL_GLITTER_POWDER);
+        if (sub == QStringLiteral("pour"))
+            m_canvas->pourPowderNow();
+        else if (sub == QStringLiteral("blow"))
+            m_canvas->blowPowderNow();
+        else
+        {
+            static const QHash<QString, int> ids = {
+                {QStringLiteral("glue"), POWDER_GLUE},
+                {QStringLiteral("glitter"), POWDER_GLITTER},
+                {QStringLiteral("push"), POWDER_PUSH},
+                {QStringLiteral("eraser"), POWDER_ERASER},
+            };
+            if (!ids.contains(sub))
+                return fail(QStringLiteral("Unknown powder action '%1'.").arg(sub));
+            m_canvas->setPowderTool(ids.value(sub));
+        }
+        m_canvas->update();
+        return ok(QStringLiteral("Glitter Powder: %1").arg(sub));
+    }
+    if (name == QStringLiteral("undo"))
+    {
+        undo();
+        return ok(QStringLiteral("Undone."));
+    }
+    if (name == QStringLiteral("redo"))
+    {
+        redo();
+        return ok(QStringLiteral("Redone."));
+    }
+    if (name == QStringLiteral("get_canvas_state"))
+    {
+        QJsonObject state;
+        state[QStringLiteral("tool")] =
+            m_canvas->property("toolName").toString();
+        state[QStringLiteral("color")] = m_canvas->fgColor().name();
+        state[QStringLiteral("brush_size")] = m_canvas->brushSize();
+        state[QStringLiteral("has_selection")] = m_canvas->hasSelection();
+        state[QStringLiteral("layer_count")] = m_document.layers().size();
+        if (const CanvasLayer *layer = m_document.currentLayer())
+            state[QStringLiteral("current_layer")] = layer->name;
+        state[QStringLiteral("canvas")] =
+            QStringLiteral("%1 x %2").arg(m_document.canvasWidth())
+                .arg(m_document.canvasHeight());
+        return ok(QStringLiteral("Canvas state read."),
+                  QString::fromUtf8(QJsonDocument(state).toJson(
+                      QJsonDocument::Compact)));
+    }
+    return fail(QStringLiteral("Unknown tool '%1'.").arg(name));
 }
 
 /* --------------------------------------------------------------- layers */
@@ -6044,12 +6537,11 @@ QString PaintbrushController::applyNaiSettings(const QString &samModel,
     const QString assistantKey = assistantApiKey.trimmed();
     const int ptsTolerance = qBound(20, ptsToleranceMs, 2000);
 
-    /* Endpoint/model identity: these still need a service re-configure and
-     * therefore a restart. API keys are read per request and are hot-applied
-     * below, so a key-only change never forces a restart. */
-    const bool changedModel = model != settingsSamModel()
-        || device != settingsSamDevice()
-        || vlmBase != settingsVlmUrl()
+    /* Which kind of change this Apply contains (status line only — the
+     * services are always reconfigured below, and that is cheap/idempotent). */
+    const bool samChanged = model != settingsSamModel()
+        || device != settingsSamDevice();
+    const bool endpointChanged = vlmBase != settingsVlmUrl()
         || vlmName != settingsVlmModel()
         || assistantBase != settingsAssistantUrl()
         || assistantName != settingsAssistantModel();
@@ -6104,25 +6596,38 @@ QString PaintbrushController::applyNaiSettings(const QString &samModel,
             "could not be saved.");
     }
 
-    /* API keys are safe to hot-apply: each service reads the key when it
-     * builds a request, never mid-request. Recompute the EFFECTIVE keys with
-     * pbApiKey so an environment override keeps winning; the vision service
-     * additionally falls back to the assistant key when it runs on the
-     * assistant gateway (its configure() rule). */
+    /* HOT APPLY — no restart, no user action.
+     *
+     * Endpoint services build every request from their configured fields and
+     * re-read the effective keys in configure(), so re-running configure() is
+     * the complete reload. The SAM runtime is the only stateful part: release
+     * the cached model (and any running tracking session), restart the
+     * segmentation worker and clear the stale embedding cache. The new model
+     * loads lazily on the next AI action on the worker thread, so the GUI
+     * never blocks. */
     vlc_object_t *obj = VLC_OBJECT(m_intf);
+
+    if (samChanged)
+    {
+        m_segmentation.shutdown();
+        m_tracking.shutdown();
+        m_segmentation.configure(obj);
+        m_tracking.configure(obj);
+        m_segmentation.clearCache();
+        m_segmentation.initialize();
+    }
+
+    m_vision.configure(obj);
+    m_assistant.configure(obj);
+    m_lookup.configure(obj);
+
+    /* Recompute the EFFECTIVE keys (environment override wins) for the
+     * "a key is configured" status; configure() already applied them. */
     const QString effectiveVlmKey =
         pbApiKey(obj, "PAINTBRUSH_VLM_API_KEY", "paintbrush-vlm-api-key");
     const QString effectiveAssistantKey =
         pbApiKey(obj, "PAINTBRUSH_ASSISTANT_API_KEY",
                  "paintbrush-assistant-api-key");
-    m_assistant.setApiKey(effectiveAssistantKey);
-    m_lookup.setApiKey(effectiveAssistantKey);
-    m_vision.setApiKey(
-        effectiveVlmKey.isEmpty() && m_vision.usingAssistantFallback()
-            ? effectiveAssistantKey
-            : effectiveVlmKey);
-
-    /* Keep the "a key is configured" status truthful after the edit. */
     const bool hasSecret =
         !effectiveVlmKey.isEmpty()
         || !pbApiKey(obj, "PAINTBRUSH_IMAGE_API_KEY",
@@ -6136,21 +6641,17 @@ QString PaintbrushController::applyNaiSettings(const QString &samModel,
      * re-read of a possibly stale config item. */
     m_thumbnails.setPtsToleranceMs(ptsTolerance);
 
-    /* Model/endpoint changes require a service re-configure to take effect,
-     * which cannot be done safely mid-session. Keep this flag sticky until a
-     * restart (or an explicit clear), so a later PTS-only Apply cannot erase
-     * an earlier model-change notice. */
-    if (changedModel)
-        m_settingsRestartRequired = true;
-
+    m_settingsRestartRequired = false;
     emit settingsChanged();
-    if (!changedModel && (changedKeys || secretsChanged))
+    emit serviceAvailabilityChanged();
+    if (samChanged)
+        setStatus(QStringLiteral("AI model updated — it loads on the next AI action."));
+    else if (endpointChanged)
+        setStatus(QStringLiteral("AI endpoint updated — the next request uses it."));
+    else if (changedKeys || secretsChanged)
         setStatus(QStringLiteral("API keys saved and applied."));
     else
-        setStatus(changedModel
-            ? QStringLiteral("Settings saved — restart VLC to apply model and "
-                             "endpoint changes.")
-            : QStringLiteral("Settings saved."));
+        setStatus(QStringLiteral("Settings applied."));
     return QString();               /* empty = applied cleanly */
 }
 

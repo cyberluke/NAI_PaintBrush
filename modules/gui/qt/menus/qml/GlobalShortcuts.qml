@@ -44,7 +44,7 @@ Item {
 
     ShortcutExt{ sequence:"Ctrl+L"; onActivated: MainCtx.playqueuePanel.visible = !MainCtx.playqueuePanel.visible; }
 
-    ShortcutExt{ sequence:"F1"; onActivated: DialogsProvider.helpDialog() }
+    ShortcutExt{ sequence:"F1"; enabled: MainCtx.useGlobalShortcuts && !MainCtx.paintbrushView; onActivated: DialogsProvider.helpDialog() }
     ShortcutExt{ sequence:"F10"; onActivated: MainCtx.toggleToolbarMenu() }
     ShortcutExt{ sequence:"F11"; onActivated: MainCtx.toggleInterfaceFullScreen() }
     ShortcutExt{ sequence:"Ctrl+H"; onActivated: MainCtx.minimalView = !MainCtx.minimalView; }

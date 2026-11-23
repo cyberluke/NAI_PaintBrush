@@ -111,16 +111,16 @@ static const char *const kBbuiltinsJson = R"JSON(
       "locked": true,
       "author": "NAI",
       "colors": [
-        "#0B0614",
-        "#1A0B2E",
-        "#2E1149",
-        "#4B1A74",
         "#FF2E9A",
         "#FF6BD6",
         "#38F2C8",
         "#00C2FF",
         "#C6FF3D",
-        "#FFF04D"
+        "#FFF04D",
+        "#0B0614",
+        "#1A0B2E",
+        "#2E1149",
+        "#4B1A74"
       ]
     },
     {

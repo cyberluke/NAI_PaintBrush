@@ -127,6 +127,13 @@ Item {
             font.pixelSize: VLCStyle.fontSize_xsmall
             color: theme.fg.secondary
         }
+
+        Widgets.LabelExt {
+            Layout.alignment: Qt.AlignHCenter
+            text: qsTr("New here? Press F1 for a plain-language guide to every tool.")
+            font.pixelSize: VLCStyle.fontSize_xsmall
+            color: theme.accent
+        }
     }
 
     FileDialog {

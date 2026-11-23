@@ -119,9 +119,9 @@ Item {
                        value: canvas.glitterAmount, onChange: (v) => canvas.glitterAmount = v })
             out.push({ kind: "slider", label: qsTr("Flake"), from: 0.2, to: 2.5, stepSize: 0.05,
                        value: canvas.glitterFlakeSize, onChange: (v) => canvas.glitterFlakeSize = v })
-            out.push({ kind: "slider", label: qsTr("Shimmer"), from: 0.0, to: 1, stepSize: 0.05,
+            out.push({ kind: "slider", label: qsTr("Shimmer"), from: 0.0, to: 1, stepSize: 0.01,
                        value: canvas.glitterShimmer, onChange: (v) => canvas.glitterShimmer = v })
-            out.push({ kind: "slider", label: qsTr("Glue"), from: 0.0, to: 1, stepSize: 0.05,
+            out.push({ kind: "slider", label: qsTr("Glue"), from: 0.0, to: 1, stepSize: 0.01,
                        value: canvas.glitterAdhesion, onChange: (v) => canvas.glitterAdhesion = v })
         }
 
@@ -155,22 +155,22 @@ Item {
              * sub-tool keeps its OWN reference size range/default; Glitter adds
              * Amount; Shimmer is a single semantic control on Glitter). */
             if (PaintbrushCtx.powderToolIsGlue)            /* Glue: width */
-                out.push({ kind: "slider", label: qsTr("Size"), from: 4, to: 60, stepSize: 1,
+                out.push({ kind: "slider", label: qsTr("Size"), from: 1, to: 60, stepSize: 1,
                            value: canvas.powderGlueWidth, onChange: (v) => canvas.powderGlueWidth = v })
             else if (PaintbrushCtx.powderToolIsGlitter)       /* Glitter: radius + amount + shimmer */
             {
-                out.push({ kind: "slider", label: qsTr("Size"), from: 6, to: 80, stepSize: 1,
+                out.push({ kind: "slider", label: qsTr("Size"), from: 1, to: 80, stepSize: 1,
                            value: canvas.powderGlitterSize, onChange: (v) => canvas.powderGlitterSize = v })
                 out.push({ kind: "slider", label: qsTr("Amount"), from: 0.1, to: 2, stepSize: 0.05,
                            value: canvas.glitterAmount, onChange: (v) => canvas.glitterAmount = v })
-                out.push({ kind: "slider", label: qsTr("Shimmer"), from: 0.0, to: 1, stepSize: 0.05,
+                out.push({ kind: "slider", label: qsTr("Shimmer"), from: 0.0, to: 1, stepSize: 0.01,
                            value: canvas.glitterShimmer, onChange: (v) => canvas.glitterShimmer = v })
             }
             else if (PaintbrushCtx.powderToolIsPush)       /* Push: radius */
-                out.push({ kind: "slider", label: qsTr("Size"), from: 8, to: 60, stepSize: 1,
+                out.push({ kind: "slider", label: qsTr("Size"), from: 1, to: 60, stepSize: 1,
                            value: canvas.powderPushSize, onChange: (v) => canvas.powderPushSize = v })
             else if (PaintbrushCtx.powderToolIsEraser)       /* Eraser: width */
-                out.push({ kind: "slider", label: qsTr("Size"), from: 8, to: 120, stepSize: 1,
+                out.push({ kind: "slider", label: qsTr("Size"), from: 1, to: 120, stepSize: 1,
                            value: canvas.powderEraserWidth, onChange: (v) => canvas.powderEraserWidth = v })
         }
 

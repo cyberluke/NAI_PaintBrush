@@ -61,15 +61,19 @@ Rectangle {
         function onDocumentChanged() { root.refreshTreatment() }
     }
 
-    /* commit helpers — one EditText undo step per committed gesture */
-    function commitText() {
+    /* commit helpers — one EditText undo step per committed gesture.
+     * `color` overrides the swatch read: mutating treatmentMap.color in place
+     * does not invalidate the read-only binding, so reading swatchRow.currentColor
+     * right after the click used to commit the PREVIOUS colour. */
+    function commitText(color) {
         if (root.treatmentMap.size === 0)
             return
         PaintbrushCtx.editTextLayer(root.layerIndex,
                                     wordField.text,
                                     roleBox.currentValue,
                                     sizeSlider.value,
-                                    swatchRow.currentColor,
+                                    color !== undefined ? color
+                                                        : swatchRow.currentColor,
                                     trackingSlider.value)
     }
 
@@ -165,7 +169,7 @@ Rectangle {
             Layout.alignment: Qt.AlignVCenter
             spacing: 4
 
-            readonly property string currentColor: root.treatmentMap.color ?? "#ff1f1b18"
+            readonly property color currentColor: root.treatmentMap.color ?? "#ff1f1b18"
 
             Repeater {
                 model: PaintbrushCtx.moodPalette
@@ -175,16 +179,21 @@ Rectangle {
                     height: width
                     radius: 4
                     color: modelData
-                    border.width: swatchRow.currentColor === modelData ? 2 : 1
-                    border.color: swatchRow.currentColor === modelData ? theme.accent : theme.border
+                    border.width: Qt.colorEqual(swatchRow.currentColor, modelData) ? 2 : 1
+                    border.color: Qt.colorEqual(swatchRow.currentColor, modelData) ? theme.accent : theme.border
                     MouseArea {
                         anchors.fill: parent
                         onClicked: {
-                            /* keep the treatment color but switch the swatch */
-                            const m = root.treatmentMap
+                            /* replace the object so the binding invalidates,
+                             * then commit the clicked colour explicitly.
+                             * (No Object.assign: Qt's QML JS engine does not
+                             * guarantee it; the rail has the same note.) */
+                            const m = {}
+                            for (const k in root.treatmentMap)
+                                m[k] = root.treatmentMap[k]
                             m.color = modelData
                             root.treatmentMap = m
-                            root.commitText()
+                            root.commitText(modelData)
                         }
                     }
                 }

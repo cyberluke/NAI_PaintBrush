@@ -1059,6 +1059,7 @@ qml_modules += {
         'paintbrush/qml/PaintbrushSettingsDialog.qml',
         'paintbrush/qml/PaintbrushToolbar.qml',
         'paintbrush/qml/PaintbrushToolOptionsBar.qml',
+        'paintbrush/qml/PaintbrushHelp.qml',
     ),
 }
 

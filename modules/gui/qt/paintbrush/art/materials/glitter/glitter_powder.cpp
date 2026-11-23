@@ -362,12 +362,26 @@ QByteArray GlitterPowder::serialize() const
     {
         ds << qint64(0);
     }
-    return out;
+    /* The state costs ~120 bytes per powder cell (56 bytes of cell fields plus
+     * the 64-byte sub-cell glue field). A 1280x720 canvas is >100 MB per
+     * snapshot, and every stroke keeps `before` + `after` in the undo stack, so
+     * glue-heavy edits could exhaust memory and trip Qt's allocation fail-fast.
+     * Store a compressed envelope; deserialize() still accepts legacy
+     * uncompressed states (the magic/version inside the stream are unchanged). */
+    return QByteArrayLiteral("GLZ1") + qCompress(out, 6);
 }
 
 bool GlitterPowder::deserialize(const QByteArray &bytes)
 {
-    QDataStream ds(bytes);
+    /* "GLZ1" = compressed envelope; anything else is a legacy raw state. */
+    QByteArray raw = bytes;
+    if (bytes.startsWith(QByteArrayLiteral("GLZ1")))
+    {
+        raw = qUncompress(bytes.mid(4));
+        if (raw.isEmpty())
+            return false;
+    }
+    QDataStream ds(raw);
     ds.setVersion(QDataStream::Qt_6_0);
     quint32 magic, ver;
     quint32 w, h;

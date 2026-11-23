@@ -20,9 +20,10 @@ import VLC.Paintbrush
  *  - Cancel (and closing the dialog) discards the draft and restores the
  *    controller's current values, so the two buttons always mean something.
  *  - Apply calls PaintbrushCtx.applyNaiSettings(...) exactly once. The
- *    controller returns EMPTY on success (including when a restart is
- *    required), so the dialog closes; a non-empty answer is a real failure and
- *    stays inline. Restart-required is shown as state, not as an error.
+ *    controller returns EMPTY on success, so the dialog closes; a non-empty
+ *    answer is a real failure and stays inline. Model/endpoint/key changes are
+ *    hot-applied (the controller reconfigures the running services and reloads
+ *    the changed model in the background) — there is no restart state.
  *  - Every row states what the capability actually is; green rows show
  *    positive text, never an "unavailable reason".
  *
@@ -154,7 +155,7 @@ Dialog {
                 Widgets.LabelExt {
                     text: qsTr("NAI Paintbrush")
                     color: theme.fg.secondary
-                    font.pixelSize: VLCStyle.fontSize_small
+                    font.pixelSize: VLCStyle.fontSize_normal
                 }
             }
         }
@@ -197,13 +198,13 @@ Dialog {
                         Widgets.LabelExt {
                             text: qsTr("Device")
                             color: theme.fg.primary
-                            font.pixelSize: VLCStyle.fontSize_small
+                            font.pixelSize: VLCStyle.fontSize_normal
                             Layout.fillWidth: true
                         }
                         Widgets.LabelExt {
                             text: PaintbrushCtx.segmentationStatusText
                             color: theme.fg.secondary
-                            font.pixelSize: VLCStyle.fontSize_xsmall
+                            font.pixelSize: VLCStyle.fontSize_small
                         }
                         ComboBox {
                             model: ["gpu", "auto", "cpu"]
@@ -223,7 +224,7 @@ Dialog {
                         color: (!PaintbrushCtx.samGpuBackendLinked
                                 || PaintbrushCtx.samGpuProbeError.length > 0)
                                ? theme.accent : theme.fg.secondary
-                        font.pixelSize: VLCStyle.fontSize_xsmall
+                        font.pixelSize: VLCStyle.fontSize_small
                         wrapMode: Text.WordWrap
                     }
                     SettingsRow {
@@ -260,7 +261,7 @@ Dialog {
                         visible: PaintbrushCtx.settingsVlmApiKeyFromEnv
                         text: qsTr("PAINTBRUSH_VLM_API_KEY is set in the environment and overrides the key stored here.")
                         color: theme.fg.secondary
-                        font.pixelSize: VLCStyle.fontSize_xsmall
+                        font.pixelSize: VLCStyle.fontSize_small
                         wrapMode: Text.WordWrap
                     }
                 }
@@ -284,13 +285,13 @@ Dialog {
                         Widgets.LabelExt {
                             text: qsTr("Device")
                             color: theme.fg.primary
-                            font.pixelSize: VLCStyle.fontSize_small
+                            font.pixelSize: VLCStyle.fontSize_normal
                             Layout.fillWidth: true
                         }
                         Widgets.LabelExt {
                             text: PaintbrushCtx.mattingBackendText
                             color: theme.fg.secondary
-                            font.pixelSize: VLCStyle.fontSize_xsmall
+                            font.pixelSize: VLCStyle.fontSize_small
                         }
                         ComboBox {
                             model: ["gpu", "auto", "cpu"]
@@ -304,7 +305,7 @@ Dialog {
                         text: PaintbrushCtx.mattingStatusText
                         color: PaintbrushCtx.mattingNeuralAvailable ? theme.fg.secondary
                                                                    : theme.accent
-                        font.pixelSize: VLCStyle.fontSize_xsmall
+                        font.pixelSize: VLCStyle.fontSize_small
                         wrapMode: Text.WordWrap
                     }
                 }
@@ -349,14 +350,14 @@ Dialog {
                         visible: PaintbrushCtx.settingsAssistantApiKeyFromEnv
                         text: qsTr("PAINTBRUSH_ASSISTANT_API_KEY is set in the environment and overrides the key stored here.")
                         color: theme.fg.secondary
-                        font.pixelSize: VLCStyle.fontSize_xsmall
+                        font.pixelSize: VLCStyle.fontSize_small
                         wrapMode: Text.WordWrap
                     }
                     Widgets.LabelExt {
                         Layout.fillWidth: true
                         text: qsTr("Keys entered here are saved in the plain-text VLC configuration file and reused on the next start. Environment variables (PAINTBRUSH_VLM_API_KEY / PAINTBRUSH_ASSISTANT_API_KEY) take precedence when set. Keys are never written to logs.")
                         color: theme.fg.secondary
-                        font.pixelSize: VLCStyle.fontSize_xsmall
+                        font.pixelSize: VLCStyle.fontSize_small
                         wrapMode: Text.WordWrap
                     }
                 }
@@ -394,7 +395,7 @@ Dialog {
                         Widgets.LabelExt {
                             text: qsTr("Exact-frame tolerance")
                             color: theme.fg.secondary
-                            font.pixelSize: VLCStyle.fontSize_small
+                            font.pixelSize: VLCStyle.fontSize_normal
                             Layout.fillWidth: true
                         }
                         SpinBox {
@@ -409,14 +410,14 @@ Dialog {
                         Widgets.LabelExt {
                             text: qsTr("ms")
                             color: theme.fg.secondary
-                            font.pixelSize: VLCStyle.fontSize_small
+                            font.pixelSize: VLCStyle.fontSize_normal
                         }
                     }
                     Widgets.LabelExt {
                         Layout.fillWidth: true
                         text: qsTr("Used by AI crops and exports. Filmstrip thumbnails accept the nearest keyframe and are labelled with its real time.")
                         color: theme.fg.secondary
-                        font.pixelSize: VLCStyle.fontSize_xsmall
+                        font.pixelSize: VLCStyle.fontSize_small
                         wrapMode: Text.WordWrap
                     }
                 }
@@ -440,7 +441,7 @@ Dialog {
                         text: PaintbrushCtx.selfTestReport
                         color: theme.fg.primary
                         wrapMode: Text.WordWrap
-                        font.pixelSize: VLCStyle.fontSize_xsmall
+                        font.pixelSize: VLCStyle.fontSize_small
                     }
                 }
             }
@@ -464,15 +465,15 @@ Dialog {
                 text: root.applyMessage
                 color: theme.accent
                 wrapMode: Text.WordWrap
-                font.pixelSize: VLCStyle.fontSize_small
+                font.pixelSize: VLCStyle.fontSize_normal
             }
             Widgets.LabelExt {
                 Layout.fillWidth: true
-                visible: PaintbrushCtx.settingsRestartRequired && root.applyMessage.length === 0
-                text: qsTr("Model and endpoint changes take effect after restart.")
+                visible: root.applyMessage.length === 0
+                text: qsTr("Changes apply immediately — no restart needed. The AI model reloads in the background when it changes.")
                 color: theme.fg.secondary
                 wrapMode: Text.WordWrap
-                font.pixelSize: VLCStyle.fontSize_xsmall
+                font.pixelSize: VLCStyle.fontSize_normal
             }
 
             RowLayout {
@@ -506,7 +507,7 @@ Dialog {
         Widgets.LabelExt {
             text: parent.title.toUpperCase()
             color: theme.fg.secondary
-            font.pixelSize: VLCStyle.fontSize_xsmall
+            font.pixelSize: VLCStyle.fontSize_small
             font.bold: true
             font.letterSpacing: 1.2
             Layout.fillWidth: true
@@ -548,7 +549,7 @@ Dialog {
             Widgets.LabelExt {
                 text: row.label
                 color: theme.fg.primary
-                font.pixelSize: VLCStyle.fontSize_small
+                font.pixelSize: VLCStyle.fontSize_normal
                 Layout.fillWidth: true
             }
             Rectangle {
@@ -560,7 +561,7 @@ Dialog {
                 text: row.status
                 visible: row.status.length > 0
                 color: theme.fg.secondary
-                font.pixelSize: VLCStyle.fontSize_xsmall
+                font.pixelSize: VLCStyle.fontSize_small
             }
         }
         RowLayout {
@@ -611,13 +612,13 @@ Dialog {
         Widgets.LabelExt {
             text: parent.label
             color: theme.fg.secondary
-            font.pixelSize: VLCStyle.fontSize_small
+            font.pixelSize: VLCStyle.fontSize_normal
             Layout.fillWidth: true
         }
         Widgets.LabelExt {
             text: parent.value
             color: theme.fg.primary
-            font.pixelSize: VLCStyle.fontSize_xsmall
+            font.pixelSize: VLCStyle.fontSize_small
         }
     }
 }

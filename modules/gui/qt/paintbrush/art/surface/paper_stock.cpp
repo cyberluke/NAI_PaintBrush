@@ -69,8 +69,8 @@ const PaperStock *findById(const QString &id)
              QColor(0xF3, 0xEB, 0xDA), 0xE55u, 0.45f, 0.42f, 0.60f,
              0.55f, 0.09f, 0.20f, +0.15f, 0.048f),
         base(QStringLiteral("matte.black"), QStringLiteral("Matte Black"),
-             QColor(0x16, 0x16, 0x18), 0xF66u, 0.50f, 0.50f, 0.82f,
-             0.60f, 0.05f, 0.30f, +0.02f, 0.042f),
+             QColor(0x24, 0x24, 0x28), 0xF66u, 0.85f, 0.65f, 0.82f,
+             0.60f, 0.22f, 0.30f, +0.02f, 0.050f),
     };
     static const int count = int(sizeof(s) / sizeof(s[0]));
     for (int i = 0; i < count; ++i)
