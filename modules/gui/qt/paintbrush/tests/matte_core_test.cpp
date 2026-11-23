@@ -485,6 +485,69 @@ void testThinStructures()
                                       barTopo, p);
     check(barTri.pixelColor(256, 256).red() == 255,
           "a 14 px bar is not misclassified as a thin structure");
+
+    /* A realistic, multi-pixel ankle bridge: the old fixed ~4 px opening
+     * radius missed anything wider than a 1-2 px leak. */
+    QImage bridge10(W, H, QImage::Format_Grayscale8);
+    bridge10.fill(0);
+    {
+        QPainter q(&bridge10);
+        q.setRenderHint(QPainter::Antialiasing, false);
+        q.setPen(Qt::NoPen);
+        q.setBrush(Qt::white);
+        q.drawEllipse(QPointF(150, 256), 60, 60);
+        q.drawEllipse(QPointF(362, 256), 60, 60);
+        q.fillRect(QRect(150, 251, 212, 10), Qt::white);
+        q.end();
+    }
+    Inputs bridgeIn;
+    bridgeIn.rgb = rgb;
+    bridgeIn.mask = bridge10;
+    const TopologyReport bridgeTopo = analyseTopology(bridgeIn, p);
+    const QImage bridgeTri = buildTrimap(bridgeTopo.repairedMask, rgb, QImage(),
+                                         bridgeTopo, p);
+    check(bridgeTri.pixelColor(256, 256).red() == 128,
+          "a 10 px false bridge becomes unknown, not hard foreground");
+    check(bridgeTri.pixelColor(150, 256).red() == 255,
+          "a 10 px bridge does not swallow the subject core");
+
+    /* A thick bar is a real structure: never downgrade it to unknown. */
+    QImage bar24(W, H, QImage::Format_Grayscale8);
+    bar24.fill(0);
+    {
+        QPainter q(&bar24);
+        q.fillRect(QRect(150, 244, 212, 24), Qt::white);
+        q.end();
+    }
+    Inputs bar24In;
+    bar24In.rgb = rgb;
+    bar24In.mask = bar24;
+    const TopologyReport bar24Topo = analyseTopology(bar24In, p);
+    const QImage bar24Tri = buildTrimap(bar24Topo.repairedMask, rgb, QImage(),
+                                        bar24Topo, p);
+    check(bar24Tri.pixelColor(256, 256).red() == 255,
+          "a 24 px bar stays confirmed foreground");
+
+    /* Two legs with a clear gap must not manufacture unknown between them. */
+    QImage gap(W, H, QImage::Format_Grayscale8);
+    gap.fill(0);
+    {
+        QPainter q(&gap);
+        q.setRenderHint(QPainter::Antialiasing, false);
+        q.setPen(Qt::NoPen);
+        q.setBrush(Qt::white);
+        q.drawEllipse(QPointF(150, 256), 60, 60);
+        q.drawEllipse(QPointF(362, 256), 60, 60);
+        q.end();
+    }
+    Inputs gapIn;
+    gapIn.rgb = rgb;
+    gapIn.mask = gap;
+    const TopologyReport gapTopo = analyseTopology(gapIn, p);
+    const QImage gapTri = buildTrimap(gapTopo.repairedMask, rgb, QImage(),
+                                      gapTopo, p);
+    check(gapTri.pixelColor(256, 256).red() == 0,
+          "a clear gap between legs stays background");
 }
 
 void testCacheIdentity()

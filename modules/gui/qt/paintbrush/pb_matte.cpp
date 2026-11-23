@@ -1317,25 +1317,37 @@ QImage buildTrimap(const QImage &repairedMask, const QImage &rgb,
     const std::vector<float> detail =
         rgb.isNull() ? std::vector<float>() : detailEnergy(rgb, w, h);
 
-    /* Thin structures: anything that disappears after erosion and does not
-     * come back under dilation is narrower than ~2*thinRadius. Those pixels
-     * are NOT deleted (wires, hair and fingers must survive); they are handed
-     * to the matting model as unknown so a false bridge between ankles or a
-     * 1-px mask leak cannot become hard foreground. */
-    const int thinRadius = std::max(1, int(std::lround(2.0 * params.scaleFor(shortEdge))));
+    /* Thin structures: anything that disappears after an opening (erosion
+     * followed by regrowth) is narrower than ~2*thinRadius. Those pixels are
+     * NOT deleted (wires, hair and fingers must survive); they are handed to
+     * the matting model as unknown so a false bridge between ankles cannot
+     * become hard foreground.
+     *
+     * The radius follows the source resolution instead of a fixed couple of
+     * pixels: an ankle bridge is several pixels wide, so a 2-px test only
+     * caught 1-px leaks. About 1.2% of the short edge marks every structure
+     * up to ~2.4% of the short edge as uncertain while leaving real limbs
+     * (tens of pixels) confidently foreground.
+     *
+     * The resulting thin core is expanded so the model gets background
+     * context on both sides of the bridge; otherwise a single unknown line
+     * sandwiched between confirmed foreground still mattes as foreground. */
+    const int thinRadius = std::max(2, int(std::lround(0.012 * double(shortEdge))));
+    const int thinExpand = std::max(2, thinRadius / 2);
     QImage thinMask;
     {
         const QImage eroded = erodeBinary(bin, thinRadius);
         const QImage regrown = dilateBinary(eroded, thinRadius);
-        thinMask = QImage(bin.size(), QImage::Format_Grayscale8);
+        QImage thinCore(bin.size(), QImage::Format_Grayscale8);
         for (int y = 0; y < h; ++y)
         {
             const uchar *src = bin.constScanLine(y);
             const uchar *grown = regrown.constScanLine(y);
-            uchar *dst = thinMask.scanLine(y);
+            uchar *dst = thinCore.scanLine(y);
             for (int x = 0; x < w; ++x)
                 dst[x] = (src[x] && !grown[x]) ? 255 : 0;
         }
+        thinMask = dilateBinary(thinCore, thinExpand);
     }
 
     const int inner = params.innerBandFor(shortEdge);
