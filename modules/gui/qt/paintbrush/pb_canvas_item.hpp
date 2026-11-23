@@ -78,6 +78,10 @@ class PaintbrushCanvasItem : public QQuickItem
     Q_PROPERTY(bool hasSelection READ hasSelection NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool objectSelectBusy READ objectSelectBusy NOTIFY objectSelectBusyChanged FINAL)
     Q_PROPERTY(bool objectMaskVisible READ objectMaskVisible WRITE setObjectMaskVisible NOTIFY objectMaskVisibleChanged FINAL)
+    /* Mask cleanup brush: 0 = add, 1 = erase (Alt/right always erase). */
+    Q_PROPERTY(int maskPaintMode READ maskPaintMode WRITE setMaskPaintMode NOTIFY maskPaintModeChanged FINAL)
+    /* True while a committed object-cutout layer's native mask is edited. */
+    Q_PROPERTY(bool layerMaskEditActive READ layerMaskEditActive NOTIFY layerMaskEditActiveChanged FINAL)
     Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged FINAL)
     Q_PROPERTY(qreal fillTolerance READ fillTolerance WRITE setFillTolerance NOTIFY fillToleranceChanged FINAL)
     /* Paintbrush 2.0 art tool controls (spec §14.3 primary controls) */
@@ -231,6 +235,16 @@ public:
                                             bool subtract);
     Q_INVOKABLE void endObjectMaskStroke();
 
+    /* -- per-layer mask editing (committed object cutouts) ---------------- */
+    int maskPaintMode() const { return m_maskPaintMode; }
+    void setMaskPaintMode(int mode);
+    bool layerMaskEditActive() const { return m_layerMaskEditActive; }
+    /* Enter/leave editing of a layer's own mask (LAYER-LOCAL grayscale).
+     * While active the Object Select brush paints that mask, mapped through
+     * the layer transform; layerMaskEdited() reports the edited mask. */
+    Q_INVOKABLE void beginLayerMaskEdit(int layerId, const QImage &localMask);
+    Q_INVOKABLE void endLayerMaskEdit();
+
     /* -- live harvest overlay (P0#3): the object selection mask over the LIVE
      * video, rendered in VIEWPORT/item space (independent of any document
      * zoom/pan). Unlike the document-space `m_objectMask`, this overlay is
@@ -339,6 +353,10 @@ void fgColorChanged();
     void objectMaskReady(const QImage &mask, double score);
     void objectMaskEdited(const QImage &mask);
     void maskRefineStarted(const QImage &mask);
+    void maskPaintModeChanged(int mode);
+    void layerMaskEditActiveChanged(bool active);
+    /* Edited LAYER-LOCAL mask after a layer-mask brush stroke. */
+    void layerMaskEdited(const QImage &localMask);
     void objectSelectClick(QPointF canvasPos, bool positive, QPointF itemPos);
     /* Native vector layer double-click: arm the in-canvas node editor. */
     void vectorEditRequested(int layerId);
@@ -431,6 +449,14 @@ private:
     /* -- selection ------------------------------------------------------------ */
     void updateSelectionFromDrag(const QPointF &canvasPos);
     void finishSelection();
+
+    /* per-layer mask editing helpers (local-space painting + overlay) */
+    void startLayerMaskStroke(const QPointF &canvasPos, bool subtract);
+    void paintLayerMaskAt(const QPointF &canvasPos, bool subtract);
+    void paintLayerMaskSegment(const QPointF &from, const QPointF &to,
+                               bool subtract);
+    void endLayerMaskStroke();
+    void rebuildLayerMaskOverlay() const;
     void clearSelectionInternal();
     void moveSelection(const QPointF &delta);
 
@@ -514,6 +540,20 @@ private:
     bool m_maskPaintDirty = false;  /* a dot was actually painted (drag, not click) */
     QPointF m_maskPaintLastPos;
     QRect m_maskPaintUnion;
+    int m_maskPaintMode = 0;        /* 0 = add, 1 = erase */
+
+    /* per-layer mask editing (committed cutouts): the mask and its mapping
+     * are LAYER-LOCAL; the overlay is a document-space tinted image. */
+    bool m_layerMaskEditActive = false;
+    int m_layerMaskEditLayerId = -1;
+    QImage m_layerMaskEditMask;         /* Grayscale8, local space */
+    QTransform m_layerMaskEditTransform;/* local -> document */
+    mutable QImage m_layerMaskOverlay;  /* document-space ARGB32 overlay */
+    mutable bool m_layerMaskOverlayDirty = true;
+    bool m_layerMaskPaintActive = false;
+    bool m_layerMaskPaintSubtract = false;
+    bool m_layerMaskPaintDirty = false;
+    QPointF m_layerMaskPaintLast;
 
     /* tiles */
     QHash<TileKey, QImage> m_tiles;

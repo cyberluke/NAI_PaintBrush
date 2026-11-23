@@ -2265,6 +2265,40 @@ void PaintbrushCanvasItem::compositeTile(int tx, int ty, QImage &tile) const
         p.end();
     }
 
+    /* committed-cutout layer mask edit overlay (document-space tint) */
+    if (m_layerMaskEditActive)
+    {
+        rebuildLayerMaskOverlay();
+        if (!m_layerMaskOverlay.isNull())
+        {
+            for (int y = 0; y < r.height(); ++y)
+            {
+                const int oy = r.top() + y;
+                if (oy < 0 || oy >= m_layerMaskOverlay.height())
+                    continue;
+                const QRgb *oline = reinterpret_cast<const QRgb *>(
+                    m_layerMaskOverlay.constScanLine(oy));
+                QRgb *tline = reinterpret_cast<QRgb *>(tile.scanLine(y));
+                for (int x = 0; x < r.width(); ++x)
+                {
+                    const int ox = r.left() + x;
+                    if (ox < 0 || ox >= m_layerMaskOverlay.width())
+                        continue;
+                    const QRgb o = oline[ox];
+                    const int oa = qAlpha(o);
+                    if (oa == 0)
+                        continue;
+                    const QRgb d = tline[x];
+                    tline[x] = qRgba(
+                        (qRed(d) * (255 - oa) + qRed(o) * oa) / 255,
+                        (qGreen(d) * (255 - oa) + qGreen(o) * oa) / 255,
+                        (qBlue(d) * (255 - oa) + qBlue(o) * oa) / 255,
+                        qMax(qAlpha(d), oa));
+                }
+            }
+        }
+    }
+
     /* manual selection tint + marching border */
     if (m_doc && !m_doc->selectionPath().isEmpty())
     {
@@ -3337,6 +3371,13 @@ void PaintbrushCanvasItem::continueStroke(const QPointF &canvasPos)
         break;
 
     case TOOL_OBJECT_SELECT:
+        if (m_layerMaskPaintActive)
+        {
+            paintLayerMaskSegment(m_layerMaskPaintLast, canvasPos,
+                                  m_layerMaskPaintSubtract);
+            m_layerMaskPaintLast = canvasPos;
+            break;
+        }
         if (m_maskPaintActive)
         {
             if (!m_maskPaintDirty)
@@ -3463,6 +3504,20 @@ void PaintbrushCanvasItem::endStroke(const QPointF &canvasPos, bool primary)
         break;
 
     case TOOL_OBJECT_SELECT:
+        if (m_layerMaskPaintActive)
+        {
+            if (m_layerMaskPaintDirty)
+            {
+                paintLayerMaskSegment(m_layerMaskPaintLast, canvasPos,
+                                      m_layerMaskPaintSubtract);
+                endLayerMaskStroke();
+            }
+            else
+                m_layerMaskPaintActive = false;
+            m_strokeActive = false;
+            updateStatus(canvasPos);
+            break;
+        }
         if (m_maskPaintActive)
         {
             const bool painted = m_maskPaintDirty;
@@ -4656,6 +4711,170 @@ void PaintbrushCanvasItem::endObjectMaskStroke()
         emit objectMaskEdited(m_objectMask);
 }
 
+/* ------------------------------------------------ per-layer mask editing */
+
+void PaintbrushCanvasItem::setMaskPaintMode(int mode)
+{
+    const int clamped = mode == 1 ? 1 : 0;
+    if (m_maskPaintMode == clamped)
+        return;
+    m_maskPaintMode = clamped;
+    emit maskPaintModeChanged(m_maskPaintMode);
+}
+
+void PaintbrushCanvasItem::beginLayerMaskEdit(int layerId,
+                                              const QImage &localMask)
+{
+    if (!m_doc || localMask.isNull())
+        return;
+    const CanvasLayer *found = nullptr;
+    for (const CanvasLayer &layer : m_doc->layersRef())
+        if (layer.id == layerId)
+        {
+            found = &layer;
+            break;
+        }
+    if (!found)
+        return;
+
+    m_layerMaskEditActive = true;
+    m_layerMaskEditLayerId = layerId;
+    m_layerMaskEditMask = localMask.format() == QImage::Format_Grayscale8
+                              ? localMask : maskToImage(localMask);
+    m_layerMaskEditTransform = found->transform();
+    m_layerMaskOverlay = QImage();
+    m_layerMaskOverlayDirty = true;
+    m_layerMaskPaintActive = false;
+    m_layerMaskPaintDirty = false;
+    emit layerMaskEditActiveChanged(true);
+    update();
+}
+
+void PaintbrushCanvasItem::endLayerMaskEdit()
+{
+    if (!m_layerMaskEditActive)
+        return;
+    m_layerMaskEditActive = false;
+    m_layerMaskPaintActive = false;
+    m_layerMaskPaintDirty = false;
+    m_layerMaskEditLayerId = -1;
+    m_layerMaskEditMask = QImage();
+    m_layerMaskOverlay = QImage();
+    emit layerMaskEditActiveChanged(false);
+    update();
+}
+
+void PaintbrushCanvasItem::startLayerMaskStroke(const QPointF &canvasPos,
+                                                bool subtract)
+{
+    if (!m_layerMaskEditActive || m_layerMaskEditMask.isNull())
+        return;
+    m_layerMaskPaintActive = true;
+    m_layerMaskPaintSubtract = subtract;
+    m_layerMaskPaintDirty = false;
+    m_layerMaskPaintLast = canvasPos;
+    /* a click paints one dab: unlike live SAM refinement there is no
+     * "point prompt" fallback in layer-mask mode */
+    paintLayerMaskAt(canvasPos, subtract);
+}
+
+void PaintbrushCanvasItem::paintLayerMaskAt(const QPointF &canvasPos,
+                                            bool subtract)
+{
+    if (m_layerMaskEditMask.isNull())
+        return;
+    const QTransform inverse = m_layerMaskEditTransform.inverted();
+    const QPointF local = inverse.map(canvasPos);
+    const qreal scale = qSqrt(qAbs(m_layerMaskEditTransform.determinant()));
+    const qreal radius =
+        qMax(qreal(1.0), m_brushSize * 0.5 * pressureFactor()
+                             / qMax(qreal(0.001), scale));
+    const QRectF af(local.x() - radius, local.y() - radius,
+                    radius * 2.0, radius * 2.0);
+    const QRect affected = af.toAlignedRect().intersected(
+        m_layerMaskEditMask.rect());
+    if (affected.isEmpty())
+        return;
+    const qreal r2 = radius * radius;
+    for (int y = affected.top(); y <= affected.bottom(); ++y)
+    {
+        uchar *line = m_layerMaskEditMask.scanLine(y);
+        for (int x = affected.left(); x <= affected.right(); ++x)
+        {
+            const qreal dx = (x + 0.5) - local.x();
+            const qreal dy = (y + 0.5) - local.y();
+            if (dx * dx + dy * dy <= r2)
+                line[x] = subtract ? 0 : 255;
+        }
+    }
+    m_layerMaskPaintDirty = true;
+    m_layerMaskOverlayDirty = true;
+    update();
+}
+
+void PaintbrushCanvasItem::paintLayerMaskSegment(const QPointF &from,
+                                                 const QPointF &to,
+                                                 bool subtract)
+{
+    const QLineF seg(from, to);
+    const qreal len = seg.length();
+    const qreal step = qMax(qreal(1.0), m_brushSize * 0.25);
+    const int n = qMax(1, int(qCeil(len / step)));
+    const QPointF delta = to - from;
+    for (int i = 0; i <= n; ++i)
+    {
+        const qreal t = n ? qreal(i) / qreal(n) : 0.0;
+        paintLayerMaskAt(from + delta * t, subtract);
+    }
+}
+
+void PaintbrushCanvasItem::endLayerMaskStroke()
+{
+    if (!m_layerMaskPaintActive)
+        return;
+    m_layerMaskPaintActive = false;
+    const bool painted = m_layerMaskPaintDirty;
+    m_layerMaskPaintDirty = false;
+    if (painted && !m_layerMaskEditMask.isNull())
+        emit layerMaskEdited(m_layerMaskEditMask);
+}
+
+void PaintbrushCanvasItem::rebuildLayerMaskOverlay() const
+{
+    if (!m_layerMaskOverlayDirty)
+        return;
+    m_layerMaskOverlayDirty = false;
+    if (!m_layerMaskEditActive || m_layerMaskEditMask.isNull() || !m_doc)
+    {
+        m_layerMaskOverlay = QImage();
+        return;
+    }
+    const QSize canvas = m_doc->canvasSize();
+    if (canvas.isEmpty())
+    {
+        m_layerMaskOverlay = QImage();
+        return;
+    }
+    /* tint the local mask once, then let the layer transform place it */
+    QImage tint(m_layerMaskEditMask.size(), QImage::Format_ARGB32);
+    tint.fill(Qt::transparent);
+    for (int y = 0; y < tint.height(); ++y)
+    {
+        const uchar *src = m_layerMaskEditMask.constScanLine(y);
+        QRgb *dst = reinterpret_cast<QRgb *>(tint.scanLine(y));
+        for (int x = 0; x < tint.width(); ++x)
+            if (src[x] >= 128)
+                dst[x] = qRgba(0, 190, 255, 96);
+    }
+    m_layerMaskOverlay = QImage(canvas, QImage::Format_ARGB32);
+    m_layerMaskOverlay.fill(Qt::transparent);
+    QPainter p(&m_layerMaskOverlay);
+    p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    p.setTransform(m_layerMaskEditTransform);
+    p.drawImage(0, 0, tint);
+    p.end();
+}
+
 /* ------------------------------------------------------------------ view */
 
 void PaintbrushCanvasItem::zoomIn() { setZoom(m_zoom * 1.25); }
@@ -4740,6 +4959,20 @@ void PaintbrushCanvasItem::mousePressEvent(QMouseEvent *event)
 
     const bool primary = event->button() == Qt::LeftButton;
     const bool alt = event->modifiers().testFlag(Qt::AltModifier);
+
+    /* Committed-cutout layer mask: left paints with the panel's Add/Erase
+     * mode, right/Alt always erase. Takes precedence over SAM prompts. */
+    if (m_tool == TOOL_OBJECT_SELECT && m_layerMaskEditActive
+        && (event->button() == Qt::LeftButton
+            || event->button() == Qt::RightButton || alt))
+    {
+        const bool subtract = event->button() != Qt::LeftButton || alt
+                              || m_maskPaintMode == 1;
+        m_strokeActive = true;
+        startLayerMaskStroke(canvasPos, subtract);
+        event->accept();
+        return;
+    }
 
     /* Object Select: right-click / alt-click adds a negative point, or
      * paints subtract onto an existing mask (freehand refinement) */

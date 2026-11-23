@@ -75,6 +75,7 @@ public:
         Reorder,
         SetVisibility,
         SetOpacity,
+        SetLayerMask,
         InsertLayer,
         DeleteLayer,
         Mask,
@@ -316,6 +317,26 @@ public:
     QString desc;
     Kind kind() const override { return Kind::SetOpacity; }
     QString description() const override { return desc; }
+    void apply(PaintbrushDocument &doc) override;
+    void revert(PaintbrushDocument &doc) override;
+};
+
+/* Native per-layer mask change (committed object cutouts). The mask lives in
+ * LAYER-LOCAL space and QImage is copy-on-write, so a cleanup stroke is one
+ * undoable operation without duplicating layer pixels. */
+class SetLayerMaskCommand : public UndoCommand
+{
+public:
+    int layerIndex = -1;
+    QImage before;
+    QImage after;
+    QString desc;
+    Kind kind() const override { return Kind::SetLayerMask; }
+    QString description() const override { return desc; }
+    qint64 bytes() const override
+    {
+        return before.sizeInBytes() + after.sizeInBytes();
+    }
     void apply(PaintbrushDocument &doc) override;
     void revert(PaintbrushDocument &doc) override;
 };

@@ -149,6 +149,10 @@ class PaintbrushController : public QObject
     Q_PROPERTY(bool objectSelected READ objectSelected NOTIFY objectSelectionChanged FINAL)
     Q_PROPERTY(QString objectMaskBoundsText READ objectMaskBoundsText NOTIFY objectSelectionChanged FINAL)
     Q_PROPERTY(bool objectSelectBusy READ objectSelectBusy NOTIFY objectSelectionChanged FINAL)
+    /* Committed object cutouts keep an editable native mask. The Inspector
+     * shows its toolset only for that layer role. */
+    Q_PROPERTY(bool selectedLayerMaskEditable READ selectedLayerMaskEditable NOTIFY documentChanged FINAL)
+    Q_PROPERTY(bool layerMaskEditActive READ layerMaskEditActive NOTIFY layerMaskEditActiveChanged FINAL)
 
     Q_PROPERTY(bool tracking READ isTracking NOTIFY trackingStateChanged FINAL)
     Q_PROPERTY(int trackingDone READ trackingDone NOTIFY trackingStateChanged FINAL)
@@ -436,6 +440,15 @@ public:
     Q_INVOKABLE void cutOutObject();
     Q_INVOKABLE void addObjectToCanvas();
     Q_INVOKABLE void extractObject();
+    /* Post-commit cleanup: edit the native mask of the selected object-cutout
+     * layer. Painting runs on the canvas; each stroke is applied live and the
+     * whole edit session is one undoable mask command on end*(). */
+    Q_INVOKABLE void beginLayerMaskEdit();
+    Q_INVOKABLE void endLayerMaskEdit();
+    Q_INVOKABLE void cancelLayerMaskEdit();
+    Q_INVOKABLE void resetLayerMask();
+    bool selectedLayerMaskEditable() const;
+    bool layerMaskEditActive() const { return m_layerMaskEditActive; }
     /* Selection edge modes for the object mask (false-positive-resistant).
      * Hard re-binarizes at the 128 threshold; Soft feathers the boundary
      * band into a genuine alpha edge. Hair/fine-edge is NOT provided because
@@ -948,6 +961,7 @@ signals:
     void serviceAvailabilityChanged();
     void objectSelectionChanged();
     void objectMaskEdgeChanged();
+    void layerMaskEditActiveChanged();
     void mattingStateChanged();
     void mattingSettingsChanged();
     void powderRendererChanged();
@@ -983,6 +997,7 @@ private slots:
     void onCanvasAskClick(QPointF canvasPos, QPointF itemPos);
     void onMaskRefineStarted(const QImage &mask);
     void onObjectMaskEdited(const QImage &mask);
+    void onLayerMaskEdited(const QImage &localMask);
     void onMaskRestored(const QImage &mask);
     void onSegmentationMaskReady(const QImage &mask, double score, const QString &method);
     void onSegmentationError(const QString &message);
@@ -1058,7 +1073,8 @@ private:
                             const QString &name, const QString &sourceMRL,
                             const QString &sourceTitle, qint64 sourceTimeMs,
                             const QImage &seedMask,
-                            const QString &subjectInstanceId = QString());
+                            const QString &subjectInstanceId = QString(),
+                            bool objectCutout = false);
     /* Insert a native LAYER_VECTOR. `localPath` is layer-local geometry;
      * `preview` is only the layer thumbnail (the renderer draws the path). */
     void insertVectorLayer(const QPainterPath &localPath,
@@ -1270,6 +1286,10 @@ private:
     QVariantList m_recentColors;
     QImage m_objectMask;
     double m_objectMaskScore = 0.0; /* confidence of the current object mask */
+    /* committed-cutout layer mask edit session (beginLayerMaskEdit) */
+    bool m_layerMaskEditActive = false;
+    int m_layerMaskEditLayerIndex = -1;
+    QImage m_layerMaskEditBefore;
     QImage m_maskUndoBefore;   /* mask captured when a refine stroke arms */
     bool m_objectMaskSoftEdge = false;
     PresentationMode m_presentationMode = PresentationMode::ComposeCanvas;

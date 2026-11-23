@@ -747,6 +747,8 @@ void PaintbrushController::setCanvasItem(QQuickItem *item)
             this, &PaintbrushController::onMaskRefineStarted);
     connect(m_canvas, &PaintbrushCanvasItem::objectMaskEdited,
             this, &PaintbrushController::onObjectMaskEdited);
+    connect(m_canvas, &PaintbrushCanvasItem::layerMaskEdited,
+            this, &PaintbrushController::onLayerMaskEdited);
     connect(m_canvas, &PaintbrushCanvasItem::strokeCommitted,
             this, &PaintbrushController::onCanvasStrokeCommitted);
     connect(m_canvas, &PaintbrushCanvasItem::canvasModified,
@@ -2618,6 +2620,27 @@ void PaintbrushController::cancelAsk()
         m_canvas->setTool(TOOL_NONE);
 }
 
+/* Decode the seed mask stored on a sticker layer's metadata. */
+static QImage decodeSeedMask(const CanvasLayer &layer)
+{
+    const QString data =
+        layer.metadata.value(QStringLiteral("seedMask")).toString();
+    if (data.isEmpty())
+        return {};
+    const int comma = data.indexOf(QLatin1Char(','));
+    if (comma < 0)
+        return {};
+    const QByteArray bytes =
+        QByteArray::fromBase64(data.mid(comma + 1).toLatin1());
+    QImage image;
+    image.loadFromData(bytes, "PNG");
+    if (image.isNull())
+        return {};
+    if (image.format() != QImage::Format_Grayscale8)
+        image = image.convertToFormat(QImage::Format_Grayscale8);
+    return image;
+}
+
 void PaintbrushController::onMaskRefineStarted(const QImage &mask)
 {
     m_maskUndoBefore = mask;
@@ -2668,6 +2691,138 @@ void PaintbrushController::onObjectMaskEdited(const QImage &mask)
         m_canvas->setLiveHarvestOverlay(mask, m_selection.contentRect,
                                         m_selection.frameToItem);
     setStatus(QStringLiteral("Selection mask refined with brush."));
+}
+
+/* ------------------------------------------- committed object mask tools */
+
+bool PaintbrushController::selectedLayerMaskEditable() const
+{
+    const CanvasLayer *layer = m_document.layerAt(m_document.currentLayerIndex());
+    if (!layer || layer->type != LAYER_STICKER)
+        return false;
+    if (layer->metadata.value(QStringLiteral("paintbrushRole")).toString()
+        != QLatin1String("object-cutout"))
+        return false;
+    return !layer->mask.isNull() || !decodeSeedMask(*layer).isNull();
+}
+
+void PaintbrushController::beginLayerMaskEdit()
+{
+    if (m_layerMaskEditActive)
+        return;
+    const int index = m_document.currentLayerIndex();
+    CanvasLayer *layer = m_document.layerAt(index);
+    if (!layer || layer->type != LAYER_STICKER)
+    {
+        setStatus(QStringLiteral("Select an object cutout layer first."));
+        return;
+    }
+    QImage mask = layer->mask;
+    if (mask.isNull())
+        mask = decodeSeedMask(*layer);
+    if (mask.isNull())
+    {
+        setStatus(QStringLiteral("This layer has no editable object mask."));
+        return;
+    }
+    if (mask.format() != QImage::Format_Grayscale8)
+        mask = mask.convertToFormat(QImage::Format_Grayscale8);
+
+    m_layerMaskEditActive = true;
+    m_layerMaskEditLayerIndex = index;
+    m_layerMaskEditBefore = mask;
+    if (layer->mask.isNull())
+    {
+        /* make the native mask authoritative before painting */
+        layer->mask = mask;
+        m_document.setDirty(true);
+        emit documentChanged();
+    }
+    if (m_canvas)
+    {
+        /* the mask brush lives in the Object Select tool */
+        m_canvas->setTool(TOOL_OBJECT_SELECT);
+        m_canvas->beginLayerMaskEdit(layer->id, mask);
+    }
+    emit layerMaskEditActiveChanged();
+    setStatus(QStringLiteral("Painting the object mask — add or erase, then Done."));
+}
+
+void PaintbrushController::onLayerMaskEdited(const QImage &localMask)
+{
+    if (!m_layerMaskEditActive || localMask.isNull())
+        return;
+    CanvasLayer *layer = m_document.layerAt(m_layerMaskEditLayerIndex);
+    if (!layer)
+        return;
+    layer->mask = localMask;
+    m_document.setDirty(true);
+    emit documentChanged();
+}
+
+void PaintbrushController::endLayerMaskEdit()
+{
+    if (!m_layerMaskEditActive)
+        return;
+    CanvasLayer *layer = m_document.layerAt(m_layerMaskEditLayerIndex);
+    const QImage after = layer ? layer->mask : QImage();
+    if (layer && !after.isNull() && after != m_layerMaskEditBefore)
+    {
+        auto cmd = std::make_unique<SetLayerMaskCommand>();
+        cmd->layerIndex = m_layerMaskEditLayerIndex;
+        cmd->before = m_layerMaskEditBefore;
+        cmd->after = after;
+        cmd->desc = QStringLiteral("Edit object mask");
+        m_undoStack.pushCommand(std::move(cmd));
+    }
+    if (m_canvas)
+        m_canvas->endLayerMaskEdit();
+    m_layerMaskEditActive = false;
+    m_layerMaskEditLayerIndex = -1;
+    m_layerMaskEditBefore = QImage();
+    emit layerMaskEditActiveChanged();
+    emit documentChanged();
+}
+
+void PaintbrushController::cancelLayerMaskEdit()
+{
+    if (!m_layerMaskEditActive)
+        return;
+    CanvasLayer *layer = m_document.layerAt(m_layerMaskEditLayerIndex);
+    if (layer && !m_layerMaskEditBefore.isNull())
+    {
+        layer->mask = m_layerMaskEditBefore;
+        m_document.setDirty(true);
+    }
+    if (m_canvas)
+        m_canvas->endLayerMaskEdit();
+    m_layerMaskEditActive = false;
+    m_layerMaskEditLayerIndex = -1;
+    m_layerMaskEditBefore = QImage();
+    emit layerMaskEditActiveChanged();
+    emit documentChanged();
+}
+
+void PaintbrushController::resetLayerMask()
+{
+    const int index = m_document.currentLayerIndex();
+    CanvasLayer *layer = m_document.layerAt(index);
+    if (!layer || layer->type != LAYER_STICKER)
+        return;
+    const QImage seed = decodeSeedMask(*layer);
+    if (seed.isNull())
+        return;
+    SetLayerMaskCommand cmd;
+    cmd.layerIndex = index;
+    cmd.before = layer->mask;
+    cmd.after = seed;
+    cmd.desc = QStringLiteral("Reset object mask");
+    layer->mask = seed;
+    m_document.setDirty(true);
+    m_undoStack.pushCommand(std::make_unique<SetLayerMaskCommand>(cmd));
+    if (m_layerMaskEditActive && m_canvas)
+        m_canvas->beginLayerMaskEdit(layer->id, seed);
+    emit documentChanged();
 }
 
 void PaintbrushController::onMaskRestored(const QImage &mask)
@@ -4101,7 +4256,7 @@ void PaintbrushController::addObjectToCanvas()
                        QStringLiteral("Cutout"), sref.mrl,
                        sref.title.isEmpty() ? m_document.sourceMediaTitle()
                                             : sref.title,
-                       sref.ptsMs, seedMask);
+                       sref.ptsMs, seedMask, QString(), true);
     if (m_canvas)
         m_canvas->markCanvasDirty();
     setStatus(QStringLiteral("Cutout added to the canvas as a sticker layer"));
@@ -4141,7 +4296,7 @@ void PaintbrushController::extractObject()
                        sref.mrl,
                        sref.title.isEmpty() ? m_document.sourceMediaTitle()
                                             : sref.title,
-                       sref.ptsMs, seedMask);
+                       sref.ptsMs, seedMask, QString(), true);
     if (m_canvas)
     {
         m_canvas->markCanvasDirty();
@@ -4814,12 +4969,27 @@ void PaintbrushController::insertStickerLayer(const QImage &raster,
                                               const QString &sourceTitle,
                                               qint64 sourceTimeMs,
                                               const QImage &seedMask,
-                                              const QString &subjectInstanceId)
+                                              const QString &subjectInstanceId,
+                                              bool objectCutout)
 {
     if (raster.isNull())
         return;
     CanvasLayer layer = CanvasLayer::createImage(raster, position, name);
     layer.type = LAYER_STICKER;
+    if (objectCutout)
+    {
+        /* The semantic layer role drives the Inspector's toolset: only an
+         * object cutout offers the mask cleanup tools. */
+        layer.metadata[QStringLiteral("paintbrushRole")] =
+            QStringLiteral("object-cutout");
+    }
+    /* A seed mask becomes the layer's NATIVE mask (local space). The cutout
+     * alpha already encodes it, so rendering is unchanged; the mask exists so
+     * the cleanup editor can modulate it after commit. */
+    if (!seedMask.isNull() && seedMask.size() == raster.size())
+        layer.mask = seedMask.format() == QImage::Format_Grayscale8
+                         ? seedMask
+                         : seedMask.convertToFormat(QImage::Format_Grayscale8);
     /* The instance linkage must be part of the layer payload captured by the
      * InsertLayerCommand below, otherwise redo restores a layer whose
      * subjectInstanceId was set after the command was pushed. */

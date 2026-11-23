@@ -1047,6 +1047,7 @@ qml_modules += {
     'paintbrush/qml/PaintbrushStrip.qml',
         'paintbrush/qml/PaintbrushFirstLaunch.qml',
         'paintbrush/qml/PaintbrushCanvasView.qml',
+        'paintbrush/qml/PaintbrushMaskPanel.qml',
         'paintbrush/qml/PaintbrushToolRail.qml',
         'paintbrush/qml/PaintbrushPaletteBar.qml',
         'paintbrush/qml/PaintbrushInspectorDock.qml',

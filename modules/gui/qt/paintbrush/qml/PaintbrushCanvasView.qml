@@ -544,6 +544,21 @@ import VLC.Paintbrush
                     selectionBar.dismissed = false
             }
         }
+
+    }
+
+    /* Object-mask cleanup: brush mode + size + commit, for the live SAM
+     * selection and for re-editing a committed cutout layer's mask. Top-left:
+     * the reference monitor and the selection bar occupy the top centre, and
+     * the media drawer covers the bottom edge. */
+    PaintbrushMaskPanel {
+        id: maskPanel
+        canvas: root.canvas
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.leftMargin: VLCStyle.margin_small
+        anchors.topMargin: VLCStyle.margin_small
+        z: 2
     }
 
     /* compact Ask input (P1#11): appears after the Ask tool click / the

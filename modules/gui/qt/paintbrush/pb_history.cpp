@@ -158,6 +158,26 @@ void SetOpacityCommand::revert(PaintbrushDocument &doc)
     }
 }
 
+void SetLayerMaskCommand::apply(PaintbrushDocument &doc)
+{
+    CanvasLayer *layer = doc.layerAt(layerIndex);
+    if (layer)
+    {
+        layer->mask = after;
+        doc.setDirty(true);
+    }
+}
+
+void SetLayerMaskCommand::revert(PaintbrushDocument &doc)
+{
+    CanvasLayer *layer = doc.layerAt(layerIndex);
+    if (layer)
+    {
+        layer->mask = before;
+        doc.setDirty(true);
+    }
+}
+
 void InsertLayerCommand::apply(PaintbrushDocument &doc)
 {
     QList<CanvasLayer> layers = doc.layers();

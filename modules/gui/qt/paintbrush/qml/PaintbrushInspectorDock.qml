@@ -357,6 +357,26 @@ Item {
                         }
                     }
 
+                    /* Object-cutout mask tools: only that layer role keeps an
+                     * editable native mask (committed SAM artifacts can be
+                     * cleaned with the same brush panel). */
+                    DockSection {
+                        title: qsTr("Object mask")
+                        open: true
+                        visible: PaintbrushCtx.selectedLayerMaskEditable
+
+                        InspectorAction {
+                            label: qsTr("Edit mask…")
+                            iconText: VLCIcons.fullscreen
+                            onClicked: PaintbrushCtx.beginLayerMaskEdit()
+                        }
+                        InspectorAction {
+                            label: qsTr("Reset mask")
+                            iconText: VLCIcons.ic_fluent_arrow_sync_24_regular
+                            onClicked: PaintbrushCtx.resetLayerMask()
+                        }
+                    }
+
                     /* transform + position, collapsed as one section */
                     DockSection {
                         title: qsTr("Transform")
