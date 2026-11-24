@@ -290,10 +290,14 @@ pwsh -File D:\_SATIN_AI\NAI-OS\vlc\scripts\pb-capture-live.ps1 `
      -OutFile D:\_SATIN_AI\NAI-OS\vlc\pb-creative-pad.png
 ```
 
-The report is written to
-`paintbrush/docs/creative-synthesis-assets/selftest-report.txt`; the process log
-is the `-LogFile` target. The app is left open on the pad so the GUI can be
-inspected without replaying the test.
+The live report is written to
+`%TEMP%\nai-paintbrush-creative-selftest\selftest-report.txt`; the committed
+snapshot is
+`paintbrush/docs/creative-synthesis-assets/selftest-report.txt`. The process log
+is the `-LogFile` target. The self-test deliberately refuses to run on a
+document with real work or a pending recovery; use a pristine test session (the
+verification here preserved the original recovery files byte-for-byte). The app
+is left open on the pad so the GUI can be inspected without replaying the test.
 
 ## 7. Next move (recommended)
 
