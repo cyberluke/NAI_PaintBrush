@@ -1,121 +1,184 @@
-# Holographic materials and fashion parsing — implementation notes
+# Holographic materials and fashion parsing — feature branch status
 
-> Status 2026-11-24: the **material engine** and the **pinned parser export**
-> are implemented and tested as libraries. They are **not yet exposed in the
-> Play Pad or the native inference service**; that wiring is the next
-> integration step and is documented below. The existing Prism Muse
-> (`holo-fashion`), Electric K-pop, one-undo transaction and Play Pad are
-> unchanged.
+> Branch: `feature/holo-material-integration`, based on `499cc77620`.
+> Isolated tree: `D:\_SATIN_AI\NAI-OS\vlc-holo`. Not merged into `master`.
+>
+> Status 2026-11-24: the material engine is hardened, eight recipes are wired
+> through the existing patch pipeline, and the FASHN export is now
+> numerically identical to PyTorch. The native parser service, cancellable
+> full-resolution rendering and app-level preview capture are still pending
+> (see §5).
 
-## 1. What is implemented
+## 1. Material engine
 
-### 1.1 One material engine, four recipes
+One engine, eight parameterised recipes. Existing fashion ids and behaviour
+are preserved; `holo-fashion` (Prism Muse) is untouched.
 
-`pb_creative_art` now has a physically inspired material shader instead of
-piling more gradient overlays on top:
+### 1.1 Recipes
 
-| API | Purpose |
-|---|---|
-| `creative::HoloMaterialId` | `LiquidHologram`, `OpalDream`, `ChromaticChrome`, `PrismaticFantasy` |
-| `creative::holoMaterialPreset(id)` | optical parameters for a recipe |
-| `creative::estimateNormals(source, mask, strength)` | screen-space orientation from the source's own shading |
-| `creative::holographicMaterial(source, mask, normals, material, strength, seed)` | returns an **albedo** layer (replaces the subject inside the mask) and a transparent **sheen** layer |
+| Id | Name | Surface intent |
+|---|---|---|
+| `holo-liquid` | Liquid Hologram | broad rainbow diffraction, moving specular bands |
+| `holo-opal` | Opal Dream | pastel low-frequency interference, pearlescent sheen |
+| `holo-chrome` | Chromatic Chrome | high metallic, sharp reflections, silver/blue |
+| `holo-prism` | Prismatic Fantasy | micro-grating, strong seeded sparkle |
+| `holo-wrap` | Holographic Wrap | deep teal/blue iridescent wrap, clearcoat |
+| `holo-chameleon` | Chameleon Paint | view-angle hue shift, green/violet/copper |
+| `holo-glitter` | Glitter Metallic | dense metallic flakes, hard glints |
+| `holo-livery` | Electric Livery | dark bodywork with electric spectral accents |
 
-The shader combines:
+The shader combines two-beam thin-film interference at three wavelengths, a
+diffraction grating, Fresnel/specular/sheen, a recipe clearcoat, view-angle
+palette shift and metallic flakes. It is physically inspired, **not** a
+calibrated spectral/BRDF simulation; do not describe it as physically accurate
+chrome.
 
-- a two-beam thin-film interference term at three wavelengths, with film
-  thickness driven by shading, orientation and seeded low-frequency noise;
-- a diffraction grating term with a recipe-specific spatial frequency;
-- Fresnel response, a roughness-driven specular lobe, a broad sheen and
-  discrete seeded glints;
-- an environment tint sampled from the recipe palette by the surface normal.
+### 1.2 Corrections from the adversarial review
 
-The source RGB is multiplied by the diffuse response (so folds and texture
-remain) and the spectral/specular light is added on top. It is not a flat
-rainbow map.
+- **Normalized object-space coordinates.** The grating, thickness noise and
+  glints use `u,v` (object space), not raw pixels. The same material at 1x and
+  2x downsamples back with an Oklab **0.9995** correlation (harness metric).
+- **Linear-light accumulation.** Source, palette and environment are converted
+  to linear before diffuse/specular/sheen accumulation, then back to sRGB.
+- **Normal confidence.** `estimateNormals(..., &confidence)` returns a
+  Grayscale8 reliability map. A wide blur separates a coherent fold from
+  printed stripes: observed **fold 0.8055 / stripes 0.0942**; the material
+  attenuates the normal where confidence is low, so a logo does not become
+  fake geometry.
+- **Mask composition contract.** `CoverageMode` distinguishes
+  `InheritedCoverage` (a finished cutout: `min`), `IndependentProbability`
+  (semantic probability: product) and `UserConstraint` (hard cap: `min`).
+  Tests: 128+128 -> **128 / 64 / 128**.
+- **No universal `min()`.** `composeCoverage()` is the only place the two
+  coverages meet; the current subject path uses `InheritedCoverage`.
 
-| Recipe | Character |
-|---|---|
-| **Liquid Hologram** | broad rainbow diffraction, moving specular bands, glossy coating |
-| **Opal Dream** | low-frequency pastel interference, pearlescent sheen, low metallic |
-| **Chromatic Chrome** | high metallic response, sharp directional reflections, silver/blue |
-| **Prismatic Fantasy** | micro-grating diffraction, embossed highlights, strong seeded sparkle |
+### 1.3 Verification (library harness)
 
-`scripts/pb-creative-art-tests.ps1` verifies the contract:
+`scripts/pb-creative-art-tests.ps1` now checks:
 
-- all four recipes are deterministic for a given seed;
-- alpha is zero outside the mask and fully present inside;
-- the four albedo+sheen fingerprints are distinct;
-- the recipe names are distinct;
-- the Liquid Hologram albedo keeps a **0.9235** Pearson correlation with the
-  source's Oklab lightness (texture and folds survive).
+- **all 8 recipes** deterministic and spatially distinct (minimum pairwise
+  Oklab RMS **0.0426**, pair liquid|wrap; mean Oklab 0.0129, mean RGB 0.0201);
+- **full-image alpha** equality (0 mismatches) and sheen confined to the mask;
+- **absolute lightness error** per recipe, not only correlation: Liquid keeps
+  **0.8853** correlation; the gates are mean < 0.15, p95 < 0.35, clipped
+  pixels < 25% on the albedo and < 30% on the albedo+sheen composite;
+  observed example (Electric Livery): mean 0.0529, p95 0.1177, clipping 0.05%;
+- **composite** (albedo + screen sheen) metrics, not only the albedo;
+- **resolution parity**, **normal confidence separation**, and coverage modes.
 
-### 1.2 FASHN Human Parser, pinned and exported
+The harness is a library contract, not a visual-quality proof. Real
+fashion/automotive reference comparisons remain in §5.
 
-`scripts/pb-fashn-export.py` produces a reproducible ONNX artifact from
-[`fashn-ai/fashn-human-parser`](https://huggingface.co/fashn-ai/fashn-human-parser):
+### 1.4 AAF mapping (no new service layer)
+
+- **Strategy**: the `HoloMaterial` parameter set; the shader is
+  parameter-driven, no object-category branches.
+- **Adapter**: `CoverageMode` + `composeCoverage()` connect subject alpha,
+  semantic probability and user constraints to the same material input.
+- **Factory/Registry**: `holoMaterialPreset()` and the existing Play Pad patch
+  catalog. No second registry.
+- **Decorator**: clearcoat, flakes, colour shift and diffraction are optional
+  parameters composed in one shader, not separate renderers.
+- **Open/Closed**: a new surface recipe is a preset plus a catalog row; no
+  change to `pb_creative_art` logic or controller special cases.
+- **Dependency inversion**: the engine consumes source, mask, normals and
+  confidence; it has no dependency on fashion or automotive classifiers.
+
+## 2. Product integration (this branch)
+
+- Catalog: eight new patch ids in `pb_creative.cpp`; existing
+  `holo-fashion`/Prism Muse unchanged; families `Material` and `Automotive`.
+- Play Pad: discovers them through the existing `patchList` (no special
+  controller logic).
+- Inspector → Creative: a material combo (fashion + automotive) plus **Apply**,
+  calling the existing `applyCreativePatch(id)`.
+- Assistant: the `apply_creative_patch` tool enum includes all eight ids.
+- All results use the existing layer stack and `CompositeCommand`; one undo.
+- Isolated build: full ninja build **EXIT=0**; QML contracts **345 members
+  PASS**; the isolated launcher is `scripts/launch-pb-noskip-holo.ps1`.
+
+**App-level self-test caveat:** the worktree run is blocked by the shared
+`%APPDATA%` recovery file and the live main app instance; the library harness,
+full build and QML probe pass, but the eight rendered previews and
+save/reopen/timings inside the isolated app were **not captured** in this
+environment. Do not present the library harness as app acceptance.
+
+## 3. FASHN Human Parser
+
+Pinned `fashn-ai/fashn-human-parser` revision
+`1f80c34dbab321c5730dda5c3fea279fd3e97498` (SegFormer-B4, 18 classes).
+License: inherits the **NVIDIA Source Code License for SegFormer**; review
+distribution rights before shipping. Weights are not committed.
+
+### 3.1 The legacy export was wrong
+
+The previous artifact used the legacy TorchScript exporter (opset 17,
+`dynamo=False`). PyTorch/ONNX parity on the same input was:
+
+```
+max abs 15.3563   mean abs 0.940238   class agreement 0.0229
+```
+
+The per-class pixel counts happened to match, but the spatial prediction was
+wrong — consistent with a layout/miscompilation issue rather than a different
+input, and exactly the failure mode the review warned about. **Fixed** by
+using the `torch.export`-based exporter:
+
+```python
+torch.onnx.export(..., opset_version=18, dynamo=True, external_data=False)
+```
+
+### 3.2 Corrected artifact
 
 | Field | Value |
 |---|---|
-| Model | SegFormer-B4, 18-class fashion human parser |
-| Revision | `1f80c34dbab321c5730dda5c3fea279fd3e97498` |
-| License | inherits the **NVIDIA Source Code License for SegFormer**; review distribution rights before shipping |
-| ONNX | `D:\_SATIN_AI\models\fashn-human-parser\fashn-human-parser.onnx` |
-| Size / SHA-256 | 257,257,748 bytes / `085df81aa180cb9045783430828948d35984bf602250c8192fe700c895f18850` |
-| Input | `pixel_values` float32 `[batch, 3, 576, 384]`, RGB, ImageNet mean/std |
-| Resize | `cv2.INTER_AREA` to 384×576 (the training preprocessing) |
-| Output | `logits` float32 `[batch, 18, 144, 96]` (1/4 resolution) |
-| Classes | background, face, hair, top, dress, skirt, pants, belt, bag, hat, scarf, glasses, arms, hands, legs, feet, torso, jewelry |
+| File | `D:\_SATIN_AI\models\fashn-human-parser\fashn-human-parser.onnx` |
+| Bytes / SHA-256 | 262,264,726 / `46a413ba51e331d4dfb8c103dbcd9319e0d941ef00ca03e510295b6b2ba81b82` |
+| Input / output | `pixel_values` float32 `[1,3,576,384]` -> `logits` `[1,18,144,96]` |
+| Preprocessing | RGB, `cv2.INTER_AREA` to 384x576, ImageNet mean/std |
+| Parity | max abs **2.235e-05**, mean abs **1.065e-06**, class agreement **1.0000** |
+| Exporter | torch 2.13.0+cpu, transformers 4.57.6, onnx 1.23.2, onnxruntime 1.32.0, opencv 4.11.0, numpy 2.5.4, pillow 10.4.0, huggingface_hub 0.36.2 |
 
-Validation on the model card's fashion example (a real person):
+Validation classes on the model-card fashion example: background 11530,
+face 61, hair 236, top 619, pants 568, arms 206, legs 279, feet 158, torso
+118, glasses 12. The manifest next to the ONNX records the revision, hashes,
+input contract, exporter versions and parity.
 
-```
-background 11530  face 61  hair 236  top 619  dress 2  pants 568
-arms 206  hands 35  legs 279  feet 158  torso 118  glasses 12
-```
+**Still pending:** the native ONNX Runtime service and the garment/hair/skin/
+accessory routing. The model is provisioned; it is not yet used by the app.
 
-That is a meaningful segmentation, not just a shape check. The contract is
-pinned in the generated `manifest.json` next to the ONNX (revision, hashes,
-input/output, class map, validation counts). The weights are **not committed**
-to the repository (size and license); the export script recreates them.
+## 4. Automotive regression reference
 
-## 2. What is not implemented yet
+The supplied Lamborghini image was **not attached to this session** and is not
+in the repository or the creative asset folders. The automotive recipes are
+therefore verified as materials on the synthetic subject only. Real
+automotive panel/headlight/window/badge preservation needs the reference image
+plus a car-part mask; the engine intentionally applies to the selected
+subject silhouette.
 
-1. **Pad/UI exposure of the four recipes.** The engine and presets exist, but
-   the Play Pad catalog and the Inspector one-tap actions still expose only
-   Prism Muse. The wiring is a small branch in `pb_creative.cpp` plus four
-   catalog entries and four assistant ids.
-2. **Native parser service.** The ONNX is exported; the app still uses the
-   SAM3 silhouette plus a heuristic skin guard. The next step is a native
-   inference service using the existing ONNX Runtime CUDA infrastructure,
-   returning per-class probability masks intersected with the committed SAM3
-   subject.
-3. **Garment/hair/skin/accessory routing.** Once (2) exists, the material
-   shader consumes the class masks (top/dress/skirt/pants for garments, hair
-   for chromatic highlights, face/arms/hands/legs for skin preservation,
-   bag/hat/scarf/glasses/jewelry for accents).
-4. **Cancellable async rendering and full-resolution export.** The commit is
-   still synchronous and capped at 1600 px; large exports upscale the effect
-   layers. The next step is the snapshot/cancellable job/tiled-render design,
-   not a blanket `QtConcurrent::run`.
-5. **Material-aware Play Pad performance.** The pad currently modulates
-   opacity/motion, not the diffraction phase. Continuous material modulation
-   needs a debounced preview rebuild or a cheaper parameter path.
+## 5. Remaining gaps (do not overclaim)
 
-The active creative-file work in the working tree (Play Pad linked-group
-resume/suggestions) is intentionally untouched; the wiring above should land
-after that work is committed to avoid sweeping it into this change.
+1. Native parser service, class masks and SAM3-alpha combination.
+2. Cancellable async rendering and native-resolution effect synthesis; the
+   commit is still synchronous and capped at 1600 px.
+3. App-level previews, save/reopen and P50/P95 for the eight new recipes.
+4. Real fashion and automotive reference comparisons.
+5. Material-aware continuous Play Pad modulation (the pad currently modulates
+   opacity/motion; the diffraction phase is fixed per preview build).
 
-## 3. Reproduce
+## 6. Reproduce
 
 ```powershell
-# material engine + all existing art primitives
+cd D:\_SATIN_AI\NAI-OS\vlc-holo
+
+# hardware-independent material contract
 pwsh scripts/pb-creative-art-tests.ps1
 
-# pinned parser ONNX (downloads ~257 MB; cached under the output dir)
-python scripts/pb-fashn-export.py
-python scripts/pb-fashn-export.py --test-image <fashion-photo.webp>
+# isolated app build and (when the shared recovery is clear) self-test
+ninja -C win64-meson
+pwsh scripts/launch-pb-noskip-holo.ps1 -CreativeSelfTest
 
-# the plugin build (after the active creative-file work is committed)
-pwsh scripts/pb-build-plugin.ps1
+# pinned parser export + PyTorch/ONNX parity (downloads ~257 MB once)
+$env:PYTHONIOENCODING = "utf-8"
+python scripts/pb-fashn-export.py --test-image <fashion-photo.webp>
 ```

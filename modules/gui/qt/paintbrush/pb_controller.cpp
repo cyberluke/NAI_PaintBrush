@@ -6636,10 +6636,13 @@ QByteArray PaintbrushController::assistantToolsJson() const
                       QJsonObject(), QJsonArray()));
 
     QJsonArray creativePatchEnum;
-    for (const char *id : { "electric-kpop", "holo-fashion", "neon-idol",
-                            "sticker-forge", "pastel-stage", "nocturne",
-                            "ink-creature", "spark-storm", "kaleido",
-                            "motion-echo" })
+    for (const char *id : { "electric-kpop", "holo-fashion",
+                            "holo-liquid", "holo-opal", "holo-chrome",
+                            "holo-prism", "holo-wrap", "holo-chameleon",
+                            "holo-glitter", "holo-livery",
+                            "neon-idol", "sticker-forge", "pastel-stage",
+                            "nocturne", "ink-creature", "spark-storm",
+                            "kaleido", "motion-echo" })
         creativePatchEnum.append(QString::fromLatin1(id));
     tools.append(make(
         QStringLiteral("apply_creative_patch"),

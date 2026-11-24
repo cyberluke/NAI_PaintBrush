@@ -1161,7 +1161,11 @@ QString PaintbrushController::runCreativeSelfTest()
         QStringLiteral("pastel-stage"), QStringLiteral("nocturne"),
         QStringLiteral("ink-creature"), QStringLiteral("spark-storm"),
         QStringLiteral("kaleido"), QStringLiteral("motion-echo"),
-        QStringLiteral("electric-kpop"), QStringLiteral("holo-fashion")
+        QStringLiteral("electric-kpop"), QStringLiteral("holo-fashion"),
+        QStringLiteral("holo-liquid"), QStringLiteral("holo-opal"),
+        QStringLiteral("holo-chrome"), QStringLiteral("holo-prism"),
+        QStringLiteral("holo-wrap"), QStringLiteral("holo-chameleon"),
+        QStringLiteral("holo-glitter"), QStringLiteral("holo-livery")
     };
     for (const QString &id : patches)
     {

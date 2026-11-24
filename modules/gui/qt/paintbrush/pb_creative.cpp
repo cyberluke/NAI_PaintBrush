@@ -100,6 +100,45 @@ void drawScaled(QImage &dst, const QImage &src, const QRectF &rect)
     p.drawImage(rect, src);
 }
 
+bool isHoloMaterialPatch(const QString &patchId)
+{
+    return patchId == QLatin1String("holo-liquid")
+           || patchId == QLatin1String("holo-opal")
+           || patchId == QLatin1String("holo-chrome")
+           || patchId == QLatin1String("holo-prism")
+           || patchId == QLatin1String("holo-wrap")
+           || patchId == QLatin1String("holo-chameleon")
+           || patchId == QLatin1String("holo-glitter")
+           || patchId == QLatin1String("holo-livery");
+}
+
+bool isAutomotivePatch(const QString &patchId)
+{
+    return patchId == QLatin1String("holo-wrap")
+           || patchId == QLatin1String("holo-chameleon")
+           || patchId == QLatin1String("holo-glitter")
+           || patchId == QLatin1String("holo-livery");
+}
+
+creative::HoloMaterialId holoMaterialIdForPatch(const QString &patchId)
+{
+    if (patchId == QLatin1String("holo-opal"))
+        return creative::HoloMaterialId::OpalDream;
+    if (patchId == QLatin1String("holo-chrome"))
+        return creative::HoloMaterialId::ChromaticChrome;
+    if (patchId == QLatin1String("holo-prism"))
+        return creative::HoloMaterialId::PrismaticFantasy;
+    if (patchId == QLatin1String("holo-wrap"))
+        return creative::HoloMaterialId::HolographicWrap;
+    if (patchId == QLatin1String("holo-chameleon"))
+        return creative::HoloMaterialId::ChameleonPaint;
+    if (patchId == QLatin1String("holo-glitter"))
+        return creative::HoloMaterialId::GlitterMetallic;
+    if (patchId == QLatin1String("holo-livery"))
+        return creative::HoloMaterialId::ElectricLivery;
+    return creative::HoloMaterialId::LiquidHologram;
+}
+
 QString qcolorHex(const QColor &c)
 {
     return c.isValid() ? c.name(QColor::HexRgb) : QString();
@@ -172,6 +211,54 @@ const QVector<PaintbrushCreative::PatchDef> &PaintbrushCreative::catalog()
           QStringLiteral("Drag across the spectrum, lift for chrome, hold for the sheen."),
           QStringLiteral("Give the next pose a different colourway."),
           QColor(255, 61, 218), QColor(0, 229, 255), QColor(4, 16, 26) },
+        { QStringLiteral("holo-liquid"), QStringLiteral("Liquid Hologram"),
+          QStringLiteral("Liquid light, zero filter."),
+          QStringLiteral("Material"),
+          QStringLiteral("Drag for flow, lift for the rainbow, hold for the gloss."),
+          QStringLiteral("Let one fold keep a pure white highlight."),
+          QColor(0, 229, 255), QColor(124, 77, 255), QColor(4, 16, 26) },
+        { QStringLiteral("holo-opal"), QStringLiteral("Opal Dream"),
+          QStringLiteral("Pearl light, soft future."),
+          QStringLiteral("Material"),
+          QStringLiteral("Drag for pearl drift, lift for softness."),
+          QStringLiteral("Pair it with pastel paper."),
+          QColor(184, 242, 230), QColor(255, 214, 224), QColor(4, 16, 26) },
+        { QStringLiteral("holo-chrome"), QStringLiteral("Chromatic Chrome"),
+          QStringLiteral("Liquid metal, main character."),
+          QStringLiteral("Material"),
+          QStringLiteral("Drag for the reflection, lift for the shine."),
+          QStringLiteral("Add one hard white glint."),
+          QColor(200, 205, 215), QColor(110, 140, 190), QColor(4, 16, 26) },
+        { QStringLiteral("holo-prism"), QStringLiteral("Prismatic Fantasy"),
+          QStringLiteral("Full-spectrum glitter storm."),
+          QStringLiteral("Material"),
+          QStringLiteral("Drag for diffraction, lift for the sparkle."),
+          QStringLiteral("Scatter three more butterflies."),
+          QColor(255, 47, 185), QColor(0, 229, 255), QColor(4, 16, 26) },
+        { QStringLiteral("holo-wrap"), QStringLiteral("Holographic Wrap"),
+          QStringLiteral("The whole body is the material."),
+          QStringLiteral("Automotive"),
+          QStringLiteral("Drag for the wrap flow, lift for the clearcoat."),
+          QStringLiteral("Keep the panel lines readable."),
+          QColor(0, 140, 255), QColor(110, 60, 200), QColor(4, 16, 26) },
+        { QStringLiteral("holo-chameleon"), QStringLiteral("Chameleon Paint"),
+          QStringLiteral("One colour, every angle."),
+          QStringLiteral("Automotive"),
+          QStringLiteral("Drag to shift the hue, lift for the gloss."),
+          QStringLiteral("Let the roofline catch the shift."),
+          QColor(0, 190, 130), QColor(80, 30, 150), QColor(4, 16, 26) },
+        { QStringLiteral("holo-glitter"), QStringLiteral("Glitter Metallic"),
+          QStringLiteral("Metal with a pulse."),
+          QStringLiteral("Automotive"),
+          QStringLiteral("Drag for the flake, lift for the glare."),
+          QStringLiteral("Keep the glass clean."),
+          QColor(255, 224, 130), QColor(120, 180, 255), QColor(4, 16, 26) },
+        { QStringLiteral("holo-livery"), QStringLiteral("Electric Livery"),
+          QStringLiteral("Neon on the bodywork."),
+          QStringLiteral("Automotive"),
+          QStringLiteral("Drag for the current, lift for the discharge."),
+          QStringLiteral("Leave the badges untouched."),
+          QColor(0, 234, 255), QColor(255, 0, 180), QColor(2, 2, 8) },
         { QStringLiteral("ink-creature"), QStringLiteral("Ink Creature"),
           QStringLiteral("Your silhouette grew a friend."),
           QStringLiteral("Mischief"),
@@ -1613,6 +1700,112 @@ QVector<CreativePiece> PaintbrushCreative::buildPatch(const QString &patchId,
         CreativeMotion mirrorM;
         mirrorM.opacityY = -0.10f;
         add(QStringLiteral("Holo reflection"), QStringLiteral("echo"),
+            mirrorFull, full, BLEND_SCREEN, 0.45f, mirrorM);
+    }
+    else if (isHoloMaterialPatch(patchId))
+    {
+        const creative::HoloMaterial material =
+            creative::holoMaterialPreset(holoMaterialIdForPatch(patchId));
+        const bool automotive = isAutomotivePatch(patchId);
+        const QColor deep(4, 16, 26);
+        const QColor c0 = material.palette.value(0, QColor(0, 229, 255));
+        const QColor c1 = material.palette.value(1, QColor(124, 77, 255));
+        const QColor c2 = material.palette.value(2, QColor(255, 61, 218));
+        const QColor c3 = material.palette.value(3, QColor(255, 230, 109));
+
+        add(QStringLiteral("Holo night"), QStringLiteral("backdrop"),
+            creative::gradientField(stage, deep, QColor(4, 3, 10),
+                                    c1.darker(260), 0.50),
+            full);
+        CreativeMotion auraM;
+        auraM.opacityX = -0.18f;
+        auraM.opacityY = 0.20f;
+        add(QStringLiteral("Material aura"), QStringLiteral("accent"),
+            creative::radialGlow(
+                stage, subjectRect.center(),
+                qMax(subjectRect.width(), subjectRect.height()) * 0.66, c1,
+                0.52f),
+            full, BLEND_SCREEN, 0.70f, auraM);
+
+        QImage confidence;
+        const QImage normals = creative::estimateNormals(
+            s, subjMask, material.normalStrength, &confidence);
+        const creative::HoloMaterialResult mat =
+            creative::holographicMaterial(
+                s, subjMask, normals, material, 1.0f, seed,
+                creative::CoverageMode::InheritedCoverage, confidence);
+        CreativeMotion holoM;
+        holoM.opacityX = 0.06f;
+        holoM.opacityY = 0.14f;
+        subjectFull(mat.albedo, material.name, 1.0f, holoM);
+
+        QImage sheenFull = stageCanvas(stage);
+        drawAt(sheenFull, mat.sheen, subjectRect);
+        CreativeMotion sheenM;
+        sheenM.opacityY = 0.30f;
+        sheenM.opacityHold = 0.20f;
+        add(QStringLiteral("Material sheen"), QStringLiteral("finish"),
+            sheenFull, full, BLEND_SCREEN, 0.92f, sheenM);
+
+        CreativeMotion edgeM;
+        edgeM.opacityY = 0.24f;
+        band(0.007, c3, QStringLiteral("Material edge"),
+             QStringLiteral("rim"), 0.90f, BLEND_SCREEN, edgeM);
+        CreativeMotion bloomM;
+        bloomM.opacityX = -0.24f;
+        bloomM.opacityY = 0.18f;
+        band(0.020, c2, QStringLiteral("Material bloom"),
+             QStringLiteral("rim"), 0.50f, BLEND_SCREEN, bloomM);
+
+        if (!automotive)
+        {
+            QList<QPointF> anchors;
+            anchors << QPointF(subjectRect.x() + subjectRect.width() * 0.12,
+                               subjectRect.y() + subjectRect.height() * 0.20)
+                    << QPointF(subjectRect.right()
+                                   - subjectRect.width() * 0.10,
+                               subjectRect.y() + subjectRect.height() * 0.38)
+                    << QPointF(subjectRect.x() + subjectRect.width() * 0.18,
+                               subjectRect.bottom()
+                                   - subjectRect.height() * 0.14)
+                    << QPointF(subjectRect.right()
+                                   - subjectRect.width() * 0.22,
+                               subjectRect.y() + subjectRect.height() * 0.62)
+                    << QPointF(subjectRect.center());
+            CreativeMotion flightM;
+            flightM.dyY = 0.05f;
+            flightM.rotationHold = 12.0f;
+            flightM.opacityHold = 0.18f;
+            add(QStringLiteral("Material butterflies"),
+                QStringLiteral("accent"),
+                creative::butterflyField(stage, seed, { c2, c0, c1, c3 },
+                                         anchors, 9),
+                full, BLEND_SCREEN, 0.90f, flightM);
+            CreativeMotion sparkleM;
+            sparkleM.opacityEnergy = 0.30f;
+            sparkleM.opacityHold = 0.25f;
+            add(QStringLiteral("Material sparkle"), QStringLiteral("accent"),
+                creative::starField(stage, seed + 4, { c3, c0, c2 }, 70),
+                full, BLEND_SCREEN, 0.62f, sparkleM);
+        }
+        else if (holoMaterialIdForPatch(patchId)
+                 == creative::HoloMaterialId::GlitterMetallic)
+        {
+            CreativeMotion flakeM;
+            flakeM.opacityEnergy = 0.25f;
+            add(QStringLiteral("Glitter sparkle"), QStringLiteral("accent"),
+                creative::starField(stage, seed + 4, { c3, c0 }, 55),
+                full, BLEND_SCREEN, 0.55f, flakeM);
+        }
+
+        QImage mirror = creative::reflection(s, 0.20, 0.15);
+        QImage mirrorFull = stageCanvas(stage);
+        drawAt(mirrorFull, mirror,
+               QRectF(subjectRect.x(), subjectRect.bottom() + H * 0.004,
+                      subjectRect.width(), subjectRect.height()));
+        CreativeMotion mirrorM;
+        mirrorM.opacityY = -0.10f;
+        add(QStringLiteral("Material reflection"), QStringLiteral("echo"),
             mirrorFull, full, BLEND_SCREEN, 0.45f, mirrorM);
     }
     else if (patchId == QLatin1String("ink-creature"))

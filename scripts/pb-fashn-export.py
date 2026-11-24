@@ -34,9 +34,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
+import onnx
+import onnxruntime as ort
 import torch
+import transformers
+import huggingface_hub as hfhub
 from huggingface_hub import snapshot_download
-from PIL import Image
+from PIL import Image, __version__ as PIL_VERSION
 import cv2
 from transformers import SegformerForSemanticSegmentation
 
@@ -125,15 +129,13 @@ def main() -> int:
         str(onnx_path),
         input_names=["pixel_values"],
         output_names=["logits"],
-        opset_version=17,
+        opset_version=18,
         do_constant_folding=True,
-        dynamic_axes={"pixel_values": {0: "batch"}, "logits": {0: "batch"}},
-        dynamo=False,
+        dynamo=True,
+        external_data=False,
     )
 
     print("[4/5] validate with onnxruntime (CPU)", flush=True)
-    import onnxruntime as ort
-
     session = ort.InferenceSession(str(onnx_path),
                                    providers=["CPUExecutionProvider"])
     input_name = session.get_inputs()[0].name
@@ -162,6 +164,22 @@ def main() -> int:
 
     logits = session.run([output_name], {input_name: pixel_values})[0]
     print(f"  output shape: {logits.shape}", flush=True)
+
+    # Numerical parity with the reference PyTorch model on the same input.
+    with torch.no_grad():
+        reference = model(pixel_values=torch.from_numpy(pixel_values)).logits.numpy()
+    parity = {
+        "reference": "PyTorch SegformerForSemanticSegmentation",
+        "maxAbs": float(np.max(np.abs(reference - logits))),
+        "meanAbs": float(np.mean(np.abs(reference - logits))),
+        "classAgreement": float(
+            (reference.argmax(axis=1) == logits.argmax(axis=1)).mean()
+        ),
+    }
+    print(f"  parity: max={parity['maxAbs']:.6g} "
+          f"mean={parity['meanAbs']:.6g} "
+          f"agree={parity['classAgreement']:.4f}", flush=True)
+
     labels = logits.argmax(axis=1)[0].astype(np.uint8)
     for index, name in enumerate(CLASSES):
         counts[name] = int((labels == index).sum())
@@ -192,6 +210,17 @@ def main() -> int:
             "output": {"name": output_name, "shape": list(logits.shape),
                        "layout": "logits at 1/4 resolution"},
         },
+        "exporter": {
+            "torch": torch.__version__,
+            "transformers": transformers.__version__,
+            "onnx": onnx.__version__,
+            "onnxruntime": ort.__version__,
+            "opencv": cv2.__version__,
+            "numpy": np.__version__,
+            "pillow": PIL_VERSION,
+            "huggingface_hub": hfhub.__version__,
+        },
+        "parity": parity,
         "classes": {str(i): name for i, name in enumerate(CLASSES)},
         "validation": {
             "image": test_note,
