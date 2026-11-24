@@ -7073,6 +7073,19 @@ void PaintbrushController::playerPlayPause()
 
 void PaintbrushController::playerSeek(qint64 timeMs)
 {
+    /* Coalesce during a scrub drag: only one precise seek may be in flight.
+     * Firing one per mouse move flushes the decoder mid-GOP and leaves a
+     * partially decoded frame on screen. */
+    if (m_scrubActive && m_seekProbeArmed)
+    {
+        m_seekPendingMs = timeMs;
+        return;
+    }
+    applyPlayerSeek(timeMs);
+}
+
+void PaintbrushController::applyPlayerSeek(qint64 timeMs)
+{
     /* A frozen Object Select selection belongs to one exact FrameRef; seeking
      * to a different PTS ends that live session (P0#5/P0#7). The same-frame
      * tolerance matches the exact-frame decoder's PTS tolerance
@@ -7134,11 +7147,25 @@ void PaintbrushController::playerSeekBegin()
     pbLogDebug(VLC_OBJECT(m_intf), "media",
                "pb seek A: slider pressed (current=%lld ms)",
                (long long)playerTimeMs());
+    m_scrubActive = true;
+    m_seekPendingMs = -1;
+    /* Pause while scrubbing so playback does not fight the seeks; the final
+     * precise seek landing in onMediaTimer resumes. */
+    m_scrubRestorePlay = playerIsPlaying();
+    if (m_scrubRestorePlay)
+    {
+        m_intf->p_mainPlaylistController->pause();
+        emit mediaStateChanged();
+    }
     m_thumbnails.suspend();
 }
 
 void PaintbrushController::playerSeekEnd()
 {
+    /* The caller issues the final precise seek right after this; the probe
+     * landing in onMediaTimer restores playback. */
+    m_scrubActive = false;
+    m_seekPendingMs = -1;
     /* user released the seek slider. The suspended thumbnail batch is NOT
      * resumed here: resuming would decode immediately and race the final
      * precise seek issued on release. onMediaTimer() resumes the batch
@@ -7641,6 +7668,22 @@ void PaintbrushController::onMediaTimer()
                        (long long)now, (long long)m_seekProbeTargetMs);
             m_seekProbeArmed = false;
             m_seekProbeTargetMs = -1;
+            if (m_scrubActive && m_seekPendingMs >= 0)
+            {
+                /* the drag moved on while this seek was in flight: issue the
+                 * coalesced target now, still one seek at a time */
+                const qint64 pending = m_seekPendingMs;
+                m_seekPendingMs = -1;
+                applyPlayerSeek(pending);
+            }
+            else if (!m_scrubActive && m_scrubRestorePlay)
+            {
+                /* the release seek landed: playback resumes where the user
+                 * dropped the playhead */
+                m_scrubRestorePlay = false;
+                m_intf->p_mainPlaylistController->play();
+                emit mediaStateChanged();
+            }
         }
     }
 

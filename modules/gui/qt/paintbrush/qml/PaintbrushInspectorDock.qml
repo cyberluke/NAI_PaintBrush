@@ -1465,6 +1465,16 @@ Item {
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
             }
+            /* Auto collage has nothing to arrange with a single layer; say so
+             * in the dialog instead of only in the status strip. */
+            Widgets.LabelExt {
+                visible: PaintbrushCtx.document.layerCount < 2
+                text: qsTr("Auto collage needs at least two content layers. Add another image, cutout or text layer first.")
+                color: theme.accent
+                font.pixelSize: VLCStyle.fontSize_small
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
 
             GridLayout {
                 Layout.fillWidth: true
@@ -1484,6 +1494,7 @@ Item {
                     Button {
                         Layout.fillWidth: true
                         text: modelData.label
+                        enabled: PaintbrushCtx.document.layerCount >= 2
                         onClicked: {
                             PaintbrushCtx.autoCollage(modelData.preset)
                             collageDialog.close()

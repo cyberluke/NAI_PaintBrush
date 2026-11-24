@@ -2877,8 +2877,12 @@ void PaintbrushCanvasItem::strokeSegmentDabs(const QPointF &fromLocal,
 
     const bool erase = (m_tool == TOOL_ERASER);
     const bool pencil = (m_tool == TOOL_PENCIL);
+    /* the eraser used to stamp at the FULL brush size while both the cursor
+     * and every other tool use half of it: it erased four times the visible
+     * area (and paid four times the commit cost). Match the cursor. */
     qreal radius = pencil ? 1.0
-                  : (erase ? qMax(2.0, m_brushSize) : m_brushSize / 2.0);
+                  : (erase ? qMax<qreal>(2.0, m_brushSize * 0.5)
+                           : m_brushSize / 2.0);
     const qreal pf = pressureFactor();
     if (pf != 1.0 && !erase)
         radius *= pf;

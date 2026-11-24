@@ -1373,6 +1373,14 @@ private:
     qint64 m_seekProbeTargetMs = -1;
     bool m_seekProbeArmed = false;
 
+    /* Slider scrub session: pause while dragging, coalesce seeks so only one
+     * is in flight (firing one per mouse move flushes the decoder mid-GOP and
+     * shows torn frames), resume playback when the final seek lands. */
+    bool m_scrubActive = false;
+    bool m_scrubRestorePlay = false;
+    qint64 m_seekPendingMs = -1;
+    void applyPlayerSeek(qint64 timeMs);
+
     /* async "Add frame to canvas" (P0.4) state */
     bool m_addFrameBusy = false;
     QString m_addFrameToken;      /* opaque identity of the in-flight request */
