@@ -509,6 +509,11 @@ vlc_module_begin ()
                 N_( "URL of the human-parser asset manifest used by the "
                     "on-demand installer. Empty disables in-app download; the "
                     "post-installer can still be used." ) )
+    add_string( "paintbrush-human-parser-manifest-sha256", NULL,
+                N_( "Fashion parser manifest SHA-256" ),
+                N_( "Pinned SHA-256 of the downloaded manifest. Required for "
+                    "on-demand installs so a compromised URL cannot install "
+                    "native parser code." ) )
     add_bool( "paintbrush-matte-selftest", false, PB_MATTE_SELFTEST_TEXT,
               PB_MATTE_SELFTEST_LONGTEXT )
     add_bool( "paintbrush-creative-selftest", false,

@@ -242,6 +242,32 @@ void testVectorModulation()
                      != hashImage(highProjection->image));
 }
 
+void testProtectionScaling()
+{
+    const QSize stage(640, 800);
+    const QImage subject = subjectImage(320, 400);
+    CreativeBuildInput input = makeInput("holo-liquid", stage, subject);
+
+    /* The subjectRect is not the native cutout size, so this is exactly the
+     * path that used to drop the mask at commit. If the mask is ignored, the
+     * two builds are identical; if it is scaled, the protected build keeps the
+     * original subject pixels and the unprotected build runs the material. */
+    QImage protection(subject.size(), QImage::Format_Grayscale8);
+    protection.fill(255);
+    input.protection = protection;
+    const QVector<CreativePiece> protectedPieces =
+        creative::recipe::build(input);
+    input.protection = QImage();
+    const QVector<CreativePiece> plainPieces = creative::recipe::build(input);
+
+    const QImage protectedImage = creative::recipe::compose(
+        protectedPieces, stage, stage, QColor(12, 12, 18), input.frame);
+    const QImage plainImage = creative::recipe::compose(
+        plainPieces, stage, stage, QColor(12, 12, 18), input.frame);
+    check("protection.scaled-applied",
+          hashImage(protectedImage) != hashImage(plainImage));
+}
+
 void testBudget()
 {
     check("budget.normal-canvas",
@@ -407,6 +433,7 @@ int main(int argc, char **argv)
     {
         testPreviewResolution();
         testVectorModulation();
+        testProtectionScaling();
         testBudget();
         testFullResolutionDeterminism();
         testCancellation();

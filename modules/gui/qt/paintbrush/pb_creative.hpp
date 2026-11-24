@@ -89,6 +89,18 @@ struct CreativeCommitEvent
     CreativeBuildResult result;
 };
 
+/* A preview build runs on its own pool: it is the same recipe as a commit, but
+ * it never bakes or publishes layers. The revision makes a stale completion
+ * harmless when the user switches patches mid-render. */
+struct PreviewBuildResult
+{
+    QVector<CreativePiece> pieces;
+    QSize stage;
+    CreativeFrame frame;
+    quint64 revision = 0;
+    bool cancelled = false;
+};
+
 /* Image provider for the live stage. QML requests
  * image://pbcreative/live/<revision>; the engine keeps the latest frame. */
 class CreativePreviewProvider : public QQuickImageProvider
@@ -379,6 +391,21 @@ private:
     int m_consumedResults = 0;
     CommitContext m_commit;
     QString m_lastCommitError;
+
+    /* Preview build state. GUI-thread only; the worker gets an input copy and
+     * a cancel token and never touches these members. */
+    QThreadPool m_previewPool;
+    QFutureWatcher<PreviewBuildResult> m_previewWatcher;
+    std::shared_ptr<std::atomic_bool> m_previewCancel;
+    quint64 m_previewBuildRevision = 0;
+    bool m_previewBuilt = false;
+    CreativeFrame m_builtFrame;
+    QSize m_builtStage;
+    QTimer m_composeCoalesceTimer;
+
+    void onPreviewBuildFinished();
+    void cancelPreviewBuild();
+    void scheduleRecompose();
 
     CreativeFrame m_frame;
     QVector<CreativePiece> m_pieces;

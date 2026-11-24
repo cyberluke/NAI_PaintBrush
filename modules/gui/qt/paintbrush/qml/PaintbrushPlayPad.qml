@@ -207,6 +207,11 @@ Item {
                 cache: false
                 asynchronous: false
                 smooth: true
+                /* The engine keeps a 4K-class still for capture/commit; the
+                 * panel only needs a display-bound texture. Without this the
+                 * image provider uploads the full 4K frame on every revision. */
+                sourceSize: Qt.size(Math.ceil(width * 2),
+                                    Math.ceil(height * 2))
                 source: root.creative.hasSubject
                             ? "image://pbcreative/live/" + root.creative.previewRevision
                             : ""

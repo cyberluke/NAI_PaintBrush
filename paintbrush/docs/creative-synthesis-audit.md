@@ -225,8 +225,9 @@ These are the things a reviewer should not assume are finished:
 5. **Performance is measured at the preview boundary, not a full trace.** The
    recipe harness measures a 2048x2560 preview compose at ~35 ms and the
    859x1073 interactive compose at ~20 ms on this workstation. Motion frames use
-   the interactive target at the 20 Hz pad cadence; the full 4K still is a single
-   post-gesture cost. No p95 frame-time trace or 4K GPU capture is claimed yet.
+   the interactive target at the 20 Hz pad cadence; the full 4K still is built
+   on the preview worker after the gesture and published by revision. No p95
+   frame-time trace or 4K GPU capture is claimed yet.
 6. **No save/reopen/export end-to-end test.** The layers are ordinary persisted
    layers, and the existing export path sees them, but this document does not
    claim a tested round trip for this specific flow.

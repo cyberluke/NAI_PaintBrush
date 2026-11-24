@@ -36,6 +36,7 @@
 [CmdletBinding(DefaultParameterSetName = "Url")]
 param(
     [string]$ManifestUrl,
+    [string]$ManifestSha256,
     [string]$ManifestPath,
     [string]$SourceDir,
     [string]$BundlePath,
@@ -59,30 +60,35 @@ function Get-Sha256([string]$path)
 function Copy-Closure([string]$from, [string]$to)
 {
     if (-not (Test-Path -LiteralPath $from)) { return $false }
-    $names = @(
+    $names = Get-ClosureNames
+    foreach ($name in $names)
+    {
+        if (-not (Test-Path -LiteralPath (Join-Path $from $name))) { return $false }
+    }
+    foreach ($name in $names)
+    {
+        Copy-Item -LiteralPath (Join-Path $from $name) -Destination (Join-Path $to $name) -Force
+    }
+    return $true
+}
+
+function Get-ClosureNames()
+{
+    @(
         "onnxruntime.dll",
         "onnxruntime_providers_shared.dll",
         "onnxruntime_providers_cuda.dll",
-        "cublas64_13.dll", "cublasLt64_13.dll",
+        "cublas64_13.dll", "cublasLt64_13.dll", "cudart64_13.dll",
         "cudnn64_9.dll", "cudnn_graph64_9.dll", "cudnn_engines_precompiled64_9.dll",
         "cudnn_engines_runtime_compiled64_9.dll", "cudnn_heuristic64_9.dll",
-        "cudnn_ops64_9.dll", "cudnn_adv64_9.dll", "cudnn_cnn64_9.dll"
+        "cudnn_ops64_9.dll", "cudnn_adv64_9.dll", "cudnn_cnn64_9.dll",
+        "cudnn_ext64_9.dll", "cudnn_engines_tensor_ir64_9.dll"
     )
-    $copied = $false
-    foreach ($name in $names)
-    {
-        $src = Join-Path $from $name
-        if (Test-Path -LiteralPath $src)
-        {
-            Copy-Item -LiteralPath $src -Destination (Join-Path $to $name) -Force
-            $copied = $true
-        }
-    }
-    return $copied
 }
 
 $temp = Join-Path $env:TEMP ("pb-human-parser-install-" + [guid]::NewGuid().ToString("N"))
 $manifest = $null
+$installManifestPath = $null
 $source = $null
 $bundleZip = $null
 
@@ -94,13 +100,22 @@ try
     if ($ManifestPath)
     {
         if (-not (Test-Path -LiteralPath $ManifestPath)) { throw "manifest not found: $ManifestPath" }
+        $installManifestPath = (Resolve-Path -LiteralPath $ManifestPath).Path
         $manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
     }
     elseif ($ManifestUrl)
     {
+        if (-not $ManifestSha256) {
+            throw "a remote manifest requires -ManifestSha256 so the download has a pinned trust anchor"
+        }
         Write-ProgressLine 4 "Fetching the parser manifest"
         $manifestFile = Join-Path $temp "manifest.json"
         Invoke-WebRequest -Uri $ManifestUrl -OutFile $manifestFile -UseBasicParsing
+        $actualManifestSha = Get-Sha256 $manifestFile
+        if ($actualManifestSha -ne $ManifestSha256.ToLowerInvariant()) {
+            throw "manifest SHA-256 mismatch (expected $ManifestSha256, got $actualManifestSha)"
+        }
+        $installManifestPath = $manifestFile
         $manifest = Get-Content -LiteralPath $manifestFile -Raw | ConvertFrom-Json
     }
 
@@ -118,6 +133,9 @@ try
 
     if ($bundleZip)
     {
+        if ($ManifestUrl -and -not ($manifest -and $manifest.bundle -and $manifest.bundle.sha256)) {
+            throw "a pinned remote install requires bundle.sha256 in the manifest"
+        }
         if ($manifest -and $manifest.bundle -and $manifest.bundle.sha256)
         {
             Write-ProgressLine 55 "Verifying the parser bundle"
@@ -145,7 +163,7 @@ try
     $model = Get-ChildItem -LiteralPath $source -Filter "fashn-human-parser.onnx" -File -Recurse |
         Select-Object -First 1
     $modelManifest = Get-ChildItem -LiteralPath $source -Filter "manifest.json" -File -Recurse |
-        Where-Object { $_.FullName -notlike "*human-parser-install*" } |
+        Where-Object { -not $installManifestPath -or $_.FullName -ne $installManifestPath } |
         Select-Object -First 1
     if (-not $runtime -or -not $model -or -not $modelManifest)
     {
@@ -153,13 +171,25 @@ try
     }
 
     Write-ProgressLine 65 "Verifying the parser runtime and model"
+    $entries = @(
+        @{ path = "pb_human_parser_cuda.dll"; file = $runtime.FullName },
+        @{ path = "models/fashn-human-parser.onnx"; file = $model.FullName },
+        @{ path = "models/manifest.json"; file = $modelManifest.FullName }
+    )
+    if ($ManifestUrl)
+    {
+        if (-not $manifest -or -not $manifest.files) {
+            throw "a pinned remote install requires manifest.files with SHA-256 entries"
+        }
+        foreach ($entry in $entries) {
+            $prop = $manifest.files.PSObject.Properties[$entry.path]
+            if (-not ($prop -and $prop.Value -and $prop.Value.sha256)) {
+                throw "a pinned remote install requires a SHA-256 for $($entry.path)"
+            }
+        }
+    }
     if ($manifest -and $manifest.files)
     {
-        $entries = @(
-            @{ path = "pb_human_parser_cuda.dll"; file = $runtime.FullName },
-            @{ path = "models/fashn-human-parser.onnx"; file = $model.FullName },
-            @{ path = "models/manifest.json"; file = $modelManifest.FullName }
-        )
         foreach ($entry in $entries)
         {
             $prop = $manifest.files.PSObject.Properties[$entry.path]
@@ -211,6 +241,8 @@ try
         manifestUrl = $ManifestUrl
         runtimeSha256 = (Get-Sha256 (Join-Path $stage "pb_human_parser_cuda.dll"))
         modelSha256 = (Get-Sha256 (Join-Path $stage "models\fashn-human-parser.onnx"))
+        manifestSha256 = $ManifestSha256
+        closure = @(Get-ClosureNames)
     }
     $metadata | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $stage "installed.json") -Encoding UTF8
 

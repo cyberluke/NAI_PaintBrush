@@ -48,8 +48,8 @@ std::wstring widen(const QString &text)
 QString exeDir()
 {
     wchar_t path[MAX_PATH] = {};
-    const DWORD len = GetModuleFileNameW(nullptr, path, DWORD(sizeof(path)));
-    if (len == 0 || len >= sizeof(path))
+    const DWORD len = GetModuleFileNameW(nullptr, path, DWORD(MAX_PATH));
+    if (len == 0 || len >= MAX_PATH)
         return {};
     return QFileInfo(QString::fromWCharArray(path, int(len))).absolutePath();
 }
@@ -62,8 +62,8 @@ QString moduleDir()
                             reinterpret_cast<LPCWSTR>(&g_apiModule), &self))
         return {};
     wchar_t path[MAX_PATH] = {};
-    const DWORD len = GetModuleFileNameW(self, path, DWORD(sizeof(path)));
-    if (len == 0 || len >= sizeof(path))
+    const DWORD len = GetModuleFileNameW(self, path, DWORD(MAX_PATH));
+    if (len == 0 || len >= MAX_PATH)
         return {};
     return QFileInfo(QString::fromWCharArray(path, int(len))).absolutePath();
 }

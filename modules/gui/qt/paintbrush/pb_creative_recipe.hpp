@@ -136,6 +136,20 @@ inline bool isHoloMaterialPatch(const QString &patchId)
            || patchId == QLatin1String("holo-livery");
 }
 
+/* Rotate a colour's hue by a fraction of the wheel. Used by the vector
+ * destinations that shift particles/arcs without changing the base palette. */
+inline QColor hueShifted(const QColor &src, float amount)
+{
+    float h = 0.0f, s = 0.0f, v = 0.0f, a = 0.0f;
+    src.getHsvF(&h, &s, &v, &a);
+    if (h < 0.0f)
+        h = 0.0f;
+    QColor out =
+        QColor::fromHsvF(std::fmod(h + amount + 1.0f, 1.0f), s, v);
+    out.setAlpha(src.alpha());
+    return out;
+}
+
 inline bool isAutomotivePatch(const QString &patchId)
 {
     return patchId == QLatin1String("holo-wrap")
@@ -660,6 +674,10 @@ inline QVector<CreativePiece> build(
         const QPointF bend(
             (vec[creative::vector::Dest::ArcBendX] - 0.5f) * W * 0.05,
             (vec[creative::vector::Dest::ArcBendY] - 0.5f) * H * 0.05);
+        const float particleHue =
+            vec[creative::vector::Dest::ParticleHue] * 0.35f;
+        const float particleSpeed =
+            0.55f + 0.90f * vec[creative::vector::Dest::ParticleSpeed];
         CreativeMotion arcM;
         arcM.opacityHold = 0.15f;
         arcM.opacityY = 0.12f;
@@ -672,8 +690,9 @@ inline QVector<CreativePiece> build(
             const QPointF target =
                 (fromLeft ? targetL : targetR)
                 + bend * (0.5 + 0.15 * i);
-            arc.halo = (i % 3 == 1) ? rose
-                                    : ((i % 3 == 2) ? magenta : cyan);
+            arc.halo = detail::hueShifted(
+                (i % 3 == 1) ? rose : ((i % 3 == 2) ? magenta : cyan),
+                particleHue);
             arc.core = (i % 3 == 0) ? white : QColor(255, 240, 250);
             add(QStringLiteral("Voltage bolt %1").arg(i + 1),
                 QStringLiteral("accent"),
@@ -701,7 +720,10 @@ inline QVector<CreativePiece> build(
             480);
         add(QStringLiteral("Voltage sparks"), QStringLiteral("accent"),
             creative::sparkField(
-                stageMask, stage, seed + 77, { cyan, rose, lime, white },
+                stageMask, stage, seed + 77,
+                { detail::hueShifted(cyan, particleHue),
+                  detail::hueShifted(rose, particleHue),
+                  detail::hueShifted(lime, particleHue), white },
                 sparkCount,
                 0.45f
                     + 0.55f
@@ -710,9 +732,10 @@ inline QVector<CreativePiece> build(
                 0.15f
                     + 0.75f
                           * vec[creative::vector::Dest::ParticleSpread],
-                0.55f
-                    + 1.10f
-                          * vec[creative::vector::Dest::ParticleLength]),
+                (0.55f
+                 + 1.10f
+                       * vec[creative::vector::Dest::ParticleLength])
+                    * particleSpeed),
             full, BLEND_SCREEN,
             0.75f + 0.20f * vec[creative::vector::Dest::Glow], sparkM);
 
@@ -1098,8 +1121,14 @@ inline QVector<CreativePiece> build(
          * pixels original. Automotive patches style the whole bodywork and
          * never receive the fashion plane. */
         QImage protection;
-        if (!automotive && input.protection.size() == s.size())
+        if (!automotive && !input.protection.isNull())
+        {
             protection = input.protection;
+            if (protection.size() != s.size())
+                protection = protection.scaled(s.size(),
+                                               Qt::IgnoreAspectRatio,
+                                               Qt::SmoothTransformation);
+        }
         const creative::HoloMaterialResult mat =
             creative::holographicMaterial(
                 s, subjMask, normals, material, 1.0f, seed,
@@ -1458,7 +1487,10 @@ inline QVector<CreativePiece> build(
             0.35f + 0.65f * vec[creative::vector::Dest::ParticleBrightness],
             wind,
             0.15f + 0.75f * vec[creative::vector::Dest::ParticleSpread],
-            0.50f + 1.20f * vec[creative::vector::Dest::ParticleLength]);
+            (0.50f + 1.20f * vec[creative::vector::Dest::ParticleLength])
+                * (0.55f
+                   + 0.90f
+                         * vec[creative::vector::Dest::ParticleSpeed]));
         if (!particles.isNull())
         {
             CreativeMotion vectorM;
@@ -1508,6 +1540,10 @@ inline QVector<CreativePiece> bake(QVector<CreativePiece> pieces,
                           + m.rotationHold * (frame.hold ? 1.0 : 0.0);
 
         p.opacity = op;
+        /* The bake has consumed the motion. Clearing it keeps the post-commit
+         * compose() from applying the same translation/opacity a second time;
+         * the committed layers already hold the baked values. */
+        p.motion = CreativeMotion();
         if (qFuzzyIsNull(dx) && qFuzzyIsNull(dy) && qFuzzyIsNull(sc - 1.0)
             && qFuzzyIsNull(rot))
             continue;

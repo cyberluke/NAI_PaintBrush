@@ -241,7 +241,8 @@ struct CudaProbe
 CudaProbe probe_cuda_driver()
 {
     CudaProbe probe;
-    HMODULE driver = LoadLibraryW(L"nvcuda.dll");
+    HMODULE driver = LoadLibraryExW(L"nvcuda.dll", nullptr,
+                                    LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (!driver)
     {
         probe.error = "nvcuda.dll is not available";
@@ -915,6 +916,19 @@ int32_t pbhp_create_session(const PbhSessionConfig *config, PbhSession **out_ses
         if (!entry.found)
         {
             set_error(err, err_len, "manifest has no usable onnx.file/onnx.sha256");
+            return PBHP_ERR_MODEL;
+        }
+        /* onnx.file is a plain file name next to the manifest. Reject path
+         * traversal and absolute/UNC forms so a crafted manifest cannot make
+         * the parser read or hash an arbitrary file outside the model dir. */
+        if (entry.file.empty()
+            || entry.file.find("..") != std::string::npos
+            || entry.file.find('/') != std::string::npos
+            || entry.file.find('\\') != std::string::npos
+            || entry.file.find(':') != std::string::npos)
+        {
+            set_error(err, err_len,
+                      "manifest onnx.file must be a plain file name");
             return PBHP_ERR_MODEL;
         }
 

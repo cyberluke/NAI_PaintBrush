@@ -195,6 +195,7 @@ private:
      * worker never touches them. */
     QString m_installDir;
     QString m_manifestUrl;
+    QString m_manifestSha256;
     bool m_canInstall = false;
     bool m_installing = false;
     int m_installProgress = 0;

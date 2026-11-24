@@ -371,6 +371,16 @@ register them; defaults apply when absent):
 - `paintbrush-human-parser-model-dir` (string)
 - `paintbrush-human-parser-device` (`auto`/`gpu`/`cpu`)
 - `paintbrush-human-parser-class-probabilities` (integer/bool)
+- `paintbrush-human-parser-manifest-url` (string; enables the on-demand
+  installer)
+- `paintbrush-human-parser-manifest-sha256` (string; pinned hash of the
+  downloaded manifest; required before the on-demand installer runs)
+
+An on-demand install is trusted only when `installed.json` pins the runtime and
+model SHA-256 and lists the complete ORT/CUDA closure. A user-profile install
+that fails that check is ignored and the packaged `<exe>\human-parser` copy is
+used instead. The installer prefers `pwsh` and falls back to Windows PowerShell;
+it refuses a remote manifest without the pinned SHA-256 in the app config.
 
 Packaging into `win64-meson\bin\human-parser` was intentionally **not**
 performed here: the shared app tree is owned by other agents and was being

@@ -373,18 +373,42 @@ PaintbrushCreative::PaintbrushCreative(PaintbrushController *controller,
     m_replayTimer.setInterval(33);
     connect(&m_replayTimer, &QTimer::timeout, this, &PaintbrushCreative::onReplayTick);
     /* Motion composes at an interactive resolution; once the gesture (or the
-     * decaying idle energy) is done, render the full preview once. */
+     * decaying idle energy) is done, rebuild the pieces at the settled frame
+     * and render the full preview. A vector change (bolt count, sparks, hue)
+     * is generation-time, so recompose() alone cannot show it. */
     m_previewSettleTimer.setSingleShot(true);
     m_previewSettleTimer.setInterval(220);
     connect(&m_previewSettleTimer, &QTimer::timeout, this, [this]() {
+        if (m_committed)
+            return;
         m_composeInteractive = false;
-        recompose();
+        const bool frameChanged =
+            !m_previewBuilt || qAbs(m_builtFrame.x - m_frame.x) > 0.001f
+            || qAbs(m_builtFrame.y - m_frame.y) > 0.001f
+            || qAbs(m_builtFrame.energy - m_frame.energy) > 0.001f
+            || m_builtFrame.hold != m_frame.hold
+            || qAbs(m_builtFrame.time - m_frame.time) > 0.001f
+            || m_builtStage != m_previewSize;
+        if (frameChanged)
+            rebuildPreview();
+        else
+            recompose();
     });
+    /* Pad moves arrive at pointer-event rate; coalesce them into one compose
+     * per ~30 fps so a drag cannot queue a composite per event. */
+    m_composeCoalesceTimer.setSingleShot(true);
+    m_composeCoalesceTimer.setInterval(33);
+    connect(&m_composeCoalesceTimer, &QTimer::timeout, this,
+            &PaintbrushCreative::recompose);
     /* One build at a time: a full-resolution render is heavy, and a monotonic
      * revision makes a replacement a cancel rather than a second concurrent
      * build. */
     m_buildPool.setMaxThreadCount(1);
     m_buildPool.setExpiryTimeout(30000);
+    m_previewPool.setMaxThreadCount(1);
+    m_previewPool.setExpiryTimeout(30000);
+    connect(&m_previewWatcher, &QFutureWatcherBase::finished, this,
+            &PaintbrushCreative::onPreviewBuildFinished);
     m_seed = QRandomGenerator::global()->generate();
     if (m_seed == 0)
         m_seed = 1;
@@ -433,9 +457,11 @@ PaintbrushCreative::~PaintbrushCreative()
 {
     if (m_commit.token)
         m_commit.token->cancel();
+    cancelPreviewBuild();
     /* The worker polls the token at piece boundaries; this bounded wait keeps
      * shutdown deterministic without blocking on a healthy long build. */
     m_buildPool.waitForDone(5000);
+    m_previewPool.waitForDone(5000);
 }
 
 QVariantList PaintbrushCreative::patchList() const
@@ -494,6 +520,8 @@ void PaintbrushCreative::setOpen(bool open)
     {
         /* Closing the pad discards any render that has not published yet. */
         cancelCommitInternal(false);
+        cancelPreviewBuild();
+        m_composeCoalesceTimer.stop();
         stopIdle();
         if (m_replayTimer.isActive())
         {
@@ -530,7 +558,9 @@ void PaintbrushCreative::setStatus(const QString &text)
 
 bool PaintbrushCreative::canCommit() const
 {
-    return hasSubject() && !m_patchId.isEmpty() && !m_busy && !m_committed;
+    return hasSubject() && !m_patchId.isEmpty() && !m_busy && !m_committed
+           && !(usesFashionProtection() && m_humanParsePending
+                && m_semanticProtection.isNull());
 }
 
 double PaintbrushCreative::recordSeconds() const
@@ -600,6 +630,9 @@ bool PaintbrushCreative::adoptSubject(const QImage &cutout,
 void PaintbrushCreative::clearSubject()
 {
     cancelCommitInternal(false);
+    cancelPreviewBuild();
+    m_previewBuilt = false;
+    m_composeCoalesceTimer.stop();
     ++m_subjectRevision;
     m_semanticProtection = QImage();
     m_humanParseRequest = 0;
@@ -723,19 +756,37 @@ void PaintbrushCreative::rebuildPreview()
             protection = protection.convertToFormat(QImage::Format_Grayscale8);
         input.protection = protection;
     }
-    m_pieces = creative::recipe::build(input);
-    /* A patch change is a new still: render it at the full preview size, not
-     * at the interactive motion size. */
+
+    /* The build is CPU-heavy (holo materials run normals + per-pixel shading),
+     * so it must never block the GUI thread. The old preview stays visible;
+     * the revision makes a completion from a previous patch harmless. */
+    cancelPreviewBuild();
+    m_previewBuilt = false;
+    const auto token = std::make_shared<std::atomic_bool>(false);
+    m_previewCancel = token;
+    const quint64 revision = ++m_previewBuildRevision;
     m_composeInteractive = false;
     m_previewSettleTimer.stop();
-    recompose();
+    m_previewWatcher.setFuture(QtConcurrent::run(
+        &m_previewPool, [input, token, revision]() -> PreviewBuildResult {
+            PreviewBuildResult result;
+            result.revision = revision;
+            result.stage = input.stage;
+            result.frame = input.frame;
+            result.pieces = creative::recipe::build(
+                input, [token](const QVector<CreativePiece> &, int) {
+                    return !token->load();
+                });
+            result.cancelled = token->load();
+            return result;
+        }));
 }
 
 void PaintbrushCreative::recompose()
 {
-    /* While a commit is rendering, the preview belongs to the job: progressive
-     * previews must not be overwritten by 20 Hz idle recompositions. */
-    if (m_busy || m_previewSize.isEmpty())
+    /* While a commit or a preview build is running, the current pieces and
+     * m_previewSize are not a matched pair; keep the last complete frame. */
+    if (m_busy || m_previewSize.isEmpty() || m_previewWatcher.isRunning())
         return;
     const QSize target =
         m_composeInteractive
@@ -753,9 +804,71 @@ void PaintbrushCreative::recompose()
 
 void PaintbrushCreative::renderPreviewStill()
 {
-    m_composeInteractive = false;
+    m_composeCoalesceTimer.stop();
     m_previewSettleTimer.stop();
+    const auto waitForBuild = [this]() {
+        if (!m_previewWatcher.isRunning())
+            return;
+        QEventLoop loop;
+        QTimer timeout;
+        timeout.setSingleShot(true);
+        connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+        connect(&m_previewWatcher, &QFutureWatcherBase::finished, &loop,
+                &QEventLoop::quit);
+        timeout.start(30000);
+        if (!m_previewWatcher.isFinished())
+            loop.exec();
+    };
+    const auto frameDiff = [this]() {
+        return !m_previewBuilt
+               || qAbs(m_builtFrame.x - m_frame.x) > 0.001f
+               || qAbs(m_builtFrame.y - m_frame.y) > 0.001f
+               || qAbs(m_builtFrame.energy - m_frame.energy) > 0.001f
+               || m_builtFrame.hold != m_frame.hold
+               || m_builtStage != m_previewSize;
+    };
+    waitForBuild();
+    /* A patch selection starts a build with the frame captured at that moment;
+     * a test/capture that moved the pad afterwards needs one settled rebuild. */
+    if (frameDiff())
+    {
+        rebuildPreview();
+        waitForBuild();
+    }
+    m_composeInteractive = false;
     recompose();
+}
+
+void PaintbrushCreative::cancelPreviewBuild()
+{
+    if (m_previewCancel)
+        m_previewCancel->store(true);
+    m_previewCancel.reset();
+    ++m_previewBuildRevision;
+}
+
+void PaintbrushCreative::onPreviewBuildFinished()
+{
+    if (!m_previewWatcher.isFinished())
+        return;
+    const PreviewBuildResult result = m_previewWatcher.result();
+    if (result.cancelled || result.revision != m_previewBuildRevision)
+        return;
+    m_pieces = result.pieces;
+    m_previewSize = result.stage;
+    m_builtStage = result.stage;
+    m_builtFrame = result.frame;
+    m_previewBuilt = true;
+    m_composeInteractive = false;
+    recompose();
+}
+
+void PaintbrushCreative::scheduleRecompose()
+{
+    m_composeInteractive = true;
+    m_previewSettleTimer.start();
+    if (!m_composeCoalesceTimer.isActive())
+        m_composeCoalesceTimer.start();
 }
 
 /* ------------------------------------------------------- human parser ---- */
@@ -764,8 +877,16 @@ bool PaintbrushCreative::usesFashionProtection() const
 {
     if (!m_fashionProtection)
         return false;
-    const PatchDef *def = patchDef(m_patchId);
-    return def && def->family == QLatin1String("Material");
+    /* Only the eight material looks whose recipe consumes the FASHN plane.
+     * holo-fashion (Prism Muse) is a full-subject look, so promising
+     * garment-only protection there would be false. */
+    static const QStringList kProtectedLooks = {
+        QStringLiteral("holo-liquid"), QStringLiteral("holo-opal"),
+        QStringLiteral("holo-chrome"), QStringLiteral("holo-prism"),
+        QStringLiteral("holo-wrap"), QStringLiteral("holo-chameleon"),
+        QStringLiteral("holo-glitter"), QStringLiteral("holo-livery"),
+    };
+    return kProtectedLooks.contains(m_patchId);
 }
 
 bool PaintbrushCreative::fashionParserInstalled() const
@@ -819,6 +940,7 @@ void PaintbrushCreative::setHumanParseStatus(const QString &text)
         return;
     m_humanParseStatus = text;
     emit humanParseStatusChanged();
+    emit stateChanged(); /* canCommit is gated on a pending parse */
 }
 
 void PaintbrushCreative::clearHumanMasks()
@@ -1093,9 +1215,8 @@ void PaintbrushCreative::onIdleTick()
     if (m_frame.energy > 0.0f)
     {
         /* still moving: keep the 20 Hz tick at the interactive size */
-        m_composeInteractive = true;
-        m_previewSettleTimer.start();
-        recompose();
+        if (!m_committed)
+            scheduleRecompose();
     }
     /* At rest the settle timer renders one full preview still and the idle
      * tick stops overwriting it; time keeps advancing for the next gesture. */
@@ -1137,9 +1258,7 @@ void PaintbrushCreative::movePad(double x, double y, double energy, bool hold)
         s.tMs = m_recordClock.elapsed();
         m_samples.append(s);
     }
-    m_composeInteractive = true;
-    m_previewSettleTimer.start();
-    recompose();
+    scheduleRecompose();
     emit padChanged();
 }
 
@@ -1165,9 +1284,7 @@ void PaintbrushCreative::setHold(bool hold)
         s.tMs = m_recordClock.elapsed();
         m_samples.append(s);
     }
-    m_composeInteractive = true;
-    m_previewSettleTimer.start();
-    recompose();
+    scheduleRecompose();
     emit padChanged();
 }
 
@@ -1250,9 +1367,7 @@ void PaintbrushCreative::onReplayTick()
     m_frame.y = a.y + (b.y - a.y) * f;
     m_frame.energy = a.energy + (b.energy - a.energy) * f;
     m_frame.hold = f < 0.5f ? a.hold : b.hold;
-    m_composeInteractive = true;
-    m_previewSettleTimer.start();
-    recompose();
+    scheduleRecompose();
     emit padChanged();
     emit stateChanged(); /* progress + elapsed */
 }
@@ -1345,6 +1460,11 @@ bool PaintbrushCreative::beginCommit(QString *error)
     if (m_committed)
         return reject(QStringLiteral(
             "Already committed. Pick a patch to start a new run."));
+    if (usesFashionProtection() && m_humanParsePending
+        && m_semanticProtection.isNull())
+        return reject(QStringLiteral(
+            "Reading the fit — try Make it real again in a moment."));
+    cancelPreviewBuild();
     const PatchDef *def = patchDef(m_patchId);
     if (!def)
         return reject(QStringLiteral("Unknown patch."));
@@ -1389,8 +1509,7 @@ bool PaintbrushCreative::beginCommit(QString *error)
     input.previewSize = previewSize;
     input.seed = m_seed;
     input.frame = m_frame;
-    if (usesFashionProtection() && !m_semanticProtection.isNull()
-        && m_semanticProtection.size() == m_subjectNative.size())
+    if (usesFashionProtection() && !m_semanticProtection.isNull())
         input.protection = m_semanticProtection;
 
     m_commit = CommitContext();

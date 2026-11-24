@@ -14,8 +14,13 @@
 #include <vlc_configuration.h>
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QProcess>
 #include <QStandardPaths>
 
@@ -49,6 +54,81 @@ QString modelFileFor(const QString &dir)
 QString manifestFileFor(const QString &dir)
 {
     return QDir(dir).filePath(QStringLiteral("manifest.json"));
+}
+
+QString fileSha256(const QString &path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    if (!hash.addData(&file))
+        return {};
+    return QString::fromLatin1(hash.result().toHex());
+}
+
+/* A user-profile install is trusted only when installed.json pins the runtime
+ * and model bytes and lists the complete runtime closure. The packaged copy is
+ * shipped by the app and is not subject to this record. */
+bool verifyInstallRecord(const QString &dir, QString *error)
+{
+    const QString recordPath = QDir(dir).filePath(QStringLiteral("installed.json"));
+    QFile record(recordPath);
+    if (!record.open(QIODevice::ReadOnly))
+    {
+        if (error)
+            *error = QStringLiteral("parser install record is missing");
+        return false;
+    }
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson(record.readAll(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject())
+    {
+        if (error)
+            *error = QStringLiteral("parser install record is invalid");
+        return false;
+    }
+    const QJsonObject obj = doc.object();
+    const QString runtime = obj.value(QStringLiteral("runtimeSha256"))
+                                .toString()
+                                .toLower();
+    const QString model = obj.value(QStringLiteral("modelSha256"))
+                              .toString()
+                              .toLower();
+    if (runtime.isEmpty() || model.isEmpty())
+    {
+        if (error)
+            *error = QStringLiteral("parser install record has no pinned hashes");
+        return false;
+    }
+    const QString dll = QDir(dir).filePath(QStringLiteral("pb_human_parser_cuda.dll"));
+    const QString modelPath =
+        QDir(dir).filePath(QStringLiteral("models/fashn-human-parser.onnx"));
+    if (fileSha256(dll) != runtime || fileSha256(modelPath) != model)
+    {
+        if (error)
+            *error = QStringLiteral("parser install hash mismatch; reinstall it");
+        return false;
+    }
+    const QJsonArray closure = obj.value(QStringLiteral("closure")).toArray();
+    if (closure.isEmpty())
+    {
+        if (error)
+            *error = QStringLiteral("parser install record has no closure list");
+        return false;
+    }
+    for (const QJsonValue &value : closure)
+    {
+        const QString name = value.toString();
+        if (name.isEmpty()
+            || !QFileInfo::exists(QDir(dir).filePath(name)))
+        {
+            if (error)
+                *error = QStringLiteral("parser runtime closure is incomplete");
+            return false;
+        }
+    }
+    return true;
 }
 
 } // namespace
@@ -108,26 +188,43 @@ void HumanParserService::configure(vlc_object_t *obj)
     m_manifestUrl = obj
         ? pbConfigString(obj, "paintbrush-human-parser-manifest-url").trimmed()
         : QString();
+    m_manifestSha256 = obj
+        ? pbConfigString(obj, "paintbrush-human-parser-manifest-sha256")
+              .trimmed()
+              .toLower()
+        : QString();
 
     const QString configured = obj
         ? pbConfigString(obj, "paintbrush-human-parser-model-dir").trimmed()
         : QString();
     const QString userModels = QDir(m_installDir).filePath(QStringLiteral("models"));
     const QString appModels = QDir(appDir).filePath(QStringLiteral("human-parser/models"));
+    const QString userRuntime =
+        QDir(m_installDir).filePath(QStringLiteral("pb_human_parser_cuda.dll"));
+    const QString appRuntime =
+        QDir(appDir).filePath(QStringLiteral("human-parser"));
+
+    /* A user-profile install must carry a verified installed.json record. If
+     * it is stale, partial, or tampered with, fall back to the packaged copy
+     * instead of loading it. */
+    bool userInstallOk = QFileInfo::exists(userRuntime);
+    QString installRecordError;
+    if (userInstallOk && !verifyInstallRecord(m_installDir, &installRecordError))
+    {
+        userInstallOk = false;
+        m_unavailableReason = installRecordError;
+    }
+
     if (!configured.isEmpty())
         m_modelDir = configured;
-    else if (QFileInfo::exists(modelFileFor(userModels)))
+    else if (userInstallOk && QFileInfo::exists(modelFileFor(userModels)))
         m_modelDir = userModels;
     else
         m_modelDir = appModels;
 
     /* The shim resolves the runtime leaf from this environment variable. Prefer
-     * the user-installed copy, then the packaged app copy. */
-    const QString userRuntime =
-        QDir(m_installDir).filePath(QStringLiteral("pb_human_parser_cuda.dll"));
-    const QString chosenRuntime = QFileInfo::exists(userRuntime)
-                                      ? m_installDir
-                                      : QDir(appDir).filePath(QStringLiteral("human-parser"));
+     * the verified user copy, then the packaged app copy. */
+    const QString chosenRuntime = userInstallOk ? m_installDir : appRuntime;
     qputenv("PB_HUMAN_PARSER_DIR", chosenRuntime.toUtf8());
 
     const QString device = obj
@@ -260,10 +357,12 @@ void HumanParserService::installHumanParser()
     emit installProgressChanged(0, installStatus());
 
     QString manifestUrl;
+    QString manifestSha256;
     QString installDir;
     {
         QMutexLocker lock(&m_mutex);
         manifestUrl = m_manifestUrl;
+        manifestSha256 = m_manifestSha256;
         installDir = m_installDir;
     }
     if (manifestUrl.isEmpty())
@@ -279,6 +378,19 @@ void HumanParserService::installHumanParser()
         emit installFinished(false, installStatus());
         return;
     }
+    if (manifestSha256.isEmpty())
+    {
+        {
+            QMutexLocker lock(&m_mutex);
+            m_installing = false;
+            m_installStatus = pbTr(
+                "The parser manifest is not pinned; set "
+                "paintbrush-human-parser-manifest-sha256 before downloading.");
+        }
+        emit installProgressChanged(0, installStatus());
+        emit installFinished(false, installStatus());
+        return;
+    }
     const QString script = installerScript();
     if (script.isEmpty())
     {
@@ -287,6 +399,28 @@ void HumanParserService::installHumanParser()
             m_installing = false;
             m_installStatus = pbTr(
                 "The bundled post-installer script was not found next to the app.");
+        }
+        emit installProgressChanged(0, installStatus());
+        emit installFinished(false, installStatus());
+        return;
+    }
+
+    /* Windows ships powershell.exe, not pwsh; prefer PowerShell 7 when it is
+     * present but do not make the advertised install action fail on stock
+     * systems. */
+    QString powershell =
+        QStandardPaths::findExecutable(QStringLiteral("pwsh"));
+    if (powershell.isEmpty())
+        powershell =
+            QStandardPaths::findExecutable(QStringLiteral("powershell.exe"));
+    if (powershell.isEmpty())
+    {
+        {
+            QMutexLocker lock(&m_mutex);
+            m_installing = false;
+            m_installStatus =
+                pbTr("PowerShell was not found; install PowerShell 7 or "
+                     "Windows PowerShell.");
         }
         emit installProgressChanged(0, installStatus());
         emit installFinished(false, installStatus());
@@ -377,10 +511,11 @@ void HumanParserService::installHumanParser()
             });
 
     m_installProcess->start(
-        QStringLiteral("pwsh"),
+        powershell,
         { QStringLiteral("-NoProfile"), QStringLiteral("-ExecutionPolicy"),
           QStringLiteral("Bypass"), QStringLiteral("-File"), script,
           QStringLiteral("-ManifestUrl"), manifestUrl,
+          QStringLiteral("-ManifestSha256"), manifestSha256,
           QStringLiteral("-InstallDir"), installDir,
           QStringLiteral("-AppDir"),
           QCoreApplication::applicationDirPath() });
@@ -765,10 +900,17 @@ void HumanParserService::probeAvailability()
      * pb_human_parser_cuda.dll and its ONNX Runtime/CUDA closure. That is a
      * worker task on first use, not a GUI-thread startup task. */
     const QString appDir = QCoreApplication::applicationDirPath();
-    const QStringList runtimeDirs = {
-        installDir,
-        QDir(appDir).filePath(QStringLiteral("human-parser"))
-    };
+    QString installRecordError;
+    bool userInstallOk =
+        QFileInfo::exists(QDir(installDir).filePath(
+            QStringLiteral("pb_human_parser_cuda.dll")));
+    if (userInstallOk && !verifyInstallRecord(installDir, &installRecordError))
+        userInstallOk = false;
+
+    QStringList runtimeDirs;
+    if (userInstallOk)
+        runtimeDirs << installDir;
+    runtimeDirs << QDir(appDir).filePath(QStringLiteral("human-parser"));
     QString runtimeDir;
     bool dllPresent = false;
     for (const QString &candidate : runtimeDirs)
@@ -783,11 +925,11 @@ void HumanParserService::probeAvailability()
         }
     }
 
-    const QStringList modelDirs = {
-        modelDir,
-        QDir(installDir).filePath(QStringLiteral("models")),
-        QDir(appDir).filePath(QStringLiteral("human-parser/models"))
-    };
+    QStringList modelDirs;
+    modelDirs << modelDir;
+    if (userInstallOk)
+        modelDirs << QDir(installDir).filePath(QStringLiteral("models"));
+    modelDirs << QDir(appDir).filePath(QStringLiteral("human-parser/models"));
     QString chosenModelDir;
     QFileInfo model;
     QFileInfo manifest;
@@ -815,6 +957,7 @@ void HumanParserService::probeAvailability()
     }
 
     const bool canInstall = !available && !manifestUrl.isEmpty()
+                            && !m_manifestSha256.isEmpty()
                             && !installerScript().isEmpty();
     {
         QMutexLocker lock(&m_mutex);
