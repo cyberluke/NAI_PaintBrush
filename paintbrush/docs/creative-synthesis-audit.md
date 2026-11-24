@@ -118,7 +118,8 @@ count/bend/jitter, glow, bloom, shadow, hue, rims and the overlay amount.
   field and Voltage bolts at the compose target; commits keep the baked fields.
   The harness measures 30 ms for the live field at 859x1073 (static compose
   ~18 ms), and the preview dumps show the particles/arcs changing with the
-  pad's frame.
+  pad's frame. The in-app creative self-test passes with the live field: all
+  19 previews at 1440x1800 and the fashion fixture at 47% protection.
 
 ### 2.3 Linked duplication
 

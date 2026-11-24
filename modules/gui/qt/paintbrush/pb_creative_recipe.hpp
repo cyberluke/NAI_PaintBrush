@@ -1642,7 +1642,7 @@ inline QImage liveVectorOverlay(const CreativeVectorOverlay &spec,
                                    frame.hold ? 1.0f : 0.0f, frame.time });
     const float hue =
         spec.style == 1
-            ? state[creative::vector::Dest::ParticleHue] * 0.35f
+            ? state[creative::vector::Dest::ParticleHue] * 0.15f
             : (state[creative::vector::Dest::HueShift] - 0.5f) * 0.5f;
     QVector<QColor> palette;
     for (const QColor &c : spec.palette)
@@ -1654,7 +1654,9 @@ inline QImage liveVectorOverlay(const CreativeVectorOverlay &spec,
     out.fill(Qt::transparent);
     QPainter p(&out);
     p.setRenderHint(QPainter::Antialiasing, true);
-    p.setCompositionMode(QPainter::CompositionMode_Plus);
+    /* Keep the individual arc colours; Plus here pushed overlapping arcs to
+     * white before the final Screen blend. */
+    p.setCompositionMode(QPainter::CompositionMode_SourceOver);
 
     const float windScale = spec.style == 1 ? 2.2f : 2.0f;
     const QPointF wind(
@@ -1690,10 +1692,41 @@ inline QImage liveVectorOverlay(const CreativeVectorOverlay &spec,
         const QRectF sr(spec.subjectRect.x() * sx, spec.subjectRect.y() * sy,
                         spec.subjectRect.width() * sx,
                         spec.subjectRect.height() * sy);
-        const QPointF targetL(sr.left() + sr.width() * 0.10,
-                              sr.top() + sr.height() * 0.40);
-        const QPointF targetR(sr.right() - sr.width() * 0.10,
-                              sr.top() + sr.height() * 0.56);
+
+        /* Use the actual silhouette edge, not the padded cutout bounds, so the
+         * live bolts terminate where the baked bolts do. */
+        int leftX = -1, rightX = -1, leftY = 0, rightY = 0;
+        const int stride =
+            qMax(1, qMin(mask.width(), mask.height()) / 180);
+        for (int y = 0; y < mask.height(); y += stride)
+        {
+            const uchar *row = mask.constScanLine(y);
+            for (int x = 0; x < mask.width(); x += stride)
+            {
+                if (row[x] < 40)
+                    continue;
+                if (leftX < 0 || x < leftX)
+                {
+                    leftX = x;
+                    leftY = y;
+                }
+                if (x > rightX)
+                {
+                    rightX = x;
+                    rightY = y;
+                }
+            }
+        }
+        const QPointF targetL =
+            leftX >= 0
+                ? QPointF(leftX + target.width() * 0.004, leftY)
+                : QPointF(sr.left() + sr.width() * 0.14,
+                          sr.top() + sr.height() * 0.40);
+        const QPointF targetR =
+            rightX >= 0
+                ? QPointF(rightX - target.width() * 0.004, rightY)
+                : QPointF(sr.right() - sr.width() * 0.10,
+                          sr.top() + sr.height() * 0.56);
         const int boltCount = qBound(
             2,
             2 + int(std::lround(
@@ -1704,14 +1737,14 @@ inline QImage liveVectorOverlay(const CreativeVectorOverlay &spec,
         arc.core = QColor(255, 240, 250);
         arc.glowWidth =
             qMax(5.0f, float(target.height())
-                          * (0.008f
-                             + 0.012f
+                          * (0.007f
+                             + 0.010f
                                    * state[creative::vector::Dest::Glow]));
         arc.coreWidth = qMax(1.2f, float(target.height()) * 0.0026f);
         arc.displacement =
-            0.10f + 0.24f * state[creative::vector::Dest::ArcJitter];
+            0.08f + 0.18f * state[creative::vector::Dest::ArcJitter];
         arc.sparkCount =
-            48 + int(120.0f
+            36 + int(90.0f
                      * state[creative::vector::Dest::ParticleCount]);
         for (int i = 0; i < boltCount; ++i)
         {
