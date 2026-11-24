@@ -504,6 +504,11 @@ vlc_module_begin ()
             change_string_list( psz_sam_devices, psz_sam_devices_text )
     add_integer_with_range( "paintbrush-human-parser-class-probabilities", 0, 0, 1,
                             N_( "Export human parser class probabilities" ), nullptr )
+    add_string( "paintbrush-human-parser-manifest-url", NULL,
+                N_( "Fashion parser manifest URL" ),
+                N_( "URL of the human-parser asset manifest used by the "
+                    "on-demand installer. Empty disables in-app download; the "
+                    "post-installer can still be used." ) )
     add_bool( "paintbrush-matte-selftest", false, PB_MATTE_SELFTEST_TEXT,
               PB_MATTE_SELFTEST_LONGTEXT )
     add_bool( "paintbrush-creative-selftest", false,

@@ -650,6 +650,36 @@ Item {
             }
         }
 
+        /* On-demand post-installer: the app checks the user install at launch;
+         * if the parser is absent, this row downloads it through the bundled
+         * installer. The parser stays optional and the material falls back. */
+        RowLayout {
+            Layout.fillWidth: true
+            visible: root.creative.hasSubject
+                     && root.active.family === "Material"
+                     && !root.creative.fashionParserInstalled
+            spacing: VLCStyle.margin_xsmall
+
+            PadButton {
+                Layout.preferredWidth: VLCStyle.dp(152)
+                text: root.creative.fashionParserInstalling
+                          ? qsTr("Installing…")
+                          : qsTr("Get the fashion parser")
+                selected: false
+                enabledAction: root.creative.fashionParserCanInstall
+                               && !root.creative.fashionParserInstalling
+                onClicked: root.creative.installFashionParser()
+            }
+
+            Widgets.LabelExt {
+                Layout.fillWidth: true
+                text: root.creative.fashionParserInstallStatus
+                color: theme.fg.secondary
+                font.pixelSize: VLCStyle.fontSize_small
+                elide: Text.ElideRight
+            }
+        }
+
         /* ------------------------------------------------------ suggestion */
         Rectangle {
             Layout.fillWidth: true

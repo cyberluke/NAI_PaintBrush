@@ -24,6 +24,8 @@
 #include <QStringList>
 #include <QWaitCondition>
 
+class QProcess;
+
 #include <atomic>
 #include <deque>
 #include <memory>
@@ -88,6 +90,18 @@ public:
     QString unavailableReason() const;
     QString backendText() const;
 
+    /* Dynamic install / post-install support. The app checks the user-writable
+     * install directory (and the packaged app directory) on every launch; if
+     * the parser is missing and a manifest URL is configured, the Play Pad can
+     * run the bundled installer on demand. */
+    bool canInstall() const;
+    bool installing() const;
+    int installProgress() const;
+    QString installStatus() const;
+    QString installDir() const;
+    QString manifestUrl() const;
+    void installHumanParser();
+
     QString modelDir() const
     {
         QMutexLocker lock(&m_mutex);
@@ -131,6 +145,8 @@ signals:
     void availabilityChanged();
     void busyChanged(bool busy);
     void statusChanged(const QString &status);
+    void installProgressChanged(int percent, const QString &status);
+    void installFinished(bool ok, const QString &error);
 
 private:
     struct Job
@@ -148,6 +164,8 @@ private:
     void setBusy(bool busy);
     bool ensureRuntime(QString *error);
     void probeAvailability();
+    QString installerScript() const;
+    void setInstallStatus(const QString &status, int percent);
     void logInfo(const char *format, ...) const;
 
     vlc_object_t *m_obj = nullptr;
@@ -172,6 +190,16 @@ private:
     bool m_available = false;
     QString m_unavailableReason;
     QString m_backendText;
+
+    /* Installer state. The process and its path are GUI-thread objects; the
+     * worker never touches them. */
+    QString m_installDir;
+    QString m_manifestUrl;
+    bool m_canInstall = false;
+    bool m_installing = false;
+    int m_installProgress = 0;
+    QString m_installStatus;
+    QProcess *m_installProcess = nullptr;
 
     /* Worker-owned: configuration of the loaded session. Changing the model
      * directory or device marks the runtime stale; the worker unloads and

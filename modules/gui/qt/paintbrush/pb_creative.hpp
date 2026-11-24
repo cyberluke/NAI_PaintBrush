@@ -146,6 +146,16 @@ class PaintbrushCreative : public QObject
                WRITE setFashionProtection NOTIFY fashionProtectionChanged)
     Q_PROPERTY(QString humanParseStatus READ humanParseStatus
                NOTIFY humanParseStatusChanged)
+    Q_PROPERTY(bool fashionParserInstalled READ fashionParserInstalled
+               NOTIFY fashionParserInstallChanged)
+    Q_PROPERTY(bool fashionParserCanInstall READ fashionParserCanInstall
+               NOTIFY fashionParserInstallChanged)
+    Q_PROPERTY(bool fashionParserInstalling READ fashionParserInstalling
+               NOTIFY fashionParserInstallChanged)
+    Q_PROPERTY(int fashionParserInstallProgress READ fashionParserInstallProgress
+               NOTIFY fashionParserInstallChanged)
+    Q_PROPERTY(QString fashionParserInstallStatus READ fashionParserInstallStatus
+               NOTIFY fashionParserInstallChanged)
 
 public:
     explicit PaintbrushCreative(PaintbrushController *controller,
@@ -189,6 +199,14 @@ public:
     bool fashionProtection() const { return m_fashionProtection; }
     void setFashionProtection(bool enabled);
     QString humanParseStatus() const { return m_humanParseStatus; }
+    bool fashionParserInstalled() const;
+    bool fashionParserCanInstall() const;
+    bool fashionParserInstalling() const;
+    int fashionParserInstallProgress() const;
+    QString fashionParserInstallStatus() const;
+    /* On-demand download: the controller's parser service runs the bundled
+     * post-installer and reloads the runtime when it finishes. */
+    Q_INVOKABLE void installFashionParser();
 
     /* Frame for the image provider. Safe from any thread. */
     QImage previewImage() const;
@@ -246,6 +264,7 @@ signals:
     void commitProgressChanged();
     void fashionProtectionChanged();
     void humanParseStatusChanged();
+    void fashionParserInstallChanged();
     /* Emitted once per accepted parse when it finishes (ready or failed).
      * Used by the self-test wait helper; not needed by the pad. */
     void humanParseFinished(bool ok);

@@ -390,6 +390,33 @@ PaintbrushCreative::PaintbrushCreative(PaintbrushController *controller,
                     &PaintbrushCreative::onHumanParseReady);
             connect(parser, &HumanParserService::parseFailed, this,
                     &PaintbrushCreative::onHumanParseFailed);
+            connect(parser, &HumanParserService::availabilityChanged, this,
+                    [this]() {
+                        emit fashionParserInstallChanged();
+                        HumanParserService *service =
+                            m_controller ? m_controller->humanParser() : nullptr;
+                        if (service && service->available()
+                            && usesFashionProtection()
+                            && !m_subjectNative.isNull()
+                            && m_semanticProtection.isNull()
+                            && !m_humanParsePending)
+                            requestHumanParse();
+                    });
+            connect(parser, &HumanParserService::installProgressChanged, this,
+                    [this](int, const QString &) {
+                        emit fashionParserInstallChanged();
+                    });
+            connect(parser, &HumanParserService::installFinished, this,
+                    [this](bool ok, const QString &) {
+                        emit fashionParserInstallChanged();
+                        if (ok && !m_subjectNative.isNull())
+                        {
+                            m_semanticProtection = QImage();
+                            m_humanParsePending = false;
+                            m_humanParseRequest = 0;
+                            requestHumanParse();
+                        }
+                    });
         }
     }
 }
@@ -712,6 +739,51 @@ bool PaintbrushCreative::usesFashionProtection() const
     return def && def->family == QLatin1String("Material");
 }
 
+bool PaintbrushCreative::fashionParserInstalled() const
+{
+    HumanParserService *parser =
+        m_controller ? m_controller->humanParser() : nullptr;
+    return parser && parser->available();
+}
+
+bool PaintbrushCreative::fashionParserCanInstall() const
+{
+    HumanParserService *parser =
+        m_controller ? m_controller->humanParser() : nullptr;
+    return parser && parser->canInstall();
+}
+
+bool PaintbrushCreative::fashionParserInstalling() const
+{
+    HumanParserService *parser =
+        m_controller ? m_controller->humanParser() : nullptr;
+    return parser && parser->installing();
+}
+
+int PaintbrushCreative::fashionParserInstallProgress() const
+{
+    HumanParserService *parser =
+        m_controller ? m_controller->humanParser() : nullptr;
+    return parser ? parser->installProgress() : 0;
+}
+
+QString PaintbrushCreative::fashionParserInstallStatus() const
+{
+    HumanParserService *parser =
+        m_controller ? m_controller->humanParser() : nullptr;
+    return parser ? parser->installStatus() : QString();
+}
+
+void PaintbrushCreative::installFashionParser()
+{
+    HumanParserService *parser =
+        m_controller ? m_controller->humanParser() : nullptr;
+    if (!parser)
+        return;
+    parser->installHumanParser();
+    emit fashionParserInstallChanged();
+}
+
 void PaintbrushCreative::setHumanParseStatus(const QString &text)
 {
     if (m_humanParseStatus == text)
@@ -745,13 +817,23 @@ void PaintbrushCreative::requestHumanParse()
     }
     if (!parser->available())
     {
+        const bool canInstall = parser->canInstall();
         clearHumanMasks();
         const QString reason = parser->unavailableReason();
-        setHumanParseStatus(
-            reason.isEmpty()
-                ? QStringLiteral("Fashion parse unavailable — styling the "
-                                 "whole subject.")
-                : QStringLiteral("Fashion parse unavailable: %1").arg(reason));
+        if (canInstall)
+        {
+            setHumanParseStatus(QStringLiteral(
+                "Fashion parser is not installed. Tap Get the fashion parser "
+                "to download it; the material will then stay on the outfit."));
+        }
+        else
+        {
+            setHumanParseStatus(
+                reason.isEmpty()
+                    ? QStringLiteral("Fashion parse unavailable — styling the "
+                                     "whole subject.")
+                    : QStringLiteral("Fashion parse unavailable: %1").arg(reason));
+        }
         return;
     }
 

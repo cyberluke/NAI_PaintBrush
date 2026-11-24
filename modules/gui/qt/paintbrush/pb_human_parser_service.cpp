@@ -16,6 +16,8 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QProcess>
+#include <QStandardPaths>
 
 #include <cstdarg>
 #include <cstdio>
@@ -99,10 +101,34 @@ void HumanParserService::configure(vlc_object_t *obj)
 {
     m_obj = obj;
 
+    const QString appDir = QCoreApplication::applicationDirPath();
+    m_installDir = QDir(QStandardPaths::writableLocation(
+                            QStandardPaths::GenericDataLocation))
+                       .filePath(QStringLiteral("NAI Paintbrush/human-parser"));
+    m_manifestUrl = obj
+        ? pbConfigString(obj, "paintbrush-human-parser-manifest-url").trimmed()
+        : QString();
+
     const QString configured = obj
         ? pbConfigString(obj, "paintbrush-human-parser-model-dir").trimmed()
         : QString();
-    m_modelDir = configured.isEmpty() ? defaultModelDir() : configured;
+    const QString userModels = QDir(m_installDir).filePath(QStringLiteral("models"));
+    const QString appModels = QDir(appDir).filePath(QStringLiteral("human-parser/models"));
+    if (!configured.isEmpty())
+        m_modelDir = configured;
+    else if (QFileInfo::exists(modelFileFor(userModels)))
+        m_modelDir = userModels;
+    else
+        m_modelDir = appModels;
+
+    /* The shim resolves the runtime leaf from this environment variable. Prefer
+     * the user-installed copy, then the packaged app copy. */
+    const QString userRuntime =
+        QDir(m_installDir).filePath(QStringLiteral("pb_human_parser_cuda.dll"));
+    const QString chosenRuntime = QFileInfo::exists(userRuntime)
+                                      ? m_installDir
+                                      : QDir(appDir).filePath(QStringLiteral("human-parser"));
+    qputenv("PB_HUMAN_PARSER_DIR", chosenRuntime.toUtf8());
 
     const QString device = obj
         ? pbConfigString(obj, "paintbrush-human-parser-device").trimmed().toLower()
@@ -153,6 +179,211 @@ QString HumanParserService::backendText() const
         return m_backendText;
     return m_available ? pbTr("human parser runtime ready")
                        : m_unavailableReason;
+}
+
+bool HumanParserService::canInstall() const
+{
+    QMutexLocker lock(&m_mutex);
+    return m_canInstall;
+}
+
+bool HumanParserService::installing() const
+{
+    QMutexLocker lock(&m_mutex);
+    return m_installing;
+}
+
+int HumanParserService::installProgress() const
+{
+    QMutexLocker lock(&m_mutex);
+    return m_installProgress;
+}
+
+QString HumanParserService::installStatus() const
+{
+    QMutexLocker lock(&m_mutex);
+    return m_installStatus;
+}
+
+QString HumanParserService::installDir() const
+{
+    QMutexLocker lock(&m_mutex);
+    return m_installDir;
+}
+
+QString HumanParserService::manifestUrl() const
+{
+    QMutexLocker lock(&m_mutex);
+    return m_manifestUrl;
+}
+
+QString HumanParserService::installerScript() const
+{
+    const QString app = QCoreApplication::applicationDirPath();
+    if (app.isEmpty())
+        return {};
+    const QStringList candidates = {
+        QDir(app).filePath(QStringLiteral("scripts/pb-install-human-parser.ps1")),
+        QDir(app).filePath(QStringLiteral("../scripts/pb-install-human-parser.ps1")),
+        QDir(app).filePath(QStringLiteral("../../scripts/pb-install-human-parser.ps1")),
+        QDir(app).filePath(QStringLiteral("../../../scripts/pb-install-human-parser.ps1"))
+    };
+    for (const QString &candidate : candidates)
+    {
+        if (QFileInfo::exists(candidate))
+            return QFileInfo(candidate).canonicalFilePath();
+    }
+    return {};
+}
+
+void HumanParserService::setInstallStatus(const QString &status, int percent)
+{
+    percent = qBound(0, percent, 100);
+    {
+        QMutexLocker lock(&m_mutex);
+        m_installStatus = status;
+        m_installProgress = percent;
+    }
+    emit installProgressChanged(percent, status);
+}
+
+void HumanParserService::installHumanParser()
+{
+    {
+        QMutexLocker lock(&m_mutex);
+        if (m_installing)
+            return;
+        m_installing = true;
+        m_installProgress = 0;
+        m_installStatus = pbTr("Preparing the fashion parser download...");
+    }
+    emit installProgressChanged(0, installStatus());
+
+    QString manifestUrl;
+    QString installDir;
+    {
+        QMutexLocker lock(&m_mutex);
+        manifestUrl = m_manifestUrl;
+        installDir = m_installDir;
+    }
+    if (manifestUrl.isEmpty())
+    {
+        {
+            QMutexLocker lock(&m_mutex);
+            m_installing = false;
+            m_installStatus = pbTr(
+                "No parser manifest URL is configured; set "
+                "paintbrush-human-parser-manifest-url or use the post-installer.");
+        }
+        emit installProgressChanged(0, installStatus());
+        emit installFinished(false, installStatus());
+        return;
+    }
+    const QString script = installerScript();
+    if (script.isEmpty())
+    {
+        {
+            QMutexLocker lock(&m_mutex);
+            m_installing = false;
+            m_installStatus = pbTr(
+                "The bundled post-installer script was not found next to the app.");
+        }
+        emit installProgressChanged(0, installStatus());
+        emit installFinished(false, installStatus());
+        return;
+    }
+
+    m_installProcess = new QProcess(this);
+    m_installProcess->setProcessChannelMode(QProcess::MergedChannels);
+    connect(m_installProcess, &QProcess::readyReadStandardOutput, this,
+            [this]() {
+                const QString output = QString::fromUtf8(
+                    m_installProcess->readAllStandardOutput());
+                const QStringList lines =
+                    output.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+                for (const QString &raw : lines)
+                {
+                    const QString line = raw.trimmed();
+                    if (line.startsWith(QLatin1String("PBHP-PROGRESS ")))
+                    {
+                        const QString rest = line.mid(14);
+                        const int space = rest.indexOf(QLatin1Char(' '));
+                        bool ok = false;
+                        const int percent =
+                            (space > 0 ? rest.left(space) : rest).toInt(&ok);
+                        if (ok)
+                        {
+                            setInstallStatus(
+                                space > 0 ? rest.mid(space + 1) : QString(),
+                                percent);
+                        }
+                    }
+                    else if (line.startsWith(QLatin1String("PBHP-ERROR ")))
+                    {
+                        setInstallStatus(line.mid(11), installProgress());
+                    }
+                }
+            });
+    connect(m_installProcess, &QProcess::errorOccurred, this,
+            [this](QProcess::ProcessError error) {
+                if (error != QProcess::FailedToStart)
+                    return;
+                {
+                    QMutexLocker lock(&m_mutex);
+                    m_installing = false;
+                    m_installStatus =
+                        pbTr("Could not start the fashion parser installer.");
+                }
+                emit installProgressChanged(0, installStatus());
+                emit installFinished(false, installStatus());
+                m_installProcess->deleteLater();
+                m_installProcess = nullptr;
+            });
+    connect(m_installProcess,
+            QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+            [this](int exitCode, QProcess::ExitStatus status) {
+                const bool ok = status == QProcess::NormalExit && exitCode == 0;
+                if (ok)
+                {
+                    human_parser::sharedRuntime().unload();
+                    m_loadedModelDir.clear();
+                    m_loadedDeviceTier = -1;
+                    probeAvailability();
+                    setInstallStatus(
+                        pbTr("Fashion parser installed. It will be used for "
+                             "the next parse."),
+                        100);
+                }
+                else
+                {
+                    QString message;
+                    {
+                        QMutexLocker lock(&m_mutex);
+                        m_installing = false;
+                        message = m_installStatus.isEmpty()
+                                      ? pbTr("The fashion parser installer failed.")
+                                      : m_installStatus;
+                    }
+                    emit installFinished(false, message);
+                }
+                {
+                    QMutexLocker lock(&m_mutex);
+                    m_installing = false;
+                }
+                if (ok)
+                    emit installFinished(true, QString());
+                m_installProcess->deleteLater();
+                m_installProcess = nullptr;
+            });
+
+    m_installProcess->start(
+        QStringLiteral("pwsh"),
+        { QStringLiteral("-NoProfile"), QStringLiteral("-ExecutionPolicy"),
+          QStringLiteral("Bypass"), QStringLiteral("-File"), script,
+          QStringLiteral("-ManifestUrl"), manifestUrl,
+          QStringLiteral("-InstallDir"), installDir,
+          QStringLiteral("-AppDir"),
+          QCoreApplication::applicationDirPath() });
 }
 
 void HumanParserService::setModelDir(const QString &dir)
@@ -522,47 +753,90 @@ void HumanParserService::probeAvailability()
      * real runtime probe and model load on the first parse; a broken runtime
      * then surfaces as an honest parseFailed instead of a frozen startup. */
     QString modelDir;
+    QString installDir;
+    QString manifestUrl;
     {
         QMutexLocker lock(&m_mutex);
         modelDir = m_modelDir;
+        installDir = m_installDir;
+        manifestUrl = m_manifestUrl;
     }
     /* Do NOT call Runtime::dllPath() here: it calls ensureApi(), which loads
      * pb_human_parser_cuda.dll and its ONNX Runtime/CUDA closure. That is a
      * worker task on first use, not a GUI-thread startup task. */
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QStringList runtimeDirs = {
+        installDir,
+        QDir(appDir).filePath(QStringLiteral("human-parser"))
+    };
     QString runtimeDir;
-    const QByteArray envDir = qgetenv("PB_HUMAN_PARSER_DIR");
-    if (!envDir.isEmpty())
-        runtimeDir = QString::fromUtf8(envDir);
-    else if (!QCoreApplication::applicationDirPath().isEmpty())
-        runtimeDir = QDir(QCoreApplication::applicationDirPath())
-                         .filePath(QStringLiteral("human-parser"));
-    const QFileInfo runtime(
-        QDir(runtimeDir).filePath(QStringLiteral("pb_human_parser_cuda.dll")));
-    const bool dllPresent = runtime.exists();
-    const QFileInfo model(modelFileFor(modelDir));
-    const QFileInfo manifest(manifestFileFor(modelDir));
+    bool dllPresent = false;
+    for (const QString &candidate : runtimeDirs)
+    {
+        const QFileInfo runtime(
+            QDir(candidate).filePath(QStringLiteral("pb_human_parser_cuda.dll")));
+        if (runtime.exists())
+        {
+            runtimeDir = candidate;
+            dllPresent = true;
+            break;
+        }
+    }
+
+    const QStringList modelDirs = {
+        modelDir,
+        QDir(installDir).filePath(QStringLiteral("models")),
+        QDir(appDir).filePath(QStringLiteral("human-parser/models"))
+    };
+    QString chosenModelDir;
+    QFileInfo model;
+    QFileInfo manifest;
+    for (const QString &candidate : modelDirs)
+    {
+        const QFileInfo candidateModel(modelFileFor(candidate));
+        const QFileInfo candidateManifest(manifestFileFor(candidate));
+        if (candidateModel.exists() && candidateManifest.exists())
+        {
+            chosenModelDir = candidate;
+            model = candidateModel;
+            manifest = candidateManifest;
+            break;
+        }
+    }
+    const bool available = dllPresent && !chosenModelDir.isEmpty();
 
     QString reason;
     if (!dllPresent)
         reason = pbTr("human parser runtime is not installed");
-    else if (!model.exists())
+    else if (chosenModelDir.isEmpty())
     {
         reason = QStringLiteral("human parser model not found: %1")
-                     .arg(model.filePath());
+                     .arg(modelFileFor(modelDir));
     }
-    else if (!manifest.exists())
-    {
-        reason = QStringLiteral("human parser manifest not found: %1")
-                     .arg(manifest.filePath());
-    }
-    const bool available = dllPresent && model.exists() && manifest.exists();
 
+    const bool canInstall = !available && !manifestUrl.isEmpty()
+                            && !installerScript().isEmpty();
     {
         QMutexLocker lock(&m_mutex);
         m_available = available;
+        if (available)
+            m_modelDir = chosenModelDir;
+        m_canInstall = canInstall;
         m_backendText.clear();
         m_unavailableReason = available ? QString() : reason;
+        if (!available && canInstall && !m_installing)
+        {
+            m_installStatus = pbTr(
+                "Fashion parser is not installed. Download it to keep "
+                "materials on the outfit.");
+        }
+        else if (!available && m_installStatus.isEmpty())
+        {
+            m_installStatus = m_unavailableReason;
+        }
     }
+    if (available)
+        qputenv("PB_HUMAN_PARSER_DIR", runtimeDir.toUtf8());
     emit availabilityChanged();
 }
 

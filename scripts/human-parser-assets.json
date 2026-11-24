@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "version": "1.0.0",
+  "bundle": {
+    "url": "https://example.invalid/nai-paintbrush/fashn-human-parser-bundle.zip",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "size": 0
+  },
+  "files": {
+    "pb_human_parser_cuda.dll": {
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "models/fashn-human-parser.onnx": {
+      "sha256": "46a413ba51e331d4dfb8c103dbcd9319e0d941ef00ca03e510295b6b2ba81b82"
+    },
+    "models/manifest.json": {
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  }
+}
