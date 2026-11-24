@@ -253,12 +253,33 @@ The run is archived at
 This closes the controller decode + recipe wiring with real video; creating the
 track through the live `TrackingService` UI is still the remaining step.
 
+### 2.9 Live TrackingService acceptance
+
+`scripts/pb-creative-live-track.ps1` starts a real `TrackingService` track from
+the NewJeans clip at seed 64320 ms, using the real SAM3 mask from the harness
+(960x540, scaled to the 3840x2160 seed frame) and SAM3 GPU. The run passed:
+
+- **6 propagated keyframes with real ordered PTS** 64320..64645 ms
+- **6 real ordered poses** through `collectCreativePoses(6)`
+- `createPastelLineup()` adds **+8 layers**, one undo
+- `createMotionEcho()` adds **+8 layers**, one undo
+- **RESULT: PASS**
+
+This also exposed and fixed a real seed-order bug: libvlc seeks to the
+preceding GOP keyframe (64085 ms) and tracking emitted a propagated pose before
+its 64320 ms seed. `SequentialVideoSource::ensurePlayer()` now steps forward
+until the decoder reaches the seed PTS, so the track never runs backwards.
+
+Report: `paintbrush/docs/creative-synthesis-assets/live-track-selftest-report.txt`.
+The test supplies a real seed mask; clicking Object Select in the UI to produce
+that seed at runtime is still a manual UI step.
+
 ## 3. Coverage against the spec
 
 | Spec area | Status | Notes |
 |---|---|---|
 | 12.1 live stage, real pixels, one composition | **Done** | Preview is the commit's pieces at preview scale, not a mock. |
-| 12.1 large stage / pan / layers / Before-After | **Partial** | Before/After compare is live and the stage now zooms 100–300% with drag pan and reset; the preview is still the fitted 544x680 composite and there is no full layer panel. |
+| 12.1 large stage / pan / layers / Before-After | **Partial** | Whole-look Before/After, stage zoom 100–300% with drag pan, and a press-and-hold selected-layer/group compare on the main canvas. The preview is still the fitted 544x680 composite and there is no full layer panel. |
 | 12.2 graphic systems (recolor, rim, halftone, arcs, sheen, silhouettes, typography) | **Partial** | Recolor, rim, halftone, arcs, sheen, bokeh, halftone, ink, butterflies, kaleidoscope exist. No typography or independent silhouette library. |
 | 12.3 Neon Idol reference | **Done (first pass)** | Electric blue/pink stage, oversized echo, halftone, bokeh, rim split, scanlines. |
 | 12.3 Sticker Forge reference | **Done (first pass)** | Die-cut white/colour bands, backing card, shadow, gloss, confetti, sparkles. |
@@ -270,7 +291,7 @@ track through the live `TrackingService` UI is still the remaining step.
 | 12.7 Scene Forge, Ink Creature family, Motion Calligraphy | **Done** | Scene Forge, Auto Splatter, Ink Creature, Motion Echo, true contour calligraphy (`addCreativeCalligraphy`, editable native vector layer) and editable agent strokes shipped. The broader rigged scene-layer family is still pending. |
 | 12.9 performance must become real layers, one undo | **Done** | Verified. |
 | 12.10 save / reopen / continue editing the performance | **Done** | Metadata includes group/source; Resume restores patch/seed/pad and replaces the old group in one undo. Save→reload→export verified in the self-test. |
-| 12.11 UX at rest / live / after creation | **Partial** | Idle shimmer, live stage, Before/After, suggestion, metrics, stage zoom/pan, recent-look rail with inline rename and one-undo delete. No full performance browser. |
+| 12.11 UX at rest / live / after creation | **Partial** | Idle shimmer, live stage, Before/After, suggestion, metrics, stage zoom/pan, recent-look rail and a Lookbook browser with resume/rename/delete. The Lookbook has no thumbnails yet. |
 | Slice A end-to-end | **Done** | Keep → chooser → Neon/Sticker → pad → record → Make it real → suggestion → undo. Verified with the synthetic fixture and a real GUI commit. |
 | Slice B (Pastel Stage, Lineup, generic smart duplicate) | **Done** | Pastel Stage + Pastel Lineup + linked presets. |
 | Slice C (Nocturne, floral/butterfly/scene layer family) | **Partial** | Nocturne shipped; broader scene family pending. |
@@ -279,7 +300,7 @@ track through the live `TrackingService` UI is still the remaining step.
 | Slice F (beat/audio energy) | **Not done** | — |
 | Slice G (subject awareness / multi-subject) | **Partial** | Subject picking understands layers/roles; no automatic face/garment graph. |
 | Slice H (Photo Regime H / dark stage / Auto Splatter / Stage mode) | **Partial** | Auto Splatter and Stage Door are real recipes; Photo Regime H and the rigged Stage mode are not wired. |
-| Slice I (compact workflow) | **Partial** | Keep → pad → commit → resume/reuse with a recent-look rail, inline rename, one-undo delete and stage zoom/pan. No full performance browser. |
+| Slice I (compact workflow) | **Partial** | Keep → pad → commit → resume/reuse with a recent-look rail, Lookbook browser, inline rename, one-undo delete and stage zoom/pan. No per-look thumbnails or full layer panel. |
 | OpenFill Remove/Fill/Expand | **Partial** | Remove object, generative fill and replace background already exist behind the image provider. Expand is now native: `expandCanvas(percent)` grows the canvas on every side, the paper surface fills the margin, layers shift and one undo restores the original canvas. No generative outpainting provider was configured in this test. |
 
 ---
@@ -288,12 +309,10 @@ track through the live `TrackingService` UI is still the remaining step.
 
 These are the things a reviewer should not assume are finished:
 
-1. **Tracked-pose Lineup/Echo needs a live TrackingService UI track.** The
-   controller pose path and both recipes now pass an opt-in real-video test
-   (3 exact PTS, Pastel +6, Motion Echo +5, one undo), and the shared selection
-   helper is covered with real frames/masks; the test builds its own track with
-   a synthetic mask. What remains is creating that track through the live
-   `TrackingService` UI instead of a test-constructed `ObjectTrack`.
+1. **Runtime UI object-selection seed is still manual.** The live
+   `TrackingService` path now passes with real SAM3 propagation and ordered PTS
+   (6 poses, recipes, one undo), but the acceptance supplies the seed mask from
+   the harness instead of clicking Object Select to create it in the app.
 2. **Scene Forge, Auto Splatter and Stage Door are shipped, but Photo Regime H,
    the rigged Stage mode and the broader scene-layer family are still missing.**
 3. **Agent strokes are deterministic/offline, not model-planned.** The assistant
@@ -305,9 +324,9 @@ These are the things a reviewer should not assume are finished:
    1440x1800 canvas; stage pan/zoom works on that preview, but there is no
    4K/HDR 60 fps claim, no GPU effect pass, no high-resolution detail preview
    and no full layer panel.
-5. **The recent-look rail is read/resume/rename/delete.** It lists committed
-   groups, resumes one, renames its label inline and deletes it with one undo.
-   There is no full performance browser.
+5. **The recent-look rail is read/resume/rename/delete, and the Lookbook
+   browser lists every look.** It has no thumbnails because the creative image
+   provider exposes only the live composite, not a group-scoped image.
 6. **OpenFill is native for Expand and provider-gated for Remove/Fill.** Remove
    object, generative fill and replace background already exist behind the image
    provider. `expandCanvas(percent)` grows the canvas and the paper surface fills

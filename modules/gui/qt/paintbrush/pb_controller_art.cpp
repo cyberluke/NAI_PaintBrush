@@ -24,10 +24,13 @@
 #include <QBuffer>
 #include <QDateTime>
 #include <QDir>
+#include <QElapsedTimer>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
 #include <QPainter>
 #include <QStandardPaths>
+#include <QTimer>
 #include <QUrl>
 #include <algorithm>
 #include <cmath>
@@ -1844,6 +1847,440 @@ QString PaintbrushController::runCreativeSelfTest()
             m_document.setTracks(oldTracks);
             setSelectedTrackId(oldSelected);
         }
+    }
+
+    /* Opt-in LIVE tracking acceptance (PB_CREATIVE_LIVE_TRACK_VIDEO): start a
+     * real TrackingService run from a real video frame through the same
+     * asynchronous controller path trackObject() uses, wait for completion,
+     * verify the persisted ObjectTrack, then run collectCreativePoses(),
+     * Pastel Lineup and Motion Echo with one-undo checks. Dormant unless the
+     * env var is set. PB_CREATIVE_LIVE_TRACK_SEED_MASK supplies a real SAM3
+     * seed mask (e.g. the harness mask for 64320 ms); without it keyframe 0
+     * is a clearly labelled synthetic Grayscale8 ellipse. The propagated
+     * keyframes are real SAM3 output in both cases. */
+    const QString liveTrackVideo =
+        qEnvironmentVariable("PB_CREATIVE_LIVE_TRACK_VIDEO");
+    if (!liveTrackVideo.isEmpty())
+    {
+        const auto runLiveTrackAcceptance = [&]() {
+            const QFileInfo videoInfo(liveTrackVideo);
+            if (!videoInfo.exists())
+            {
+                note(QStringLiteral("FAIL: live-track video not found: %1")
+                         .arg(liveTrackVideo));
+                return;
+            }
+            if (!m_tracking.isConfigured() || !m_tracking.isAvailable())
+            {
+                /* the env var is an explicit acceptance request: a missing
+                 * backend must fail the run, never pass it silently */
+                note(QStringLiteral("FAIL: live tracking unavailable (%1)")
+                         .arg(m_tracking.unavailableReason()));
+                return;
+            }
+            if (m_tracking.isTracking())
+            {
+                note(QStringLiteral("FAIL: live track: a tracking run is "
+                                    "already active"));
+                return;
+            }
+
+            const QString mrl =
+                QUrl::fromLocalFile(videoInfo.absoluteFilePath()).toString();
+            const qint64 requestedSeedPts = 64320;
+            const DecodedFrame seed =
+                m_editSource.request(FrameRef{ mrl, {}, requestedSeedPts });
+            if (!seed.ok())
+            {
+                note(QStringLiteral("FAIL: live-track seed decode at %1 ms "
+                                    "(actual %2 ms)")
+                         .arg(requestedSeedPts).arg(seed.ptsMs));
+                return;
+            }
+            /* Seed the tracker at the frame's ACTUAL PTS, not the requested
+             * sampling time: the sequential decoder's first propagated frame
+             * must be strictly after the seed keyframe. */
+            const qint64 seedPts = seed.ptsMs;
+
+            QImage seedMask;
+            bool syntheticSeed = true;
+            QString seedLabel;
+            const QString seedMaskPath =
+                qEnvironmentVariable("PB_CREATIVE_LIVE_TRACK_SEED_MASK");
+            if (!seedMaskPath.isEmpty())
+            {
+                const QImage loadedMask =
+                    QFileInfo::exists(seedMaskPath) ? QImage(seedMaskPath)
+                                                    : QImage();
+                if (loadedMask.isNull())
+                {
+                    note(QStringLiteral("FAIL: live-track seed mask cannot be "
+                                        "loaded: %1").arg(seedMaskPath));
+                    return;
+                }
+                QImage normalized =
+                    loadedMask.convertToFormat(QImage::Format_Grayscale8);
+                if (normalized.size() != seed.image.size())
+                {
+                    /* The harness mask is a 960x540 segmentation of this
+                     * frame while the edit source decodes the native video
+                     * size (3840x2160). Accept only a proportional mask and
+                     * state the rescale; a crop from another geometry is a
+                     * mistake, not a mask. */
+                    if (qint64(normalized.width()) * seed.image.height()
+                        != qint64(normalized.height()) * seed.image.width())
+                    {
+                        note(QStringLiteral("FAIL: live-track seed mask "
+                                            "geometry %1x%2 does not match "
+                                            "the seed frame %3x%4")
+                                 .arg(normalized.width()).arg(normalized.height())
+                                 .arg(seed.image.width())
+                                 .arg(seed.image.height()));
+                        return;
+                    }
+                    const QSize maskSize(normalized.width(),
+                                         normalized.height());
+                    normalized = normalized.scaled(
+                        seed.image.size(), Qt::IgnoreAspectRatio,
+                        Qt::FastTransformation);
+                    normalized =
+                        normalized.convertToFormat(QImage::Format_Grayscale8);
+                    seedLabel =
+                        QStringLiteral("real mask %1 (%2x%3 scaled to %4x%5)")
+                            .arg(seedMaskPath)
+                            .arg(maskSize.width()).arg(maskSize.height())
+                            .arg(seed.image.width())
+                            .arg(seed.image.height());
+                }
+                else
+                {
+                    seedLabel =
+                        QStringLiteral("real mask %1").arg(seedMaskPath);
+                }
+                seedMask = normalized;
+                syntheticSeed = false;
+            }
+            if (seedMask.isNull())
+            {
+                QImage painted(seed.image.size(), QImage::Format_ARGB32);
+                painted.fill(Qt::transparent);
+                QPainter maskPainter(&painted);
+                maskPainter.setRenderHint(QPainter::Antialiasing, true);
+                maskPainter.setPen(Qt::NoPen);
+                maskPainter.setBrush(Qt::white);
+                maskPainter.drawEllipse(
+                    QRectF(painted.width() * 0.18, painted.height() * 0.08,
+                           painted.width() * 0.64, painted.height() * 0.84));
+                maskPainter.end();
+                seedMask = painted.convertToFormat(QImage::Format_Grayscale8);
+                seedLabel = QStringLiteral(
+                    "synthetic Grayscale8 ellipse (keyframe 0 is "
+                    "seeded-synthetic; propagated keyframes are real SAM3)");
+            }
+            if (seedMask.isNull() || seedMask.size() != seed.image.size()
+                || seedMask.format() != QImage::Format_Grayscale8)
+            {
+                note(QStringLiteral("FAIL: live-track seed mask must be "
+                                    "Grayscale8 at the seed frame size (%1x%2), "
+                                    "got %3x%4")
+                         .arg(seed.image.width()).arg(seed.image.height())
+                         .arg(seedMask.width()).arg(seedMask.height()));
+                return;
+            }
+
+            /* a positive prompt point on the mask: the centroid, or the
+             * nearest mask pixel when the centroid falls into a hole */
+            const auto positivePoint = [](const QImage &mask) {
+                const int w = mask.width();
+                const int h = mask.height();
+                qint64 sx = 0, sy = 0, count = 0;
+                for (int y = 0; y < h; ++y)
+                {
+                    const uchar *line = mask.constScanLine(y);
+                    for (int x = 0; x < w; ++x)
+                        if (line[x] >= 128)
+                        {
+                            sx += x;
+                            sy += y;
+                            ++count;
+                        }
+                }
+                if (count == 0)
+                    return QPointF(-1, -1);
+                const qreal cx = qreal(sx) / qreal(count);
+                const qreal cy = qreal(sy) / qreal(count);
+                const int px = qBound(0, int(cx), w - 1);
+                const int py = qBound(0, int(cy), h - 1);
+                if (mask.constScanLine(py)[px] >= 128)
+                    return QPointF(cx, cy);
+                qint64 best = -1;
+                int bx = px, by = py;
+                for (int y = 0; y < h; ++y)
+                {
+                    const uchar *line = mask.constScanLine(y);
+                    for (int x = 0; x < w; ++x)
+                    {
+                        if (line[x] < 128)
+                            continue;
+                        const qint64 dx = x - px;
+                        const qint64 dy = y - py;
+                        const qint64 dist = dx * dx + dy * dy;
+                        if (best < 0 || dist < best)
+                        {
+                            best = dist;
+                            bx = x;
+                            by = y;
+                        }
+                    }
+                }
+                return QPointF(qreal(bx) + 0.5, qreal(by) + 0.5);
+            };
+            const QPointF livePoint = positivePoint(seedMask);
+            if (livePoint.x() < 0)
+            {
+                note(QStringLiteral("FAIL: live-track seed mask is empty"));
+                return;
+            }
+
+            note(QStringLiteral("live-track seed: %1").arg(seedLabel));
+
+            const QVector<ObjectTrack> oldTracks = m_document.tracks();
+            const int oldSelected = m_selectedTrackId;
+
+            /* pre-populate the pending track exactly like trackObject(), so
+             * onTrackKeyframe() keeps the real masks and onTrackFinished()
+             * publishes the track into the document */
+            m_pendingTrack.clear();
+            ObjectTrack pending;
+            pending.id = m_trackIdCounter++;
+            pending.sourceMRL = mrl;
+            pending.startMs = seedPts;
+            pending.complete = false;
+            m_pendingTrack.append(pending);
+            const int liveTrackId = pending.id;
+
+            QEventLoop wait;
+            bool finished = false;
+            bool finishedComplete = false;
+            bool finishedCancelled = false;
+            QString finishedError;
+            const QMetaObject::Connection finishConn = QObject::connect(
+                &m_tracking, &TrackingService::trackFinished, &wait,
+                [&](bool complete, bool cancelled, const QString &error) {
+                    finished = true;
+                    finishedComplete = complete;
+                    finishedCancelled = cancelled;
+                    finishedError = error;
+                    wait.quit();
+                });
+            const QMetaObject::Connection progressConn = QObject::connect(
+                &m_tracking, &TrackingService::progressChanged, &wait,
+                [&](int done, int total) {
+                    note(QStringLiteral("live-track progress: %1/%2")
+                             .arg(done).arg(total));
+                });
+            QTimer timeout;
+            timeout.setSingleShot(true);
+            QObject::connect(&timeout, &QTimer::timeout, &wait,
+                             &QEventLoop::quit);
+            /* hard observation bound for the nested wait (real CPU SAM3 can
+             * take minutes per propagated frame); env override for slower
+             * machines. This is not a build timeout: the service remains
+             * asynchronous and a hit here is reported as a failed run. */
+            int waitMs = 30 * 60 * 1000;
+            bool waitOverrideOk = false;
+            const int waitOverride = qEnvironmentVariableIntValue(
+                "PB_CREATIVE_LIVE_TRACK_TIMEOUT_MS", &waitOverrideOk);
+            if (waitOverrideOk && waitOverride > 0)
+                waitMs = waitOverride;
+            timeout.start(waitMs);
+            QElapsedTimer clock;
+            clock.start();
+
+            m_tracking.startTrack(&m_sequentialSource, mrl, seed.image,
+                                  seedMask, { livePoint },
+                                  TrackingService::TRACK_FORWARD, 6, seedPts);
+            emit trackingStateChanged();
+            note(QStringLiteral("live-track: started id=%1 seed=%2 ms")
+                     .arg(liveTrackId).arg(seedPts));
+            if (!finished)
+                wait.exec();
+            timeout.stop();
+            QObject::disconnect(finishConn);
+            QObject::disconnect(progressConn);
+
+            const auto restoreDocument = [&]() {
+                m_pendingTrack.clear();
+                /* the discarded track's sticker frames are no longer
+                 * addressable from the document; do not leave 4K frames in
+                 * the cache for a track that does not exist */
+                m_stickerFrames.clear();
+                m_document.setTracks(oldTracks);
+                setSelectedTrackId(oldSelected);
+            };
+
+            if (!finished)
+            {
+                note(QStringLiteral("FAIL: live track timed out after %1 s "
+                                    "(progress %2/%3, status '%4')")
+                         .arg(waitMs / 1000)
+                         .arg(m_tracking.progressDone())
+                         .arg(m_tracking.progressTotal())
+                         .arg(m_tracking.statusText()));
+                m_tracking.cancel();
+                restoreDocument();
+                return;
+            }
+
+            const double elapsedS = clock.elapsed() / 1000.0;
+            if (!finishedComplete || finishedCancelled
+                || !finishedError.isEmpty())
+            {
+                note(QStringLiteral("FAIL: live track finished complete=%1 "
+                                    "cancelled=%2 error='%3' (%4 s)")
+                         .arg(finishedComplete ? 1 : 0)
+                         .arg(finishedCancelled ? 1 : 0)
+                         .arg(finishedError)
+                         .arg(elapsedS, 0, 'f', 1));
+                restoreDocument();
+                return;
+            }
+
+            ObjectTrack liveTrack;
+            bool found = false;
+            for (const ObjectTrack &candidate : m_document.tracks())
+                if (candidate.id == liveTrackId)
+                {
+                    liveTrack = candidate;
+                    found = true;
+                    break;
+                }
+            if (!found)
+            {
+                note(QStringLiteral("FAIL: live track finished but track id %1 "
+                                    "is missing from the document")
+                         .arg(liveTrackId));
+                restoreDocument();
+                return;
+            }
+
+            const int keyframeCount = liveTrack.keyframes.size();
+            bool masks8Bit = true;
+            bool ptsOrdered = keyframeCount > 0
+                              && liveTrack.keyframes.first().timeMs == seedPts;
+            int changedMasks = 0;
+            for (int i = 0; i < keyframeCount; ++i)
+            {
+                const TrackKeyframe &kf = liveTrack.keyframes.at(i);
+                if (kf.mask.isNull() || kf.mask.depth() != 8
+                    || kf.mask.size() != seed.image.size())
+                    masks8Bit = false;
+                if (i > 0 && kf.timeMs <= liveTrack.keyframes.at(i - 1).timeMs)
+                    ptsOrdered = false;
+                if (i > 0 && !kf.mask.isNull() && kf.mask != seedMask)
+                    ++changedMasks;
+            }
+
+            if (!liveTrack.complete)
+                note(QStringLiteral("FAIL: live track is not complete"));
+            if (keyframeCount < 2)
+                note(QStringLiteral("FAIL: live track has %1 keyframe(s) "
+                                    "(want >= 2)").arg(keyframeCount));
+            if (!masks8Bit)
+                note(QStringLiteral("FAIL: live track masks are not 8-bit at "
+                                    "the seed frame size"));
+            if (!ptsOrdered)
+                note(QStringLiteral("FAIL: live track PTS are not monotonic "
+                                    "from %1 ms").arg(seedPts));
+            if (changedMasks == 0)
+                note(QStringLiteral("FAIL: no propagated mask differs from the "
+                                    "seed mask"));
+            note(QStringLiteral("live track: id=%1 complete keyframes=%2 "
+                                "pts %3..%4 ms (%5 s)")
+                     .arg(liveTrack.id)
+                     .arg(keyframeCount)
+                     .arg(keyframeCount > 0 ? liveTrack.keyframes.first().timeMs
+                                            : -1)
+                     .arg(keyframeCount > 0 ? liveTrack.keyframes.last().timeMs
+                                            : -1)
+                     .arg(elapsedS, 0, 'f', 1));
+            note(QStringLiteral("live track: seed frame %1x%2; %3 propagated "
+                                "frame(s) differ from the seed")
+                     .arg(seed.image.width()).arg(seed.image.height())
+                     .arg(changedMasks));
+
+            setSelectedTrackId(liveTrackId);
+
+            QVector<qint64> posePts;
+            const QVector<QImage> poses = collectCreativePoses(6, &posePts);
+            bool posesReal =
+                poses.size() >= 2 && poses.size() == posePts.size();
+            for (int i = 0; i < posePts.size(); ++i)
+            {
+                if (posePts.at(i) < 0)
+                    posesReal = false;
+                if (i > 0 && posePts.at(i) <= posePts.at(i - 1))
+                    posesReal = false;
+            }
+            if (posesReal)
+                note(syntheticSeed
+                         ? QStringLiteral("live-track poses: %1 ordered PTS "
+                                          "(%2..%3 ms); the keyframe-0 cutout "
+                                          "uses the seeded-synthetic mask")
+                               .arg(poses.size())
+                               .arg(posePts.first())
+                               .arg(posePts.last())
+                         : QStringLiteral("live-track poses: %1 real ordered "
+                                          "PTS (%2..%3 ms)")
+                               .arg(poses.size())
+                               .arg(posePts.first())
+                               .arg(posePts.last()));
+            else
+                note(QStringLiteral("FAIL: live-track poses: %1 pose(s), %2 "
+                                    "PTS (still fallback or missing)")
+                         .arg(poses.size()).arg(posePts.size()));
+
+            /* tracked recipes: real layers, one undo restores the count */
+            const int beforeLineup = m_document.layers().size();
+            const QString lineupError = createPastelLineup();
+            const int lineupAdded = m_document.layers().size() - beforeLineup;
+            note(lineupError.isEmpty() && lineupAdded > 0
+                     ? QStringLiteral("live-track pastel lineup: +%1 layers")
+                           .arg(lineupAdded)
+                     : QStringLiteral("FAIL: live-track pastel lineup: %1")
+                           .arg(lineupError));
+            if (lineupAdded > 0)
+            {
+                undo();
+                if (m_document.layers().size() != beforeLineup)
+                    note(QStringLiteral("FAIL: live-track lineup undo "
+                                        "(%1 != %2)")
+                             .arg(m_document.layers().size())
+                             .arg(beforeLineup));
+                else
+                    note(QStringLiteral("live-track lineup undo: OK"));
+            }
+
+            const int beforeEcho = m_document.layers().size();
+            const QString echoError = createMotionEcho();
+            const int echoAdded = m_document.layers().size() - beforeEcho;
+            note(echoError.isEmpty() && echoAdded > 0
+                     ? QStringLiteral("live-track motion echo: +%1 layers")
+                           .arg(echoAdded)
+                     : QStringLiteral("FAIL: live-track motion echo: %1")
+                           .arg(echoError));
+            if (echoAdded > 0)
+            {
+                undo();
+                if (m_document.layers().size() != beforeEcho)
+                    note(QStringLiteral("FAIL: live-track echo undo "
+                                        "(%1 != %2)")
+                             .arg(m_document.layers().size()).arg(beforeEcho));
+                else
+                    note(QStringLiteral("live-track echo undo: OK"));
+            }
+        };
+        runLiveTrackAcceptance();
     }
 
     /* leave a composed stage open for the screenshot */

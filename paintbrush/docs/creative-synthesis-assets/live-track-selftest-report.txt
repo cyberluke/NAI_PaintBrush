@@ -1,0 +1,80 @@
+subject: Self-test cutout
+preview neon-idol 544x680
+preview sticker-forge 544x680
+preview pastel-stage 544x680
+preview nocturne 544x680
+preview ink-creature 544x680
+preview spark-storm 544x680
+preview kaleido 544x680
+preview motion-echo 544x680
+preview electric-kpop 544x680
+preview holo-fashion 544x680
+preview scene-forge 544x680
+preview auto-splatter 544x680
+preview stage-mode 544x680
+pad reaction neon-idol: 17.00/255
+pad reaction electric-kpop: 8.90/255
+pad reaction sticker-forge: 5.73/255
+pad reaction pastel-stage: 3.81/255
+gesture record: OK
+gesture loop: OK
+preview p95: 3.73 ms (13 samples)
+commit neon: +12 layers
+commit neon: 685.7 ms
+recent look history: 1 (Neon Idol)
+look rename: OK
+look delete: -12 layers
+look delete undo: OK
+save/reopen/export: OK (14 layers, 10143 KB)
+suggestion kind: ribbon
+suggestion: +1 layer
+resume look: OK (neon-idol)
+resume replace: 14 layers
+resume one-undo: OK
+one-undo contract: OK
+expand canvas: 1440x1800 -> 1800x2160
+expand canvas undo: OK
+contour calligraphy: +1 layer
+contour calligraphy undo: OK
+apply look: +12 layers
+apply look undo: OK
+commit sticker: +12 layers
+sticker undo: OK
+commit electric: +11 layers
+source content 304x864.8 raster 720x1120 scale 0.8
+subject content 307x871 raster 273x774 scale 1.125
+committed subject scale: OK
+repeated apply: original source kept
+electric undo: OK
+commit holo: +10 layers
+holo undo: OK
+lineup: +5 linked poses
+lineup undo: OK
+pastel lineup: +8 layers
+pastel lineup undo: OK
+motion echo: +8 layers
+motion echo undo: OK
+duplicate preset 1: OK
+duplicate preset 2: OK
+duplicate preset 3: OK
+agent stroke: +1 layer
+agent stroke undo: OK
+assistant stroke tool: OK
+post-keep chooser: OK
+chooser selection: OK
+live-track seed: real mask D:\_SATIN_AI\NAI-OS\vlc\_REVIEW\harness\pb_live_harness\build\live-tracked\live_mask_B.png (960x540 scaled to 3840x2160)
+live-track: started id=1 seed=64320 ms
+live-track progress: 0/6
+live-track progress: 1/6
+live-track progress: 2/6
+live-track progress: 3/6
+live-track progress: 4/6
+live-track progress: 5/6
+live track: id=1 complete keyframes=7 pts 64320..64645 ms (9.9 s)
+live track: seed frame 3840x2160; 6 propagated frame(s) differ from the seed
+live-track poses: 6 real ordered PTS (64320..64645 ms)
+live-track pastel lineup: +8 layers
+live-track lineup undo: OK
+live-track motion echo: +8 layers
+live-track echo undo: OK
+RESULT: PASS

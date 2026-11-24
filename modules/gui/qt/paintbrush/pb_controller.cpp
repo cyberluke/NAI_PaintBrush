@@ -208,6 +208,12 @@ PaintbrushController::PaintbrushController(qt_intf_t *intf, QObject *parent)
     connect(&m_document, &PaintbrushDocument::tracksChanged,
             this, &PaintbrushController::sanitizeSelectedTrack);
 
+    /* A document reset/load replaces every layer id: drop a live layer compare
+     * without touching the incoming document (its ids must never be restored
+     * by the outgoing compare). */
+    connect(&m_document, &PaintbrushDocument::documentReset,
+            this, &PaintbrushController::resetLayerCompareState);
+
     m_companion.setAssistantService(&m_assistant);
     m_assistant.setToolDefinitions(assistantToolsJson());
 
@@ -1415,6 +1421,8 @@ void PaintbrushController::saveProject(const QUrl &url)
     if (path.isEmpty())
         return;
 
+    /* Never persist the transient Before state of a live compare. */
+    endLayerCompare();
     const QString err = m_projectStore.save(&m_document, path);
     if (!err.isEmpty())
     {
@@ -1563,6 +1571,8 @@ void PaintbrushController::exportImage(const QUrl &url, const QString &format)
     const QString path = url.toLocalFile();
     if (path.isEmpty())
         return;
+    /* Export the real composition, never the transient compare state. */
+    endLayerCompare();
     const QString err = ExportService::exportImage(&m_document, path, format);
     setStatus(err.isEmpty() ? QStringLiteral("Exported image")
                             : err);
@@ -1596,6 +1606,7 @@ void PaintbrushController::exportImagePreset(const QUrl &url, int preset)
     default:
         break; /* Canvas PNG: default */
     }
+    endLayerCompare();
     const QString err = ExportService::exportImageOptions(
         &m_document, path, format, scale, crop, background);
     setStatus(err.isEmpty() ? QStringLiteral("Exported (%1)").arg(preset)
@@ -1669,6 +1680,12 @@ QString PaintbrushController::projectInfoText() const
 void PaintbrushController::autosaveNow()
 {
     if (!var_InheritBool(m_intf, "paintbrush-autosave"))
+        return;
+
+    /* A live layer compare hides a layer for viewing. Do not write that
+     * transient state into the recovery autosave; the next tick after the
+     * compare ends will persist normally. */
+    if (m_layerCompareActive)
         return;
 
     /* nothing to recover on a pristine blank canvas: do not create a
@@ -1810,6 +1827,8 @@ void PaintbrushController::openRecoveryCopy()
 
 void PaintbrushController::undo()
 {
+    /* restore the transient compare before an older command captures state */
+    endLayerCompare();
     if (m_undoStack.undo(m_document) && m_canvas)
     {
         m_canvas->markCanvasDirty();
@@ -1819,6 +1838,7 @@ void PaintbrushController::undo()
 
 void PaintbrushController::redo()
 {
+    endLayerCompare();
     if (m_undoStack.redo(m_document) && m_canvas)
     {
         m_canvas->markCanvasDirty();
@@ -1830,6 +1850,7 @@ void PaintbrushController::redo()
 
 void PaintbrushController::newLayer()
 {
+    endLayerCompare();
     CanvasLayer layer = CanvasLayer::createRaster(
         m_document.canvasSize(),
         QCoreApplication::translate("Paintbrush", "Layer %1")
@@ -1852,6 +1873,7 @@ void PaintbrushController::newLayer()
 
 void PaintbrushController::deleteLayer(int index)
 {
+    endLayerCompare();
     QList<CanvasLayer> layers = m_document.layers();
     if (index < 0 || index >= layers.size() || layers.size() <= 1)
         return;
@@ -1873,6 +1895,7 @@ void PaintbrushController::deleteLayer(int index)
 
 void PaintbrushController::duplicateLayer(int index)
 {
+    endLayerCompare();
     QList<CanvasLayer> layers = m_document.layers();
     if (index < 0 || index >= layers.size())
         return;
@@ -1903,6 +1926,9 @@ void PaintbrushController::setCurrentLayer(int index)
 
 void PaintbrushController::setLayerVisible(int index, bool visible)
 {
+    /* An explicit visibility change outranks the transient compare: restore
+     * first so the toggle is recorded against the real prior state. */
+    endLayerCompare();
     CanvasLayer *layer = m_document.layerAt(index);
     pbLogInfo(VLC_OBJECT(m_intf), "layers",
               "setLayerVisible: index=%d visible=%d layerPresent=%d "
@@ -1932,6 +1958,188 @@ void PaintbrushController::setLayerVisible(int index, bool visible)
     emit documentChanged();
 }
 
+/* ------------------------------------------------ layer Before/After compare
+ *
+ * A compare is a transient VIEW change: it hides the selected content layer
+ * (or the whole committed creative look it belongs to) so the painter can see
+ * what that layer contributes. Visibility is mutated directly — never through
+ * an undo command — and the document dirty flag is deliberately left alone.
+ * End restores exactly the layer ids that were visible at begin (by stable id,
+ * so nothing can drift onto the wrong row). Callers that capture layer state
+ * in an undo command or replace the document end the compare first. */
+
+bool PaintbrushController::isComparableContentLayer(const CanvasLayer &layer) const
+{
+    switch (layer.type)
+    {
+    case LAYER_RASTER:
+    case LAYER_IMAGE:
+    case LAYER_REFERENCE:
+    case LAYER_GENERATED:
+    case LAYER_STICKER:
+        return !layer.raster.isNull();
+    case LAYER_TEXT:
+        return !layer.raster.isNull() || !layer.text.trimmed().isEmpty();
+    case LAYER_VECTOR:
+        return !layer.vectorPath.isEmpty();
+    default:
+        return false;
+    }
+}
+
+bool PaintbrushController::layerCompareAvailable() const
+{
+    if (m_layerCompareActive)
+        return true; /* keep the hold/toggle enabled so it can always end */
+    const CanvasLayer *layer = m_document.layerAt(m_document.currentLayerIndex());
+    return layer && isComparableContentLayer(*layer);
+}
+
+QString PaintbrushController::beginLayerCompare()
+{
+    if (m_layerCompareActive)
+        return {};
+
+    const auto fail = [this](const QString &message) {
+        setStatus(message);
+        return message;
+    };
+
+    const CanvasLayer *layer = m_document.layerAt(m_document.currentLayerIndex());
+    if (!layer)
+        return fail(QStringLiteral("Select a layer to compare."));
+    if (!isComparableContentLayer(*layer))
+        return fail(QStringLiteral("That layer has no content to compare."));
+
+    const QString group =
+        layer->metadata.value(QStringLiteral("creative.group")).toString();
+
+    /* A standalone raster with no painted pixels is not a real content layer;
+     * say so instead of pretending to compare nothing. This scan runs only on
+     * the explicit begin action, never from the QML availability property. */
+    if (group.isEmpty() && layer->type == LAYER_RASTER
+        && layer->contentBounds().isEmpty())
+        return fail(QStringLiteral("That layer is empty — there is nothing to compare."));
+
+    QVector<int> hiddenIds;
+    QString label;
+    if (!group.isEmpty())
+    {
+        /* A committed look is several layers; compare the whole group so the
+         * Before state is the canvas as it was before that look. */
+        QString groupLabel;
+        const QList<CanvasLayer> &layers = m_document.layers();
+        for (const CanvasLayer &candidate : layers)
+        {
+            if (candidate.metadata.value(QStringLiteral("creative.group"))
+                    .toString() != group)
+                continue;
+            if (candidate.visible)
+                hiddenIds.append(candidate.id);
+            if (groupLabel.isEmpty())
+            {
+                groupLabel = candidate.metadata
+                                 .value(QStringLiteral("creative.label"))
+                                 .toString();
+                if (groupLabel.isEmpty())
+                    groupLabel = candidate.metadata
+                                     .value(QStringLiteral("creative.patchName"))
+                                     .toString();
+            }
+        }
+        label = groupLabel.isEmpty() ? QStringLiteral("this look") : groupLabel;
+    }
+    else
+    {
+        if (layer->visible)
+            hiddenIds.append(layer->id);
+        label = layer->name.isEmpty() ? QStringLiteral("this layer") : layer->name;
+    }
+
+    if (hiddenIds.isEmpty())
+        return fail(group.isEmpty()
+            ? QStringLiteral("That layer is already hidden — nothing to compare.")
+            : QStringLiteral("That look is already hidden — nothing to compare."));
+
+    for (int id : hiddenIds)
+    {
+        CanvasLayer *hidden = m_document.layerById(id);
+        if (hidden)
+            hidden->visible = false;
+    }
+    m_layerCompareActive = true;
+    m_layerCompareLabel = label;
+    m_layerCompareHiddenIds = hiddenIds;
+
+    if (m_layerModel)
+        m_layerModel->reload();
+    if (m_canvas)
+    {
+        /* Visibility is not a stroke: force the scene-graph update. */
+        m_canvas->markCanvasDirty();
+        m_canvas->update();
+    }
+    emit documentChanged();
+    emit layerCompareChanged();
+    setStatus(QStringLiteral("Comparing without %1 — release to restore.").arg(label));
+    return {};
+}
+
+void PaintbrushController::endLayerCompare()
+{
+    if (!m_layerCompareActive)
+        return;
+
+    bool restored = false;
+    for (int id : m_layerCompareHiddenIds)
+    {
+        CanvasLayer *layer = m_document.layerById(id);
+        if (layer && !layer->visible)
+        {
+            layer->visible = true;
+            restored = true;
+        }
+    }
+    m_layerCompareActive = false;
+    m_layerCompareHiddenIds.clear();
+    m_layerCompareLabel.clear();
+
+    if (m_layerModel)
+        m_layerModel->reload();
+    if (m_canvas)
+    {
+        m_canvas->markCanvasDirty();
+        m_canvas->update();
+    }
+    emit documentChanged();
+    emit layerCompareChanged();
+    if (restored)
+        setStatus(QStringLiteral("Layer compare ended — visibility restored."));
+}
+
+QString PaintbrushController::toggleLayerCompare()
+{
+    if (m_layerCompareActive)
+    {
+        endLayerCompare();
+        return {};
+    }
+    return beginLayerCompare();
+}
+
+void PaintbrushController::resetLayerCompareState()
+{
+    if (!m_layerCompareActive)
+        return;
+    /* The document reset/load cleared or replaced the layers; the captured
+     * ids belong to the outgoing document, so drop them without restoring. */
+    m_layerCompareActive = false;
+    m_layerCompareHiddenIds.clear();
+    m_layerCompareLabel.clear();
+    emit layerCompareChanged();
+    emit documentChanged();
+}
+
 void PaintbrushController::setLayerOpacity(int index, double opacity)
 {
     CanvasLayer *layer = m_document.layerAt(index);
@@ -1955,6 +2163,7 @@ void PaintbrushController::setLayerOpacity(int index, double opacity)
 
 void PaintbrushController::moveLayer(int index, int delta)
 {
+    endLayerCompare();
     QList<CanvasLayer> layers = m_document.layers();
     const int target = index + delta;
     if (index < 0 || index >= layers.size() || target < 0 || target >= layers.size())
@@ -1976,6 +2185,7 @@ void PaintbrushController::moveLayer(int index, int delta)
 
 void PaintbrushController::moveLayerTo(int from, int to)
 {
+    endLayerCompare();
     QList<CanvasLayer> layers = m_document.layers();
     if (from < 0 || to < 0 || from >= layers.size() || to >= layers.size())
         return;
@@ -5866,6 +6076,7 @@ static QImage creativeHueShift(const QImage &src, int degrees)
 
 void PaintbrushController::duplicateLayer()
 {
+    endLayerCompare();
     const int index = m_document.currentLayerIndex();
     const CanvasLayer *src = m_document.layerAt(index);
     if (!src)

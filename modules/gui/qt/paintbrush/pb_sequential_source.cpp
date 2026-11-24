@@ -260,6 +260,37 @@ bool SequentialVideoSource::ensurePlayer(const FrameRef &seed)
         return false;
     }
 
+    /* A libvlc seek lands on the preceding keyframe (GOP), which can be
+     * earlier than the requested seed PTS. Tracking must never emit a
+     * propagated keyframe before its seed, or the pose list runs backwards.
+     * Step forward until the persistent decoder reaches the seed time. */
+    int stepped = 0;
+    while (seedUs >= 0 && seedUs / 1000 < seed.ptsMs && stepped < 60) {
+        quint64 before = 0;
+        {
+            QMutexLocker lock(&m_mutex);
+            before = m_seq;
+        }
+        libvlc_media_player_set_pause(m_player, false);
+        const bool presented = waitForDisplay(before, int(kFrameTimeoutMs));
+        libvlc_media_player_set_pause(m_player, true);
+        if (!presented)
+            break;
+        QImage next;
+        qint64 nextUs = -1;
+        if (!copyCurrentFrame(next, nextUs) || nextUs < 0)
+            break;
+        seedImage = next;
+        seedUs = nextUs;
+        ++stepped;
+    }
+    if (stepped > 0) {
+        std::fprintf(stderr,
+                     "paintbrush: sequential seed advanced %d frame(s) to reach %lldms (actual %lldms)\n",
+                     stepped, (long long)seed.ptsMs,
+                     (long long)(seedUs >= 0 ? seedUs / 1000 : seed.ptsMs));
+    }
+
     {
         QMutexLocker lock(&m_mutex);
         m_lastImage = seedImage;

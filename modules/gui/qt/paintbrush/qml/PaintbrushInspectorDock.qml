@@ -357,6 +357,45 @@ Item {
                         }
                     }
 
+                    /* Layer-level Before/After. Hold the row to hide the
+                     * selected content layer (or its committed look group)
+                     * and see the canvas without it; release restores the
+                     * exact previous visibility. View-only: no undo step and
+                     * no document dirty flag. This is independent from the
+                     * Play Pad's whole-look Before/After. */
+                    InspectorAction {
+                        id: compareLayerAction
+                        label: PaintbrushCtx.layerCompareActive
+                               ? qsTr("Showing before — release to restore")
+                               : PaintbrushCtx.layerCompareAvailable
+                                 ? qsTr("Hold to compare layer")
+                                 : qsTr("Compare layer (select a content layer)")
+                        iconText: VLCIcons.fullscreen
+                        active: PaintbrushCtx.layerCompareActive
+                        actionEnabled: PaintbrushCtx.layerCompareActive
+                                       || PaintbrushCtx.layerCompareAvailable
+                        onPressed: {
+                            const err = PaintbrushCtx.beginLayerCompare()
+                            if (err.length > 0)
+                                console.log(err)
+                        }
+                        onReleased: PaintbrushCtx.endLayerCompare()
+                    }
+
+                    /* Never leave the transient Before state behind when the
+                     * Layers page is left or the drawer collapses mid-hold. */
+                    Connections {
+                        target: root
+                        function onTabIndexChanged() {
+                            if (PaintbrushCtx.layerCompareActive)
+                                PaintbrushCtx.endLayerCompare()
+                        }
+                        function onExpandedChanged() {
+                            if (!root.expanded && PaintbrushCtx.layerCompareActive)
+                                PaintbrushCtx.endLayerCompare()
+                        }
+                    }
+
                     /* Object-cutout mask tools: only that layer role keeps an
                      * editable native mask (committed SAM artifacts can be
                      * cleaned with the same brush panel). */
@@ -1492,20 +1531,26 @@ Item {
         property string label
         property string iconText: ""
         property bool primary: false
+        property bool active: false
         property bool actionEnabled: true
         signal clicked()
+        signal pressed()
+        signal released()
 
         Layout.fillWidth: true
         implicitHeight: VLCStyle.dp(36, VLCStyle.scale)
         radius: VLCStyle.margin_xsmall
         color: !action.actionEnabled ? theme.bg.secondary
                : action.primary ? theme.accent
-               : (actionHover.containsMouse
-                  ? Qt.rgba(theme.accent.r, theme.accent.g,
-                            theme.accent.b, 0.12)
-                  : theme.bg.secondary)
+               : action.active
+                 ? Qt.rgba(theme.accent.r, theme.accent.g,
+                           theme.accent.b, 0.24)
+                 : (actionHover.containsMouse
+                    ? Qt.rgba(theme.accent.r, theme.accent.g,
+                              theme.accent.b, 0.12)
+                    : theme.bg.secondary)
         border.width: 1
-        border.color: action.primary ? theme.accent
+        border.color: action.primary || action.active ? theme.accent
                      : (actionHover.containsMouse ? theme.accent : theme.border)
         opacity: action.actionEnabled ? 1.0 : 0.45
 
@@ -1524,7 +1569,9 @@ Item {
             Widgets.LabelExt {
                 Layout.fillWidth: true
                 text: action.label
-                color: action.primary ? theme.bg.primary : theme.fg.primary
+                color: action.primary ? theme.bg.primary
+                       : action.active ? theme.accent
+                       : theme.fg.primary
                 font.pixelSize: VLCStyle.fontSize_normal
                 elide: Text.ElideRight
             }
@@ -1534,6 +1581,9 @@ Item {
             anchors.fill: parent
             hoverEnabled: true
             enabled: action.actionEnabled
+            onPressed: action.pressed()
+            onReleased: action.released()
+            onCanceled: action.released()
             onClicked: action.clicked()
         }
         Accessible.role: Accessible.Button

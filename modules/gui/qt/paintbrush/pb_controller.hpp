@@ -488,6 +488,23 @@ public:
     Q_INVOKABLE void moveLayerTo(int from, int to);
     Q_INVOKABLE void setLayerVisible(int index, bool visible);
     Q_INVOKABLE void setCurrentLayer(int index);
+    /* Layer-level Before/After compare: temporarily hides the selected
+     * content layer (or the committed creative look group it belongs to) and
+     * restores the EXACT prior visibility on end. This is a view state, never
+     * a document edit: no undo command is pushed and the project dirty flag is
+     * not touched. It is independent from the Play Pad's whole-look
+     * creative.compareMode. */
+    Q_PROPERTY(bool layerCompareActive READ layerCompareActive NOTIFY layerCompareChanged FINAL)
+    Q_PROPERTY(bool layerCompareAvailable READ layerCompareAvailable NOTIFY documentChanged FINAL)
+    Q_PROPERTY(QString layerCompareLabel READ layerCompareLabel NOTIFY layerCompareChanged FINAL)
+    Q_INVOKABLE QString beginLayerCompare();
+    Q_INVOKABLE void endLayerCompare();
+    /* One-call toggle for menus/shortcuts: ends an active compare, otherwise
+     * begins one. Empty return = success; otherwise the honest reason. */
+    Q_INVOKABLE QString toggleLayerCompare();
+    bool layerCompareActive() const { return m_layerCompareActive; }
+    bool layerCompareAvailable() const;
+    QString layerCompareLabel() const { return m_layerCompareLabel; }
     /* Layer opacity (0..1), one undoable typed command per change. */
     Q_INVOKABLE void setLayerOpacity(int index, double opacity);
     /* Image-layer transforms (scale/rotation/pivot at content center),
@@ -1038,6 +1055,7 @@ signals:
     void objectSelectionChanged();
     void objectMaskEdgeChanged();
     void layerMaskEditActiveChanged();
+    void layerCompareChanged();
     void mattingStateChanged();
     void mattingSettingsChanged();
     void powderRendererChanged();
@@ -1305,6 +1323,11 @@ private:
     void beginLayerMove(int layerIndex, const QPointF &canvasPos);
     void updateLayerMove(const QPointF &canvasPos);
     void endLayerMove();
+    /* Layer compare: cheap eligibility test for the UI property (never scans
+     * a full raster), and a no-restore state drop used when the document is
+     * replaced while a compare is active. */
+    bool isComparableContentLayer(const CanvasLayer &layer) const;
+    void resetLayerCompareState();
 
     qt_intf_t *m_intf = nullptr;
     PaintbrushDocument m_document;
@@ -1352,6 +1375,13 @@ private:
     QString m_statusMessage;
     QString m_projectName;
     bool m_objectSelected = false;
+    /* Transient layer Before/After compare. Hidden layers are captured by
+     * stable id so a reorder during the compare cannot restore the wrong row.
+     * Only layers that were visible at begin are hidden, and end restores
+     * exactly those ids to visible. */
+    bool m_layerCompareActive = false;
+    QString m_layerCompareLabel;
+    QVector<int> m_layerCompareHiddenIds;
     /* layer move drag */
     bool m_layerMoveActive = false;
     int m_moveLayerIndex = -1;

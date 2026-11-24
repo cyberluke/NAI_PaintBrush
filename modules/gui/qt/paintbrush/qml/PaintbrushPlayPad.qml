@@ -60,6 +60,7 @@ Item {
         id: btn
 
         property string text
+        property string accessibleName: ""
         property bool primary: false
         property bool selected: false
         property bool enabledAction: true
@@ -75,11 +76,18 @@ Item {
                    : primary
                        ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.92)
                        : (hover.hovered ? "#232738" : "#171926")
-        border.width: 1
-        border.color: primary
-                          ? root.accent
-                          : (selected ? root.accent : "#2C3045")
+        border.width: activeFocus ? 2 : 1
+        border.color: activeFocus
+                          ? "#FFFFFF"
+                          : primary
+                              ? root.accent
+                              : (selected ? root.accent : "#2C3045")
         opacity: enabledAction ? 1.0 : 0.45
+
+        activeFocusOnTab: enabledAction
+        Keys.onReturnPressed: if (enabledAction) btn.clicked()
+        Keys.onEnterPressed: if (enabledAction) btn.clicked()
+        Keys.onSpacePressed: if (enabledAction) btn.clicked()
 
         Widgets.LabelExt {
             id: btnLabel
@@ -104,7 +112,8 @@ Item {
         }
 
         Accessible.role: Accessible.Button
-        Accessible.name: btn.text
+        Accessible.name: btn.accessibleName.length > 0 ? btn.accessibleName
+                                                       : btn.text
         Accessible.onPressAction: btn.clicked()
     }
 
@@ -790,10 +799,10 @@ Item {
         /* --------------------------------------------------- recent looks */
         RowLayout {
             Layout.fillWidth: true
-            visible: root.creative.history.length > 0
             spacing: VLCStyle.margin_xsmall
 
             Widgets.LabelExt {
+                visible: root.creative.history.length > 0
                 text: qsTr("Recent")
                 color: theme.fg.secondary
                 font.pixelSize: VLCStyle.dp(9)
@@ -802,7 +811,8 @@ Item {
 
             ListView {
                 Layout.fillWidth: true
-                height: VLCStyle.dp(28)
+                Layout.preferredHeight: VLCStyle.dp(28)
+                visible: root.creative.history.length > 0
                 orientation: ListView.Horizontal
                 spacing: VLCStyle.margin_xsmall
                 clip: true
@@ -879,6 +889,28 @@ Item {
                     ToolTip.text: qsTr("Click to resume · right-click to rename")
                 }
             }
+
+            Widgets.LabelExt {
+                Layout.fillWidth: true
+                visible: root.creative.history.length === 0
+                text: qsTr("No looks caught yet")
+                color: theme.fg.secondary
+                font.pixelSize: VLCStyle.fontSize_small
+                elide: Text.ElideRight
+            }
+
+            PadButton {
+                id: browseLooksButton
+                implicitWidth: VLCStyle.dp(76)
+                implicitHeight: VLCStyle.dp(26)
+                text: qsTr("Browse")
+                accessibleName: qsTr("Browse all saved looks")
+                onClicked: browsePopup.open()
+                HoverHandler { id: browseHover }
+                ToolTip.visible: browseHover.hovered
+                ToolTip.delay: 400
+                ToolTip.text: qsTr("Open the Lookbook")
+            }
         }
 
         /* ---------------------------------------------------------- status */
@@ -943,17 +975,259 @@ Item {
         }
     }
 
-    /* Rename a committed look (right-click a recent-look chip). */
+    /* The Lookbook: every committed look, not just the last few chips. */
+    Popup {
+        id: browsePopup
+        parent: root
+        z: 1
+        modal: true
+        focus: true
+        width: Math.min(root.width - VLCStyle.margin_normal * 2,
+                        VLCStyle.dp(400))
+        height: Math.min(root.height - VLCStyle.margin_normal * 2,
+                         VLCStyle.dp(560))
+        x: (root.width - width) / 2
+        y: (root.height - height) / 2
+        padding: 0
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        onOpened: browseCloseButton.forceActiveFocus()
+        onClosed: {
+            if (root.open && browseLooksButton)
+                browseLooksButton.forceActiveFocus()
+        }
+
+        background: Rectangle {
+            color: "#11131E"
+            radius: VLCStyle.dp(14)
+            border.width: 1
+            border.color: Qt.rgba(root.accent.r, root.accent.g,
+                                  root.accent.b, 0.45)
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: VLCStyle.margin_normal
+            spacing: VLCStyle.margin_small
+
+            Accessible.role: Accessible.Dialog
+            Accessible.name: qsTr("Lookbook: every saved look")
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: VLCStyle.margin_small
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 0
+
+                    Widgets.LabelExt {
+                        Layout.fillWidth: true
+                        text: qsTr("Lookbook")
+                        color: "#FFFFFF"
+                        font.pixelSize: VLCStyle.fontSize_large
+                        font.weight: Font.DemiBold
+                    }
+                    Widgets.LabelExt {
+                        Layout.fillWidth: true
+                        text: qsTr("Every look you caught, one tap away.")
+                        color: theme.fg.secondary
+                        font.pixelSize: VLCStyle.fontSize_small
+                        elide: Text.ElideRight
+                    }
+                }
+
+                Widgets.LabelExt {
+                    text: root.creative.history.length === 1
+                          ? qsTr("1 look")
+                          : qsTr("%1 looks").arg(root.creative.history.length)
+                    color: Qt.rgba(1, 1, 1, 0.55)
+                    font.pixelSize: VLCStyle.fontSize_small
+                }
+
+                PadButton {
+                    id: browseCloseButton
+                    implicitWidth: VLCStyle.dp(64)
+                    implicitHeight: VLCStyle.dp(28)
+                    text: qsTr("Close")
+                    accessibleName: qsTr("Close the Lookbook")
+                    onClicked: browsePopup.close()
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 1
+                color: Qt.rgba(1, 1, 1, 0.08)
+            }
+
+            ListView {
+                id: browseList
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                visible: root.creative.history.length > 0
+                clip: true
+                spacing: VLCStyle.margin_xsmall
+                boundsBehavior: Flickable.StopAtBounds
+                model: root.creative.history
+
+                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                delegate: Rectangle {
+                    id: lookRow
+                    required property var modelData
+                    readonly property string lookLabel:
+                        modelData.label ? modelData.label : modelData.patchName
+
+                    width: ListView.view ? ListView.view.width : 0
+                    height: rowLayout.implicitHeight + VLCStyle.margin_small * 2
+                    radius: VLCStyle.dp(10)
+                    color: rowHover.hovered
+                               ? Qt.rgba(root.accent.r, root.accent.g,
+                                         root.accent.b, 0.10)
+                               : Qt.rgba(1, 1, 1, 0.04)
+                    border.width: 1
+                    border.color: Qt.rgba(1, 1, 1, 0.08)
+
+                    HoverHandler { id: rowHover }
+
+                    Accessible.role: Accessible.ListItem
+                    Accessible.name: lookRow.lookLabel
+
+                    ColumnLayout {
+                        id: rowLayout
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.leftMargin: VLCStyle.margin_small
+                        anchors.rightMargin: VLCStyle.margin_small
+                        spacing: VLCStyle.dp(3)
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: VLCStyle.margin_xsmall
+
+                            Widgets.LabelExt {
+                                Layout.fillWidth: true
+                                text: lookRow.lookLabel
+                                color: "#FFFFFF"
+                                font.pixelSize: VLCStyle.fontSize_normal
+                                font.weight: Font.DemiBold
+                                elide: Text.ElideRight
+                            }
+
+                            Widgets.LabelExt {
+                                visible: lookRow.modelData.layerCount !== undefined
+                                         && lookRow.modelData.layerCount !== null
+                                text: qsTr("%1 layers").arg(
+                                          lookRow.modelData.layerCount)
+                                color: theme.fg.secondary
+                                font.pixelSize: VLCStyle.dp(9)
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: VLCStyle.margin_xsmall
+
+                            Widgets.LabelExt {
+                                Layout.fillWidth: true
+                                text: lookRow.modelData.patchName
+                                color: theme.fg.secondary
+                                font.pixelSize: VLCStyle.fontSize_small
+                                elide: Text.ElideRight
+                            }
+
+                            PadButton {
+                                implicitWidth: VLCStyle.dp(56)
+                                implicitHeight: VLCStyle.dp(24)
+                                text: qsTr("Use")
+                                accessibleName: qsTr("Use look %1").arg(
+                                                    lookRow.lookLabel)
+                                onClicked: {
+                                    PaintbrushCtx.resumeCreativeLook(
+                                                lookRow.modelData.layerIndex)
+                                    browsePopup.close()
+                                }
+                            }
+                            PadButton {
+                                implicitWidth: VLCStyle.dp(66)
+                                implicitHeight: VLCStyle.dp(24)
+                                text: qsTr("Rename")
+                                accessibleName: qsTr("Rename look %1").arg(
+                                                    lookRow.lookLabel)
+                                onClicked: {
+                                    root.pendingGroup = lookRow.modelData.group
+                                    renameField.text = lookRow.lookLabel
+                                    renamePopup.open()
+                                }
+                            }
+                            PadButton {
+                                implicitWidth: VLCStyle.dp(62)
+                                implicitHeight: VLCStyle.dp(24)
+                                text: qsTr("Delete")
+                                accessibleName: qsTr("Delete look %1").arg(
+                                                    lookRow.lookLabel)
+                                onClicked: PaintbrushCtx.deleteCreativeGroup(
+                                               lookRow.modelData.group)
+                                HoverHandler { id: rowDeleteHover }
+                                ToolTip.visible: rowDeleteHover.hovered
+                                ToolTip.delay: 400
+                                ToolTip.text: qsTr("Bin this look · one undo brings it back")
+                            }
+                        }
+                    }
+                }
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                visible: root.creative.history.length === 0
+                spacing: VLCStyle.margin_small
+
+                Item { Layout.fillHeight: true }
+
+                Widgets.LabelExt {
+                    Layout.fillWidth: true
+                    text: qsTr("No looks yet")
+                    color: "#FFFFFF"
+                    font.pixelSize: VLCStyle.fontSize_large
+                    font.weight: Font.DemiBold
+                    horizontalAlignment: Text.AlignHCenter
+                }
+                Widgets.LabelExt {
+                    Layout.fillWidth: true
+                    text: qsTr("Catch a moment on the pad, hit Make it real, and it lands here.")
+                    color: theme.fg.secondary
+                    font.pixelSize: VLCStyle.fontSize_small
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.WordWrap
+                }
+                PadButton {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: qsTr("Back to the pad")
+                    onClicked: browsePopup.close()
+                }
+
+                Item { Layout.fillHeight: true }
+            }
+        }
+    }
+
+    /* Rename a committed look (right-click a recent-look chip or the Lookbook). */
     Popup {
         id: renamePopup
         parent: root
+        z: 2
         modal: true
+        focus: true
         width: Math.min(root.width - VLCStyle.margin_normal * 2,
                         VLCStyle.dp(300))
         height: VLCStyle.dp(150)
         x: (root.width - width) / 2
         y: (root.height - height) / 2
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        onOpened: renameField.forceActiveFocus()
 
         background: Rectangle {
             color: "#11131E"
@@ -968,6 +1242,9 @@ Item {
             anchors.margins: VLCStyle.margin_normal
             spacing: VLCStyle.margin_small
 
+            Accessible.role: Accessible.Dialog
+            Accessible.name: qsTr("Rename look")
+
             Widgets.LabelExt {
                 Layout.fillWidth: true
                 text: qsTr("Name this look")
@@ -981,6 +1258,7 @@ Item {
                 placeholderText: qsTr("Look name")
                 color: "#F2F3F9"
                 selectByMouse: true
+                Accessible.name: qsTr("Look name")
                 onAccepted: {
                     PaintbrushCtx.renameCreativeGroup(root.pendingGroup,
                                                       text)
@@ -1008,14 +1286,32 @@ Item {
         }
     }
 
+    /* The pad closing must never leave a browser floating over the canvas. */
+    Connections {
+        target: root
+        function onOpenChanged() {
+            if (!root.open) {
+                browsePopup.close()
+                renamePopup.close()
+            }
+        }
+    }
+
     Shortcut {
         sequence: "Escape"
-        enabled: root.open
+        enabled: root.open && !browsePopup.opened && !renamePopup.opened
         onActivated: root.creative.close()
     }
 
     FocusScope {
         anchors.fill: parent
-        Keys.onEscapePressed: root.creative.close()
+        Keys.onEscapePressed: {
+            if (renamePopup.opened)
+                renamePopup.close()
+            else if (browsePopup.opened)
+                browsePopup.close()
+            else
+                root.creative.close()
+        }
     }
 }
