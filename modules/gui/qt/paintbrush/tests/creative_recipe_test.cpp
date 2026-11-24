@@ -12,11 +12,11 @@
 /* pb_creative_recipe.hpp is VLC-free and has no QObject/controller/document
  * dependency. This probe compiles the EXACT production builder with Qt
  * Core/Gui only and verifies the contracts the asynchronous commit relies on:
- *   - a build at a native canvas larger than the legacy 1600 px cap really is
- *     authored at the native size (no upscale, no second renderer),
+ *   - a build at a native canvas really is authored at the native size (no
+ *     upscale, no second renderer), with an opt-in 3840x2160 render,
  *   - the same snapshot + seed produces byte-identical pieces and composite,
  *   - cancellation stops the build early,
- *   - preview composition is bounded and deterministic,
+ *   - preview composition follows the 4K budget and stays deterministic,
  *   - the direct-renderer memory bound refuses oversized canvases,
  *   - every existing fashion/automotive patch id still maps to the same
  *     material recipe. */
@@ -33,6 +33,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 
 using namespace paintbrush;
 
@@ -423,11 +424,57 @@ void testPatches()
     check("patch.holo-wrap-sheen", hasSheen);
 }
 
+void test4KNative()
+{
+    const QSize stage(3840, 2160);
+    check("fullres.4k-budget",
+          creative::recipe::fullResolutionBudgetError(stage).isEmpty());
+
+    CreativeBuildInput neon = makeInput("neon-idol", stage, subjectImage());
+    QElapsedTimer clock;
+    clock.start();
+    const QVector<CreativePiece> neonPieces = creative::recipe::build(neon);
+    const qint64 neonBuildMs = clock.elapsed();
+    clock.restart();
+    const QImage neonFrame = creative::recipe::compose(
+        neonPieces, stage, stage, QColor(12, 12, 18), neon.frame);
+    const qint64 neonComposeMs = clock.elapsed();
+    std::printf("INFO.4k-neon|stage=%dx%d pieces=%d build_ms=%lld "
+                "compose_ms=%lld\n",
+                stage.width(), stage.height(), int(neonPieces.size()),
+                static_cast<long long>(neonBuildMs),
+                static_cast<long long>(neonComposeMs));
+    check("fullres.4k-neon-size", neonFrame.size() == stage);
+    check("fullres.4k-neon-pieces", neonPieces.size() >= 8);
+
+    /* The material path is the heaviest 4K target: it estimates normals and
+     * runs the full per-pixel holographic material over the subject. */
+    CreativeBuildInput holo = makeInput("holo-liquid", stage, subjectImage());
+    clock.restart();
+    const QVector<CreativePiece> holoPieces = creative::recipe::build(holo);
+    const qint64 holoBuildMs = clock.elapsed();
+    clock.restart();
+    const QImage holoFrame = creative::recipe::compose(
+        holoPieces, stage, stage, QColor(12, 12, 18), holo.frame);
+    const qint64 holoComposeMs = clock.elapsed();
+    std::printf("INFO.4k-material|stage=%dx%d pieces=%d build_ms=%lld "
+                "compose_ms=%lld\n",
+                stage.width(), stage.height(), int(holoPieces.size()),
+                static_cast<long long>(holoBuildMs),
+                static_cast<long long>(holoComposeMs));
+    check("fullres.4k-material-size", holoFrame.size() == stage);
+    check("fullres.4k-material-pieces", holoPieces.size() >= 5);
+}
+
 } // namespace
 
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
+    bool fourK = false;
+    for (int i = 1; i < argc; ++i)
+        if (std::strcmp(argv[i], "--4k") == 0)
+            fourK = true;
 
     try
     {
@@ -438,6 +485,8 @@ int main(int argc, char **argv)
         testFullResolutionDeterminism();
         testCancellation();
         testPatches();
+        if (fourK)
+            test4KNative();
     }
     catch (...)
     {

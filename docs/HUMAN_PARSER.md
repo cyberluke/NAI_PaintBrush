@@ -268,6 +268,19 @@ pwsh -File scripts/pb-test-human-parser-shim.ps1
 It stages only the small ORT core closure and uses CPUExecutionProvider for
 exact parity; the MSVC smoke covers the CUDA provider.
 
+The installer's remote path is exercised end-to-end against a local HTTP
+server with synthetic assets:
+
+```powershell
+pwsh -File scripts/pb-test-human-parser-remote-install.ps1
+# REMOTE-INSTALL|PASS|wrong_exit=1|right_exit=0|closure=16
+```
+
+It proves a wrong manifest pin is rejected before an install, then the pinned
+manifest, bundle hash, per-file hashes, temp-tree model-manifest lookup and the
+complete 16-file closure all work through the same `-ManifestUrl` path the app
+uses. The assets are tiny dummies; this is installer plumbing, not inference.
+
 Smoke, GPU:
 
 ```powershell

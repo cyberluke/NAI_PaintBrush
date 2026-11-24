@@ -6,10 +6,15 @@
 #
 #   pwsh scripts/pb-creative-recipe-tests.ps1
 #   pwsh scripts/pb-creative-recipe-tests.ps1 -QtRoot C:\msys64\mingw64
+#   pwsh scripts/pb-creative-recipe-tests.ps1 -FourK
+#     -FourK adds the opt-in 3840x2160 native build/compose for Neon Idol and
+#     the holo-liquid material. It is heavier (~0.5 GB peak) and not part of the
+#     default fast harness.
 
 [CmdletBinding()]
 param(
-    [string]$QtRoot = "C:\msys64\mingw64"
+    [string]$QtRoot = "C:\msys64\mingw64",
+    [switch]$FourK
 )
 
 $ErrorActionPreference = "Stop"
@@ -64,5 +69,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Output "--- running creative_recipe_test ---"
-& $exe 2>&1 | ForEach-Object { Write-Output $_ }
+$runArgs = @()
+if ($FourK) { $runArgs += "--4k" }
+& $exe @runArgs 2>&1 | ForEach-Object { Write-Output $_ }
 exit $LASTEXITCODE

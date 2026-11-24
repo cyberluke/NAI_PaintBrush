@@ -226,8 +226,11 @@ These are the things a reviewer should not assume are finished:
    recipe harness measures a 2048x2560 preview compose at ~35 ms and the
    859x1073 interactive compose at ~20 ms on this workstation. Motion frames use
    the interactive target at the 20 Hz pad cadence; the full 4K still is built
-   on the preview worker after the gesture and published by revision. No p95
-   frame-time trace or 4K GPU capture is claimed yet.
+   on the preview worker after the gesture and published by revision. The
+   opt-in `-FourK` harness renders a real 3840x2160 frame: Neon Idol built in
+   ~0.60 s and composed in ~0.12 s; holo-liquid built in ~6.65 s and composed in
+   ~0.09 s on this workstation. No p95 frame-time trace or 4K GPU capture is
+   claimed yet.
 6. **No save/reopen/export end-to-end test.** The layers are ordinary persisted
    layers, and the existing export path sees them, but this document does not
    claim a tested round trip for this specific flow.
