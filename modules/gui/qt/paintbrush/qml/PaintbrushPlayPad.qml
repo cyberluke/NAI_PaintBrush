@@ -199,11 +199,48 @@ Item {
                     ? root.creative.previewWidth / root.creative.previewHeight
                     : 0.8
 
+            /* Full-stage view: one-finger drag pans a zoomed stage, the wheel
+             * and +/- zoom it, and the percentage chip resets it. At 1x the
+             * pad drag stays untouched. */
+            property real stageZoom: 1.0
+            property real stagePanX: 0
+            property real stagePanY: 0
+            readonly property real stageBaseWidth:
+                Math.min(width, height * previewAspect)
+            readonly property real stageBaseHeight:
+                previewAspect > 0 ? stageBaseWidth / previewAspect : height
+
+            function clampStagePan() {
+                const maxX = Math.max(0, (stageBaseWidth * stageZoom - width) / 2)
+                const maxY = Math.max(0, (stageBaseHeight * stageZoom - height) / 2)
+                stagePanX = Math.max(-maxX, Math.min(maxX, stagePanX))
+                stagePanY = Math.max(-maxY, Math.min(maxY, stagePanY))
+            }
+            function setStageZoom(value) {
+                const next = Math.max(1.0, Math.min(3.0, value))
+                stageZoom = next
+                if (next <= 1.001) {
+                    stagePanX = 0
+                    stagePanY = 0
+                } else {
+                    clampStagePan()
+                }
+            }
+            function resetStageView() {
+                stageZoom = 1.0
+                stagePanX = 0
+                stagePanY = 0
+            }
+            onWidthChanged: clampStagePan()
+            onHeightChanged: clampStagePan()
+            onPreviewAspectChanged: clampStagePan()
+
             Image {
                 id: stageImage
-                anchors.centerIn: parent
-                width: Math.min(parent.width, parent.height * parent.previewAspect)
-                height: width / parent.previewAspect
+                width: stageFrame.stageBaseWidth * stageFrame.stageZoom
+                height: stageFrame.stageBaseHeight * stageFrame.stageZoom
+                x: (stageFrame.width - width) / 2 + stageFrame.stagePanX
+                y: (stageFrame.height - height) / 2 + stageFrame.stagePanY
                 fillMode: Image.PreserveAspectFit
                 cache: false
                 asynchronous: false
@@ -211,6 +248,42 @@ Item {
                 source: root.creative.hasSubject
                             ? "image://pbcreative/live/" + root.creative.previewRevision
                             : ""
+            }
+
+            /* Drag the zoomed stage to inspect it; at 1x the pad drag wins. */
+            MouseArea {
+                anchors.fill: parent
+                enabled: stageFrame.stageZoom > 1.001
+                visible: enabled
+                preventStealing: true
+                cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                property real lastX: 0
+                property real lastY: 0
+                onPressed: function(mouse) {
+                    lastX = mouse.x
+                    lastY = mouse.y
+                }
+                onPositionChanged: function(mouse) {
+                    if (!pressed)
+                        return
+                    stageFrame.stagePanX += mouse.x - lastX
+                    stageFrame.stagePanY += mouse.y - lastY
+                    lastX = mouse.x
+                    lastY = mouse.y
+                    stageFrame.clampStagePan()
+                }
+                onDoubleClicked: stageFrame.resetStageView()
+            }
+
+            WheelHandler {
+                onWheel: function(wheel) {
+                    if (wheel.angleDelta.y === 0)
+                        return
+                    stageFrame.setStageZoom(
+                        stageFrame.stageZoom
+                        * (wheel.angleDelta.y > 0 ? 1.15 : 0.87))
+                    wheel.accepted = true
+                }
             }
 
             /* live badge + subject label */
@@ -266,7 +339,42 @@ Item {
                 color: Qt.rgba(1, 1, 1, 0.72)
                 font.pixelSize: VLCStyle.fontSize_small
                 elide: Text.ElideRight
-                width: parent.width - VLCStyle.margin_small * 2
+                width: Math.max(0, parent.width - VLCStyle.dp(150))
+            }
+
+            /* Stage view controls: zoom in/out, percentage resets, drag pans. */
+            Row {
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                anchors.margins: VLCStyle.margin_small
+                spacing: VLCStyle.dp(3)
+
+                PadButton {
+                    implicitWidth: VLCStyle.dp(22)
+                    implicitHeight: VLCStyle.dp(22)
+                    text: "−"
+                    enabled: stageFrame.stageZoom > 1.001
+                    onClicked: stageFrame.setStageZoom(
+                                   stageFrame.stageZoom - 0.25)
+                }
+                PadButton {
+                    implicitWidth: VLCStyle.dp(48)
+                    implicitHeight: VLCStyle.dp(22)
+                    text: Math.round(stageFrame.stageZoom * 100) + "%"
+                    onClicked: stageFrame.resetStageView()
+                    HoverHandler { id: zoomHover }
+                    ToolTip.visible: zoomHover.hovered
+                    ToolTip.delay: 400
+                    ToolTip.text: qsTr("Wheel to zoom · drag the stage to pan · click to reset")
+                }
+                PadButton {
+                    implicitWidth: VLCStyle.dp(22)
+                    implicitHeight: VLCStyle.dp(22)
+                    text: "+"
+                    enabled: stageFrame.stageZoom < 2.999
+                    onClicked: stageFrame.setStageZoom(
+                                   stageFrame.stageZoom + 0.25)
+                }
             }
 
             /* busy veil */

@@ -184,6 +184,10 @@ GUI verification:
   (downscaled for the repo). The new multi-action Inspector entries are verified
   at the engine/self-test level; a full click-through of every entry is not
   claimed.
+- Play Pad stage view is QML-only: the wheel and `+`/`−` buttons zoom
+  100–300%, dragging pans only when zoomed, and the percentage chip/double-click
+  resets. The QML loaded in a live self-test run without QML errors; the
+  zoom/pan interaction itself was not UI-automation-clicked.
 
 ### 2.6 Verification tools and metrics
 
@@ -204,7 +208,7 @@ GUI verification:
 | Spec area | Status | Notes |
 |---|---|---|
 | 12.1 live stage, real pixels, one composition | **Done** | Preview is the commit's pieces at preview scale, not a mock. |
-| 12.1 large stage / pan / layers / Before-After | **Partial** | Before/After compare is live; the preview is still fitted to the canvas (no pan/zoom or full layer panel). |
+| 12.1 large stage / pan / layers / Before-After | **Partial** | Before/After compare is live and the stage now zooms 100–300% with drag pan and reset; the preview is still the fitted 544x680 composite and there is no full layer panel. |
 | 12.2 graphic systems (recolor, rim, halftone, arcs, sheen, silhouettes, typography) | **Partial** | Recolor, rim, halftone, arcs, sheen, bokeh, halftone, ink, butterflies, kaleidoscope exist. No typography or independent silhouette library. |
 | 12.3 Neon Idol reference | **Done (first pass)** | Electric blue/pink stage, oversized echo, halftone, bokeh, rim split, scanlines. |
 | 12.3 Sticker Forge reference | **Done (first pass)** | Die-cut white/colour bands, backing card, shadow, gloss, confetti, sparkles. |
@@ -216,7 +220,7 @@ GUI verification:
 | 12.7 Scene Forge, Ink Creature family, Motion Calligraphy | **Done** | Scene Forge, Auto Splatter, Ink Creature, Motion Echo, true contour calligraphy (`addCreativeCalligraphy`, editable native vector layer) and editable agent strokes shipped. The broader rigged scene-layer family is still pending. |
 | 12.9 performance must become real layers, one undo | **Done** | Verified. |
 | 12.10 save / reopen / continue editing the performance | **Done** | Metadata includes group/source; Resume restores patch/seed/pad and replaces the old group in one undo. Save→reload→export verified in the self-test. |
-| 12.11 UX at rest / live / after creation | **Partial** | Idle shimmer, live stage, Before/After, suggestion, metrics, recent-look rail with inline rename and one-undo delete. No large-stage pan. |
+| 12.11 UX at rest / live / after creation | **Partial** | Idle shimmer, live stage, Before/After, suggestion, metrics, stage zoom/pan, recent-look rail with inline rename and one-undo delete. No full performance browser. |
 | Slice A end-to-end | **Done** | Keep → chooser → Neon/Sticker → pad → record → Make it real → suggestion → undo. Verified with the synthetic fixture and a real GUI commit. |
 | Slice B (Pastel Stage, Lineup, generic smart duplicate) | **Done** | Pastel Stage + Pastel Lineup + linked presets. |
 | Slice C (Nocturne, floral/butterfly/scene layer family) | **Partial** | Nocturne shipped; broader scene family pending. |
@@ -225,7 +229,7 @@ GUI verification:
 | Slice F (beat/audio energy) | **Not done** | — |
 | Slice G (subject awareness / multi-subject) | **Partial** | Subject picking understands layers/roles; no automatic face/garment graph. |
 | Slice H (Photo Regime H / dark stage / Auto Splatter / Stage mode) | **Partial** | Auto Splatter and Stage Door are real recipes; Photo Regime H and the rigged Stage mode are not wired. |
-| Slice I (compact workflow) | **Partial** | Keep → pad → commit → resume/reuse with a recent-look rail, inline rename and one-undo delete. No full performance browser or stage pan. |
+| Slice I (compact workflow) | **Partial** | Keep → pad → commit → resume/reuse with a recent-look rail, inline rename, one-undo delete and stage zoom/pan. No full performance browser. |
 | OpenFill Remove/Fill/Expand | **Partial** | Remove object, generative fill and replace background already exist behind the image provider. Expand is now native: `expandCanvas(percent)` grows the canvas on every side, the paper surface fills the margin, layers shift and one undo restores the original canvas. No generative outpainting provider was configured in this test. |
 
 ---
@@ -246,8 +250,9 @@ These are the things a reviewer should not assume are finished:
    silhouette. No LLM authoring path chooses multi-stroke plans.
 4. **The preview is CPU-composed and fixed-scale.** The current run measured a
    preview p95 of 7.53 ms and an 833.1 ms Neon commit at 544x680 preview /
-   1440x1800 canvas; there is no 4K/HDR 60 fps claim, no GPU effect pass, and no
-   large-stage pan/zoom or full layer panel.
+   1440x1800 canvas; stage pan/zoom works on that preview, but there is no
+   4K/HDR 60 fps claim, no GPU effect pass, no high-resolution detail preview
+   and no full layer panel.
 5. **The recent-look rail is read/resume/rename/delete.** It lists committed
    groups, resumes one, renames its label inline and deletes it with one undo.
    There is no full performance browser.
@@ -326,8 +331,8 @@ value next work is, in order:
    tracked clip, verify pose diversity, PTS order and the one-undo replacement.
 2. **Photo Regime H, the rigged Stage mode and the remaining scene-layer
    family**, now that Scene Forge / Auto Splatter / Stage Door are real recipes.
-3. **Full-stage pan/zoom**, a layer-level Before/After and a full performance
-   browser; rename/delete of the recent-look rail are already shipped.
+3. **A layer-level Before/After and a full performance browser**; stage
+   zoom/pan and rename/delete of the recent-look rail are already shipped.
 4. **OpenFill generative Remove/Fill/Replace Background** behind an explicit
    provider-status surface; native Expand is already shipped.
 5. **Real-idol art review** and a small expressive type/sticker library.
