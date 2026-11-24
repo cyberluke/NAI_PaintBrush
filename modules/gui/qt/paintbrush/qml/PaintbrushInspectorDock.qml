@@ -377,6 +377,41 @@ Item {
                         }
                     }
 
+                    /* Creative post-cutout actions: every result stays a
+                     * separate editable layer and one undo step. */
+                    DockSection {
+                        title: qsTr("Creative")
+                        open: true
+                        visible: PaintbrushCtx.hasOpenDocument
+
+                        InspectorAction {
+                            label: qsTr("Duplicate layer")
+                            iconText: VLCIcons.add
+                            onClicked: PaintbrushCtx.duplicateLayer()
+                        }
+                        InspectorAction {
+                            label: qsTr("Outline with the brush")
+                            iconText: VLCIcons.fullscreen
+                            onClicked: PaintbrushCtx.outlineObjectLayer("brush")
+                        }
+                        InspectorAction {
+                            label: qsTr("Outline with glitter")
+                            iconText: VLCIcons.ok
+                            onClicked: PaintbrushCtx.outlineObjectLayer("glitter")
+                        }
+                        InspectorAction {
+                            label: qsTr("Pop-art variation")
+                            iconText: VLCIcons.list
+                            onClicked: PaintbrushCtx.popArtLayer()
+                        }
+                        InspectorAction {
+                            label: qsTr("Auto collage…")
+                            iconText: VLCIcons.list
+                            visible: PaintbrushCtx.document.layerCount >= 2
+                            onClicked: collageDialog.open()
+                        }
+                    }
+
                     /* transform + position, collapsed as one section */
                     DockSection {
                         title: qsTr("Transform")
@@ -835,6 +870,58 @@ Item {
                                                ? PaintbrushCtx.setObjectMaskEdgeHard()
                                                : PaintbrushCtx.setObjectMaskEdgeSoft()
                                 }
+                            }
+
+                            /* One gesture instead of six sliders: the pad
+                             * turns a drag into a coherent parameter bundle. */
+                            PaintbrushMattePad {
+                                Layout.fillWidth: true
+                                boundary: PaintbrushCtx.matteAdvanced().boundary
+                                detail: PaintbrushCtx.matteAdvanced().detail
+                                onChanged: (b, d) => {
+                                    const f = d / 100
+                                    PaintbrushCtx.setMatteAdvanced(
+                                        b, d,
+                                        Math.round(15 + 65 * f),
+                                        Math.round(20 + 45 * f),
+                                        Math.round(25 + 50 * f),
+                                        50)
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: VLCStyle.margin_xsmall
+
+                                Repeater {
+                                    model: [
+                                        { label: qsTr("Clean"), b: 3, d: 20 },
+                                        { label: qsTr("Hair"), b: 9, d: 85 },
+                                        { label: qsTr("Glow"), b: 16, d: 40 },
+                                        { label: qsTr("Product"), b: 2, d: 10 }
+                                    ]
+                                    Button {
+                                        Layout.fillWidth: true
+                                        text: modelData.label
+                                        onClicked: {
+                                            const f = modelData.d / 100
+                                            PaintbrushCtx.setMatteAdvanced(
+                                                modelData.b, modelData.d,
+                                                Math.round(15 + 65 * f),
+                                                Math.round(20 + 45 * f),
+                                                Math.round(25 + 50 * f),
+                                                50)
+                                        }
+                                    }
+                                }
+                            }
+
+                            Widgets.LabelExt {
+                                Layout.fillWidth: true
+                                text: qsTr("Drag the puck: left/right widens the edge, up/down trades a clean cut for hair and fine detail. Hole fill and colour decontamination follow the detail axis automatically.")
+                                color: theme.fg.secondary
+                                font.pixelSize: VLCStyle.fontSize_small
+                                wrapMode: Text.WordWrap
                             }
 
                             RowLayout {

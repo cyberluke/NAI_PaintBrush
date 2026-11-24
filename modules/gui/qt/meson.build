@@ -1048,6 +1048,7 @@ qml_modules += {
         'paintbrush/qml/PaintbrushFirstLaunch.qml',
         'paintbrush/qml/PaintbrushCanvasView.qml',
         'paintbrush/qml/PaintbrushMaskPanel.qml',
+        'paintbrush/qml/PaintbrushMattePad.qml',
         'paintbrush/qml/PaintbrushToolRail.qml',
         'paintbrush/qml/PaintbrushPaletteBar.qml',
         'paintbrush/qml/PaintbrushInspectorDock.qml',

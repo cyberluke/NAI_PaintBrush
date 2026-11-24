@@ -533,7 +533,12 @@ public:
     /* Auto Collage: arrange two or more selected raster/cutout layers into
      * a layout preset without flattening. One undoable operation. */
     Q_INVOKABLE void autoCollage(int preset); /* 0 free, 1 grid, 2 editorial,
-                                                 3 scrapbook, 4 poster, 5 banner */
+                                              * 3 scrapbook, 4 poster, 5 banner */
+    /* Post-cutout creative actions. Each one is a single undoable step and
+     * keeps every piece an editable layer. */
+    Q_INVOKABLE void duplicateLayer();
+    Q_INVOKABLE void outlineObjectLayer(const QString &style); /* brush|glitter */
+    Q_INVOKABLE void popArtLayer();
 
     /* -- companion --------------------------------------------------------- */
     Q_INVOKABLE void companionNotifyEvent(const QString &event);

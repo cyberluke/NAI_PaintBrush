@@ -38,6 +38,7 @@ extern "C" __declspec(dllimport) HRESULT WINAPI
 #include <QDir>
 #include <QPainter>
 #include <QDateTime>
+#include <QRandomGenerator>
 #include <QUuid>
 #include <QVariantMap>
 #include <QTextStream>
@@ -5744,6 +5745,263 @@ void PaintbrushController::autoCollage(int preset)
         m_canvas->markCanvasDirty();
     setStatus(QStringLiteral("Auto collage applied"));
     triggerCompanionEvent(QStringLiteral("collage"));
+}
+
+/* ------------------------------------------------ creative layer actions */
+
+static QImage creativeLayerMask(const CanvasLayer &layer)
+{
+    if (!layer.mask.isNull())
+    {
+        QImage mask = layer.mask;
+        if (mask.format() != QImage::Format_Grayscale8)
+            mask = mask.convertToFormat(QImage::Format_Grayscale8);
+        if (mask.size() != layer.raster.size())
+            mask = mask.scaled(layer.raster.size(), Qt::IgnoreAspectRatio,
+                               Qt::SmoothTransformation);
+        return mask;
+    }
+    if (layer.raster.isNull())
+        return {};
+    QImage mask(layer.raster.size(), QImage::Format_Grayscale8);
+    for (int y = 0; y < layer.raster.height(); ++y)
+    {
+        const QRgb *src = reinterpret_cast<const QRgb *>(
+            layer.raster.constScanLine(y));
+        uchar *dst = mask.scanLine(y);
+        for (int x = 0; x < layer.raster.width(); ++x)
+            dst[x] = uchar(qAlpha(src[x]));
+    }
+    return mask;
+}
+
+/* Disc dilation by drawing the mask at 24 offsets around a circle: exact
+ * enough for a decorative outline and far cheaper than a kernel at 4K. */
+static QImage creativeGrowMask(const QImage &mask, int radius)
+{
+    if (mask.isNull() || radius <= 0)
+        return mask;
+    QImage stamp(mask.size(), QImage::Format_ARGB32_Premultiplied);
+    stamp.fill(Qt::transparent);
+    for (int y = 0; y < mask.height(); ++y)
+    {
+        const uchar *src = mask.constScanLine(y);
+        QRgb *dst = reinterpret_cast<QRgb *>(stamp.scanLine(y));
+        for (int x = 0; x < mask.width(); ++x)
+            if (src[x] >= 40)
+                dst[x] = qRgba(255, 255, 255, 255);
+    }
+    QImage acc(mask.size(), QImage::Format_ARGB32_Premultiplied);
+    acc.fill(Qt::transparent);
+    {
+        QPainter p(&acc);
+        constexpr int steps = 24;
+        constexpr double tau = 6.283185307179586;
+        for (int i = 0; i < steps; ++i)
+        {
+            const double a = tau * double(i) / double(steps);
+            p.drawImage(QPointF(std::cos(a) * radius, std::sin(a) * radius),
+                        stamp);
+        }
+    }
+    QImage grown(mask.size(), QImage::Format_Grayscale8);
+    for (int y = 0; y < acc.height(); ++y)
+    {
+        const QRgb *src = reinterpret_cast<const QRgb *>(acc.constScanLine(y));
+        uchar *dst = grown.scanLine(y);
+        for (int x = 0; x < acc.width(); ++x)
+            dst[x] = uchar(qAlpha(src[x]));
+    }
+    return grown;
+}
+
+static QImage creativeColorize(const QImage &band, const QColor &color,
+                               bool glitter, quint32 seed)
+{
+    QImage out(band.size(), QImage::Format_ARGB32);
+    out.fill(Qt::transparent);
+    QRandomGenerator rng(seed);
+    for (int y = 0; y < band.height(); ++y)
+    {
+        const uchar *src = band.constScanLine(y);
+        QRgb *dst = reinterpret_cast<QRgb *>(out.scanLine(y));
+        for (int x = 0; x < band.width(); ++x)
+        {
+            const int a = src[x];
+            if (a == 0)
+                continue;
+            QColor c = (glitter && rng.bounded(100) < 22)
+                           ? QColor(255, 244, 200) : color;
+            c.setAlpha(a);
+            dst[x] = c.rgba();
+        }
+    }
+    return out;
+}
+
+static QImage creativeHueShift(const QImage &src, int degrees)
+{
+    QImage out = src.convertToFormat(QImage::Format_ARGB32);
+    for (int y = 0; y < out.height(); ++y)
+    {
+        QRgb *line = reinterpret_cast<QRgb *>(out.scanLine(y));
+        for (int x = 0; x < out.width(); ++x)
+        {
+            const QRgb v = line[x];
+            if (qAlpha(v) == 0)
+                continue;
+            QColor c = QColor::fromRgba(v);
+            int h, s, l, a;
+            c.getHsl(&h, &s, &l, &a);
+            if (h < 0)
+                continue; /* achromatic: nothing to rotate */
+            h = (h + degrees) % 360;
+            if (h < 0)
+                h += 360;
+            c.setHsl(h, s, l, a);
+            line[x] = c.rgba();
+        }
+    }
+    return out;
+}
+
+void PaintbrushController::duplicateLayer()
+{
+    const int index = m_document.currentLayerIndex();
+    const CanvasLayer *src = m_document.layerAt(index);
+    if (!src)
+    {
+        setStatus(QStringLiteral("Select a layer to duplicate."));
+        return;
+    }
+    CanvasLayer copy = *src;
+    copy.id = 0;
+    copy.name = src->name + QStringLiteral(" copy");
+    copy.position = src->position + QPointF(24.0, 24.0);
+    InsertLayerCommand cmd;
+    cmd.desc = QStringLiteral("Duplicate layer");
+    QList<CanvasLayer> layers = m_document.layers();
+    const int at = qBound(0, index + 1, layers.size());
+    layers.insert(at, copy);
+    cmd.index = at;
+    cmd.prevCurrentIndex = index;
+    m_document.setLayers(layers);
+    m_document.setCurrentLayerIndex(at);
+    cmd.layer = m_document.layerAt(at) ? *m_document.layerAt(at) : copy;
+    m_undoStack.pushInsertLayer(cmd);
+    if (m_canvas)
+        m_canvas->markCanvasDirty();
+    emit documentChanged();
+    setStatus(QStringLiteral("Layer duplicated."));
+}
+
+void PaintbrushController::outlineObjectLayer(const QString &style)
+{
+    const int index = m_document.currentLayerIndex();
+    const CanvasLayer *src = m_document.layerAt(index);
+    if (!src || src->raster.isNull())
+    {
+        setStatus(QStringLiteral("Select an image or cutout layer to outline."));
+        return;
+    }
+    const QImage mask = creativeLayerMask(*src);
+    if (mask.isNull())
+    {
+        setStatus(QStringLiteral("This layer has no shape to outline."));
+        return;
+    }
+    const bool glitter = style == QLatin1String("glitter");
+    const int radius = qMax(3, int(std::lround(
+        0.02 * double(qMin(mask.width(), mask.height())))));
+    const QImage grown = creativeGrowMask(mask, radius);
+    QImage band(mask.size(), QImage::Format_Grayscale8);
+    for (int y = 0; y < mask.height(); ++y)
+    {
+        const uchar *g = grown.constScanLine(y);
+        const uchar *m = mask.constScanLine(y);
+        uchar *b = band.scanLine(y);
+        for (int x = 0; x < mask.width(); ++x)
+            b[x] = uchar(qMax(0, int(g[x]) - int(m[x])));
+    }
+    const QColor color = glitter
+                             ? QColor(255, 214, 120)
+                             : (m_canvas ? m_canvas->fgColor()
+                                         : QColor(255, 136, 0));
+    const QImage art = creativeColorize(
+        band, color, glitter, quint32(index) * 2654435761u + 17u);
+    CanvasLayer layer = CanvasLayer::createImage(
+        art, src->position,
+        glitter ? QStringLiteral("Glitter outline")
+                : QStringLiteral("Brush outline"));
+    layer.rotation = src->rotation;
+    layer.scale = src->scale;
+    InsertLayerCommand cmd;
+    cmd.desc = layer.name;
+    QList<CanvasLayer> layers = m_document.layers();
+    const int at = qBound(0, index, layers.size()); /* behind the object */
+    layers.insert(at, layer);
+    cmd.index = at;
+    cmd.prevCurrentIndex = index;
+    m_document.setLayers(layers);
+    m_document.setCurrentLayerIndex(
+        qBound(0, index + 1, m_document.layers().size() - 1));
+    cmd.layer = m_document.layerAt(at) ? *m_document.layerAt(at) : layer;
+    m_undoStack.pushInsertLayer(cmd);
+    if (m_canvas)
+        m_canvas->markCanvasDirty();
+    emit documentChanged();
+    setStatus(glitter ? QStringLiteral("Glitter outline added.")
+                      : QStringLiteral("Brush outline added."));
+}
+
+void PaintbrushController::popArtLayer()
+{
+    const int index = m_document.currentLayerIndex();
+    const CanvasLayer *src = m_document.layerAt(index);
+    if (!src || src->raster.isNull())
+    {
+        setStatus(QStringLiteral("Select an image or cutout for pop art."));
+        return;
+    }
+    const CanvasLayer base = *src;
+    QList<CanvasLayer> layers = m_document.layers();
+    int at = qBound(0, index + 1, layers.size());
+    const int hues[3] = { 300, 60, 180 };
+    const int modes[3] = { BLEND_MULTIPLY, BLEND_SCREEN, BLEND_OVERLAY };
+    const QPointF offsets[3] = { QPointF(-28, -20), QPointF(28, 20),
+                                 QPointF(0, -44) };
+    QList<int> inserted;
+    for (int i = 0; i < 3; ++i)
+    {
+        CanvasLayer copy = base;
+        copy.id = 0;
+        copy.name = QStringLiteral("Pop art %1").arg(i + 1);
+        copy.raster = creativeHueShift(base.raster, hues[i]);
+        copy.position = base.position + offsets[i];
+        copy.blendMode = modes[i];
+        copy.opacity = 0.85f;
+        layers.insert(at + i, copy);
+        inserted.append(at + i);
+    }
+    m_document.setLayers(layers);
+    m_document.setCurrentLayerIndex(inserted.last());
+    auto composite = std::make_unique<CompositeCommand>();
+    composite->desc = QStringLiteral("Pop-art variation");
+    for (int idx : inserted)
+    {
+        InsertLayerCommand ins;
+        ins.desc = composite->desc;
+        ins.index = idx;
+        ins.prevCurrentIndex = index;
+        ins.layer = m_document.layerAt(idx) ? *m_document.layerAt(idx)
+                                            : CanvasLayer();
+        composite->children.push_back(std::make_unique<InsertLayerCommand>(ins));
+    }
+    m_undoStack.pushCommand(std::move(composite));
+    if (m_canvas)
+        m_canvas->markCanvasDirty();
+    emit documentChanged();
+    setStatus(QStringLiteral("Pop-art variation added (3 layers)."));
 }
 
 void PaintbrushController::onGenerationResult(const QString &requestId,
