@@ -350,16 +350,16 @@ Item {
                 spacing: VLCStyle.dp(3)
 
                 PadButton {
-                    implicitWidth: VLCStyle.dp(22)
-                    implicitHeight: VLCStyle.dp(22)
+                    width: VLCStyle.dp(22)
+                    height: VLCStyle.dp(22)
                     text: "−"
-                    enabled: stageFrame.stageZoom > 1.001
+                    enabledAction: stageFrame.stageZoom > 1.001
                     onClicked: stageFrame.setStageZoom(
                                    stageFrame.stageZoom - 0.25)
                 }
                 PadButton {
-                    implicitWidth: VLCStyle.dp(48)
-                    implicitHeight: VLCStyle.dp(22)
+                    width: VLCStyle.dp(48)
+                    height: VLCStyle.dp(22)
                     text: Math.round(stageFrame.stageZoom * 100) + "%"
                     onClicked: stageFrame.resetStageView()
                     HoverHandler { id: zoomHover }
@@ -368,10 +368,10 @@ Item {
                     ToolTip.text: qsTr("Wheel to zoom · drag the stage to pan · click to reset")
                 }
                 PadButton {
-                    implicitWidth: VLCStyle.dp(22)
-                    implicitHeight: VLCStyle.dp(22)
+                    width: VLCStyle.dp(22)
+                    height: VLCStyle.dp(22)
                     text: "+"
-                    enabled: stageFrame.stageZoom < 2.999
+                    enabledAction: stageFrame.stageZoom < 2.999
                     onClicked: stageFrame.setStageZoom(
                                    stageFrame.stageZoom + 0.25)
                 }
