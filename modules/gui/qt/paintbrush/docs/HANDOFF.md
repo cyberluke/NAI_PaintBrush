@@ -10,10 +10,10 @@
 ## 0. Latest (2026-11-24) — creative looks / Play Pad
 
 **State:** the Creative Play Pad and the two subject-aware looks are
-implemented and locally committed. `master` is **more than 100 commits ahead of
-`origin/master` and nothing was pushed**. That is why the GitHub remote cannot
-fetch `11e2cb1b47` yet — the commit exists locally; it is a push-state gap,
-not a missing implementation.
+implemented and committed. `master` is **pushed to `origin/master`**; the
+creative commits, including `11e2cb1b47`, are now available on GitHub
+(`cyberluke/NAI_PaintBrush`). The remote could not fetch that SHA before the
+push; it was a push-state gap, not a missing implementation.
 
 **Creative commits (newest last):**
 - `11e2cb1b47` — Electric K-pop and Holographic fashion looks: deterministic
