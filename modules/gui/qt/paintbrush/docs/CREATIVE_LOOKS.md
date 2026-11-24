@@ -7,6 +7,22 @@ layers** — recolour, sheen, rim light, electric arcs, silhouette sparks,
 butterflies, aura and backdrop. Every piece is editable, and the whole look is
 one undo step.
 
+## Status (2026-11-24)
+
+Implemented and verified locally: the two looks, the shared
+`applyCreativePatch` path used by both the Inspector and the assistant, the
+one-undo layer commit, the deterministic art library and the acceptance
+harness. The plugin was relinked from `21d296b45f` and its embedded
+`PB_BUILD_SHA` matches that commit.
+
+Not implemented yet: independent garment / hair / skin / accessory masks, the
+four named holo materials, cancellable async rendering, and full-resolution
+effect synthesis above the 1600 px build cap. Those are the next
+material-intelligence phase, not part of this milestone.
+
+`master` is 115 commits ahead of `origin/master` and nothing was pushed, so
+`11e2cb1b47` exists locally but is not visible on GitHub yet.
+
 ## Where it lives
 
 | Surface | Entry point |
@@ -36,7 +52,7 @@ with a live stage, so a look can be performed before it is committed.
   stars, vignette) placed at the bottom of the committed stack.
 - **Accents**: four-point stars.
 
-### `holo-fashion` — Holographic fashion
+### `holo-fashion` — Holographic fashion (Prism Muse in the pad)
 
 - **Subject**: the same Oklab recolour with a stronger iridescent hue drift and
   a higher `textureKeep`, so original chroma variation survives.

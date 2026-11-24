@@ -7,7 +7,56 @@
 > Superseded, for history only: `docs/LAMP.md` and `../HANDOFF.md` (banners at
 > their tops). Do not act on either of them.
 
-## 1. Repository / build
+## 0. Latest (2026-11-24) — creative looks / Play Pad
+
+**State:** the Creative Play Pad and the two subject-aware looks are
+implemented and locally committed. `master` is **115 commits ahead of
+`origin/master` and nothing was pushed**. That is why the GitHub remote cannot
+fetch `11e2cb1b47` yet — the commit exists locally; it is a push-state gap,
+not a missing implementation.
+
+**Creative commits (newest last):**
+- `11e2cb1b47` — Electric K-pop and Holographic fashion looks: deterministic
+  art library, the two patches, Inspector one-tap actions and the assistant
+  `apply_creative_patch` tool.
+- `5a34de0f16` — Creative Play Pad synthesis, linked lineup and acceptance
+  harness (landed from the concurrent pad workstream).
+- `cfe684b02c` — harden creative looks: repeat apply reuses the hidden source,
+  pieces map onto their canvas rectangles, 1600 px build cap, reflection
+  height, self-test safety, one layer-mask adapter.
+- `21d296b45f` — content-to-content subject-scale assertion in the self-test.
+
+**Verified build (post-relink, 2026-11-24 06:09):**
+`ninja -C win64-meson modules/libqt_plugin.dll` → `EXIT=0`.
+`PB_BUILD_SHA=21d296b45f0f4d0d72936839f525092dde748f05` (matches HEAD), compiled
+Nov 24 2026 06:09, `plugins.dat` regenerated 06:09:54. The docs commit after
+the link does not change the plugin.
+
+**Verified behaviour:**
+- `scripts/pb-creative-art-tests.ps1` → 68/68 PASS; worst Oklab ΔL 0.0132.
+- `probes/run-probes.ps1` → 5/5 PASS (345 controller members).
+- Creative self-test → **RESULT: PASS**: electric +10 layers / undo OK,
+  holo +9 / undo OK, `source content 304x864.8` vs `subject content 305x867`,
+  repeated apply keeps the hidden source, one-undo contract OK.
+- The one-tap Inspector actions and the assistant tool both call
+  `PaintbrushController::applyCreativePatch`; `commitCreativeLayers` wraps the
+  hidden-source visibility change and every insert in one `CompositeCommand`
+  → one undo.
+
+**Not implemented yet — the next delta is material intelligence, not another
+effects catalogue:**
+- independent garment / hair / skin / accessory masks; the recolour uses the
+  subject silhouette plus a heuristic skin guard only;
+- the four named holo materials (Liquid Hologram, Opal Dream, Chromatic
+  Chrome, Prismatic Fantasy); there is one `holo-fashion` material, displayed
+  in the pad as **Prism Muse** and exposed to the Inspector/assistant as the
+  Holographic fashion look;
+- cancellable async rendering; the creative build is synchronous and capped at
+  1600 px, so large exports upscale effect layers rather than synthesising at
+  the target resolution;
+- material-aware Play Pad gestures.
+
+## 1. Repository / build (historical 2026-11-22 — see §0 for current)
 
 - Repo: `D:\_SATIN_AI\NAI-OS\vlc`, branch `master`.
 - Build dir: `win64-meson` (native MSYS2/MINGW64 Meson build).
