@@ -14,10 +14,12 @@
 #include "pb_document.hpp"
 #include "pb_creative_art.hpp"
 #include "pb_stage.hpp"
+#include "art/style/typography_style.hpp"
 
 #include <QLinearGradient>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPolygonF>
 #include <QRadialGradient>
 #include <QRandomGenerator>
 #include <QTransform>
@@ -29,6 +31,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <random>
 
 namespace paintbrush {
 
@@ -177,7 +180,8 @@ QColor stageLightColor(const QString &patchId)
     if (patchId == QLatin1String("pastel-stage"))
         return QColor(180, 150, 255);
     if (patchId == QLatin1String("scene-forge")
-        || patchId == QLatin1String("stage-mode"))
+        || patchId == QLatin1String("stage-mode")
+        || patchId == QLatin1String("paper-theatre"))
         return QColor(255, 236, 196);
     if (patchId == QLatin1String("nocturne")
         || patchId == QLatin1String("holo-fashion"))
@@ -363,6 +367,12 @@ const QVector<PaintbrushCreative::PatchDef> &PaintbrushCreative::catalog()
           QStringLiteral("Drag the spotlight, lift the floor, hold for the reveal."),
           QStringLiteral("Add one halo over the spotlight."),
           QColor(255, 211, 122), QColor(184, 51, 106), QColor(8, 6, 12) },
+        { QStringLiteral("paper-theatre"), QStringLiteral("Paper Theatre"),
+          QStringLiteral("A little world, cut from paper."),
+          QStringLiteral("Scene"),
+          QStringLiteral("Drag to move the paper planes, lift for moonlight, hold to part the curtains."),
+          QStringLiteral("Add one paper ribbon across the marquee."),
+          QColor(214, 154, 64), QColor(172, 72, 52), QColor(38, 27, 20) },
     };
     return defs;
 }
@@ -1477,6 +1487,13 @@ QString PaintbrushCreative::commit()
         params[QStringLiteral("energy")] = double(m_frame.energy);
         params[QStringLiteral("hold")] = m_frame.hold;
         layer.metadata[QStringLiteral("creative.params")] = params;
+        /* Scene props carry their procedural role and depth so the committed
+         * layer stays self-describing after reopen (Paper Theatre, Nocturne). */
+        for (const QString &key : { QStringLiteral("creative.prop"),
+                                    QStringLiteral("creative.depth"),
+                                    QStringLiteral("creative.parallax") })
+            if (p.metadata.contains(key))
+                layer.metadata.insert(key, p.metadata.value(key));
 
         if (p.role == QLatin1String("powder"))
         {
@@ -1825,8 +1842,1072 @@ QImage PaintbrushCreative::composeStage(const QVector<CreativePiece> &pieces,
     return out;
 }
 
-/* -------------------------------------------------------------- patch recipes */
+/* --------------------------------------- paper theatre / scene prop geometry
+ *
+ * These builders are the missing scene-layer delta shared by Paper Theatre and
+ * Nocturne. Every shape is vector geometry (QPainterPath) rasterized at the
+ * recipe's stage resolution: curtains, planes, trees, castle, fan, ribbon,
+ * florals, stars, butterflies and the proscenium. A stable mt19937 stream plus
+ * the recipe seed decides every jitter, so the same seed always produces the
+ * same pixels and the committed layers reproduce after undo/reopen/export.
+ * Nothing here samples the source cutout except the subject itself. */
 
+namespace {
+
+/* std::mt19937 is specified bit-for-bit; masking to 24 bits keeps the float
+ * conversion identical across compilers (unlike generate_canonical). */
+struct SceneRng
+{
+    std::mt19937 engine;
+    explicit SceneRng(quint32 seed)
+        : engine(seed ? seed : 0x9E3779B9u)
+    {
+    }
+    quint32 next() { return quint32(engine()); }
+    float unit() { return float(next() & 0xFFFFFFu) / float(0x1000000u); }
+    float range(float a, float b) { return a + (b - a) * unit(); }
+    int pick(int count) { return count <= 0 ? 0 : int(next() % quint32(count)); }
+};
+
+struct SceneProp
+{
+    QImage image;
+    QPointF topLeft;
+};
+
+template <typename DrawFn>
+SceneProp renderProp(const QSize &stage, const QRectF &bounds, DrawFn &&draw)
+{
+    if (!stage.isValid() || stage.isEmpty())
+        return {};
+    const QRectF clipped =
+        bounds.intersected(QRectF(QPointF(0, 0), QSizeF(stage)));
+    if (clipped.width() < 1.0 || clipped.height() < 1.0)
+        return {};
+    const QPointF topLeft(std::floor(clipped.left()),
+                          std::floor(clipped.top()));
+    const QSize size(
+        qMax(1, int(std::ceil(clipped.right() - topLeft.x()))),
+        qMax(1, int(std::ceil(clipped.bottom() - topLeft.y()))));
+    QImage image(size, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    painter.translate(-topLeft);
+    draw(painter);
+    painter.end();
+    return { image, topLeft };
+}
+
+QPainterPath fivePointStar(const QPointF &center, qreal radius,
+                           qreal innerRatio = 0.43,
+                           qreal rotationDeg = -90.0)
+{
+    QPainterPath path;
+    for (int i = 0; i < 10; ++i)
+    {
+        const qreal r = (i % 2 == 0) ? radius : radius * innerRatio;
+        const qreal a = qDegreesToRadians(rotationDeg + i * 36.0);
+        const QPointF point(center.x() + std::cos(a) * r,
+                            center.y() + std::sin(a) * r);
+        if (i == 0)
+            path.moveTo(point);
+        else
+            path.lineTo(point);
+    }
+    path.closeSubpath();
+    return path;
+}
+
+QPainterPath irregularBlob(const QPointF &center, qreal rx, qreal ry,
+                           SceneRng &rng, int points = 11,
+                           qreal jitter = 0.16)
+{
+    QPainterPath path;
+    for (int i = 0; i < points; ++i)
+    {
+        const qreal a = kTau * qreal(i) / qreal(points);
+        const qreal r = 1.0 + rng.range(float(-jitter), float(jitter));
+        const QPointF point(center.x() + std::cos(a) * rx * r,
+                            center.y() + std::sin(a) * ry * r);
+        if (i == 0)
+            path.moveTo(point);
+        else
+            path.lineTo(point);
+    }
+    path.closeSubpath();
+    return path;
+}
+
+/* A cut-paper horizon plane. Returns a tight strip; the caller places it at
+ * `topLeft` and the bottom is always the stage bottom. */
+SceneProp makePaperPlane(const QSize &stage, const QColor &paper,
+                         const QColor &core, qreal horizon, qreal amplitude,
+                         qreal phase, int waves)
+{
+    const qreal w = stage.width();
+    const qreal h = stage.height();
+    const qreal top = qMax<qreal>(0.0, horizon - amplitude * 1.9 - h * 0.012);
+    QVector<QPointF> points;
+    const int steps = 38;
+    for (int i = 0; i <= steps; ++i)
+    {
+        const qreal t = qreal(i) / qreal(steps);
+        const qreal x = w * t;
+        const qreal y = horizon
+                        + std::sin(t * waves * kTau + phase) * amplitude
+                        + std::sin(t * waves * 2.7 * kTau + phase * 1.7)
+                              * amplitude * 0.32;
+        points.append(QPointF(x, y));
+    }
+    return renderProp(stage, QRectF(0, top, w, h - top),
+                      [&](QPainter &p) {
+        QPainterPath path;
+        path.moveTo(0, h);
+        path.lineTo(points.first());
+        for (int i = 1; i < points.size(); ++i)
+            path.lineTo(points[i]);
+        path.lineTo(w, h);
+        path.closeSubpath();
+
+        const qreal thickness = qMax<qreal>(1.5, h * 0.0045);
+        QPainterPath back = path;
+        back.translate(0, -thickness);
+        p.setPen(Qt::NoPen);
+        p.setBrush(core);
+        p.drawPath(back);
+
+        QLinearGradient g(0, horizon - amplitude, 0, h);
+        g.setColorAt(0.0, paper.lighter(108));
+        g.setColorAt(0.55, paper);
+        g.setColorAt(1.0, paper.darker(118));
+        p.setBrush(g);
+        p.drawPath(path);
+
+        QPainterPath edge;
+        edge.moveTo(points.first());
+        for (int i = 1; i < points.size(); ++i)
+            edge.lineTo(points[i]);
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(core, qMax<qreal>(1.0, h * 0.0024), Qt::SolidLine,
+                      Qt::RoundCap, Qt::RoundJoin));
+        p.drawPath(edge);
+    });
+}
+
+SceneProp makePaperTree(const QSize &stage, quint32 seed, const QColor &paper,
+                        const QColor &core, qreal x, qreal baseY,
+                        qreal height, qreal spread)
+{
+    const qreal h = stage.height();
+    const qreal top = baseY - height;
+    SceneRng rng(seed);
+    return renderProp(stage,
+                      QRectF(x - spread * 1.35, top - height * 0.10,
+                             spread * 2.7, height * 1.10),
+                      [&](QPainter &p) {
+        const qreal lean = rng.range(float(-spread * 0.10f),
+                                     float(spread * 0.10f));
+        const qreal trunkTop = baseY - height * 0.58;
+        const qreal trunkW = qMax<qreal>(2.0, spread * 0.10);
+
+        QPainterPath trunk;
+        trunk.moveTo(x - trunkW * 0.62, baseY);
+        trunk.quadTo(x - trunkW * 0.28 + lean * 0.4, baseY - height * 0.28,
+                     x + lean - trunkW * 0.34, trunkTop);
+        trunk.lineTo(x + lean + trunkW * 0.34, trunkTop);
+        trunk.quadTo(x + trunkW * 0.30 + lean * 0.4, baseY - height * 0.28,
+                     x + trunkW * 0.72, baseY);
+        trunk.closeSubpath();
+        QLinearGradient trunkFill(x, 0, x + trunkW, 0);
+        trunkFill.setColorAt(0.0, paper.darker(132));
+        trunkFill.setColorAt(0.55, paper.darker(112));
+        trunkFill.setColorAt(1.0, paper.darker(142));
+        p.setPen(Qt::NoPen);
+        p.setBrush(trunkFill);
+        p.drawPath(trunk);
+
+        const QPointF canopyMain(x + lean * 0.35, baseY - height * 0.72);
+        const QPointF canopyLeft(x - spread * 0.44, baseY - height * 0.57);
+        const QPointF canopyRight(x + spread * 0.46, baseY - height * 0.60);
+        const QPointF canopyTop(x + spread * 0.10, baseY - height * 0.90);
+
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(paper.darker(125), qMax<qreal>(1.6, h * 0.0045),
+                      Qt::SolidLine, Qt::RoundCap));
+        p.drawLine(QPointF(x + lean, trunkTop), canopyMain);
+        p.drawLine(QPointF(x + lean * 0.7, baseY - height * 0.46),
+                   canopyLeft);
+        p.drawLine(QPointF(x + lean * 0.7, baseY - height * 0.50),
+                   canopyRight);
+
+        struct Blob
+        {
+            QPointF center;
+            qreal rx;
+            qreal ry;
+        };
+        const Blob blobs[] = {
+            { canopyTop, spread * 0.42, height * 0.16 },
+            { canopyLeft, spread * 0.47, height * 0.19 },
+            { canopyRight, spread * 0.49, height * 0.20 },
+            { canopyMain, spread * 0.62, height * 0.25 },
+        };
+        for (const Blob &blob : blobs)
+        {
+            const QPainterPath shape =
+                irregularBlob(blob.center, blob.rx, blob.ry, rng);
+            QLinearGradient fill(0, blob.center.y() - blob.ry, 0,
+                                 blob.center.y() + blob.ry);
+            fill.setColorAt(0.0, paper.lighter(110));
+            fill.setColorAt(0.55, paper);
+            fill.setColorAt(1.0, paper.darker(122));
+            p.setPen(QPen(core, qMax<qreal>(1.0, h * 0.0022),
+                          Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            p.setBrush(fill);
+            p.drawPath(shape);
+        }
+    });
+}
+
+SceneProp makePaperCastle(const QSize &stage, quint32 seed, const QColor &paper,
+                          const QColor &core, qreal centerX, qreal baseY,
+                          qreal width, qreal height)
+{
+    const qreal h = stage.height();
+    Q_UNUSED(seed);
+    return renderProp(stage,
+                      QRectF(centerX - width * 0.62, baseY - height * 1.32,
+                             width * 1.24, height * 1.34),
+                      [&](QPainter &p) {
+        QLinearGradient fill(0, baseY - height, 0, baseY);
+        fill.setColorAt(0.0, paper.lighter(108));
+        fill.setColorAt(0.6, paper);
+        fill.setColorAt(1.0, paper.darker(120));
+        p.setPen(Qt::NoPen);
+        p.setBrush(fill);
+
+        const qreal wallH = height * 0.44;
+        const qreal wallTop = baseY - wallH;
+        p.drawRect(QRectF(centerX - width * 0.44, wallTop,
+                          width * 0.88, wallH));
+
+        struct Tower
+        {
+            qreal cx;
+            qreal tw;
+            qreal th;
+            qreal roof;
+        };
+        const Tower towers[] = {
+            { centerX - width * 0.34, width * 0.18, height * 0.72,
+              height * 0.13 },
+            { centerX, width * 0.21, height * 0.98, height * 0.16 },
+            { centerX + width * 0.34, width * 0.17, height * 0.68,
+              height * 0.12 },
+        };
+
+        const auto crenellate = [&](qreal left, qreal right, qreal top) {
+            const qreal cw = width * 0.030;
+            const int count = qMax(2, int((right - left) / (cw * 1.9)));
+            for (int i = 0; i < count; ++i)
+            {
+                const qreal cx = left + (right - left) * (qreal(i) + 0.5)
+                                            / qreal(count);
+                p.drawRect(QRectF(cx - cw / 2, top - cw * 0.75, cw,
+                                  cw * 0.75));
+            }
+        };
+
+        for (const Tower &tower : towers)
+        {
+            const qreal left = tower.cx - tower.tw / 2;
+            const qreal top = baseY - tower.th;
+            p.drawRect(QRectF(left, top, tower.tw, tower.th));
+            crenellate(left, left + tower.tw, top);
+            QPainterPath roof;
+            roof.moveTo(left - tower.tw * 0.10, top);
+            roof.lineTo(tower.cx, top - tower.roof);
+            roof.lineTo(left + tower.tw + tower.tw * 0.10, top);
+            roof.closeSubpath();
+            p.setBrush(paper.darker(118));
+            p.drawPath(roof);
+            p.setBrush(fill);
+        }
+        crenellate(centerX - width * 0.44, centerX + width * 0.44, wallTop);
+
+        /* cut-paper windows and gate: the backdrop must show through */
+        p.setCompositionMode(QPainter::CompositionMode_Clear);
+        p.setBrush(Qt::black);
+        p.setPen(Qt::NoPen);
+        for (const Tower &tower : towers)
+        {
+            const qreal ww = tower.tw * 0.30;
+            const qreal wh = qMin<qreal>(height * 0.13, tower.th * 0.24);
+            const qreal wy = baseY - tower.th * 0.56;
+            p.drawRoundedRect(QRectF(tower.cx - ww / 2, wy, ww, wh),
+                              ww / 2, ww / 2);
+        }
+        p.drawRoundedRect(QRectF(centerX - width * 0.055,
+                                 baseY - height * 0.24, width * 0.11,
+                                 height * 0.24),
+                          width * 0.055, width * 0.055);
+        p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+
+        /* paper edges */
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(core, qMax<qreal>(1.0, h * 0.0022), Qt::SolidLine,
+                      Qt::RoundCap, Qt::RoundJoin));
+        p.drawLine(QPointF(centerX - width * 0.44, wallTop),
+                   QPointF(centerX + width * 0.44, wallTop));
+        for (const Tower &tower : towers)
+        {
+            const qreal left = tower.cx - tower.tw / 2;
+            const qreal top = baseY - tower.th;
+            p.drawLine(QPointF(left, top), QPointF(left + tower.tw, top));
+            QPainterPath roof;
+            roof.moveTo(left - tower.tw * 0.10, top);
+            roof.lineTo(tower.cx, top - tower.roof);
+            roof.lineTo(left + tower.tw + tower.tw * 0.10, top);
+            p.drawPath(roof);
+        }
+        /* pennant on the tallest tower */
+        const qreal flagBase = baseY - height * 0.98 - height * 0.16;
+        p.setPen(QPen(core, qMax<qreal>(1.0, h * 0.002)));
+        p.drawLine(QPointF(centerX, flagBase),
+                   QPointF(centerX, flagBase - height * 0.11));
+        QPainterPath flag;
+        flag.moveTo(centerX, flagBase - height * 0.11);
+        flag.lineTo(centerX + width * 0.075, flagBase - height * 0.085);
+        flag.lineTo(centerX, flagBase - height * 0.06);
+        flag.closeSubpath();
+        p.setPen(Qt::NoPen);
+        p.setBrush(core);
+        p.drawPath(flag);
+    });
+}
+
+SceneProp makePaperCurtain(const QSize &stage, const QColor &paper,
+                           const QColor &core, bool left)
+{
+    const qreal w = stage.width();
+    const qreal h = stage.height();
+    const qreal side = w * 0.34;
+    const QRectF bounds = left ? QRectF(0, 0, side, h)
+                               : QRectF(w - side, 0, side, h);
+    return renderProp(stage, bounds, [&](QPainter &p) {
+        const qreal outerX = left ? 0.0 : w;
+        const qreal dir = left ? 1.0 : -1.0;
+        const auto X = [&](qreal local) { return outerX + dir * local; };
+
+        QPainterPath path;
+        path.moveTo(X(0), 0);
+        path.lineTo(X(w * 0.31), 0);
+        path.cubicTo(X(w * 0.26), h * 0.20, X(w * 0.17), h * 0.40,
+                     X(w * 0.19), h * 0.56);
+        path.cubicTo(X(w * 0.21), h * 0.72, X(w * 0.31), h * 0.88,
+                     X(w * 0.30), h);
+        path.lineTo(X(0), h);
+        path.closeSubpath();
+
+        QLinearGradient fill(left ? 0 : w, 0, left ? w * 0.32 : w * 0.68, 0);
+        fill.setColorAt(0.0, paper.darker(158));
+        fill.setColorAt(0.55, paper.darker(120));
+        fill.setColorAt(1.0, paper);
+        p.setPen(Qt::NoPen);
+        p.setBrush(fill);
+        p.drawPath(path);
+
+        p.save();
+        p.setClipPath(path);
+        for (int i = 0; i < 7; ++i)
+        {
+            const qreal lx = w * (0.035 + i * 0.042);
+            const qreal sway = w * (i % 2 == 0 ? 0.016 : -0.014);
+            QPainterPath fold;
+            fold.moveTo(X(lx), 0);
+            fold.cubicTo(X(lx + sway), h * 0.30, X(lx - sway), h * 0.62,
+                         X(lx + sway * 0.5), h);
+            QColor foldColor = (i % 2 == 0) ? paper.lighter(112)
+                                            : paper.darker(132);
+            foldColor.setAlpha(72);
+            p.setBrush(Qt::NoBrush);
+            p.setPen(QPen(foldColor, qMax<qreal>(1.2, w * 0.010),
+                          Qt::SolidLine, Qt::RoundCap));
+            p.drawPath(fold);
+        }
+        p.restore();
+
+        QPainterPath edge;
+        edge.moveTo(X(w * 0.31), 0);
+        edge.cubicTo(X(w * 0.26), h * 0.20, X(w * 0.17), h * 0.40,
+                     X(w * 0.19), h * 0.56);
+        edge.cubicTo(X(w * 0.21), h * 0.72, X(w * 0.31), h * 0.88,
+                     X(w * 0.30), h);
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(core, qMax<qreal>(1.2, h * 0.0032), Qt::SolidLine,
+                      Qt::RoundCap, Qt::RoundJoin));
+        p.drawPath(edge);
+
+        /* tie-back: a paper band pinching the drape */
+        p.save();
+        p.translate(X(w * 0.185), h * 0.56);
+        p.rotate(left ? -7.0 : 7.0);
+        QLinearGradient band(-w * 0.07, 0, w * 0.07, 0);
+        band.setColorAt(0.0, paper.darker(150));
+        band.setColorAt(0.5, paper.darker(126));
+        band.setColorAt(1.0, paper.darker(160));
+        p.setPen(QPen(core, qMax<qreal>(1.0, h * 0.0018)));
+        p.setBrush(band);
+        p.drawRoundedRect(QRectF(-w * 0.075, -h * 0.013, w * 0.15,
+                                 h * 0.026),
+                          h * 0.008, h * 0.008);
+        p.restore();
+    });
+}
+
+SceneProp makePaperFan(const QSize &stage, quint32 seed, const QColor &paper,
+                       const QColor &alt, const QColor &core,
+                       const QPointF &center, qreal radius, qreal startDeg,
+                       qreal spanDeg)
+{
+    SceneRng rng(seed);
+    const QRectF bounds(center.x() - radius * 1.25,
+                        center.y() - radius * 1.25, radius * 2.5,
+                        radius * 1.85);
+    return renderProp(stage, bounds, [&](QPainter &p) {
+        const int sectors = 9;
+        const qreal step = spanDeg / qreal(sectors);
+        const QRectF disc(center.x() - radius, center.y() - radius,
+                          radius * 2.0, radius * 2.0);
+        for (int i = 0; i < sectors; ++i)
+        {
+            QPainterPath sector;
+            sector.moveTo(center);
+            sector.arcTo(disc, startDeg + i * step, step);
+            sector.closeSubpath();
+            QColor c = (i % 2 == 0) ? paper : alt;
+            c = c.lighter(int(rng.range(-4.0f, 8.0f)));
+            c.setAlpha(232);
+            p.setPen(Qt::NoPen);
+            p.setBrush(c);
+            p.drawPath(sector);
+        }
+        p.setBrush(Qt::NoBrush);
+        for (int i = 0; i <= sectors; ++i)
+        {
+            const qreal a = qDegreesToRadians(startDeg + i * step);
+            const QPointF tick(center.x() + std::cos(a) * radius,
+                               center.y() - std::sin(a) * radius);
+            p.setPen(QPen(core, qMax<qreal>(0.9, radius * 0.012),
+                          Qt::SolidLine, Qt::RoundCap));
+            p.drawLine(center, tick);
+        }
+        p.setPen(QPen(core, qMax<qreal>(1.2, radius * 0.020),
+                      Qt::SolidLine, Qt::RoundCap));
+        p.drawArc(disc, int(std::lround(startDeg * 16.0)),
+                  int(std::lround(spanDeg * 16.0)));
+        p.setPen(QPen(core, qMax<qreal>(0.9, radius * 0.012)));
+        p.setBrush(paper.darker(145));
+        p.drawEllipse(center, radius * 0.055, radius * 0.055);
+
+        /* tassel */
+        p.setPen(QPen(core, qMax<qreal>(0.9, radius * 0.010)));
+        p.drawLine(center + QPointF(0, radius * 0.05),
+                   center + QPointF(0, radius * 0.30));
+        QPainterPath drop;
+        drop.moveTo(center + QPointF(0, radius * 0.28));
+        drop.lineTo(center + QPointF(-radius * 0.035, radius * 0.34));
+        drop.lineTo(center + QPointF(0, radius * 0.42));
+        drop.lineTo(center + QPointF(radius * 0.035, radius * 0.34));
+        drop.closeSubpath();
+        p.setPen(QPen(core, qMax<qreal>(0.7, radius * 0.008)));
+        p.setBrush(paper.darker(135));
+        p.drawPath(drop);
+    });
+}
+
+SceneProp makePaperRibbon(const QSize &stage, const QColor &paper,
+                          const QColor &core)
+{
+    const qreal w = stage.width();
+    const qreal h = stage.height();
+    return renderProp(stage, QRectF(0, 0, w, h), [&](QPainter &p) {
+        QPainterPath upper;
+        upper.moveTo(-w * 0.05, h * 0.33);
+        upper.cubicTo(w * 0.18, h * 0.12, w * 0.36, h * 0.48,
+                      w * 0.54, h * 0.40);
+        upper.cubicTo(w * 0.72, h * 0.32, w * 0.82, h * 0.08,
+                      w * 1.05, h * 0.24);
+
+        QPainterPath lower;
+        lower.moveTo(-w * 0.05, h * 0.47);
+        lower.cubicTo(w * 0.20, h * 0.63, w * 0.40, h * 0.31,
+                      w * 0.60, h * 0.45);
+        lower.cubicTo(w * 0.78, h * 0.58, w * 0.92, h * 0.51,
+                      w * 1.05, h * 0.63);
+
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(paper.darker(150), h * 0.033, Qt::SolidLine,
+                      Qt::RoundCap, Qt::RoundJoin));
+        p.drawPath(upper);
+        p.setPen(QPen(paper, h * 0.026, Qt::SolidLine, Qt::RoundCap,
+                      Qt::RoundJoin));
+        p.drawPath(upper);
+        p.setPen(QPen(core, h * 0.005, Qt::SolidLine, Qt::RoundCap,
+                      Qt::RoundJoin));
+        p.drawPath(upper);
+
+        p.setPen(QPen(paper.darker(160), h * 0.023, Qt::SolidLine,
+                      Qt::RoundCap, Qt::RoundJoin));
+        p.drawPath(lower);
+        p.setPen(QPen(paper.darker(112), h * 0.018, Qt::SolidLine,
+                      Qt::RoundCap, Qt::RoundJoin));
+        p.drawPath(lower);
+
+        /* paper twist where the two ribbons cross */
+        p.save();
+        p.translate(w * 0.555, h * 0.425);
+        p.rotate(-26.0);
+        p.setPen(QPen(core, qMax<qreal>(1.0, h * 0.0018)));
+        p.setBrush(paper.darker(128));
+        p.drawRoundedRect(QRectF(-w * 0.030, -h * 0.012, w * 0.060,
+                                 h * 0.024),
+                          h * 0.006, h * 0.006);
+        p.restore();
+    });
+}
+
+SceneProp makePaperFloral(const QSize &stage, quint32 seed,
+                          const QList<QColor> &palette,
+                          const QPointF &origin, qreal sizeScale, bool mirror)
+{
+    if (palette.isEmpty() || sizeScale <= 1.0)
+        return {};
+    const qreal dir = mirror ? -1.0 : 1.0;
+    SceneRng rng(seed);
+    const QRectF bounds(origin.x() - sizeScale * 2.45,
+                        origin.y() - sizeScale * 3.05, sizeScale * 4.90,
+                        sizeScale * 3.25);
+    const QColor stem = palette.value(qMin(2, palette.size() - 1)).darker(138);
+    const QColor leaf = palette.value(qMin(2, palette.size() - 1));
+    return renderProp(stage, bounds, [&](QPainter &p) {
+        p.setRenderHint(QPainter::Antialiasing, true);
+        struct Stem
+        {
+            QPointF tip;
+            qreal bend;
+        };
+        QVector<Stem> stems;
+        for (int i = 0; i < 3; ++i)
+        {
+            const qreal spread = sizeScale * (0.55 + 0.55 * i);
+            const qreal lift = sizeScale * (2.25 - 0.35 * i);
+            const QPointF tip(origin.x() + dir * spread
+                                  + rng.range(-sizeScale * 0.08f,
+                                              sizeScale * 0.08f),
+                              origin.y() - lift);
+            QPainterPath path;
+            path.moveTo(origin + QPointF(dir * sizeScale * 0.10 * i, 0));
+            const QPointF control(origin.x() + dir * spread * 0.55
+                                      + rng.range(-sizeScale * 0.15f,
+                                                  sizeScale * 0.15f),
+                                  origin.y() - lift * 0.55);
+            path.quadTo(control, tip);
+            p.setBrush(Qt::NoBrush);
+            p.setPen(QPen(stem, qMax<qreal>(1.2, sizeScale * 0.055),
+                          Qt::SolidLine, Qt::RoundCap));
+            p.drawPath(path);
+            stems.append({ tip, spread });
+        }
+
+        const auto drawLeaf = [&](const QPointF &at, qreal len, qreal angle) {
+            p.save();
+            p.translate(at);
+            p.rotate(angle);
+            QPainterPath leafPath;
+            leafPath.moveTo(0, 0);
+            leafPath.quadTo(len * 0.55, -len * 0.36, len, 0);
+            leafPath.quadTo(len * 0.55, len * 0.36, 0, 0);
+            p.setPen(QPen(stem.lighter(118), qMax<qreal>(0.7,
+                                                         len * 0.035)));
+            p.setBrush(leaf);
+            p.drawPath(leafPath);
+            p.restore();
+        };
+        for (int i = 0; i < stems.size(); ++i)
+        {
+            const Stem &s = stems.at(i);
+            for (int j = 0; j < 3; ++j)
+            {
+                const qreal t = 0.28 + 0.22 * j;
+                const QPointF at(origin.x() + dir * s.bend * t
+                                      + (j % 2 == 0 ? -1 : 1)
+                                            * sizeScale * 0.16,
+                                  origin.y() - (origin.y() - s.tip.y()) * t);
+                drawLeaf(at, sizeScale * rng.range(0.42f, 0.62f),
+                         dir * rng.range(-52.0f, 52.0f));
+            }
+        }
+
+        const auto drawFlower = [&](const QPointF &at, qreal radius,
+                                    const QColor &petal,
+                                    const QColor &heart) {
+            const int petals = 6;
+            for (int i = 0; i < petals; ++i)
+            {
+                const qreal a = kTau * qreal(i) / qreal(petals)
+                                + rng.range(-0.10f, 0.10f);
+                p.save();
+                p.translate(at);
+                p.rotate(qRadiansToDegrees(a));
+                QPainterPath petalPath;
+                const qreal len = radius * (0.92 + rng.range(-0.10f, 0.16f));
+                petalPath.addEllipse(QPointF(radius * 0.55, 0.0),
+                                     len * 0.60, radius * 0.30);
+                p.setPen(QPen(heart.lighter(118), qMax<qreal>(0.7,
+                                                               radius * 0.035)));
+                p.setBrush(petal);
+                p.drawPath(petalPath);
+                p.restore();
+            }
+            p.setPen(QPen(heart, qMax<qreal>(0.8, radius * 0.045)));
+            p.setBrush(heart);
+            p.drawEllipse(at, radius * 0.24, radius * 0.24);
+        };
+        for (int i = 0; i < stems.size(); ++i)
+        {
+            const QColor petal = palette.at(
+                (i + 1) % qMax(1, palette.size()));
+            const QColor heart = palette.at(
+                (i + 2) % qMax(1, palette.size()));
+            drawFlower(stems.at(i).tip,
+                       sizeScale * (0.46 + 0.10 * (i % 2)), petal, heart);
+        }
+        /* one low bud between the stems */
+        drawFlower(origin + QPointF(dir * sizeScale * 0.20,
+                                    -sizeScale * 0.95),
+                   sizeScale * 0.28, palette.at(0),
+                   palette.value(qMin(1, palette.size() - 1)));
+    });
+}
+
+SceneProp makePaperButterflies(const QSize &stage, quint32 seed,
+                               const QList<QColor> &palette,
+                               const QList<QPointF> &anchors, int count,
+                               qreal wingSize)
+{
+    if (palette.isEmpty() || anchors.isEmpty() || count <= 0)
+        return {};
+    SceneRng rng(seed);
+    qreal minX = stage.width();
+    qreal minY = stage.height();
+    qreal maxX = 0.0;
+    qreal maxY = 0.0;
+    for (const QPointF &anchor : anchors)
+    {
+        minX = qMin(minX, anchor.x() - wingSize * 4.0);
+        minY = qMin(minY, anchor.y() - wingSize * 4.0);
+        maxX = qMax(maxX, anchor.x() + wingSize * 4.0);
+        maxY = qMax(maxY, anchor.y() + wingSize * 4.0);
+    }
+    const QRectF bounds(minX, minY, maxX - minX, maxY - minY);
+    return renderProp(stage, bounds, [&](QPainter &p) {
+        for (int i = 0; i < count; ++i)
+        {
+            const QPointF anchor = anchors.at(i % anchors.size());
+            const QPointF c(
+                anchor.x() + rng.range(float(-wingSize * 2.2f),
+                                       float(wingSize * 2.2f)),
+                anchor.y() + rng.range(float(-wingSize * 2.2f),
+                                       float(wingSize * 2.2f)));
+            const qreal s = wingSize * rng.range(0.78f, 1.18f);
+            const QColor base = palette.at(rng.pick(palette.size()));
+            QColor paper = base;
+            paper.setAlpha(236);
+            QColor edge = base.lighter(138);
+            edge.setAlpha(245);
+            p.save();
+            p.translate(c);
+            p.rotate(rng.range(-32.0f, 32.0f));
+            p.setPen(QPen(edge, qMax<qreal>(0.8, s * 0.035)));
+            p.setBrush(paper);
+            QPainterPath upperL;
+            upperL.addEllipse(QPointF(-s * 0.52, -s * 0.34), s * 0.62,
+                              s * 0.46);
+            QPainterPath upperR;
+            upperR.addEllipse(QPointF(s * 0.52, -s * 0.34), s * 0.62,
+                              s * 0.46);
+            QPainterPath lowerL;
+            lowerL.addEllipse(QPointF(-s * 0.40, s * 0.34), s * 0.46,
+                              s * 0.34);
+            QPainterPath lowerR;
+            lowerR.addEllipse(QPointF(s * 0.40, s * 0.34), s * 0.46,
+                              s * 0.34);
+            p.drawPath(upperL);
+            p.drawPath(upperR);
+            p.drawPath(lowerL);
+            p.drawPath(lowerR);
+            p.setPen(Qt::NoPen);
+            QColor inner = edge.lighter(112);
+            inner.setAlpha(150);
+            p.setBrush(inner);
+            p.drawEllipse(QPointF(-s * 0.52, -s * 0.30), s * 0.26,
+                          s * 0.18);
+            p.drawEllipse(QPointF(s * 0.52, -s * 0.30), s * 0.26, s * 0.18);
+            p.setBrush(paper.darker(165));
+            p.setPen(QPen(edge, qMax<qreal>(0.6, s * 0.02)));
+            p.drawRoundedRect(QRectF(-s * 0.075, -s * 0.62, s * 0.15,
+                                     s * 1.20),
+                              s * 0.07, s * 0.07);
+            p.setPen(QPen(edge, qMax<qreal>(0.6, s * 0.02),
+                          Qt::SolidLine, Qt::RoundCap));
+            p.drawLine(QPointF(0, -s * 0.58),
+                       QPointF(-s * 0.28, -s * 0.94));
+            p.drawLine(QPointF(0, -s * 0.58),
+                       QPointF(s * 0.28, -s * 0.94));
+            p.restore();
+        }
+    });
+}
+
+SceneProp makePaperStarGarland(const QSize &stage, quint32 seed,
+                               const QColor &paper, const QColor &core,
+                               int count, qreal y, qreal sag)
+{
+    if (count <= 0)
+        return {};
+    const qreal w = stage.width();
+    const qreal h = stage.height();
+    const qreal radius = qMax<qreal>(3.0, h * 0.018);
+    SceneRng rng(seed);
+    return renderProp(
+        stage,
+        QRectF(0, y - radius * 2.4, w, sag + radius * 5.0),
+        [&](QPainter &p) {
+        const qreal margin = w * 0.06;
+        QPainterPath string;
+        const int steps = 40;
+        for (int i = 0; i <= steps; ++i)
+        {
+            const qreal t = qreal(i) / qreal(steps);
+            const qreal x = margin + (w - margin * 2.0) * t;
+            const qreal yy = y + std::sin(t * 3.141592653589793) * sag;
+            if (i == 0)
+                string.moveTo(x, yy);
+            else
+                string.lineTo(x, yy);
+        }
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(core, qMax<qreal>(0.8, h * 0.0018)));
+        p.drawPath(string);
+
+        for (int i = 0; i < count; ++i)
+        {
+            const qreal t = (qreal(i) + 0.5) / qreal(count);
+            const qreal x = margin + (w - margin * 2.0) * t;
+            const qreal yy = y + std::sin(t * 3.141592653589793) * sag;
+            const qreal r = radius * rng.range(0.70f, 1.10f);
+            const QPointF c(x, yy + r * 1.35);
+            p.setPen(QPen(core, qMax<qreal>(0.8, r * 0.10)));
+            p.setBrush(paper);
+            p.drawPath(fivePointStar(c, r, 0.43,
+                                     rng.range(-16.0f, 16.0f)));
+            p.setPen(QPen(core, qMax<qreal>(0.6, r * 0.06)));
+            p.drawLine(QPointF(x, yy), QPointF(x, yy + r * 0.55));
+        }
+    });
+}
+
+SceneProp makePaperMoon(const QSize &stage, quint32 seed, const QColor &paper,
+                        const QColor &core, const QPointF &center,
+                        qreal radius)
+{
+    SceneRng rng(seed);
+    return renderProp(stage,
+                      QRectF(center.x() - radius * 1.25,
+                             center.y() - radius * 1.25, radius * 2.5,
+                             radius * 2.5),
+                      [&](QPainter &p) {
+        QRadialGradient disc(
+            QPointF(center.x() - radius * 0.28,
+                    center.y() - radius * 0.30),
+            radius * 1.35);
+        disc.setColorAt(0.0, paper.lighter(112));
+        disc.setColorAt(0.62, paper);
+        disc.setColorAt(1.0, paper.darker(114));
+        p.setPen(QPen(core, qMax<qreal>(1.0, radius * 0.025)));
+        p.setBrush(disc);
+        p.drawEllipse(center, radius, radius);
+
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(paper.darker(122), qMax<qreal>(0.8, radius * 0.012)));
+        p.drawEllipse(center, radius * 0.82, radius * 0.82);
+        p.setPen(Qt::NoPen);
+        for (int i = 0; i < 7; ++i)
+        {
+            const qreal a = rng.range(0.0f, float(kTau));
+            const qreal d = radius * rng.range(0.06f, 0.68f);
+            const qreal r = radius * rng.range(0.03f, 0.10f);
+            QColor crater = paper.darker(112);
+            crater.setAlpha(int(rng.range(32.0f, 76.0f)));
+            p.setBrush(crater);
+            p.drawEllipse(QPointF(center.x() + std::cos(a) * d,
+                                  center.y() + std::sin(a) * d),
+                          r, r * 0.86);
+        }
+    });
+}
+
+SceneProp makePaperForegroundLip(const QSize &stage, quint32 seed,
+                                 const QColor &paper, const QColor &core,
+                                 qreal topY)
+{
+    const qreal w = stage.width();
+    const qreal h = stage.height();
+    SceneRng rng(seed);
+    return renderProp(stage,
+                      QRectF(0, topY - h * 0.04, w, h - topY + h * 0.04),
+                      [&](QPainter &p) {
+        QVector<QPointF> edge;
+        const int steps = 44;
+        for (int i = 0; i <= steps; ++i)
+        {
+            const qreal t = qreal(i) / qreal(steps);
+            const qreal x = w * t;
+            const qreal y = topY + std::sin(t * 3.2 * kTau + 0.8) * h * 0.008
+                            + rng.range(float(-h * 0.003f),
+                                        float(h * 0.003f));
+            edge.append(QPointF(x, y));
+        }
+        QPainterPath path;
+        path.moveTo(0, h);
+        path.lineTo(edge.first());
+        for (int i = 1; i < edge.size(); ++i)
+            path.lineTo(edge[i]);
+        path.lineTo(w, h);
+        path.closeSubpath();
+
+        QLinearGradient fill(0, topY, 0, h);
+        fill.setColorAt(0.0, paper.lighter(104));
+        fill.setColorAt(0.25, paper);
+        fill.setColorAt(1.0, paper.darker(158));
+        p.setPen(Qt::NoPen);
+        p.setBrush(fill);
+        p.drawPath(path);
+
+        QPainterPath rim;
+        rim.moveTo(edge.first());
+        for (int i = 1; i < edge.size(); ++i)
+            rim.lineTo(edge[i]);
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(core, qMax<qreal>(1.0, h * 0.0030), Qt::SolidLine,
+                      Qt::RoundCap, Qt::RoundJoin));
+        p.drawPath(rim);
+
+        /* paper grass / board seams */
+        p.setPen(Qt::NoPen);
+        p.setBrush(paper.darker(128));
+        for (int i = 0; i < 26; ++i)
+        {
+            const qreal t = (qreal(i) + rng.range(0.1f, 0.9f)) / 26.0;
+            const int idx = qBound(0, int(t * (edge.size() - 1)),
+                                   edge.size() - 1);
+            const QPointF at = edge.at(idx);
+            const qreal bh = h * rng.range(0.008f, 0.030f);
+            const qreal bw = w * rng.range(0.0015f, 0.0035f);
+            QPainterPath blade;
+            blade.moveTo(at.x() - bw, at.y());
+            blade.lineTo(at.x() + rng.range(-bw, bw), at.y() - bh);
+            blade.lineTo(at.x() + bw, at.y());
+            blade.closeSubpath();
+            p.drawPath(blade);
+        }
+        p.setPen(QPen(paper.darker(175), qMax<qreal>(0.8, h * 0.0015)));
+        p.drawLine(QPointF(0, topY + h * 0.045),
+                   QPointF(w, topY + h * 0.045));
+        p.setPen(QPen(paper.darker(185), qMax<qreal>(0.7, h * 0.0012)));
+        p.drawLine(QPointF(0, topY + h * 0.085),
+                   QPointF(w, topY + h * 0.085));
+    });
+}
+
+SceneProp makePaperCornerFoliage(const QSize &stage, quint32 seed,
+                                 const QColor &paper, const QColor &core,
+                                 bool left)
+{
+    const qreal w = stage.width();
+    const qreal h = stage.height();
+    const qreal bw = w * 0.30;
+    const qreal boundsW = w * 0.36;
+    const qreal bh = h * 0.34;
+    const QRectF bounds = left ? QRectF(0, 0, boundsW, bh)
+                               : QRectF(w - boundsW, 0, boundsW, bh);
+    SceneRng rng(seed);
+    return renderProp(stage, bounds, [&](QPainter &p) {
+        const qreal dir = left ? 1.0 : -1.0;
+        const qreal ox = left ? 0.0 : w;
+        const auto X = [&](qreal local) { return ox + dir * local; };
+        QPainterPath branch;
+        branch.moveTo(X(0), h * 0.06);
+        branch.cubicTo(X(bw * 0.35), h * 0.04, X(bw * 0.62), h * 0.18,
+                       X(bw * 0.94), h * 0.34);
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(paper.darker(124), qMax<qreal>(1.4, h * 0.0060),
+                      Qt::SolidLine, Qt::RoundCap));
+        p.drawPath(branch);
+
+        const int leaves = 11;
+        for (int i = 0; i < leaves; ++i)
+        {
+            const qreal t = 0.12 + 0.82 * qreal(i) / qreal(leaves - 1);
+            const QPointF at = branch.pointAtPercent(t);
+            const qreal len = h * rng.range(0.022f, 0.046f);
+            p.save();
+            p.translate(at + QPointF(0, h * rng.range(-0.010f, 0.010f)));
+            p.rotate(dir * rng.range(-62.0f, 58.0f));
+            QPainterPath leaf;
+            leaf.moveTo(0, 0);
+            leaf.quadTo(len * 0.55, -len * 0.34, len, 0);
+            leaf.quadTo(len * 0.55, len * 0.34, 0, 0);
+            p.setPen(QPen(core, qMax<qreal>(0.6, len * 0.045)));
+            p.setBrush(paper);
+            p.drawPath(leaf);
+            p.restore();
+        }
+    });
+}
+
+SceneProp makePaperProscenium(const QSize &stage, const QColor &paper,
+                              const QColor &core)
+{
+    const qreal w = stage.width();
+    const qreal h = stage.height();
+    const qreal t = w * 0.060;
+    return renderProp(stage, QRectF(0, 0, w, h), [&](QPainter &p) {
+        QPainterPath frame;
+        frame.moveTo(0, h);
+        frame.lineTo(0, h * 0.34);
+        frame.cubicTo(0, h * 0.10, w * 0.22, h * 0.03, w * 0.5, h * 0.03);
+        frame.cubicTo(w * 0.78, h * 0.03, w, h * 0.10, w, h * 0.34);
+        frame.lineTo(w, h);
+        frame.lineTo(w - t, h);
+        frame.lineTo(w - t, h * 0.35);
+        frame.cubicTo(w - t, h * 0.15, w * 0.74, h * 0.09, w * 0.5,
+                      h * 0.09);
+        frame.cubicTo(w * 0.26, h * 0.09, t, h * 0.15, t, h * 0.35);
+        frame.lineTo(t, h);
+        frame.closeSubpath();
+
+        QLinearGradient fill(0, 0, 0, h);
+        fill.setColorAt(0.0, paper.darker(112));
+        fill.setColorAt(0.55, paper);
+        fill.setColorAt(1.0, paper.darker(140));
+        p.setPen(Qt::NoPen);
+        p.setBrush(fill);
+        p.drawPath(frame);
+
+        QPainterPath inner;
+        inner.moveTo(w - t, h * 0.35);
+        inner.cubicTo(w - t, h * 0.15, w * 0.74, h * 0.09, w * 0.5,
+                      h * 0.09);
+        inner.cubicTo(w * 0.26, h * 0.09, t, h * 0.15, t, h * 0.35);
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(core, qMax<qreal>(1.2, h * 0.0030), Qt::SolidLine,
+                      Qt::RoundCap, Qt::RoundJoin));
+        p.drawPath(inner);
+
+        /* scalloped valance */
+        const qreal vh = h * 0.085;
+        const int scallops = 9;
+        QPainterPath valance;
+        valance.moveTo(0, 0);
+        valance.lineTo(w, 0);
+        valance.lineTo(w, vh);
+        for (int i = scallops; i > 0; --i)
+        {
+            const qreal x0 = w * qreal(i) / qreal(scallops);
+            const qreal x1 = w * qreal(i - 1) / qreal(scallops);
+            valance.quadTo((x0 + x1) / 2.0, vh + h * 0.018, x1, vh);
+        }
+        valance.closeSubpath();
+        QLinearGradient vfill(0, 0, 0, vh + h * 0.02);
+        vfill.setColorAt(0.0, paper.darker(128));
+        vfill.setColorAt(1.0, paper.darker(106));
+        p.setPen(Qt::NoPen);
+        p.setBrush(vfill);
+        p.drawPath(valance);
+
+        QPainterPath vedge;
+        vedge.moveTo(0, vh);
+        for (int i = scallops; i > 0; --i)
+        {
+            const qreal x0 = w * qreal(i) / qreal(scallops);
+            const qreal x1 = w * qreal(i - 1) / qreal(scallops);
+            vedge.quadTo((x0 + x1) / 2.0, vh + h * 0.018, x1, vh);
+        }
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(core, qMax<qreal>(1.0, h * 0.0026), Qt::SolidLine,
+                      Qt::RoundCap, Qt::RoundJoin));
+        p.drawPath(vedge);
+    });
+}
+
+SceneProp makePaperTitle(const QSize &stage, const QString &text,
+                         const QColor &color, const QColor &shadowColor,
+                         qreal heightFraction, qreal y)
+{
+    if (text.trimmed().isEmpty() || stage.isEmpty())
+        return {};
+    art::TextTreatment treatment;
+    treatment.text = text;
+    treatment.styleId = QStringLiteral("condensed.impact");
+    treatment.color = color;
+    float px = float(stage.height()) * float(heightFraction);
+    QImage textImage;
+    for (int attempt = 0; attempt < 4; ++attempt)
+    {
+        treatment.sizePx = px;
+        textImage = art::typography::render(treatment, 1.0f);
+        if (textImage.isNull()
+            || textImage.width() <= int(stage.width() * 0.90))
+            break;
+        px *= 0.84f;
+    }
+    if (textImage.isNull())
+        return {};
+    art::TextTreatment shadowTreatment = treatment;
+    shadowTreatment.color = QColor(shadowColor.red(), shadowColor.green(),
+                                   shadowColor.blue(), 150);
+    QImage shadowImage = art::typography::render(shadowTreatment, 1.0f);
+
+    const qreal maxWidth = stage.width() * 0.92;
+    if (textImage.width() > maxWidth)
+    {
+        const int target = qMax(1, int(maxWidth));
+        textImage = textImage.scaledToWidth(target, Qt::SmoothTransformation);
+        if (!shadowImage.isNull())
+            shadowImage =
+                shadowImage.scaledToWidth(target, Qt::SmoothTransformation);
+    }
+    const qreal x = (stage.width() - textImage.width()) / 2.0;
+    const qreal shadowOffset = stage.height() * 0.0045;
+    return renderProp(
+        stage,
+        QRectF(x - stage.width() * 0.015, y - shadowOffset,
+               textImage.width() + stage.width() * 0.03,
+               textImage.height() + shadowOffset * 2.5),
+        [&](QPainter &p) {
+        if (!shadowImage.isNull())
+            p.drawImage(QPointF(x, y + shadowOffset), shadowImage);
+        p.drawImage(QPointF(x, y), textImage);
+    });
+}
+
+} /* namespace */
+
+/* -------------------------------------------------------------- patch recipes */
 QVector<CreativePiece> PaintbrushCreative::buildPatch(const QString &patchId,
                                                       const QImage &subject,
                                                       const QRectF &subjectRect,
@@ -1917,6 +2998,51 @@ QVector<CreativePiece> PaintbrushCreative::buildPatch(const QString &patchId,
     auto solid = [&](const QImage &src, const QColor &color) {
         return tintPreserveAlpha(src, color);
     };
+    auto addSceneProp = [&](const SceneProp &prop, const QString &name,
+                            const QString &role, int blend, float opacity,
+                            const CreativeMotion &motion,
+                            const QString &propKind, float depth) {
+        if (prop.image.isNull())
+            return;
+        CreativePiece p;
+        p.name = name;
+        p.role = role;
+        p.image = prop.image;
+        p.rect = QRectF(prop.topLeft, QSizeF(prop.image.size()));
+        p.pivot = p.rect.center();
+        p.blendMode = blend;
+        p.opacity = opacity;
+        p.motion = motion;
+        p.metadata[QStringLiteral("creative.prop")] = propKind;
+        p.metadata[QStringLiteral("creative.depth")] = double(depth);
+        p.metadata[QStringLiteral("creative.parallax")] = double(motion.dxX);
+        pieces.append(p);
+    };
+    auto addScenePropShadowed =
+        [&](const SceneProp &prop, const QString &name, const QString &role,
+            int blend, float opacity, const CreativeMotion &motion,
+            const QString &propKind, float depth, const QColor &shadowColor,
+            qreal shadowDx, qreal shadowDy, float shadowOpacity) {
+            if (prop.image.isNull())
+                return;
+            const QImage shadow = creative::silhouetteShadow(
+                prop.image, shadowColor, 1.0f);
+            if (!shadow.isNull())
+            {
+                SceneProp shadowProp{ shadow,
+                                      prop.topLeft
+                                          + QPointF(shadowDx, shadowDy) };
+                addSceneProp(
+                    shadowProp, name + QStringLiteral(" shadow"),
+                    role == QLatin1String("backdrop")
+                        ? QStringLiteral("backdrop")
+                        : QStringLiteral("echo"),
+                    BLEND_NORMAL, shadowOpacity, motion,
+                    propKind + QStringLiteral("-shadow"), depth - 0.02f);
+            }
+            addSceneProp(prop, name, role, blend, opacity, motion, propKind,
+                         depth);
+        };
 
     if (patchId == QLatin1String("neon-idol"))
     {
@@ -2295,6 +3421,55 @@ QVector<CreativePiece> PaintbrushCreative::buildPatch(const QString &patchId,
             creative::gradientField(stage, night, QColor(24, 14, 44),
                                     QColor(82, 52, 160, 110), 0.36),
             full);
+
+        /* Scene-layer delta: velvet depth, a paper moon, a distant silhouette
+         * and a second star plane. The existing night palette is untouched;
+         * these sit behind the existing stars/aura/rims. */
+        add(QStringLiteral("Nocturne velvet depth"), QStringLiteral("backdrop"),
+            creative::velvetField(stage, seed + 41, QColor(10, 6, 24), 0.85f),
+            full, BLEND_MULTIPLY, 0.55f);
+
+        CreativeMotion moonM;
+        moonM.dxX = 0.016f;
+        moonM.dyY = 0.008f;
+        addScenePropShadowed(
+            makePaperMoon(stage, seed + 43, QColor(222, 216, 246), lilac,
+                          QPointF(W * 0.73, H * 0.21), H * 0.100),
+            QStringLiteral("Nocturne paper moon"),
+            QStringLiteral("backdrop"), BLEND_SCREEN, 0.72f, moonM,
+            QStringLiteral("moon"), -0.32f, QColor(6, 4, 16), W * 0.005,
+            H * 0.008, 0.40f);
+
+        CreativeMotion castleM;
+        castleM.dxX = 0.026f;
+        castleM.dyY = 0.009f;
+        addScenePropShadowed(
+            makePaperCastle(stage, seed + 47, QColor(14, 10, 30), violet,
+                            W * 0.52, H * 0.64, W * 0.30, H * 0.17),
+            QStringLiteral("Nocturne distant castle"),
+            QStringLiteral("backdrop"), BLEND_NORMAL, 0.70f, castleM,
+            QStringLiteral("castle"), -0.54f, QColor(4, 3, 12), W * 0.004,
+            H * 0.007, 0.48f);
+
+        CreativeMotion distantM;
+        distantM.dxX = 0.020f;
+        distantM.dyY = 0.008f;
+        addScenePropShadowed(
+            makePaperPlane(stage, QColor(10, 8, 24), violet, H * 0.66,
+                           H * 0.032, 2.2, 2),
+            QStringLiteral("Nocturne distant silhouettes"),
+            QStringLiteral("backdrop"), BLEND_NORMAL, 0.80f, distantM,
+            QStringLiteral("plane-back"), -0.60f, QColor(4, 3, 12),
+            W * 0.004, H * 0.007, 0.42f);
+
+        CreativeMotion bloomStarsM;
+        bloomStarsM.dxX = 0.012f;
+        bloomStarsM.dyY = 0.006f;
+        add(QStringLiteral("Nocturne star bloom"), QStringLiteral("backdrop"),
+            creative::starField(stage, seed + 31,
+                                { lilac, silver, teal }, 140),
+            full, BLEND_SCREEN, 0.55f, bloomStarsM);
+
         add(QStringLiteral("Nocturne stars"), QStringLiteral("backdrop"),
             creative::starField(stage, seed, silver, 220), full,
             BLEND_SCREEN, 0.75f);
@@ -2347,6 +3522,68 @@ QVector<CreativePiece> PaintbrushCreative::buildPatch(const QString &patchId,
                                     { QColor(120, 40, 90), lilac, teal },
                                     34, H * 0.008, H * 0.022),
             full, BLEND_NORMAL, 0.5f);
+
+        /* Foreground scene layer: velvet edge, edge silhouettes and near
+         * florals/butterflies. They occlude only the frame edges; the figure
+         * stays readable. */
+        add(QStringLiteral("Nocturne velvet edge"), QStringLiteral("finish"),
+            creative::velvetField(stage, seed + 53, QColor(8, 4, 20), 0.70f),
+            full, BLEND_MULTIPLY, 0.32f);
+
+        CreativeMotion fgTreeLM;
+        fgTreeLM.dxX = 0.105f;
+        fgTreeLM.dyY = 0.020f;
+        addScenePropShadowed(
+            makePaperTree(stage, seed + 57, QColor(8, 7, 18), violet,
+                          W * 0.02, H * 1.01, H * 0.70, W * 0.15),
+            QStringLiteral("Nocturne foreground silhouette left"),
+            QStringLiteral("accent"), BLEND_NORMAL, 0.94f, fgTreeLM,
+            QStringLiteral("foreground"), 0.52f, QColor(3, 2, 10),
+            W * 0.004, H * 0.007, 0.44f);
+        CreativeMotion fgTreeRM;
+        fgTreeRM.dxX = -0.105f;
+        fgTreeRM.dyY = 0.020f;
+        addScenePropShadowed(
+            makePaperTree(stage, seed + 59, QColor(8, 7, 18), violet,
+                          W * 0.98, H * 1.01, H * 0.66, W * 0.14),
+            QStringLiteral("Nocturne foreground silhouette right"),
+            QStringLiteral("accent"), BLEND_NORMAL, 0.94f, fgTreeRM,
+            QStringLiteral("foreground"), 0.52f, QColor(3, 2, 10),
+            W * 0.004, H * 0.007, 0.44f);
+
+        CreativeMotion fgFloralLM;
+        fgFloralLM.dxX = 0.070f;
+        fgFloralLM.dyY = 0.016f;
+        addSceneProp(
+            makePaperFloral(stage, seed + 61,
+                            { lilac, silver, teal, violet },
+                            QPointF(W * 0.10, H * 0.90), H * 0.078, false),
+            QStringLiteral("Nocturne floral left"), QStringLiteral("accent"),
+            BLEND_NORMAL, 0.90f, fgFloralLM, QStringLiteral("floral"), 0.34f);
+        CreativeMotion fgFloralRM;
+        fgFloralRM.dxX = -0.070f;
+        fgFloralRM.dyY = 0.016f;
+        addSceneProp(
+            makePaperFloral(stage, seed + 63,
+                            { lilac, silver, teal, violet },
+                            QPointF(W * 0.90, H * 0.92), H * 0.074, true),
+            QStringLiteral("Nocturne floral right"), QStringLiteral("accent"),
+            BLEND_NORMAL, 0.90f, fgFloralRM, QStringLiteral("floral"), 0.34f);
+
+        CreativeMotion nearFlightM;
+        nearFlightM.rotationEnergy = 6.0f;
+        nearFlightM.dxEnergy = 0.008f;
+        addSceneProp(
+            makePaperButterflies(
+                stage, seed + 67, { lilac, silver, teal },
+                { QPointF(subjectRect.x() + subjectRect.width() * 0.08,
+                          subjectRect.y() + subjectRect.height() * 0.30),
+                  QPointF(subjectRect.right() - subjectRect.width() * 0.06,
+                          subjectRect.y() + subjectRect.height() * 0.52) },
+                3, H * 0.030),
+            QStringLiteral("Nocturne near butterflies"),
+            QStringLiteral("accent"), BLEND_NORMAL, 0.86f, nearFlightM,
+            QStringLiteral("butterflies"), 0.30f);
 
         add(QStringLiteral("Nocturne grain"), QStringLiteral("finish"),
             creative::grainField(stage, seed + 9, 22), full,
@@ -2884,6 +4121,225 @@ QVector<CreativePiece> PaintbrushCreative::buildPatch(const QString &patchId,
         add(QStringLiteral("Paper grain"), QStringLiteral("finish"),
             creative::grainField(stage, seed + 5, 30), full,
             BLEND_OVERLAY, 0.35f);
+    }
+    else if (patchId == QLatin1String("paper-theatre"))
+    {
+        const QColor cream(246, 233, 208), sand(232, 210, 172),
+            ochre(214, 154, 64), rust(172, 72, 52), teal(38, 96, 86),
+            ink(38, 27, 20), rose(191, 86, 96), dusk(70, 40, 64);
+
+        add(QStringLiteral("Paper stock"), QStringLiteral("backdrop"),
+            creative::paperStockField(stage, seed, cream, ochre, 0.85f), full);
+        add(QStringLiteral("Paper dusk wash"), QStringLiteral("backdrop"),
+            creative::gradientField(stage, QColor(255, 248, 232, 0),
+                                    QColor(66, 34, 52, 120),
+                                    QColor(255, 226, 170, 96), 0.30),
+            full, BLEND_MULTIPLY, 0.55f);
+
+        CreativeMotion moonM;
+        moonM.dxX = 0.018f;
+        moonM.dyY = 0.008f;
+        const SceneProp moon = makePaperMoon(
+            stage, seed + 3, QColor(252, 242, 214), ochre,
+            QPointF(W * 0.62, H * 0.21), H * 0.085);
+        addScenePropShadowed(moon, QStringLiteral("Paper moon"),
+                             QStringLiteral("backdrop"), BLEND_NORMAL, 0.92f,
+                             moonM, QStringLiteral("moon"), -0.30f,
+                             QColor(52, 30, 30), W * 0.006, H * 0.010, 0.30f);
+
+        CreativeMotion archM;
+        archM.dxX = 0.012f;
+        archM.dyY = 0.006f;
+        addSceneProp(makePaperProscenium(stage, rust, cream),
+                     QStringLiteral("Paper proscenium"),
+                     QStringLiteral("backdrop"), BLEND_NORMAL, 1.0f, archM,
+                     QStringLiteral("proscenium"), -0.45f);
+
+        CreativeMotion castleM;
+        castleM.dxX = 0.030f;
+        castleM.dyY = 0.010f;
+        addScenePropShadowed(
+            makePaperCastle(stage, seed + 5, ochre.darker(118), cream,
+                            W * 0.56, H * 0.61, W * 0.32, H * 0.20),
+            QStringLiteral("Paper castle"), QStringLiteral("backdrop"),
+            BLEND_NORMAL, 0.92f, castleM, QStringLiteral("castle"), -0.48f,
+            QColor(58, 32, 28), W * 0.005, H * 0.009, 0.34f);
+
+        CreativeMotion backM;
+        backM.dxX = 0.020f;
+        backM.dyY = 0.008f;
+        addScenePropShadowed(
+            makePaperPlane(stage, sand, cream, H * 0.50, H * 0.045, 0.5, 2),
+            QStringLiteral("Paper back plane"), QStringLiteral("backdrop"),
+            BLEND_NORMAL, 0.96f, backM, QStringLiteral("plane-back"), -0.60f,
+            QColor(60, 34, 30), W * 0.004, H * 0.008, 0.30f);
+
+        CreativeMotion treeLM;
+        treeLM.dxX = 0.045f;
+        treeLM.dyY = 0.014f;
+        addScenePropShadowed(
+            makePaperTree(stage, seed + 7, teal.darker(108), cream, W * 0.30,
+                          H * 0.72, H * 0.42, W * 0.10),
+            QStringLiteral("Paper tree left"), QStringLiteral("backdrop"),
+            BLEND_NORMAL, 0.95f, treeLM, QStringLiteral("tree"), -0.36f,
+            QColor(40, 30, 28), W * 0.006, H * 0.010, 0.36f);
+        CreativeMotion treeRM;
+        treeRM.dxX = 0.050f;
+        treeRM.dyY = 0.014f;
+        addScenePropShadowed(
+            makePaperTree(stage, seed + 11, teal.darker(122), cream, W * 0.70,
+                          H * 0.74, H * 0.38, W * 0.10),
+            QStringLiteral("Paper tree right"), QStringLiteral("backdrop"),
+            BLEND_NORMAL, 0.95f, treeRM, QStringLiteral("tree"), -0.35f,
+            QColor(40, 30, 28), W * 0.006, H * 0.010, 0.36f);
+
+        CreativeMotion midM;
+        midM.dxX = -0.035f;
+        midM.dyY = 0.012f;
+        addScenePropShadowed(
+            makePaperPlane(stage, ochre, cream, H * 0.70, H * 0.030, 1.7, 3),
+            QStringLiteral("Paper mid plane"), QStringLiteral("backdrop"),
+            BLEND_NORMAL, 0.96f, midM, QStringLiteral("plane-mid"), -0.20f,
+            QColor(52, 32, 28), W * 0.004, H * 0.008, 0.32f);
+
+        CreativeMotion fanM;
+        fanM.dxX = -0.055f;
+        fanM.rotationHold = 3.0f;
+        addScenePropShadowed(
+            makePaperFan(stage, seed + 13, rose, cream, ink,
+                         QPointF(W * 0.30, H * 0.73), H * 0.165, 195.0,
+                         150.0),
+            QStringLiteral("Paper fan"), QStringLiteral("accent"),
+            BLEND_NORMAL, 0.95f, fanM, QStringLiteral("fan"), 0.05f,
+            QColor(48, 28, 28), W * 0.005, H * 0.008, 0.32f);
+
+        CreativeMotion ribbonM;
+        ribbonM.dxX = 0.070f;
+        ribbonM.dyY = 0.016f;
+        ribbonM.rotationEnergy = 2.0f;
+        addScenePropShadowed(makePaperRibbon(stage, rust, cream),
+                             QStringLiteral("Paper ribbon"),
+                             QStringLiteral("accent"), BLEND_NORMAL, 0.82f,
+                             ribbonM, QStringLiteral("ribbon"), 0.12f,
+                             QColor(48, 26, 24), W * 0.005, H * 0.008, 0.28f);
+
+        CreativeMotion garlandM;
+        garlandM.dxX = 0.024f;
+        garlandM.rotationEnergy = 1.2f;
+        addSceneProp(makePaperStarGarland(stage, seed + 23, cream, ochre, 9,
+                                          H * 0.155, H * 0.035),
+                     QStringLiteral("Paper star garland"),
+                     QStringLiteral("accent"), BLEND_NORMAL, 0.95f, garlandM,
+                     QStringLiteral("stars"), -0.05f);
+
+        CreativeMotion curtainLM;
+        curtainLM.dxX = -0.075f;
+        curtainLM.dxHold = -0.040f;
+        addScenePropShadowed(
+            makePaperCurtain(stage, rust, cream, true),
+            QStringLiteral("Paper curtain left"), QStringLiteral("backdrop"),
+            BLEND_NORMAL, 0.98f, curtainLM, QStringLiteral("curtain"),
+            -0.15f, QColor(40, 20, 18), W * 0.006, H * 0.008, 0.35f);
+        CreativeMotion curtainRM;
+        curtainRM.dxX = 0.075f;
+        curtainRM.dxHold = 0.040f;
+        addScenePropShadowed(
+            makePaperCurtain(stage, rust, cream, false),
+            QStringLiteral("Paper curtain right"), QStringLiteral("backdrop"),
+            BLEND_NORMAL, 0.98f, curtainRM, QStringLiteral("curtain"),
+            -0.15f, QColor(40, 20, 18), W * 0.006, H * 0.008, 0.35f);
+
+        /* floor shadow anchors the cutout on the paper stage */
+        {
+            QImage ellipse(stage, QImage::Format_ARGB32_Premultiplied);
+            ellipse.fill(Qt::transparent);
+            QPainter ep(&ellipse);
+            ep.setRenderHint(QPainter::Antialiasing, true);
+            ep.setPen(Qt::NoPen);
+            ep.setBrush(QColor(0, 0, 0, 255));
+            ep.drawEllipse(
+                QRectF(subjectRect.center().x() - subjectRect.width() * 0.55,
+                       subjectRect.bottom() - H * 0.012,
+                       subjectRect.width() * 1.10, H * 0.038));
+            ep.end();
+            add(QStringLiteral("Paper floor shadow"), QStringLiteral("echo"),
+                creative::softBlur(ellipse, 0), full, BLEND_NORMAL, 0.32f);
+        }
+
+        const QImage graded = creative::gradeImage(
+            s, creative::Grade{ 1.03f, 1.08f, 1.00f, dusk, 0.14f, cream,
+                                0.10f });
+        subjectFull(graded, QStringLiteral("Paper figure"), 1.0f, subjectM);
+
+        CreativeMotion lipM;
+        lipM.dxX = 0.095f;
+        lipM.dyY = 0.022f;
+        addSceneProp(makePaperForegroundLip(stage, seed + 29, rust, cream,
+                                            H * 0.91),
+                     QStringLiteral("Paper stage lip"), QStringLiteral("accent"),
+                     BLEND_NORMAL, 1.0f, lipM,
+                     QStringLiteral("foreground"), 0.55f);
+
+        CreativeMotion floralLM;
+        floralLM.dxX = -0.060f;
+        floralLM.dyY = 0.018f;
+        addSceneProp(
+            makePaperFloral(stage, seed + 17, { rose, cream, teal, ochre },
+                            QPointF(W * 0.105, H * 0.84), H * 0.075, false),
+            QStringLiteral("Paper floral left"), QStringLiteral("accent"),
+            BLEND_NORMAL, 0.95f, floralLM, QStringLiteral("floral"), 0.10f);
+        CreativeMotion floralRM;
+        floralRM.dxX = 0.060f;
+        floralRM.dyY = 0.018f;
+        addSceneProp(
+            makePaperFloral(stage, seed + 19, { rose, cream, teal, ochre },
+                            QPointF(W * 0.895, H * 0.86), H * 0.070, true),
+            QStringLiteral("Paper floral right"), QStringLiteral("accent"),
+            BLEND_NORMAL, 0.95f, floralRM, QStringLiteral("floral"), 0.10f);
+
+        CreativeMotion cornerLM;
+        cornerLM.dxX = -0.110f;
+        cornerLM.dyY = 0.030f;
+        addSceneProp(makePaperCornerFoliage(stage, seed + 31,
+                                            teal.darker(118), cream, true),
+                     QStringLiteral("Paper corner foliage left"),
+                     QStringLiteral("accent"), BLEND_NORMAL, 0.94f, cornerLM,
+                     QStringLiteral("foreground"), 0.50f);
+        CreativeMotion cornerRM;
+        cornerRM.dxX = 0.110f;
+        cornerRM.dyY = 0.030f;
+        addSceneProp(makePaperCornerFoliage(stage, seed + 33,
+                                            teal.darker(118), cream, false),
+                     QStringLiteral("Paper corner foliage right"),
+                     QStringLiteral("accent"), BLEND_NORMAL, 0.94f, cornerRM,
+                     QStringLiteral("foreground"), 0.50f);
+
+        CreativeMotion butterflyM;
+        butterflyM.rotationEnergy = 7.0f;
+        butterflyM.dxEnergy = 0.010f;
+        addSceneProp(
+            makePaperButterflies(
+                stage, seed + 37, { cream, rose, ochre, teal },
+                { QPointF(subjectRect.x() + subjectRect.width() * 0.12,
+                          subjectRect.y() + subjectRect.height() * 0.16),
+                  QPointF(subjectRect.right() - subjectRect.width() * 0.10,
+                          subjectRect.y() + subjectRect.height() * 0.34),
+                  QPointF(subjectRect.x() + subjectRect.width() * 0.20,
+                          subjectRect.bottom() - subjectRect.height() * 0.14) },
+                5, H * 0.022),
+            QStringLiteral("Paper butterflies"), QStringLiteral("accent"),
+            BLEND_NORMAL, 0.90f, butterflyM, QStringLiteral("butterflies"),
+            0.30f);
+
+        addSceneProp(makePaperTitle(stage, QStringLiteral("PAPER THEATRE"),
+                                    cream, ink, 0.048, H * 0.022),
+                     QStringLiteral("Paper title"), QStringLiteral("finish"),
+                     BLEND_NORMAL, 1.0f, CreativeMotion(),
+                     QStringLiteral("typography"), 0.60f);
+
+        add(QStringLiteral("Paper grain"), QStringLiteral("finish"),
+            creative::grainField(stage, seed + 41, 28), full, BLEND_OVERLAY,
+            0.34f);
     }
     else if (patchId == QLatin1String("auto-splatter"))
     {

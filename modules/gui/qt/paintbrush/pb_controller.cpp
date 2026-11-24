@@ -7151,7 +7151,8 @@ QByteArray PaintbrushController::assistantToolsJson() const
     for (const char *id : { "electric-kpop", "holo-fashion", "neon-idol",
                             "sticker-forge", "pastel-stage", "nocturne",
                             "ink-creature", "spark-storm", "kaleido",
-                            "motion-echo", "scene-forge", "auto-splatter", "stage-mode" })
+                            "motion-echo", "scene-forge", "auto-splatter",
+                            "stage-mode", "paper-theatre" })
         creativePatchEnum.append(QString::fromLatin1(id));
     tools.append(make(
         QStringLiteral("apply_creative_patch"),

@@ -382,6 +382,40 @@ void testSceneHelpers()
     check("grain.size", grain.size() == stage);
     check("grain.has-pixels", hasAlpha(grain));
 
+    /* Paper Theatre / Nocturne scene-layer primitives. */
+    const QImage paperStock = creative::paperStockField(
+        stage, 23, QColor(246, 233, 208), QColor(214, 154, 64), 0.85f);
+    check("paper-stock.size", paperStock.size() == stage);
+    check("paper-stock.opaque", qAlpha(paperStock.pixel(2, 2)) == 255);
+    check("paper-stock.deterministic",
+          hashImage(paperStock)
+              == hashImage(creative::paperStockField(
+                     stage, 23, QColor(246, 233, 208), QColor(214, 154, 64),
+                     0.85f)));
+    check("paper-stock.seed-matters",
+          hashImage(paperStock)
+              != hashImage(creative::paperStockField(
+                     stage, 24, QColor(246, 233, 208), QColor(214, 154, 64),
+                     0.85f)));
+
+    const QImage velvet = creative::velvetField(
+        stage, 29, QColor(10, 6, 24), 0.80f);
+    check("velvet.size", velvet.size() == stage);
+    check("velvet.has-pixels", hasAlpha(velvet));
+    check("velvet.deterministic",
+          hashImage(velvet)
+              == hashImage(creative::velvetField(
+                     stage, 29, QColor(10, 6, 24), 0.80f)));
+
+    const QImage propShadow = creative::silhouetteShadow(
+        subjectImage(), QColor(20, 12, 10), 0.45f);
+    check("prop-shadow.size", propShadow.size() == subjectImage().size());
+    check("prop-shadow.has-pixels", hasAlpha(propShadow));
+    check("prop-shadow.deterministic",
+          hashImage(propShadow)
+              == hashImage(creative::silhouetteShadow(
+                     subjectImage(), QColor(20, 12, 10), 0.45f)));
+
     const QImage scan = creative::scanlineField(stage, QColor(8, 8, 20), 4,
                                                 0.10);
     check("scan.has-pixels", hasAlpha(scan));

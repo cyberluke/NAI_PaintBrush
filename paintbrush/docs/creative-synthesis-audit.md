@@ -1,6 +1,6 @@
 # Creative Synthesis — audit and delivery log
 
-Status: **Slice A/B and the named C/D creative slices delivered; E/F/H remain; native OpenFill Expand and recent-look rename/delete shipped.** This document is the
+Status: **Slice A/B and the named C/D creative slices delivered; E/F/H remain; native OpenFill Expand and recent-look rename/delete shipped. Paper Theatre and the Nocturne scene-layer extension are implemented in source (syntax-checked; runtime commit pending the coordinator build).** This document is the
 honest map of what exists, what was added for the Creative Synthesis work, what
 was verified, and what is deliberately not finished yet.
 
@@ -49,10 +49,11 @@ and the post-Keep moment.
   commit materializes, served through `image://pbcreative/live/<revision>`.
   The preview follows the real document aspect and the subject's real canvas
   rectangle, so what the pad shows is what gets committed.
-- Patch rail with thirteen starting recipes:
+- Patch rail with the named starting recipes:
   Neon Idol, Voltage Idol, Sticker Forge, Pastel Stage, Nocturne, Prism Muse,
   Ink Creature, Spark Storm, Kaleido, Motion Echo, Scene Forge, Auto Splatter,
-  Stage Door.
+  Stage Door, plus **Paper Theatre** appended so every existing patch keeps its
+  name and index.
 - Per-patch pad mapping: horizontal / vertical position, gesture speed (energy)
   and Hold drive different combinations of opacity, scale, rotation, tint
   balance, particle bloom and outline growth. The pad is not a debug shader;
@@ -91,8 +92,13 @@ A reusable procedural kit, shared by preview and commit:
   electric arcs, spark fields.
 - grading: brightness/contrast/saturation, shadow/highlight tint, soft blur.
 - fields: backdrop gradients, radial glow, halftone, bokeh, confetti, stars,
-  grain, scanlines, butterflies, spiral glitter, ink splatter.
+  grain, scanlines, butterflies, spiral glitter, ink splatter, fibrous paper
+  stock, velvet nap, silhouette drop shadow.
 - composites: reflection, wedge kaleidoscope, gloss overlay, diamond star.
+
+Paper Theatre and the Nocturne scene layers add reusable procedural prop
+geometry on top of that kit: cut planes, trees, castle, curtains, fan, ribbon,
+florals, five-point star garlands, folded-paper butterflies and a proscenium.
 
 The same functions produce the live preview at panel resolution and the final
 layers at canvas resolution, with geometry expressed in stage-relative units.
@@ -274,32 +280,78 @@ Report: `paintbrush/docs/creative-synthesis-assets/live-track-selftest-report.tx
 The test supplies a real seed mask; clicking Object Select in the UI to produce
 that seed at runtime is still a manual UI step.
 
+### 2.10 Paper Theatre and Nocturne scene-layer delta (source; build pending)
+
+The remaining scene-asset delta is implemented in the existing creative engine;
+no second renderer, no QML change and no external asset pack.
+
+- **Paper Theatre** (`paper-theatre`, appended to the catalog): opaque
+  `paperStockField` stock sheet, paper dusk wash, a layered proscenium arch and
+  scalloped valance, paper moon, cut-paper castle, back/mid paper planes with
+  core edges, teal paper trees, curtains with tie-backs, fan, ribbon, star
+  garland, floral clusters, paper butterflies, a foreground stage lip and corner
+  foliage for real occlusion, a floor shadow, scene typography and paper grain.
+- **Geometry and motion**: every prop is built from `QPainterPath` geometry and
+  a stable `std::mt19937` stream (`SceneRng`); props express depth through
+  independent `dxX`/`dyY` parallax, so the existing pad X/Y moves the camera and
+  Hold parts the curtains. At the neutral pad state the recipe is a complete
+  static look; no prop starts at zero opacity.
+- **Independent editability**: each prop (and each prop shadow) is inserted as
+  its own normal layer in the existing `CompositeCommand`, so the whole look is
+  one undo. Layers carry `creative.prop`, `creative.depth` and
+  `creative.parallax` metadata; the project store already round-trips the same
+  `Layer::metadata` map used by the existing `creative.*` keys.
+- **Nocturne extension**: the existing night-field/aura/violet-teal rim/
+  butterflies/petals/grain pieces are unchanged. Added scene layers are velvet
+  depth + velvet edge, a paper moon, a distant castle and silhouette plane, a
+  second star bloom, two foreground silhouettes, near florals and near paper
+  butterflies — all in the existing night/violet/lilac/teal/silver palette.
+- **New shared primitives** in `pb_creative_art`: `paperStockField`,
+  `velvetField`, `silhouetteShadow` (deterministic; covered by the standalone
+  art harness).
+- **Preview**: the existing fit rule yields **544×680** for the 1440×1800
+  self-test canvas; the recipe itself is stage-relative and runs at any document
+  aspect. The self-test preview loop now renders `paper-theatre`, its pad
+  reaction gate includes the new patch, and a focused commit test asserts
+  ≥12 prop layers, ≥8 prop kinds, one undo, and metadata survival through a
+  project reload.
+- **Assets**: no external texture, sprite or font files were added; the paper
+  stock, velvet, prop geometry and shadows are procedural, so no new license
+  manifest entry is required. The existing typography roles resolve installed
+  fonts only.
+- **Honest gap**: the committed props are separately editable raster layers
+  whose geometry is procedurally derived, not native `LAYER_VECTOR` node paths;
+  arbitrary vector-node authoring is still future work. Scene typography uses
+  the existing curated typography roles and therefore depends on the installed
+  font fallback (fonts are not bundled). Art review on a real idol cutout and
+  live commit timing still need the coordinator build/self-test run.
+
 ## 3. Coverage against the spec
 
 | Spec area | Status | Notes |
 |---|---|---|
 | 12.1 live stage, real pixels, one composition | **Done** | Preview is the commit's pieces at preview scale, not a mock. |
 | 12.1 large stage / pan / layers / Before-After | **Partial** | Whole-look Before/After, stage zoom 100–300% with drag pan, and a press-and-hold selected-layer/group compare on the main canvas. The preview is still the fitted 544x680 composite and there is no full layer panel. |
-| 12.2 graphic systems (recolor, rim, halftone, arcs, sheen, silhouettes, typography) | **Partial** | Recolor, rim, halftone, arcs, sheen, bokeh, halftone, ink, butterflies, kaleidoscope exist. No typography or independent silhouette library. |
+| 12.2 graphic systems (recolor, rim, halftone, arcs, sheen, silhouettes, typography) | **Partial** | Recolor, rim, halftone, arcs, sheen, bokeh, halftone, ink, butterflies, kaleidoscope exist. Paper Theatre adds scene typography plus procedural cut-paper silhouette props; there is still no arbitrary silhouette/vector-node authoring library. |
 | 12.3 Neon Idol reference | **Done (first pass)** | Electric blue/pink stage, oversized echo, halftone, bokeh, rim split, scanlines. |
 | 12.3 Sticker Forge reference | **Done (first pass)** | Die-cut white/colour bands, backing card, shadow, gloss, confetti, sparkles. |
 | 12.3 Pastel Lineup reference | **Done** | Real Pastel Lineup recipe: tracked-pose selection when a track exists, still fallback otherwise, stage/floor/reflections, linked poses and typography. |
-| 12.3 Nocturne reference | **Done (first pass)** | Night field, aura, violet/teal rim, butterflies, petals, grain. |
+| 12.3 Nocturne reference | **Extended (first pass)** | Night field, aura, violet/teal rim, butterflies, petals, grain unchanged; added velvet depth/edge, paper moon, distant castle/silhouette plane, second star bloom, foreground silhouettes, near florals and near paper butterflies. |
 | 12.4 pad mapping / hold / pressure | **Done** | Position, energy, hold; pressure on pen/touch, speed on mouse. |
 | 12.5 gesture recording / loop / surprise / reseed | **Done** | Duration is displayed while recording; loops; no delete/rename of a recording yet. |
 | 12.6 smart duplication, lineup, linked effects | **Done** | Lineup + Duo/Grid/Overlap presets, group-wide finish propagation, reuse on another cutout. |
-| 12.7 Scene Forge, Ink Creature family, Motion Calligraphy | **Done** | Scene Forge, Auto Splatter, Ink Creature, Motion Echo, true contour calligraphy (`addCreativeCalligraphy`, editable native vector layer) and editable agent strokes shipped. The broader rigged scene-layer family is still pending. |
+| 12.7 Scene Forge, Ink Creature family, Motion Calligraphy | **Done** | Scene Forge, Auto Splatter, Ink Creature, Motion Echo, true contour calligraphy (`addCreativeCalligraphy`, editable native vector layer) and editable agent strokes shipped. Paper Theatre now ships the paper cut-out scene-layer family; the broader rigged scene-layer family remains pending. |
 | 12.9 performance must become real layers, one undo | **Done** | Verified. |
 | 12.10 save / reopen / continue editing the performance | **Done** | Metadata includes group/source; Resume restores patch/seed/pad and replaces the old group in one undo. Save→reload→export verified in the self-test. |
 | 12.11 UX at rest / live / after creation | **Partial** | Idle shimmer, live stage, Before/After, suggestion, metrics, stage zoom/pan, recent-look rail and a Lookbook browser with resume/rename/delete. The Lookbook has no thumbnails yet. |
 | Slice A end-to-end | **Done** | Keep → chooser → Neon/Sticker → pad → record → Make it real → suggestion → undo. Verified with the synthetic fixture and a real GUI commit. |
 | Slice B (Pastel Stage, Lineup, generic smart duplicate) | **Done** | Pastel Stage + Pastel Lineup + linked presets. |
-| Slice C (Nocturne, floral/butterfly/scene layer family) | **Partial** | Nocturne shipped; broader scene family pending. |
+| Slice C (Nocturne, floral/butterfly/scene layer family) | **Done (first pass)** | Nocturne extended with velvet/paper depth, foreground silhouettes, florals, stars and butterfly depth; Paper Theatre is the dedicated paper scene-layer recipe. |
 | Slice D (Scene Forge / Motion Calligraphy / ink family) | **Done** | Scene Forge + Auto Splatter added; Ink Creature, Motion Echo (real poses when tracked), editable agent strokes and true contour calligraphy. |
 | Slice E (generative patch language, authoring, savable looks) | **Not done** | Patch catalog is compiled in; no authoring/catalog UI. |
 | Slice F (beat/audio energy) | **Not done** | — |
 | Slice G (subject awareness / multi-subject) | **Partial** | Subject picking understands layers/roles; no automatic face/garment graph. |
-| Slice H (Photo Regime H / dark stage / Auto Splatter / Stage mode) | **Partial** | Auto Splatter and Stage Door are real recipes; Photo Regime H and the rigged Stage mode are not wired. |
+| Slice H (Photo Regime H / dark stage / Auto Splatter / Stage mode) | **Partial** | Auto Splatter and Stage Door are real recipes; Paper Theatre supplies the paper scene-layer recipe; Photo Regime H and the rigged Stage mode are not wired. |
 | Slice I (compact workflow) | **Partial** | Keep → pad → commit → resume/reuse with a recent-look rail, Lookbook browser, inline rename, one-undo delete and stage zoom/pan. No per-look thumbnails or full layer panel. |
 | OpenFill Remove/Fill/Expand | **Partial** | Remove object, generative fill and replace background already exist behind the image provider. Expand is now native: `expandCanvas(percent)` grows the canvas on every side, the paper surface fills the margin, layers shift and one undo restores the original canvas. No generative outpainting provider was configured in this test. |
 
@@ -313,8 +365,11 @@ These are the things a reviewer should not assume are finished:
    `TrackingService` path now passes with real SAM3 propagation and ordered PTS
    (6 poses, recipes, one undo), but the acceptance supplies the seed mask from
    the harness instead of clicking Object Select to create it in the app.
-2. **Scene Forge, Auto Splatter and Stage Door are shipped, but Photo Regime H,
-   the rigged Stage mode and the broader scene-layer family are still missing.**
+2. **Scene Forge, Auto Splatter, Stage Door and Paper Theatre are shipped; the
+   Nocturne scene-layer extension is implemented.** Photo Regime H and the
+   rigged Stage mode are still missing. Paper Theatre's committed props are
+   separately editable raster layers whose geometry is procedurally derived,
+   not native vector-node paths.
 3. **Agent strokes are deterministic/offline, not model-planned.** The assistant
    can call `draw_creative_stroke` (ribbon/halo/splat/ink/calligraphy) and it
    commits a real editable vector layer; calligraphy traces the actual cutout
@@ -332,8 +387,11 @@ These are the things a reviewer should not assume are finished:
    provider. `expandCanvas(percent)` grows the canvas and the paper surface fills
    the margin in one undo; it is not generative outpainting, and no provider was
    configured in this test.
-7. **Typography is limited to the lineup title.** There is no full expressive
-   type system, sticker library or independent silhouette asset library.
+7. **Typography is used only where a recipe asks for it.** Paper Theatre adds a
+   scene title and Pastel Lineup has its title, but there is no full expressive
+   type system, sticker library or arbitrary silhouette asset library. The
+   typography roles resolve installed font families, so the exact glyphs depend
+   on the machine's font fallback; fonts are not bundled.
 8. **The art previews use a synthetic fixture.** The recipes are real, but the
    editorial impact on a real idol cutout with hair, fabric folds and a
    transparent background still needs human art review.
@@ -360,7 +418,14 @@ New:
 Touched:
 - `pb_controller.hpp` / `pb_controller.cpp` / `pb_controller_art.cpp`
   (creative property, harvest signal, subject picking, commit composite, linked
-  effects, lineup, sparkle, self-test, assistant state)
+  effects, lineup, sparkle, self-test, assistant state). The Paper Theatre delta
+  adds the preview-loop entry, the pad-reaction check, the one-undo/reload prop
+  test and the assistant patch enum.
+- `pb_creative_art.hpp` / `pb_creative_art.cpp` (paper stock, velvet, silhouette
+  shadow primitives; standalone harness checks).
+- `pb_creative.cpp` (Paper Theatre recipe, Nocturne scene layers, prop geometry,
+  prop metadata propagation).
+- `tests/creative_art_test.cpp` (new primitive determinism/coverage checks).
 - `qml/PaintbrushWorkspace.qml` (Play Pad surface, post-Keep connection, top bar)
 - `qml/PaintbrushInspectorDock.qml` (Creative actions)
 - `maininterface/mainui.cpp` (QML type + `pbcreative` image provider)

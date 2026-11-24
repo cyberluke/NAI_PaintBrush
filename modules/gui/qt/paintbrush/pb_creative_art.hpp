@@ -283,6 +283,25 @@ QImage bokehField(const QSize &size, quint32 seed, const QList<QColor> &palette,
 /* Film grain / paper tooth. `amount` is 0..255 peak alpha. */
 QImage grainField(const QSize &size, quint32 seed, int amount);
 
+/* Opaque fibrous paper stock: a warm base sheet with a two-octave mottle,
+ * laid lines, short fibres and specks. This is the paper-theatre stock, not a
+ * photo texture: every mark comes from the seed, so a saved look reproduces
+ * byte-identically and no external asset is required. */
+QImage paperStockField(const QSize &size, quint32 seed, const QColor &base,
+                       const QColor &fibre, float strength);
+
+/* Transparent velvet nap / vignette overlay. The alpha is strongest at the
+ * frame edges; fine short strokes read as pile. Multiply-blend it over a
+ * backdrop to add physical depth without changing the palette. */
+QImage velvetField(const QSize &size, quint32 seed, const QColor &color,
+                   float strength);
+
+/* A soft drop shadow derived from any ARGB silhouette: tint the shape,
+ * blur it, then fade it. Used for paper planes, cut props and scene occlusion;
+ * the shape itself is never modified. */
+QImage silhouetteShadow(const QImage &shape, const QColor &color, float opacity,
+                        int blurDownscale = 0);
+
 /* Horizontal scan lines. `alpha` is 0..1. */
 QImage scanlineField(const QSize &size, const QColor &color, int spacing,
                      qreal alpha);

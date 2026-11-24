@@ -22,6 +22,13 @@ FASHN parser export are implemented and tested as libraries; exposing them in
 the pad and adding the native parser service are the next integration steps
 (see `docs/HOLO_MATERIALS.md`).
 
+Paper Theatre (scene layers) and the Nocturne scene-layer extension are
+implemented in source and syntax-checked; the coordinator build runs the
+preview/commit self-test. The paper props are separately editable raster layers
+whose geometry is procedurally derived from vector paths, not native vector-node
+layers. Scene typography uses the curated typography roles and therefore depends
+on the installed font fallback; fonts are not bundled.
+
 `master` is pushed to `origin/master`; `11e2cb1b47` and the follow-up fixes
 are visible on GitHub (`cyberluke/NAI_PaintBrush`).
 
@@ -88,7 +95,8 @@ segmentation. Part masks (hair / clothing / accessories) remain future work.
 `apply_creative_patch` takes `{ "patch": "<id>" }` and commits the look on the
 current selection in one undo. Valid ids include `electric-kpop`,
 `holo-fashion`, and the earlier `neon-idol`, `sticker-forge`, `pastel-stage`,
-`nocturne`, `ink-creature`, `spark-storm`, `kaleido`, `motion-echo`.
+`nocturne`, `ink-creature`, `spark-storm`, `kaleido`, `motion-echo`,
+`scene-forge`, `auto-splatter`, `stage-mode` and `paper-theatre`.
 `get_canvas_state` returns the same catalogue under `creative_patches`.
 The assistant is instructed that this is a real edit made of layers, not image
 generation.

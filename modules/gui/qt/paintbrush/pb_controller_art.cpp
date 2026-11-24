@@ -1195,7 +1195,7 @@ QString PaintbrushController::runCreativeSelfTest()
         QStringLiteral("holo-wrap"), QStringLiteral("holo-chameleon"),
         QStringLiteral("holo-glitter"), QStringLiteral("holo-livery"),
         QStringLiteral("scene-forge"), QStringLiteral("auto-splatter"),
-        QStringLiteral("stage-mode")
+        QStringLiteral("stage-mode"), QStringLiteral("paper-theatre")
     };
     for (const QString &id : patches)
     {
@@ -1215,13 +1215,15 @@ QString PaintbrushController::runCreativeSelfTest()
                      .arg(id).arg(preview.width()).arg(preview.height()));
     }
 
-    /* Pad reaction gate: the four starter looks must visibly change pixels
-     * between a low/quiet pose and a high/energetic/hold pose. This is the
-     * regression test for "the pad does nothing" reports. */
+    /* Pad reaction gate: the starter looks and Paper Theatre's parallax must
+     * visibly change pixels between a low/quiet pose and a high/energetic/
+     * hold pose. This is the regression test for "the pad does nothing"
+     * reports. */
     {
         const QStringList reactive = {
             QStringLiteral("neon-idol"), QStringLiteral("electric-kpop"),
-            QStringLiteral("sticker-forge"), QStringLiteral("pastel-stage")
+            QStringLiteral("sticker-forge"), QStringLiteral("pastel-stage"),
+            QStringLiteral("paper-theatre")
         };
         for (const QString &id : reactive)
         {
@@ -1635,6 +1637,98 @@ QString PaintbrushController::runCreativeSelfTest()
                  .arg(m_document.layers().size()).arg(baseLayers));
     else
         note(QStringLiteral("holo undo: OK"));
+
+    /* Paper Theatre: the layered paper scene commits as independent props in
+     * one undo; each prop keeps its kind/depth metadata across a project
+     * reload (the same Layer::metadata map the project store round-trips). */
+    for (int i = 0; i < m_document.layers().size(); ++i)
+    {
+        const CanvasLayer *l = m_document.layerAt(i);
+        if (l && l->name == QLatin1String("Self-test cutout"))
+        {
+            m_document.setCurrentLayerIndex(i);
+            emit documentChanged();
+            break;
+        }
+    }
+    m_creative->openForSelection();
+    m_creative->selectPatch(QStringLiteral("paper-theatre"));
+    m_creative->movePad(0.64, 0.44, 0.22, false);
+    error = m_creative->commit();
+    const int theatreAfter = m_document.layers().size();
+    if (!error.isEmpty())
+        note(QStringLiteral("FAIL: paper-theatre commit: %1").arg(error));
+    else if (theatreAfter - baseLayers < 12)
+        note(QStringLiteral("FAIL: paper-theatre added %1 layers")
+                 .arg(theatreAfter - baseLayers));
+    else
+        note(QStringLiteral("commit paper-theatre: +%1 layers")
+                 .arg(theatreAfter - baseLayers));
+    {
+        int propLayers = 0;
+        QStringList propKinds;
+        for (int i = baseLayers; i < m_document.layers().size(); ++i)
+        {
+            const CanvasLayer *l = m_document.layerAt(i);
+            if (!l
+                || l->metadata.value(QStringLiteral("creative.patch"))
+                       .toString() != QLatin1String("paper-theatre"))
+                continue;
+            const QString prop =
+                l->metadata.value(QStringLiteral("creative.prop")).toString();
+            if (prop.isEmpty())
+                continue;
+            ++propLayers;
+            if (!propKinds.contains(prop))
+                propKinds.append(prop);
+        }
+        if (propLayers < 12 || propKinds.size() < 8)
+            note(QStringLiteral("FAIL: paper-theatre props %1 layers / %2 kinds")
+                     .arg(propLayers).arg(propKinds.size()));
+        else
+            note(QStringLiteral("paper-theatre props: %1 layers / %2 kinds")
+                     .arg(propLayers).arg(propKinds.size()));
+
+        const QString theatreProject =
+            QDir(QStandardPaths::writableLocation(
+                     QStandardPaths::TempLocation))
+                .filePath(QStringLiteral("nai-pb-paper-theatre.pbproj"));
+        ProjectStore theatreStore;
+        const QString theatreSaveError =
+            theatreStore.save(&m_document, theatreProject);
+        if (!theatreSaveError.isEmpty())
+            note(QStringLiteral("FAIL: paper-theatre save: %1")
+                     .arg(theatreSaveError));
+        else
+        {
+            PaintbrushDocument loaded;
+            const QString theatreLoadError =
+                theatreStore.load(&loaded, theatreProject);
+            int loadedProps = 0;
+            for (const CanvasLayer &l : loaded.layers())
+                if (l.metadata.value(QStringLiteral("creative.patch"))
+                            .toString()
+                        == QLatin1String("paper-theatre")
+                    && !l.metadata.value(QStringLiteral("creative.prop"))
+                            .toString().isEmpty())
+                    ++loadedProps;
+            if (!theatreLoadError.isEmpty())
+                note(QStringLiteral("FAIL: paper-theatre reload: %1")
+                         .arg(theatreLoadError));
+            else if (loadedProps < 12)
+                note(QStringLiteral("FAIL: paper-theatre reload props %1")
+                         .arg(loadedProps));
+            else
+                note(QStringLiteral("paper-theatre reload props: %1")
+                         .arg(loadedProps));
+        }
+    }
+    undo();
+    if (m_document.layers().size() != baseLayers)
+        note(QStringLiteral("FAIL: paper-theatre undo (%1 != %2)")
+                 .arg(m_document.layers().size()).arg(baseLayers));
+    else
+        note(QStringLiteral("paper-theatre undo: OK"));
 
     /* Linked lineup: five poses, one undo. */
     m_document.setCurrentLayerIndex(0);

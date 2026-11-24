@@ -2005,6 +2005,177 @@ QImage grainField(const QSize &size, quint32 seed, int amount)
     return out;
 }
 
+QImage paperStockField(const QSize &size, quint32 seed, const QColor &base,
+                       const QColor &fibre, float strength)
+{
+    if (!size.isValid() || size.isEmpty())
+        return {};
+    const int w = size.width();
+    const int h = size.height();
+    const float k = clamp01(strength);
+    QImage out(size, QImage::Format_ARGB32);
+    out.fill(Qt::transparent);
+
+    const float mottleCell = float(qMax(12, qMin(w, h))) * 0.055f;
+    const quint32 fineSeed = seed ^ 0x9E3779B9u;
+    for (int y = 0; y < h; ++y)
+    {
+        QRgb *row = reinterpret_cast<QRgb *>(out.scanLine(y));
+        for (int x = 0; x < w; ++x)
+        {
+            const float mottle = valueNoise(seed, float(x) / mottleCell,
+                                            float(y) / mottleCell);
+            const float fine = valueNoise(fineSeed, float(x) / 3.7f,
+                                          float(y) / 3.7f);
+            const float laid = 0.5f
+                               + 0.5f
+                                     * std::sin(float(y) * 0.62f
+                                                + mottle * 6.2831853f);
+            const float shade =
+                1.0f + (mottle - 0.5f) * 0.11f * k
+                + (fine - 0.5f) * 0.06f * k
+                + (laid - 0.5f) * 0.022f * k;
+            const int r = qBound(0, int(float(base.red()) * shade + 0.5f), 255);
+            const int g = qBound(0, int(float(base.green()) * shade + 0.5f),
+                                 255);
+            const int b = qBound(0, int(float(base.blue()) * shade + 0.5f),
+                                 255);
+            row[x] = qRgba(r, g, b, 255);
+        }
+    }
+
+    QPainter p(&out);
+    p.setRenderHint(QPainter::Antialiasing, true);
+
+    /* laid lines: long, faint, horizontal */
+    const int laidStep = qMax(4, int(float(h) * 0.012f));
+    QColor laid = fibre;
+    laid.setAlpha(qBound(0, int(16.0f * k), 255));
+    p.setPen(QPen(laid, 1.0));
+    for (int y = laidStep / 2; y < h; y += laidStep)
+        p.drawLine(0, y, w, y);
+
+    /* short fibres and flecks */
+    Rng rng(seed ^ 0x51ED270Bu);
+    const int fibres = qBound(140, (w * h) / 1500, 4200);
+    for (int i = 0; i < fibres; ++i)
+    {
+        const QPointF at(rng.range(0.0f, float(w)), rng.range(0.0f, float(h)));
+        const qreal len = rng.range(float(qMax(2, w / 220)),
+                                    float(qMax(4, w / 45)));
+        const qreal angle = rng.range(-0.38f, 0.38f);
+        QColor c = (rng.unit() < 0.35f) ? fibre.lighter(118) : fibre;
+        c.setAlpha(qBound(0, int(rng.range(14.0f, 46.0f) * k), 255));
+        p.setPen(QPen(c, rng.range(0.7f, 1.3f), Qt::SolidLine, Qt::RoundCap));
+        const QPointF mid = at + QPointF(std::cos(angle) * len * 0.5,
+                                         std::sin(angle) * len * 0.5);
+        const QPointF end = mid + QPointF(std::cos(angle) * len * 0.5,
+                                          std::sin(angle) * len * 0.5);
+        QPainterPath path(at);
+        path.quadTo(mid + QPointF(0.0, rng.range(-1.2f, 1.2f)), end);
+        p.drawPath(path);
+    }
+    const int specks = fibres / 2;
+    for (int i = 0; i < specks; ++i)
+    {
+        QColor c = (rng.unit() < 0.5f) ? fibre.darker(125) : base.darker(112);
+        c.setAlpha(qBound(0, int(rng.range(18.0f, 54.0f) * k), 255));
+        p.setPen(Qt::NoPen);
+        p.setBrush(c);
+        const qreal r = rng.range(0.6f, 1.7f);
+        p.drawEllipse(QPointF(rng.range(0.0f, float(w)),
+                              rng.range(0.0f, float(h))),
+                      r, r);
+    }
+    p.end();
+    return out;
+}
+
+QImage velvetField(const QSize &size, quint32 seed, const QColor &color,
+                   float strength)
+{
+    if (!size.isValid() || size.isEmpty())
+        return {};
+    const int w = size.width();
+    const int h = size.height();
+    const float k = clamp01(strength);
+    QImage out(size, QImage::Format_ARGB32);
+    out.fill(Qt::transparent);
+    QPainter p(&out);
+    p.setRenderHint(QPainter::Antialiasing, true);
+
+    /* edge-weighted vignette: the nap is visible against the frame, not as a
+     * flat black wash over the subject */
+    QRadialGradient vignette(QPointF(w * 0.5, h * 0.42),
+                             std::hypot(qreal(w), qreal(h)) * 0.72);
+    QColor edge = color;
+    vignette.setColorAt(0.0, QColor(edge.red(), edge.green(), edge.blue(), 0));
+    edge.setAlpha(qBound(0, int(26.0f * k), 255));
+    vignette.setColorAt(0.48, edge);
+    edge.setAlpha(qBound(0, int(74.0f * k), 255));
+    vignette.setColorAt(0.78, edge);
+    edge.setAlpha(qBound(0, int(168.0f * k), 255));
+    vignette.setColorAt(1.0, edge);
+    p.fillRect(QRectF(0, 0, w, h), vignette);
+
+    Rng rng(seed);
+    const int strokes = qBound(240, (w * h) / 2200, 3600);
+    for (int i = 0; i < strokes; ++i)
+    {
+        const qreal x = rng.range(0.0f, float(w));
+        const qreal y = rng.range(0.0f, float(h));
+        const qreal len = rng.range(float(qMax(2, h / 120)),
+                                    float(qMax(4, h / 26)));
+        QColor c = (rng.unit() < 0.55f) ? color.lighter(132)
+                                        : color.lighter(108);
+        c.setAlpha(qBound(0, int(rng.range(7.0f, 26.0f) * k), 255));
+        p.setPen(QPen(c, rng.range(0.6f, 1.5f), Qt::SolidLine,
+                      Qt::RoundCap));
+        p.drawLine(QPointF(x, y),
+                   QPointF(x + rng.range(-1.5f, 1.5f), y + len));
+    }
+
+    /* broad soft folds: vertical pile direction, transparent edges */
+    const int folds = 4 + int(rng.next() % 3u);
+    for (int i = 0; i < folds; ++i)
+    {
+        const qreal cx = rng.range(0.0f, float(w));
+        const qreal half = rng.range(float(w) * 0.05f, float(w) * 0.13f);
+        QLinearGradient g(cx - half, 0, cx + half, 0);
+        g.setColorAt(0.0, QColor(color.red(), color.green(), color.blue(), 0));
+        QColor mid = color.darker(128);
+        mid.setAlpha(qBound(0, int(rng.range(14.0f, 34.0f) * k), 255));
+        g.setColorAt(0.5, mid);
+        g.setColorAt(1.0, QColor(color.red(), color.green(), color.blue(), 0));
+        p.fillRect(QRectF(cx - half, 0, half * 2.0, h), g);
+    }
+    p.end();
+    return out;
+}
+
+QImage silhouetteShadow(const QImage &shape, const QColor &color, float opacity,
+                        int blurDownscale)
+{
+    if (shape.isNull())
+        return {};
+    QImage tintedShape =
+        shape.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    {
+        QPainter tintPainter(&tintedShape);
+        tintPainter.setCompositionMode(QPainter::CompositionMode_SourceIn);
+        tintPainter.fillRect(tintedShape.rect(), color);
+    }
+    QImage blurred = softBlur(tintedShape, blurDownscale);
+    QImage out(blurred.size(), QImage::Format_ARGB32_Premultiplied);
+    out.fill(Qt::transparent);
+    QPainter p(&out);
+    p.setOpacity(clamp01(opacity));
+    p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    p.drawImage(0, 0, blurred);
+    p.end();
+    return out;
+}
+
 QImage scanlineField(const QSize &size, const QColor &color, int spacing,
                      qreal alpha)
 {
