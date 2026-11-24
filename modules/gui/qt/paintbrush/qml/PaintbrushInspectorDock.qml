@@ -415,6 +415,59 @@ Item {
                             onClicked: PaintbrushCtx.duplicateIntoLineup()
                         }
                         InspectorAction {
+                            label: qsTr("Pastel Lineup (tracked poses)")
+                            iconText: VLCIcons.list
+                            onClicked: {
+                                const err = PaintbrushCtx.createPastelLineup()
+                                if (err.length > 0)
+                                    console.log(err)
+                            }
+                        }
+                        InspectorAction {
+                            label: qsTr("Echo the movement")
+                            iconText: VLCIcons.list
+                            onClicked: {
+                                const err = PaintbrushCtx.createMotionEcho()
+                                if (err.length > 0)
+                                    console.log(err)
+                            }
+                        }
+                        InspectorAction {
+                            label: qsTr("Linked duo")
+                            iconText: VLCIcons.add
+                            onClicked: PaintbrushCtx.duplicateLinked(1)
+                        }
+                        InspectorAction {
+                            label: qsTr("Linked grid ×4")
+                            iconText: VLCIcons.add
+                            onClicked: PaintbrushCtx.duplicateLinked(2)
+                        }
+                        InspectorAction {
+                            label: qsTr("Editorial overlap ×3")
+                            iconText: VLCIcons.add
+                            onClicked: PaintbrushCtx.duplicateLinked(3)
+                        }
+                        InspectorAction {
+                            label: qsTr("Draw with me (ribbon)")
+                            iconText: VLCIcons.effect_filter
+                            onClicked: PaintbrushCtx.addCreativeStrokeAccent("ribbon")
+                        }
+                        InspectorAction {
+                            label: qsTr("Ink burst")
+                            iconText: VLCIcons.effect_filter
+                            onClicked: PaintbrushCtx.addCreativeStrokeAccent("splat")
+                        }
+                        InspectorAction {
+                            label: qsTr("Reuse this look on the cutout")
+                            iconText: VLCIcons.effect_filter
+                            onClicked: PaintbrushCtx.applyCreativeLookToSelection()
+                        }
+                        InspectorAction {
+                            label: qsTr("Resume this creative look")
+                            iconText: VLCIcons.effect_filter
+                            onClicked: PaintbrushCtx.resumeCreativeLook(-1)
+                        }
+                        InspectorAction {
                             label: qsTr("Duplicate layer")
                             iconText: VLCIcons.add
                             onClicked: PaintbrushCtx.duplicateLayer()

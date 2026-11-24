@@ -262,18 +262,42 @@ public:
      * shares the same style group, so a finish edit on one propagates to
      * all copies while each pose keeps its own transform. */
     Q_INVOKABLE void duplicateIntoLineup();
+    /* Generic linked duplicate presets: 1 duo offset, 2 grid x4, 3 overlap x3.
+     * Preset 0 is the five-pose lineup. */
+    Q_INVOKABLE void duplicateLinked(int preset);
+    /* Resume the creative look stored on a committed layer (patch, seed, pad,
+     * original cutout). The next Make it real replaces the old group in the
+     * same one-undo transaction. */
+    Q_INVOKABLE void resumeCreativeLook(int layerIndex);
+    /* Re-apply the current Play Pad look to the selected cutout. */
+    Q_INVOKABLE void applyCreativeLookToSelection();
+    /* Real poses from a tracked video when a track exists; otherwise a still
+     * lineup of the current cutout (never invented anatomy). */
+    Q_INVOKABLE QString createPastelLineup();
+    Q_INVOKABLE QString createMotionEcho();
+    /* One editable vector stroke suggestion: ribbon, halo or splat. */
+    Q_INVOKABLE void addCreativeStrokeAccent(const QString &kind);
     Q_INVOKABLE void addCreativeSparkle(const QColor &color,
                                         const QPointF &canvasPos, double sizePx);
+    void addCreativeRibbon(const QColor &color, const QRectF &subjectRect,
+                           int variant, bool splat = false);
     /* -- creative bridge (used by PaintbrushCreative; not QML surface) ---- */
     QImage creativePadSubject(int *sourceLayerId, QRectF *canvasRect,
                               QString *label) const;
     QImage creativePadHarvest(int harvestId, QRectF *canvasRect,
                               QString *label) const;
+    QImage creativeSubjectFromLayer(const CanvasLayer &layer, QRectF *canvasRect,
+                                    QString *label) const;
+    bool creativeLookInfo(int layerIndex, QVariantMap *info, QImage *cutout,
+                          QRectF *canvasRect, QString *label) const;
     QSize creativePadCanvasSize() const;
     /* Append the committed creative pieces as ONE undoable composite and
-     * hide the source layer (by id) so the derivative never doubles it. */
+     * hide the source layer (by id) so the derivative never doubles it.
+     * `replaceGroup` deletes the previous look of the same group first, so
+     * resuming a look replaces it instead of stacking another copy. */
     QString commitCreativeLayers(const QList<CanvasLayer> &layers,
-                                 int hideLayerId, const QString &desc);
+                                 int hideLayerId, const QString &desc,
+                                 const QString &replaceGroup = QString());
 
     /* -- living harvest (stage 3) ---------------------------------------- */
     /* Rig a tray item into a PuppetAsset (rig once, auto source-motion
@@ -1250,6 +1274,10 @@ private:
      * from the track, PTS from the keyframe) with PTS verification. */
     QImage decodeKeyframeFrame(const ObjectTrack &track,
                                const TrackKeyframe &kf) const;
+    /* Real PTS-separated cutouts from the selected track (or the most
+     * complete track). Falls back to `want` copies of the current cutout when
+     * no track is available; never invents anatomy. */
+    QVector<QImage> collectCreativePoses(int want, QVector<qint64> *pts);
     void startAutosave();
     /* Total bytes held by tracked-object masks and a bounded-eviction pass
      * used while a track grows (memory hardening). Returns bytes after

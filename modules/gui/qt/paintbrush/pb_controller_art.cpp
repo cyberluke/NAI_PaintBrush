@@ -34,6 +34,8 @@ namespace paintbrush {
 
 namespace {
 
+constexpr double kTau = 6.283185307179586;
+
 QString creativeLinkGroup(const CanvasLayer &layer)
 {
     return layer.metadata.value(QStringLiteral("creative.linkGroup")).toString();
@@ -1195,6 +1197,10 @@ QString PaintbrushController::runCreativeSelfTest()
     m_creative->toggleReplay();
     m_creative->setHold(false);
 
+    note(QStringLiteral("preview p95: %1 ms (%2 samples)")
+             .arg(m_creative->previewP95Ms(), 0, 'f', 2)
+             .arg(patches.size()));
+
     const int baseLayers = m_document.layers().size();
 
     /* Neon Idol: commit + optional suggestion + one undo restores exactly. */
@@ -1210,20 +1216,142 @@ QString PaintbrushController::runCreativeSelfTest()
                  .arg(neonAfter - baseLayers));
     else
         note(QStringLiteral("commit neon: +%1 layers").arg(neonAfter - baseLayers));
+    note(QStringLiteral("commit neon: %1 ms")
+             .arg(m_creative->lastCommitMs(), 0, 'f', 1));
+
+    /* Save -> load -> export round trip over the committed layers. */
+    {
+        const QString projectPath =
+            QDir(QStandardPaths::writableLocation(
+                     QStandardPaths::TempLocation))
+                .filePath(QStringLiteral("nai-pb-selftest.pbproj"));
+        const QString exportPath =
+            QDir(QStandardPaths::writableLocation(
+                     QStandardPaths::TempLocation))
+                .filePath(QStringLiteral("nai-pb-selftest-export.png"));
+        ProjectStore store;
+        const QString saveError = store.save(&m_document, projectPath);
+        if (!saveError.isEmpty())
+            note(QStringLiteral("FAIL: project save: %1").arg(saveError));
+        else
+        {
+            PaintbrushDocument loaded;
+            const QString loadError = store.load(&loaded, projectPath);
+            if (!loadError.isEmpty())
+                note(QStringLiteral("FAIL: project load: %1").arg(loadError));
+            else if (loaded.layers().size() != m_document.layers().size())
+                note(QStringLiteral("FAIL: reload layer count %1 != %2")
+                         .arg(loaded.layers().size())
+                         .arg(m_document.layers().size()));
+            else
+            {
+                bool creativeMeta = false;
+                for (const CanvasLayer &l : loaded.layers())
+                    if (!l.metadata.value(QStringLiteral("creative.patch"))
+                             .toString().isEmpty())
+                        creativeMeta = true;
+                if (!creativeMeta)
+                    note(QStringLiteral("FAIL: reload lost creative metadata"));
+                const QString exportError = ExportService::exportImage(
+                    &loaded, exportPath, QStringLiteral("png"));
+                if (!exportError.isEmpty())
+                    note(QStringLiteral("FAIL: export: %1").arg(exportError));
+                else if (QFileInfo(exportPath).size() <= 0)
+                    note(QStringLiteral("FAIL: export produced an empty file"));
+                else if (!creativeMeta)
+                    note(QStringLiteral("FAIL: reload/export metadata gap"));
+                else
+                    note(QStringLiteral(
+                             "save/reopen/export: OK (%1 layers, %2 KB)")
+                             .arg(loaded.layers().size())
+                             .arg(QFileInfo(exportPath).size() / 1024));
+            }
+        }
+    }
 
     if (m_creative->suggestionVisible())
     {
+        note(QStringLiteral("suggestion kind: %1")
+                 .arg(m_creative->suggestionKind()));
         m_creative->acceptSuggestion();
         note(QStringLiteral("suggestion: +%1 layer")
                  .arg(m_document.layers().size() - neonAfter));
         undo();
     }
+
+    /* Resume the committed look from its metadata and replace it in one undo. */
+    {
+        int topCreative = -1;
+        for (int i = m_document.layers().size() - 1; i >= 0; --i)
+        {
+            const CanvasLayer *l = m_document.layerAt(i);
+            if (l && !l->metadata.value(QStringLiteral("creative.patch"))
+                          .toString().isEmpty())
+            {
+                topCreative = i;
+                break;
+            }
+        }
+        if (topCreative < 0)
+            note(QStringLiteral("FAIL: no resumable creative layer"));
+        else if (!m_creative->restoreFromCommittedLayer(topCreative))
+            note(QStringLiteral("FAIL: resume look did not open"));
+        else
+        {
+            note(QStringLiteral("resume look: OK (%1)")
+                     .arg(m_creative->activePatchId()));
+            m_creative->movePad(0.35, 0.62, 0.20, false);
+            const QString resumeError = m_creative->commit();
+            if (!resumeError.isEmpty())
+                note(QStringLiteral("FAIL: resume commit: %1").arg(resumeError));
+            else
+            {
+                note(QStringLiteral("resume replace: %1 layers")
+                         .arg(m_document.layers().size()));
+                undo();
+                if (m_document.layers().size() != neonAfter)
+                    note(QStringLiteral("FAIL: resume undo (%1 != %2)")
+                             .arg(m_document.layers().size()).arg(neonAfter));
+                else
+                    note(QStringLiteral("resume one-undo: OK"));
+            }
+        }
+    }
+
     undo();
     if (m_document.layers().size() != baseLayers)
         note(QStringLiteral("FAIL: one-undo contract broke (%1 != %2)")
                  .arg(m_document.layers().size()).arg(baseLayers));
     else
         note(QStringLiteral("one-undo contract: OK"));
+
+    /* Reuse the current look on the selected cutout (one undo). */
+    {
+        for (int i = 0; i < m_document.layers().size(); ++i)
+        {
+            const CanvasLayer *l = m_document.layerAt(i);
+            if (l && l->name == QLatin1String("Self-test cutout"))
+            {
+                m_document.setCurrentLayerIndex(i);
+                emit documentChanged();
+                break;
+            }
+        }
+        const QString applyError = m_creative->applyLookToSelection();
+        if (!applyError.isEmpty())
+            note(QStringLiteral("FAIL: apply look: %1").arg(applyError));
+        else
+        {
+            note(QStringLiteral("apply look: +%1 layers")
+                     .arg(m_document.layers().size() - baseLayers));
+            undo();
+            if (m_document.layers().size() != baseLayers)
+                note(QStringLiteral("FAIL: apply look undo (%1 != %2)")
+                         .arg(m_document.layers().size()).arg(baseLayers));
+            else
+                note(QStringLiteral("apply look undo: OK"));
+        }
+    }
 
     /* Sticker Forge: commit + one undo. */
     m_creative->selectPatch(QStringLiteral("sticker-forge"));
@@ -1358,6 +1486,114 @@ QString PaintbrushController::runCreativeSelfTest()
     else
         note(QStringLiteral("lineup undo: OK"));
 
+    auto selectSelfTestCutout = [&]() {
+        for (int i = 0; i < m_document.layers().size(); ++i)
+        {
+            const CanvasLayer *l = m_document.layerAt(i);
+            if (l && l->name == QLatin1String("Self-test cutout"))
+            {
+                m_document.setCurrentLayerIndex(i);
+                emit documentChanged();
+                break;
+            }
+        }
+    };
+
+    /* Pastel Lineup and Motion Echo: still-source fallback in this fixture. */
+    {
+        selectSelfTestCutout();
+        const int before = m_document.layers().size();
+        const QString lineupError = createPastelLineup();
+        if (!lineupError.isEmpty())
+            note(QStringLiteral("FAIL: pastel lineup: %1").arg(lineupError));
+        else
+        {
+            const int added = m_document.layers().size() - before;
+            note(QStringLiteral("pastel lineup: +%1 layers").arg(added));
+            if (added < 5)
+                note(QStringLiteral("FAIL: pastel lineup too few layers"));
+        }
+        undo();
+        if (m_document.layers().size() != baseLayers)
+            note(QStringLiteral("FAIL: pastel lineup undo (%1 != %2)")
+                     .arg(m_document.layers().size()).arg(baseLayers));
+        else
+            note(QStringLiteral("pastel lineup undo: OK"));
+    }
+    {
+        selectSelfTestCutout();
+        const int before = m_document.layers().size();
+        const QString echoError = createMotionEcho();
+        if (!echoError.isEmpty())
+            note(QStringLiteral("FAIL: motion echo: %1").arg(echoError));
+        else
+        {
+            const int added = m_document.layers().size() - before;
+            note(QStringLiteral("motion echo: +%1 layers").arg(added));
+            if (added < 5)
+                note(QStringLiteral("FAIL: motion echo too few layers"));
+        }
+        undo();
+        if (m_document.layers().size() != baseLayers)
+            note(QStringLiteral("FAIL: motion echo undo (%1 != %2)")
+                     .arg(m_document.layers().size()).arg(baseLayers));
+        else
+            note(QStringLiteral("motion echo undo: OK"));
+    }
+
+    /* Generic linked duplicate presets. */
+    for (int preset = 1; preset <= 3; ++preset)
+    {
+        selectSelfTestCutout();
+        const int before = m_document.layers().size();
+        duplicateLinked(preset);
+        const int added = m_document.layers().size() - before;
+        const int expected = preset == 1 ? 2 : (preset == 2 ? 4 : 3);
+        if (added != expected)
+            note(QStringLiteral("FAIL: duplicate preset %1 added %2 (want %3)")
+                     .arg(preset).arg(added).arg(expected));
+        else
+            note(QStringLiteral("duplicate preset %1: OK").arg(preset));
+        undo();
+        if (m_document.layers().size() != baseLayers)
+            note(QStringLiteral("FAIL: duplicate preset %1 undo").arg(preset));
+    }
+
+    /* Editable agent stroke suggestion. */
+    {
+        selectSelfTestCutout();
+        const int before = m_document.layers().size();
+        addCreativeStrokeAccent(QStringLiteral("ribbon"));
+        const int added = m_document.layers().size() - before;
+        note(QStringLiteral("agent stroke: +%1 layer").arg(added));
+        if (added != 1)
+            note(QStringLiteral("FAIL: agent stroke added %1").arg(added));
+        undo();
+        if (m_document.layers().size() != baseLayers)
+            note(QStringLiteral("FAIL: agent stroke undo"));
+        else
+            note(QStringLiteral("agent stroke undo: OK"));
+    }
+
+    /* The assistant tool exposes the same editable stroke action. */
+    {
+        selectSelfTestCutout();
+        const int before = m_document.layers().size();
+        const QVariantMap tool = executeAssistantTool(
+            QStringLiteral("draw_creative_stroke"),
+            QStringLiteral("{\"kind\":\"halo\"}"));
+        const bool ok = tool.value(QStringLiteral("ok")).toBool();
+        note(ok ? QStringLiteral("assistant stroke tool: OK")
+                : QStringLiteral("FAIL: assistant stroke tool: %1")
+                      .arg(tool.value(QStringLiteral("summary")).toString()));
+        if (m_document.layers().size() != before + 1)
+            note(QStringLiteral("FAIL: assistant stroke added %1")
+                     .arg(m_document.layers().size() - before));
+        undo();
+        if (m_document.layers().size() != baseLayers)
+            note(QStringLiteral("FAIL: assistant stroke undo"));
+    }
+
     /* Post-Keep moment: a kept cutout opens the pad on the two-card chooser. */
     HarvestItem kept;
     kept.cutout = idol;
@@ -1460,6 +1696,43 @@ QSize PaintbrushController::creativePadCanvasSize() const
     return QSize(1440, 1800);
 }
 
+QImage PaintbrushController::creativeSubjectFromLayer(const CanvasLayer &layer,
+                                                      QRectF *canvasRect,
+                                                      QString *label) const
+{
+    if (layer.raster.isNull())
+        return {};
+    QImage cutout = creative::maskToCutout(layer.raster,
+                                           creative::layerMask(layer));
+    if (cutout.isNull())
+        return {};
+    QRectF rect = layer.transform().mapRect(layer.raster.rect());
+    if (!qFuzzyIsNull(layer.rotation))
+    {
+        /* bake the rotation into canvas space so the stage sees exactly
+         * the silhouette the user has on the canvas */
+        const QSize canvas = creativePadCanvasSize();
+        QImage baked(canvas, QImage::Format_ARGB32);
+        baked.fill(Qt::transparent);
+        {
+            QPainter p(&baked);
+            p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+            p.setTransform(layer.transform());
+            p.drawImage(QPointF(0, 0), cutout);
+        }
+        QPoint offset;
+        cutout = creative::trimTransparent(baked, &offset);
+        if (cutout.isNull())
+            return {};
+        rect = QRectF(offset, cutout.size());
+    }
+    if (canvasRect)
+        *canvasRect = rect;
+    if (label)
+        *label = layer.name;
+    return cutout;
+}
+
 QImage PaintbrushController::creativePadSubject(int *sourceLayerId,
                                                 QRectF *canvasRect,
                                                 QString *label) const
@@ -1546,36 +1819,9 @@ QImage PaintbrushController::creativePadSubject(int *sourceLayerId,
 
     if (chosen)
     {
-        QImage cutout = creative::maskToCutout(chosen->raster,
-                                                creative::layerMask(*chosen));
-        if (cutout.isNull())
-            return {};
-        QRectF rect = chosen->transform().mapRect(chosen->raster.rect());
-        if (!qFuzzyIsNull(chosen->rotation))
-        {
-            /* bake the rotation into canvas space so the stage sees exactly
-             * the silhouette the user has on the canvas */
-            const QSize canvas = creativePadCanvasSize();
-            QImage baked(canvas, QImage::Format_ARGB32);
-            baked.fill(Qt::transparent);
-            {
-                QPainter p(&baked);
-                p.setRenderHint(QPainter::SmoothPixmapTransform, true);
-                p.setTransform(chosen->transform());
-                p.drawImage(QPointF(0, 0), cutout);
-            }
-            QPoint offset;
-            cutout = creative::trimTransparent(baked, &offset);
-            if (cutout.isNull())
-                return {};
-            rect = QRectF(offset, cutout.size());
-        }
-        if (sourceLayerId)
+        const QImage cutout = creativeSubjectFromLayer(*chosen, canvasRect, label);
+        if (!cutout.isNull() && sourceLayerId)
             *sourceLayerId = chosen->id;
-        if (canvasRect)
-            *canvasRect = rect;
-        if (label)
-            *label = chosen->name;
         return cutout;
     }
 
@@ -1617,12 +1863,94 @@ QImage PaintbrushController::creativePadHarvest(int harvestId,
     return item->cutout;
 }
 
+bool PaintbrushController::creativeLookInfo(int layerIndex, QVariantMap *info,
+                                            QImage *cutout, QRectF *canvasRect,
+                                            QString *label) const
+{
+    const CanvasLayer *layer = m_document.layerAt(layerIndex);
+    if (!layer || !info || !cutout)
+        return false;
+    const QString patch =
+        layer->metadata.value(QStringLiteral("creative.patch")).toString();
+    if (patch.isEmpty())
+        return false;
+    const int sourceLayerId =
+        layer->metadata.value(QStringLiteral("creative.sourceLayerId")).toInt();
+    const int sourceHarvestId =
+        layer->metadata.value(QStringLiteral("creative.sourceHarvestId")).toInt();
+
+    QImage source;
+    QRectF rect;
+    QString name;
+    if (sourceLayerId > 0)
+    {
+        const CanvasLayer *src = m_document.layerById(sourceLayerId);
+        if (src)
+            source = creativeSubjectFromLayer(*src, &rect, &name);
+    }
+    if (source.isNull() && sourceHarvestId > 0)
+        source = creativePadHarvest(sourceHarvestId, &rect, &name);
+    if (source.isNull())
+    {
+        /* Source removed: the committed subject piece is still a valid
+         * starting point (already graded, but editable). */
+        source = creativeSubjectFromLayer(*layer, &rect, &name);
+    }
+    if (source.isNull())
+        return false;
+
+    info->clear();
+    (*info)[QStringLiteral("patch")] = patch;
+    (*info)[QStringLiteral("patchName")] =
+        layer->metadata.value(QStringLiteral("creative.patchName"));
+    (*info)[QStringLiteral("seed")] =
+        layer->metadata.value(QStringLiteral("creative.seed"));
+    (*info)[QStringLiteral("params")] =
+        layer->metadata.value(QStringLiteral("creative.params"));
+    (*info)[QStringLiteral("group")] =
+        layer->metadata.value(QStringLiteral("creative.group"));
+    (*info)[QStringLiteral("sourceLayerId")] = sourceLayerId;
+    (*info)[QStringLiteral("sourceHarvestId")] = sourceHarvestId;
+    *cutout = source;
+    if (canvasRect)
+        *canvasRect = rect;
+    if (label)
+        *label = name;
+    return true;
+}
+
 QString PaintbrushController::commitCreativeLayers(const QList<CanvasLayer> &layers,
                                                    int hideLayerId,
-                                                   const QString &desc)
+                                                   const QString &desc,
+                                                   const QString &replaceGroup)
 {
     if (layers.isEmpty())
         return QStringLiteral("Nothing to commit.");
+
+    auto composite = std::make_unique<CompositeCommand>();
+    composite->desc = desc;
+
+    /* Resuming a look replaces its previous group instead of stacking a
+     * second copy. Delete top-down; composite revert re-inserts bottom-up. */
+    if (!replaceGroup.isEmpty())
+    {
+        for (int i = m_document.layers().size() - 1; i >= 0; --i)
+        {
+            CanvasLayer *old = m_document.layerAt(i);
+            if (!old
+                || old->metadata.value(QStringLiteral("creative.group"))
+                       .toString() != replaceGroup)
+                continue;
+            DeleteLayerCommand del;
+            del.index = i;
+            del.layer = *old;
+            del.prevCurrentIndex = m_document.currentLayerIndex();
+            del.desc = desc;
+            del.apply(m_document);
+            composite->children.push_back(
+                std::make_unique<DeleteLayerCommand>(del));
+        }
+    }
 
     QList<CanvasLayer> all = m_document.layers();
     const int firstNew = all.size();
@@ -1633,9 +1961,6 @@ QString PaintbrushController::commitCreativeLayers(const QList<CanvasLayer> &lay
         all.append(copy);
     }
     m_document.setLayers(all);
-
-    auto composite = std::make_unique<CompositeCommand>();
-    composite->desc = desc;
 
     if (hideLayerId > 0)
     {
@@ -1761,6 +2086,615 @@ void PaintbrushController::addCreativeSparkle(const QColor &color,
     emit documentChanged();
 }
 
+void PaintbrushController::addCreativeRibbon(const QColor &color,
+                                             const QRectF &subjectRect,
+                                             int variant, bool splat)
+{
+    if (subjectRect.isEmpty())
+        return;
+    const qreal w = qMax<qreal>(48.0, subjectRect.width() * 0.94);
+    const qreal h = qMax<qreal>(48.0, subjectRect.height() * 1.02);
+    const QRectF box(subjectRect.x() - w * 0.03,
+                     subjectRect.y() - h * 0.02, w, h);
+    QPainterPath path;
+    qreal width = qMax<qreal>(1.5, h * 0.006);
+
+    if (variant == 1)
+    {
+        /* halo: an offset ring behind the head */
+        const QRectF ring(w * 0.16, h * 0.05, w * 0.68, h * 0.26);
+        path.addEllipse(ring);
+        path.addEllipse(ring.adjusted(w * 0.02, h * 0.012,
+                                      -w * 0.02, -h * 0.012));
+        width = qMax<qreal>(1.5, h * 0.005);
+    }
+    else if (splat)
+    {
+        /* a torn ink burst at the shoulder */
+        const QPointF c(w * 0.72, h * 0.24);
+        const qreal R = w * 0.16;
+        for (int i = 0; i < 22; ++i)
+        {
+            const qreal a = kTau * i / 22.0;
+            const qreal r = (i & 1) ? R * 0.42 : R;
+            const QPointF p(c.x() + std::cos(a) * r,
+                            c.y() + std::sin(a) * r * 0.82);
+            if (i == 0)
+                path.moveTo(p);
+            else
+                path.lineTo(p);
+        }
+        path.closeSubpath();
+        width = qMax<qreal>(1.5, h * 0.0045);
+    }
+    else
+    {
+        /* flowing ribbon: a deliberate line alongside the silhouette */
+        path.moveTo(w * 0.04, h * 0.86);
+        path.cubicTo(w * -0.02, h * 0.60, w * 0.16, h * 0.46,
+                     w * 0.31, h * 0.50);
+        path.cubicTo(w * 0.47, h * 0.54, w * 0.36, h * 0.20,
+                     w * 0.62, h * 0.15);
+        path.cubicTo(w * 0.82, h * 0.11, w * 0.96, h * 0.30,
+                     w * 0.97, h * 0.55);
+        width = qMax<qreal>(1.5, h * 0.0065);
+    }
+
+    QImage preview(QSize(qMax(1, int(std::ceil(w))), qMax(1, int(std::ceil(h)))),
+                   QImage::Format_ARGB32);
+    preview.fill(Qt::transparent);
+    {
+        QPainter p(&preview);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        QColor glow = color.isValid() ? color : QColor(255, 226, 120);
+        glow.setAlpha(70);
+        QPen glowPen(glow);
+        glowPen.setWidthF(width * 3.2);
+        glowPen.setCapStyle(Qt::RoundCap);
+        glowPen.setJoinStyle(Qt::RoundJoin);
+        p.setPen(glowPen);
+        p.setBrush(Qt::NoBrush);
+        p.drawPath(path);
+        QPen pen(color.isValid() ? color : QColor(255, 226, 120));
+        pen.setWidthF(width);
+        pen.setCapStyle(Qt::RoundCap);
+        pen.setJoinStyle(Qt::RoundJoin);
+        p.setPen(pen);
+        p.drawPath(path);
+    }
+    const QString name = splat ? QStringLiteral("Ink burst")
+                               : (variant == 1 ? QStringLiteral("Halo")
+                                                : QStringLiteral("Ribbon"));
+    insertVectorLayer(path, box.topLeft(), preview,
+                      color.isValid() ? color : QColor(255, 226, 120),
+                      width, name);
+    if (m_canvas)
+        m_canvas->markCanvasDirty();
+    emit documentChanged();
+    setStatus(QStringLiteral("%1 added — it is an editable vector layer.")
+                  .arg(name));
+    triggerCompanionEvent(QStringLiteral("creative-stroke"));
+}
+
+void PaintbrushController::addCreativeStrokeAccent(const QString &kind)
+{
+    int sourceLayerId = -1;
+    QRectF rect;
+    QString label;
+    const QImage cutout = creativePadSubject(&sourceLayerId, &rect, &label);
+    if (cutout.isNull() || rect.isEmpty())
+    {
+        setStatus(QStringLiteral("Select a cutout first — a stroke needs a pose."));
+        return;
+    }
+    QColor color(255, 226, 120);
+    if (m_creative)
+    {
+        const QColor accent(
+            m_creative->activePatch().value(QStringLiteral("accent")).toString());
+        if (accent.isValid())
+            color = accent;
+    }
+    const bool splat = kind == QLatin1String("splat");
+    const int variant = kind == QLatin1String("halo") ? 1 : 0;
+    if (kind == QLatin1String("ink"))
+        color = QColor(20, 18, 16);
+    addCreativeRibbon(color, rect, variant, splat);
+}
+
+void PaintbrushController::resumeCreativeLook(int layerIndex)
+{
+    if (!m_creative)
+        return;
+    if (layerIndex < 0)
+    {
+        layerIndex = m_document.currentLayerIndex();
+        const CanvasLayer *current = m_document.layerAt(layerIndex);
+        if (!current
+            || current->metadata.value(QStringLiteral("creative.patch"))
+                   .toString().isEmpty())
+        {
+            for (int i = m_document.layers().size() - 1; i >= 0; --i)
+            {
+                const CanvasLayer *l = m_document.layerAt(i);
+                if (l && !l->metadata.value(QStringLiteral("creative.patch"))
+                              .toString().isEmpty())
+                {
+                    layerIndex = i;
+                    break;
+                }
+            }
+        }
+    }
+    if (!m_creative->restoreFromCommittedLayer(layerIndex))
+        setStatus(QStringLiteral("Select a creative layer to resume its look."));
+}
+
+void PaintbrushController::applyCreativeLookToSelection()
+{
+    if (!m_creative)
+        return;
+    const QString error = m_creative->applyLookToSelection();
+    if (!error.isEmpty())
+        setStatus(error);
+}
+
+QVector<QImage> PaintbrushController::collectCreativePoses(int want,
+                                                           QVector<qint64> *pts)
+{
+    want = qBound(1, want, 8);
+    if (pts)
+        pts->clear();
+    const ObjectTrack *track = nullptr;
+    for (const ObjectTrack &t : m_document.tracks())
+    {
+        if (t.id == m_selectedTrackId && !t.keyframes.isEmpty())
+        {
+            track = &t;
+            break;
+        }
+    }
+    if (!track)
+    {
+        for (const ObjectTrack &t : m_document.tracks())
+        {
+            if (t.keyframes.isEmpty())
+                continue;
+            if (!track || t.keyframes.size() > track->keyframes.size())
+                track = &t;
+        }
+    }
+
+    QVector<QImage> poses;
+    if (track)
+    {
+        const int n = track->keyframes.size();
+        QVector<int> indices;
+        if (n <= want)
+        {
+            for (int i = 0; i < n; ++i)
+                indices.append(i);
+        }
+        else
+        {
+            for (int k = 0; k < want; ++k)
+            {
+                const int idx = qBound(
+                    0, int(std::lround(double(k) * (n - 1) / double(want - 1))),
+                    n - 1);
+                if (!indices.contains(idx))
+                    indices.append(idx);
+            }
+        }
+        for (int idx : indices)
+        {
+            const TrackKeyframe &kf = track->keyframes.at(idx);
+            const QImage frame = decodeKeyframeFrame(*track, kf);
+            if (frame.isNull())
+                continue;
+            const QImage sticker =
+                renderStickerFrame(frame, kf.mask, 0, QColor(), false, 1.0,
+                                   nullptr);
+            if (sticker.isNull())
+                continue;
+            QPoint offset;
+            const QImage trimmed = creative::trimTransparent(sticker, &offset);
+            if (trimmed.isNull())
+                continue;
+            poses.append(trimmed);
+            if (pts)
+                pts->append(kf.timeMs);
+        }
+    }
+
+    if (poses.isEmpty())
+    {
+        /* No track: use the still cutout, never invented anatomy. */
+        int sourceLayerId = -1;
+        QRectF rect;
+        QString label;
+        const QImage cutout = creativePadSubject(&sourceLayerId, &rect, &label);
+        if (!cutout.isNull())
+        {
+            for (int i = 0; i < want; ++i)
+            {
+                poses.append(cutout);
+                if (pts)
+                    pts->append(-1);
+            }
+        }
+    }
+    return poses;
+}
+
+QString PaintbrushController::createPastelLineup()
+{
+    const QSize canvas = creativePadCanvasSize();
+    QVector<qint64> pts;
+    const QVector<QImage> poses = collectCreativePoses(5, &pts);
+    if (poses.isEmpty())
+    {
+        const QString msg =
+            QStringLiteral("Keep a subject or track a person first.");
+        setStatus(msg);
+        return msg;
+    }
+    const bool tracked = !pts.isEmpty() && pts.first() >= 0;
+    const int count = poses.size();
+    const qreal targetH = canvas.height() * 0.46;
+    const qreal margin = canvas.width() * 0.06;
+    const qreal slot = canvas.width() * 0.88 / count;
+    const qreal baseline = canvas.height() * 0.86;
+    const QString group =
+        QStringLiteral("lineup-%1").arg(QDateTime::currentMSecsSinceEpoch());
+
+    QList<CanvasLayer> layers;
+    const QColor lavender(199, 187, 255), pink(255, 199, 230);
+    const QColor ink(90, 74, 107);
+
+    QImage bg = creative::gradientField(canvas, QColor(255, 231, 245),
+                                        QColor(207, 198, 255),
+                                        QColor(255, 255, 255, 190), 0.20);
+    {
+        QPainter p(&bg);
+        QLinearGradient floor(0, canvas.height() * 0.62, 0, canvas.height());
+        floor.setColorAt(0.0, QColor(255, 219, 239, 220));
+        floor.setColorAt(1.0, QColor(244, 166, 213, 245));
+        p.fillRect(QRectF(0, canvas.height() * 0.62, canvas.width(),
+                          canvas.height() * 0.38), floor);
+        QLinearGradient horizon(0, canvas.height() * 0.60, 0,
+                                canvas.height() * 0.66);
+        horizon.setColorAt(0.0, QColor(255, 255, 255, 0));
+        horizon.setColorAt(0.6, QColor(255, 255, 255, 170));
+        horizon.setColorAt(1.0, QColor(255, 255, 255, 0));
+        p.fillRect(QRectF(0, canvas.height() * 0.595, canvas.width(),
+                          canvas.height() * 0.07), horizon);
+    }
+    {
+        CanvasLayer l = CanvasLayer::createImage(bg, QPointF(0, 0),
+                                                 QStringLiteral("Stage"));
+        l.metadata[QStringLiteral("creative.role")] = QStringLiteral("backdrop");
+        layers.append(l);
+    }
+
+    /* reflections: one plate under the whole lineup */
+    QImage reflectPlate(canvas, QImage::Format_ARGB32);
+    reflectPlate.fill(Qt::transparent);
+    {
+        QPainter rp(&reflectPlate);
+        rp.setOpacity(0.42);
+        for (int i = 0; i < count; ++i)
+        {
+            const qreal maxW = slot * 1.08;
+            const qreal scale =
+                qMin(targetH / qMax(1, poses[i].height()),
+                     maxW / qMax(1, poses[i].width()));
+            const QSize sz(qMax(1, int(poses[i].width() * scale)),
+                           qMax(1, int(poses[i].height() * scale)));
+            const QImage scaled = poses[i].scaled(
+                sz, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+            const QImage mirror = creative::reflection(scaled, 0.55, 0.42);
+            const qreal cx = margin + slot * (i + 0.5);
+            rp.drawImage(QPointF(cx - mirror.width() / 2.0,
+                                 baseline + canvas.height() * 0.004),
+                         mirror);
+        }
+    }
+    {
+        CanvasLayer l = CanvasLayer::createImage(
+            reflectPlate, QPointF(0, 0), QStringLiteral("Floor reflections"));
+        l.metadata[QStringLiteral("creative.role")] = QStringLiteral("echo");
+        layers.append(l);
+    }
+
+    for (int i = 0; i < count; ++i)
+    {
+        const qreal maxW = slot * 1.08;
+        const qreal scale =
+            qMin(targetH / qMax(1, poses[i].height()),
+                 maxW / qMax(1, poses[i].width()));
+        const QSize sz(qMax(1, int(poses[i].width() * scale)),
+                       qMax(1, int(poses[i].height() * scale)));
+        QImage pose = poses[i].scaled(sz, Qt::IgnoreAspectRatio,
+                                      Qt::SmoothTransformation);
+        pose = creative::gradeImage(
+            pose, creative::Grade{ 1.10f, 0.94f, 0.92f, lavender, 0.18f,
+                                   QColor(255, 255, 255), 0.10f });
+        const qreal cx = margin + slot * (i + 0.5);
+        CanvasLayer l = CanvasLayer::createImage(
+            pose, QPointF(0, 0), QStringLiteral("Pose %1").arg(i + 1));
+        l.setTransform(QTransform::fromTranslate(cx - sz.width() / 2.0,
+                                                 baseline - sz.height()));
+        l.effects.append(art::EffectNode::makeShadow(
+            float(qMax<qreal>(3.0, canvas.height() * 0.010)), 0.24f));
+        l.metadata[QStringLiteral("creative.linkGroup")] = group;
+        l.metadata[QStringLiteral("creative.role")] = QStringLiteral("lineup");
+        if (tracked)
+            l.metadata[QStringLiteral("creative.ptsMs")] = pts.value(i, -1);
+        layers.append(l);
+    }
+
+    art::TextTreatment title;
+    title.text = QStringLiteral("MAIN CHARACTER");
+    title.styleId = QStringLiteral("editorial");
+    title.sizePx = float(canvas.height() * 0.052);
+    title.color = ink;
+    const QImage titleImg = art::typography::render(title, 1.0f);
+    if (!titleImg.isNull())
+    {
+        CanvasLayer l = CanvasLayer::createImage(
+            titleImg,
+            QPointF((canvas.width() - titleImg.width()) / 2.0,
+                    canvas.height() * 0.055),
+            QStringLiteral("Main Character"));
+        l.type = LAYER_TEXT;
+        l.text = title.text;
+        l.opacity = 0.82f;
+        l.metadata[QStringLiteral("textTreatment")] = title.toVariant();
+        l.metadata[QStringLiteral("creative.role")] = QStringLiteral("finish");
+        layers.append(l);
+    }
+
+    int hideLayerId = -1;
+    const CanvasLayer *current = m_document.layerAt(m_document.currentLayerIndex());
+    if (current && current->visible && current->id > 0 && !current->raster.isNull()
+        && current->metadata.value(QStringLiteral("creative.patch"))
+               .toString().isEmpty())
+        hideLayerId = current->id;
+
+    const QString error = commitCreativeLayers(
+        layers, hideLayerId, QStringLiteral("Pastel Lineup"));
+    if (!error.isEmpty())
+    {
+        setStatus(error);
+        return error;
+    }
+    setStatus(tracked
+                  ? QStringLiteral("Pastel lineup from %1 real tracked poses — "
+                                   "one undo, every pose editable.")
+                        .arg(count)
+                  : QStringLiteral("Pastel lineup from the still cutout — one "
+                                   "undo. Track a video for real poses."));
+    triggerCompanionEvent(QStringLiteral("lineup"));
+    return {};
+}
+
+QString PaintbrushController::createMotionEcho()
+{
+    const QSize canvas = creativePadCanvasSize();
+    QVector<qint64> pts;
+    const QVector<QImage> poses = collectCreativePoses(6, &pts);
+    if (poses.isEmpty())
+    {
+        const QString msg =
+            QStringLiteral("Keep a subject or track a person first.");
+        setStatus(msg);
+        return msg;
+    }
+    const bool tracked = !pts.isEmpty() && pts.first() >= 0;
+    const int count = poses.size();
+    const qreal targetH = canvas.height() * 0.55;
+    const qreal baseline = canvas.height() * 0.80;
+    const QString group =
+        QStringLiteral("echo-%1").arg(QDateTime::currentMSecsSinceEpoch());
+
+    QList<CanvasLayer> layers;
+    QImage bg = creative::gradientField(canvas, QColor(9, 9, 20),
+                                        QColor(24, 19, 42),
+                                        QColor(90, 60, 160, 100), 0.42);
+    layers.append(CanvasLayer::createImage(bg, QPointF(0, 0),
+                                           QStringLiteral("Echo stage")));
+    QImage trail(canvas, QImage::Format_ARGB32);
+    trail.fill(Qt::transparent);
+    {
+        QPainter p(&trail);
+        p.drawImage(0, 0, creative::starField(canvas, 17,
+                                              QColor(240, 240, 255), 110));
+        p.drawImage(0, 0, creative::bokehField(
+                             canvas, 23,
+                             { QColor(78, 123, 255), QColor(255, 111, 174) },
+                             70, canvas.height() * 0.004,
+                             canvas.height() * 0.018));
+    }
+    {
+        CanvasLayer l = CanvasLayer::createImage(trail, QPointF(0, 0),
+                                                 QStringLiteral("Echo trail"));
+        l.metadata[QStringLiteral("creative.role")] = QStringLiteral("accent");
+        layers.append(l);
+    }
+
+    const auto addEcho = [&](int i, const QImage &pose, bool main) {
+        const qreal maxW = canvas.width() * 0.28;
+        const qreal scale = qMin(targetH / qMax(1, pose.height()),
+                                 maxW / qMax(1, pose.width()));
+        const QSize sz(qMax(1, int(pose.width() * scale)),
+                       qMax(1, int(pose.height() * scale)));
+        QImage img = pose.scaled(sz, Qt::IgnoreAspectRatio,
+                                 Qt::SmoothTransformation);
+        const int hue = (i - 2) * 14;
+        if (hue)
+            img = creative::hueShift(img, hue);
+        img = creative::gradeImage(
+            img, creative::Grade{ 0.96f, 1.06f, 1.0f,
+                                  main ? QColor(78, 123, 255)
+                                       : QColor(255, 111, 174),
+                                  0.16f, QColor(255, 255, 255), 0.06f });
+        const qreal cx = canvas.width() * (0.12 + 0.145 * i);
+        CanvasLayer l = CanvasLayer::createImage(
+            img, QPointF(0, 0),
+            main ? QStringLiteral("Echo main") : QStringLiteral("Echo %1").arg(i));
+        l.setTransform(QTransform::fromTranslate(cx - sz.width() / 2.0,
+                                                 baseline - sz.height()));
+        l.opacity = main ? 1.0f : float(0.20 + 0.40 * (1.0 - qAbs(i - 2) / 3.0));
+        if (main)
+            l.effects.append(art::EffectNode::makeShadow(
+                float(qMax<qreal>(3.0, canvas.height() * 0.010)), 0.25f));
+        l.metadata[QStringLiteral("creative.linkGroup")] = group;
+        l.metadata[QStringLiteral("creative.role")] =
+            main ? QStringLiteral("subject") : QStringLiteral("echo");
+        if (tracked)
+            l.metadata[QStringLiteral("creative.ptsMs")] = pts.value(i, -1);
+        layers.append(l);
+    };
+
+    const int mainIndex = qBound(0, count / 2, count - 1);
+    for (int i = 0; i < count; ++i)
+        if (i != mainIndex)
+            addEcho(i, poses[i], false);
+    addEcho(mainIndex, poses[mainIndex], true);
+
+    int hideLayerId = -1;
+    const CanvasLayer *current = m_document.layerAt(m_document.currentLayerIndex());
+    if (current && current->visible && current->id > 0 && !current->raster.isNull()
+        && current->metadata.value(QStringLiteral("creative.patch"))
+               .toString().isEmpty())
+        hideLayerId = current->id;
+
+    const QString error = commitCreativeLayers(
+        layers, hideLayerId, QStringLiteral("Motion Echo"));
+    if (!error.isEmpty())
+    {
+        setStatus(error);
+        return error;
+    }
+    setStatus(tracked
+                  ? QStringLiteral("Motion echo from %1 real tracked poses — "
+                                   "one undo.")
+                        .arg(count)
+                  : QStringLiteral("Motion echo from the still cutout — one "
+                                   "undo. Track a video for real poses."));
+    triggerCompanionEvent(QStringLiteral("motion-echo"));
+    return {};
+}
+
+void PaintbrushController::duplicateLinked(int preset)
+{
+    if (preset <= 0)
+    {
+        duplicateIntoLineup();
+        return;
+    }
+    const int index = m_document.currentLayerIndex();
+    const CanvasLayer *src = m_document.layerAt(index);
+    if (!src || src->raster.isNull())
+    {
+        setStatus(QStringLiteral("Select a cutout layer to duplicate."));
+        return;
+    }
+    const QSize canvas = creativePadCanvasSize();
+    struct CreativeSlot { qreal cx; qreal baseline; qreal height; qreal rotation; };
+    QVector<CreativeSlot> layoutSlots;
+    QString desc;
+    switch (preset)
+    {
+    case 1:
+        layoutSlots = { { 0.38, 0.82, 0.48, -4.0 }, { 0.62, 0.84, 0.48, 4.0 } };
+        desc = QStringLiteral("Duo");
+        break;
+    case 2:
+        layoutSlots = { { 0.30, 0.50, 0.34, -3.0 }, { 0.70, 0.52, 0.34, 3.0 },
+                  { 0.30, 0.86, 0.34, 3.0 }, { 0.70, 0.88, 0.34, -3.0 } };
+        desc = QStringLiteral("Grid x4");
+        break;
+    default:
+        layoutSlots = { { 0.34, 0.60, 0.50, -6.0 }, { 0.50, 0.54, 0.52, 0.0 },
+                  { 0.66, 0.60, 0.50, 6.0 } };
+        desc = QStringLiteral("Overlap x3");
+        break;
+    }
+    const QString group =
+        QStringLiteral("duo-%1").arg(QDateTime::currentMSecsSinceEpoch());
+
+    QList<CanvasLayer> all = m_document.layers();
+    const int firstNew = all.size();
+    for (int i = 0; i < layoutSlots.size(); ++i)
+    {
+        const CreativeSlot &slot = layoutSlots.at(i);
+        const qreal targetH = canvas.height() * slot.height;
+        const qreal factor = qMin<qreal>(
+            targetH / qMax(1, src->raster.height()),
+            canvas.width() * 0.42 / qMax(1, src->raster.width()));
+        CanvasLayer copy = *src;
+        copy.id = 0;
+        copy.name = QStringLiteral("%1 %2").arg(desc).arg(i + 1);
+        copy.visible = true;
+        copy.rotation = float(slot.rotation);
+        copy.scale = float(factor);
+        const qreal w = src->raster.width() * factor;
+        const qreal h = src->raster.height() * factor;
+        copy.position = QPointF(canvas.width() * slot.cx - w / 2.0,
+                                canvas.height() * slot.baseline - h);
+        copy.metadata[QStringLiteral("creative.linkGroup")] = group;
+        copy.metadata[QStringLiteral("creative.role")] = QStringLiteral("lineup");
+        copy.effects.erase(
+            std::remove_if(copy.effects.begin(), copy.effects.end(),
+                           [](const art::EffectNode &e) {
+                               return e.type == art::EffectNode::Shadow;
+                           }),
+            copy.effects.end());
+        copy.effects.append(art::EffectNode::makeShadow(
+            float(qMax<qreal>(3.0, canvas.height() * 0.012)), 0.24f));
+        all.append(copy);
+    }
+    const bool srcVisible = src->visible;
+    const int srcId = src->id;
+    m_document.setLayers(all);
+
+    auto composite = std::make_unique<CompositeCommand>();
+    composite->desc = desc;
+    if (srcVisible && srcId > 0)
+    {
+        SetVisibilityCommand vis;
+        vis.layerIndex = index;
+        vis.before = true;
+        vis.after = false;
+        vis.desc = composite->desc;
+        m_document.layerAt(index)->visible = false;
+        composite->children.push_back(
+            std::make_unique<SetVisibilityCommand>(vis));
+    }
+    const int end = m_document.layers().size();
+    for (int i = firstNew; i < end; ++i)
+    {
+        const CanvasLayer *added = m_document.layerAt(i);
+        if (!added)
+            continue;
+        InsertLayerCommand cmd;
+        cmd.desc = composite->desc;
+        cmd.index = i;
+        cmd.prevCurrentIndex = index;
+        cmd.layer = *added;
+        composite->children.push_back(std::make_unique<InsertLayerCommand>(cmd));
+    }
+    m_document.setCurrentLayerIndex(end - 1);
+    m_undoStack.pushCommand(std::move(composite));
+    if (m_canvas)
+        m_canvas->markCanvasDirty();
+    emit documentChanged();
+    setStatus(QStringLiteral("%1 created — linked finish, one undo.").arg(desc));
+    triggerCompanionEvent(QStringLiteral("smart-duplicate"));
+}
+
 void PaintbrushController::duplicateIntoLineup()
 {
     const int index = m_document.currentLayerIndex();
@@ -1813,11 +2747,13 @@ void PaintbrushController::duplicateIntoLineup()
             float(qMax<qreal>(3.0, canvas.height() * 0.012)), 0.24f));
         all.append(copy);
     }
+    const bool srcVisible = src->visible;
+    const int srcId = src->id;
     m_document.setLayers(all);
 
     auto composite = std::make_unique<CompositeCommand>();
     composite->desc = QStringLiteral("Lineup");
-    if (src->visible && src->id > 0)
+    if (srcVisible && srcId > 0)
     {
         SetVisibilityCommand vis;
         vis.layerIndex = index;

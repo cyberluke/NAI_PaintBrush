@@ -1,6 +1,6 @@
 # Creative Synthesis — audit and delivery log
 
-Status: **Slice A delivered; Slice B/C partially delivered.** This document is the
+Status: **Slice A and B delivered; C/D material and look slices partly delivered; H not started.** This document is the
 honest map of what exists, what was added for the Creative Synthesis work, what
 was verified, and what is deliberately not finished yet.
 
@@ -92,7 +92,7 @@ A reusable procedural kit, shared by preview and commit:
 The same functions produce the live preview at panel resolution and the final
 layers at canvas resolution, with geometry expressed in stage-relative units.
 
-### 2.3 Linked duplication
+### 2.3 Linked duplication, resume and reuse
 
 - **Lineup of 5 (linked style)** duplicates the selected cutout into five poses
   across the stage, hides the source, and writes a `creative.linkGroup` metadata
@@ -100,13 +100,25 @@ layers at canvas resolution, with geometry expressed in stage-relative units.
 - `applyLayerEffects()` detects the group: Shadow / Glow / Outline / Clear
   finish now land on every linked pose as **one** undo step, while each pose
   keeps its own transform.
-- The self-test verifies +5 layers and a one-undo restore.
+- Three generic linked presets were added: **Duo** (+2), **Grid ×4** (+4) and
+  **Editorial overlap ×3** (+3). Every copy shares the group; the source is
+  hidden and one undo restores it.
+- Every committed piece also stores `creative.group`, `creative.sourceLayerId`
+  and `creative.sourceHarvestId`. **Resume this creative look** re-adopts the
+  original cutout, restores patch/seed/pad and, on the next Make it real,
+  deletes the previous group and inserts the new one in the SAME one-undo
+  transaction. **Reuse this look on the cutout** applies the current pad state
+  to the selected cutout.
+- The self-test verifies +5 lineup, all three presets, resume/replace/one-undo
+  and apply/one-undo.
 
-### 2.4 Assistant awareness
+### 2.4 Assistant awareness and co-drawing
 
-The assistant state now exposes the patch catalog (`creative_patches`) and the
-creative tool descriptions include the stage/material vocabulary, so the
-assistant can suggest a patch by name without inventing one.
+The assistant state exposes the patch catalog (`creative_patches`). The tool
+list now includes `apply_creative_patch` and **`draw_creative_stroke`**
+(ribbon / halo / splat / ink): the offline co-drawing action adds ONE native
+editable vector stroke around the selected cutout in one undo. The assistant
+prompt tells the model to use it when the user asks to draw with them.
 
 ### 2.5 Acceptance harness
 
@@ -114,17 +126,28 @@ assistant can suggest a patch by name without inventing one.
 `scripts/launch-pb-noskip.ps1 -CreativeSelfTest`) builds a synthetic transparent
 idol fixture, then:
 
-1. opens the pad and renders every patch at preview scale;
+1. opens the pad and renders every patch at preview scale; records preview p95;
 2. records a two-point gesture and verifies the loop starts;
-3. commits Neon Idol (+11 layers), adds the suggestion (+1), undoes twice and
-   verifies the exact layer count returns;
-4. commits Sticker Forge (+11), Voltage Idol (+10), Prism Muse (+9), each with
+3. commits Neon Idol (+11 layers), saves the project, reloads it into a
+   separate document, exports it to PNG and verifies the creative metadata
+   survived; adds the patch suggestion (one editable stroke, +1) and undoes;
+4. resumes the committed look from metadata, replaces it in one composite
+   (+13 layers), verifies one undo restores the previous look, then verifies
+   the original commit undo returns to the base document;
+5. applies the current look to the selected cutout (+11) and verifies one undo;
+6. commits Sticker Forge (+11), Voltage Idol (+10), Prism Muse (+9), each with
    one-undo verification;
-5. builds a linked lineup (+5) and verifies one-undo;
-6. writes previews + a text report and leaves the pad open on Neon Idol.
+7. builds a linked lineup (+5), Pastel Lineup (+8, still-source fallback in this
+   fixture), Motion Echo (+8) and the three duplicate presets (+2/+4/+3), each
+   with one-undo verification;
+8. adds a direct agent ribbon (+1) and the assistant `draw_creative_stroke`
+   tool (+1), each with one undo;
+9. opens the post-Keep chooser from a kept cutout, selects a patch, writes the
+   report and leaves the pad open.
 
 Latest report: `paintbrush/docs/creative-synthesis-assets/selftest-report.txt`
-(**RESULT: PASS**). Generated previews:
+(**RESULT: PASS**, preview p95 **3.20 ms**, Neon commit **597.3 ms**, reload and
+export **13 layers / 10,143 KB**). Generated previews:
 `selftest-neon-idol.png`, `selftest-sticker-forge.png`,
 `selftest-pastel-stage.png`, `selftest-nocturne.png`,
 `selftest-ink-creature.png`, `selftest-spark-storm.png`,
@@ -136,16 +159,27 @@ GUI verification:
   (Accessible name "Make it real"), saw "Committed", the suggestion card and the
   committed layers in the Inspector; the canvas behind showed the neon
   composition.
+- The final capture shows the new **Before/After** toggle, record-duration
+  button, and the expanded Inspector actions (Pastel Lineup, Echo, linked
+  presets, Reuse/Resume, Draw with me). The live p95/commit numbers are in the
+  LIVE badge tooltip.
 - `ui-play-pad.png`, `ui-committed-pad.png` and `ui-committed-canvas.png`
   under `paintbrush/docs/creative-synthesis-assets/` are the captures
-  (downscaled for the repo).
+  (downscaled for the repo). The new multi-action Inspector entries are verified
+  at the engine/self-test level; a full click-through of every entry is not
+  claimed.
 
-### 2.6 Verification tools
+### 2.6 Verification tools and metrics
 
 - `scripts/pb-capture-live.ps1` captures an already-running Paintbrush window
   (needed for interactive UI checks; `pb-capture-window.ps1` launches its own).
-- `dumpStagePieces(dir)` on the creative engine writes every preview piece and
-  its stage rect for art QA.
+- `dumpStagePieces(dir)` writes every preview piece and its stage rect for art
+  QA.
+- The engine measures real recompose time (p95 over 120 frames) and the last
+  commit time; both are exposed to QML and written to the self-test report.
+- `collectCreativePoses()` samples PTS-separated keyframes from the selected
+  track (or the most complete track) for Pastel Lineup and Motion Echo; with no
+  track it falls back to still copies, never invented anatomy.
 
 ---
 
@@ -154,28 +188,29 @@ GUI verification:
 | Spec area | Status | Notes |
 |---|---|---|
 | 12.1 live stage, real pixels, one composition | **Done** | Preview is the commit's pieces at preview scale, not a mock. |
-| 12.1 large stage / pan / layers / Before-After | **Not done** | Pad preview is fitted to the canvas; no pan/zoom/compare yet. |
+| 12.1 large stage / pan / layers / Before-After | **Partial** | Before/After compare is live; the preview is still fitted to the canvas (no pan/zoom or full layer panel). |
 | 12.2 graphic systems (recolor, rim, halftone, arcs, sheen, silhouettes, typography) | **Partial** | Recolor, rim, halftone, arcs, sheen, bokeh, halftone, ink, butterflies, kaleidoscope exist. No typography or independent silhouette library. |
 | 12.3 Neon Idol reference | **Done (first pass)** | Electric blue/pink stage, oversized echo, halftone, bokeh, rim split, scanlines. |
 | 12.3 Sticker Forge reference | **Done (first pass)** | Die-cut white/colour bands, backing card, shadow, gloss, confetti, sparkles. |
-| 12.3 Pastel Lineup reference | **Partial** | Pastel Stage is a stylization patch; Lineup of 5 is a linked duplication action, not a single "Pastel Lineup" performance recipe. |
+| 12.3 Pastel Lineup reference | **Done** | Real Pastel Lineup recipe: tracked-pose selection when a track exists, still fallback otherwise, stage/floor/reflections, linked poses and typography. |
 | 12.3 Nocturne reference | **Done (first pass)** | Night field, aura, violet/teal rim, butterflies, petals, grain. |
 | 12.4 pad mapping / hold / pressure | **Done** | Position, energy, hold; pressure on pen/touch, speed on mouse. |
-| 12.5 gesture recording / loop / surprise / reseed | **Done** | Recording duration is not displayed; no undo/delete of a recording yet. |
-| 12.6 smart duplication, lineup, linked effects | **Partial** | Lineup + linked finish propagation. Generic duplicate layers are not linked. |
+| 12.5 gesture recording / loop / surprise / reseed | **Done** | Duration is displayed while recording; loops; no delete/rename of a recording yet. |
+| 12.6 smart duplication, lineup, linked effects | **Done** | Lineup + Duo/Grid/Overlap presets, group-wide finish propagation, reuse on another cutout. |
 | 12.7 Scene Forge, Ink Creature family, Motion Calligraphy | **Partial** | Ink Creature and Motion Echo exist; Scene Forge / true contour calligraphy are not built. |
 | 12.9 performance must become real layers, one undo | **Done** | Verified. |
-| 12.10 save / reopen / continue editing the performance | **Partial** | Every committed piece is a normal layer with `creative.patch`, `creative.role`, `creative.seed`, `creative.params` metadata, so the layers save and reopen through the existing project store. Restoring the pad to the exact previous performance state from that metadata is not implemented. |
-| 12.11 UX at rest / live / after creation | **Partial** | Pad is alive at rest (idle shimmer), live under the puck, and has a post-commit suggestion. No performance history, Before/After compare, or large-stage pan. |
+| 12.10 save / reopen / continue editing the performance | **Done** | Metadata includes group/source; Resume restores patch/seed/pad and replaces the old group in one undo. Save→reload→export verified in the self-test. |
+| 12.11 UX at rest / live / after creation | **Partial** | Idle shimmer, live stage, Before/After, suggestion, metrics. No performance history list or large-stage pan. |
 | Slice A end-to-end | **Done** | Keep → chooser → Neon/Sticker → pad → record → Make it real → suggestion → undo. Verified with the synthetic fixture and a real GUI commit. |
-| Slice B (Pastel Stage, Lineup, generic smart duplicate) | **Partial** | Pastel Stage + lineup shipped; generic smart duplication pending. |
-| Slice C (Nocturne, floral/butterfly/scene layer family) | **Partial** | Nocturne shipped; broader family pending. |
-| Slice D (Scene Forge / Motion Calligraphy / ink family) | **Partial** | Ink Creature + Motion Echo only. |
+| Slice B (Pastel Stage, Lineup, generic smart duplicate) | **Done** | Pastel Stage + Pastel Lineup + linked presets. |
+| Slice C (Nocturne, floral/butterfly/scene layer family) | **Partial** | Nocturne shipped; broader scene family pending. |
+| Slice D (Scene Forge / Motion Calligraphy / ink family) | **Partial** | Ink Creature, Motion Echo (real poses when tracked), editable agent strokes. Scene Forge and true contour calligraphy pending. |
 | Slice E (generative patch language, authoring, savable looks) | **Not done** | Patch catalog is compiled in; no authoring/catalog UI. |
 | Slice F (beat/audio energy) | **Not done** | — |
 | Slice G (subject awareness / multi-subject) | **Partial** | Subject picking understands layers/roles; no automatic face/garment graph. |
 | Slice H (Photo Regime H / dark stage / Auto Splatter / Stage mode) | **Not done** | The existing puppet photo regime remains the precedent; not wired into the pad. |
-| Slice I (compact workflow) | **Partial** | Keep → pad → commit is compact. No persistent "current look" state machine. |
+| Slice I (compact workflow) | **Partial** | Keep → pad → commit → resume/reuse is compact. No multi-look history rail. |
+| OpenFill Remove/Fill/Expand | **Partial** | Remove object, generative fill and replace background already exist behind the image provider; Expand canvas is not implemented. No provider was configured in this test. |
 
 ---
 
@@ -183,33 +218,37 @@ GUI verification:
 
 These are the things a reviewer should not assume are finished:
 
-1. **Not every spec patch exists.** The collection is ten real recipes, not the
-   full eventual library. "Pastel Lineup", "Scene Forge", "Auto Splatter",
-   "Motion Calligraphy" (true contour-following strokes), "Stage mode" and the
-   full Nocturne layer family are not complete.
-2. **Performance state is not restorable after reopen.** Committed layers keep
-   the patch/seed/params metadata, but there is no "continue this performance"
-   action that rebuilds the pad state from that metadata.
-3. **Linked effects only apply inside a lineup group.** Ordinary duplicates and
-   independently created copies do not share a style.
-4. **The suggestion is deterministic, not model-generated.** It is a real
-   editable vector sparkle, but the text/action is authored per patch; no LLM
-   tool call decides the next embellishment yet.
-5. **No real-time performance measurement.** The preview is recomposed
-   synchronously in C++ at preview resolution; no p95 frame-time capture on the
-   target machine yet. The 50 ms idle tick is a deliberate rest animation, not
-   a measured 60 fps claim.
-6. **No save/reopen/export end-to-end test.** The layers are ordinary persisted
-   layers, and the existing export path sees them, but this document does not
-   claim a tested round trip for this specific flow.
-7. **The art previews use a synthetic fixture.** The recipes are real, but the
+1. **Tracked-pose Lineup/Echo is implemented but not exercised with a real
+   video in this test.** `collectCreativePoses()` decodes real keyframes by PTS
+   and the still fallback is verified; the self-test fixture has no track, so
+   the real-pose path still needs a tracked-video acceptance run.
+2. **Scene Forge, Auto Splatter, Stage mode and the full Photo Regime H are
+   still missing.** Pastel Stage/Lineup, Nocturne and Ink Creature are real, but
+   the broader scene/motion system is not built.
+3. **Agent strokes are deterministic/offline, not model-planned.** The assistant
+   can call `draw_creative_stroke` (ribbon/halo/splat/ink) and it commits a real
+   editable vector layer, but no LLM authoring path chooses multi-stroke plans.
+4. **The preview is CPU-composed and fixed-scale.** Measured p95 is 3.20 ms and
+   a Neon commit is 597.3 ms at 544x680 preview / 1440x1800 canvas; there is no
+   4K/HDR 60 fps claim, no GPU effect pass, and no large-stage pan/zoom or
+   full layer panel.
+5. **No performance history rail.** Resume replaces the last look and reuse
+   applies the current look; there is no saved list of previous performances
+   with rename/delete.
+6. **OpenFill is provider-gated and partial.** Remove object, generative fill
+   and replace background already exist behind the image provider; Expand
+   canvas is not implemented, and no provider was configured in this test.
+7. **Typography is limited to the lineup title.** There is no full expressive
+   type system, sticker library or independent silhouette asset library.
+8. **The art previews use a synthetic fixture.** The recipes are real, but the
    editorial impact on a real idol cutout with hair, fabric folds and a
    transparent background still needs human art review.
-8. **No typography, sticker library, or independent silhouette assets.**
-9. **The UI copy for the two material looks is "Voltage Idol" and "Prism Muse"**
-   (internal patch ids remain `electric-kpop` / `holo-fashion`); the rest of the
-   copy is patch-specific and deliberately non-technical.
-
+9. **Before/After compares the untouched source with the whole look**, not a
+   per-layer or per-patch comparison.
+10. **The acceptance self-test refuses to run on a document with real work or a
+    pending recovery.** That is deliberate (it never discards user work); the
+    test requires a pristine document. The temporary recovery-file dance used
+    for this verification preserves the original byte-for-byte.
 ---
 
 ## 5. Files
@@ -258,15 +297,15 @@ inspected without replaying the test.
 
 ## 7. Next move (recommended)
 
-Slice A is shippable. The highest-value next work is, in order:
+The core creative loop is complete enough to test on real media. The highest-
+value next work is, in order:
 
-1. **Restore the performance** from committed metadata (pad reopen with the same
-   seed/params, "Continue editing this look").
-2. **Generic linked duplicates** (style group on every duplicate, not only
-   lineup) and a small "Current look" state so a look can be applied to another
-   cutout.
-3. **Pastel Lineup / Scene Forge** as real recipes, then **Auto Splatter /
-   Stage mode**.
-4. **Measure** pad commit and preview frame time on the 4090 target and record
-   the p95 numbers here.
-5. Save/reopen/export round-trip test with the committed layers.
+1. **Tracked-video acceptance** for Pastel Lineup and Motion Echo: open a real
+   tracked clip, verify pose diversity, PTS order and the one-undo replacement.
+2. **Scene Forge / Auto Splatter / Stage mode**, then the Photo Regime H
+   amplitude safety, as separate real recipes rather than more pad parameters.
+3. **Full-stage pan/zoom and a performance history rail** (rename/delete/reuse),
+   plus a layer-level Before/After.
+4. **OpenFill Expand** on top of the existing provider-gated Remove/Fill/
+   Replace Background, with an explicit provider-status surface.
+5. **Real-idol art review** and a small expressive type/sticker library.

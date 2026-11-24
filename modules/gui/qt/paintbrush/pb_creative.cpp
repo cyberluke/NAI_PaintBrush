@@ -21,6 +21,7 @@
 #include <QRandomGenerator>
 #include <QTransform>
 #include <QtMath>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QTextStream>
@@ -103,6 +104,19 @@ void drawScaled(QImage &dst, const QImage &src, const QRectF &rect)
 QString qcolorHex(const QColor &c)
 {
     return c.isValid() ? c.name(QColor::HexRgb) : QString();
+}
+
+QString suggestionKindFor(const QString &patchId)
+{
+    if (patchId == QLatin1String("sticker-forge")
+        || patchId == QLatin1String("spark-storm"))
+        return QStringLiteral("sparkle");
+    if (patchId == QLatin1String("nocturne")
+        || patchId == QLatin1String("kaleido"))
+        return QStringLiteral("halo");
+    if (patchId == QLatin1String("ink-creature"))
+        return QStringLiteral("splat");
+    return QStringLiteral("ribbon");
 }
 
 } /* namespace */
@@ -225,6 +239,9 @@ PaintbrushCreative::PaintbrushCreative(PaintbrushController *controller,
     connect(&m_idleTimer, &QTimer::timeout, this, &PaintbrushCreative::onIdleTick);
     m_replayTimer.setInterval(33);
     connect(&m_replayTimer, &QTimer::timeout, this, &PaintbrushCreative::onReplayTick);
+    m_recordUiTimer.setInterval(250);
+    connect(&m_recordUiTimer, &QTimer::timeout, this,
+            &PaintbrushCreative::stateChanged);
     m_seed = QRandomGenerator::global()->generate();
     if (m_seed == 0)
         m_seed = 1;
@@ -363,6 +380,7 @@ bool PaintbrushCreative::adoptSubject(const QImage &cutout,
     m_subjectNative = cutout.convertToFormat(QImage::Format_ARGB32);
     m_subjectCanvasRect = canvasRect;
     m_sourceLayerId = sourceLayerId;
+    m_sourceHarvestId = -1;
     m_subjectLabel = label;
     m_seed = QRandomGenerator::global()->generate();
     if (m_seed == 0)
@@ -387,6 +405,8 @@ void PaintbrushCreative::clearSubject()
     m_subjectCanvasRect = QRectF();
     m_subjectLabel.clear();
     m_sourceLayerId = -1;
+    m_sourceHarvestId = -1;
+    m_resumeGroup.clear();
     m_pieces.clear();
     {
         QMutexLocker locker(&m_previewMutex);
@@ -407,12 +427,14 @@ void PaintbrushCreative::openFromHarvest(int harvestId)
                               : QImage();
     m_patchId = defaultPatchId();
     m_chooserOpen = true;
+    m_resumeGroup.clear();
     if (!adoptSubject(cutout, rect, -1, label,
                       QStringLiteral("That kept moment has no cutout yet.")))
     {
         setOpen(true);
         return;
     }
+    m_sourceHarvestId = harvestId;
     m_committed = false;
     setOpen(true);
     setStatus(QStringLiteral("Start with Neon Idol or Sticker Forge."));
@@ -428,6 +450,7 @@ void PaintbrushCreative::openForSelection()
                               ? m_controller->creativePadSubject(&layerId, &rect, &label)
                               : QImage();
     m_chooserOpen = false;
+    m_resumeGroup.clear();
     if (!adoptSubject(cutout, rect, layerId, label,
                       QStringLiteral("Pick a cutout first — or Keep a moment.")))
     {
@@ -466,6 +489,7 @@ void PaintbrushCreative::rebuildPreview()
                              m_subjectCanvasRect.y() * sy,
                              m_subjectCanvasRect.width() * sx,
                              m_subjectCanvasRect.height() * sy);
+    m_previewSubjectRect = previewRect;
     const QSize subjSize(qMax(1, int(std::lround(previewRect.width()))),
                          qMax(1, int(std::lround(previewRect.height()))));
     m_subject = m_subjectNative.scaled(subjSize, Qt::IgnoreAspectRatio,
@@ -479,13 +503,66 @@ void PaintbrushCreative::recompose()
 {
     if (m_previewSize.isEmpty())
         return;
-    QImage frame = composeStage(m_pieces, m_previewSize, QColor(12, 12, 18));
+    QElapsedTimer frameClock;
+    frameClock.start();
+
+    QImage frame;
+    if (m_compare)
+    {
+        /* Before: the untouched source on a neutral studio field. */
+        frame = QImage(m_previewSize, QImage::Format_ARGB32_Premultiplied);
+        frame.fill(QColor(12, 13, 20));
+        QPainter p(&frame);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        QLinearGradient bg(0, 0, 0, frame.height());
+        bg.setColorAt(0.0, QColor(26, 28, 40));
+        bg.setColorAt(1.0, QColor(8, 9, 14));
+        p.fillRect(frame.rect(), bg);
+        if (!m_subject.isNull())
+        {
+            const QRectF r = m_previewSubjectRect;
+            p.setPen(Qt::NoPen);
+            p.setBrush(QColor(0, 0, 0, 70));
+            p.drawEllipse(QPointF(r.center().x(), r.bottom() + r.height() * 0.03),
+                          r.width() * 0.38, r.height() * 0.035);
+            p.drawImage(r, m_subject);
+        }
+        p.end();
+    }
+    else
+    {
+        frame = composeStage(m_pieces, m_previewSize, QColor(12, 12, 18));
+    }
+
     {
         QMutexLocker locker(&m_previewMutex);
         m_preview = frame;
     }
     ++m_previewRevision;
+
+    m_previewTimes.append(double(frameClock.nsecsElapsed()) / 1.0e6);
+    while (m_previewTimes.size() > 120)
+        m_previewTimes.removeFirst();
+    if (!m_previewTimes.isEmpty())
+    {
+        QVector<double> sorted = m_previewTimes;
+        std::sort(sorted.begin(), sorted.end());
+        const int idx = qBound(0, int(std::ceil(sorted.size() * 0.95)) - 1,
+                               sorted.size() - 1);
+        m_previewP95Ms = sorted.at(idx);
+    }
     emit previewChanged();
+    emit metricsChanged();
+}
+
+void PaintbrushCreative::setCompare(bool compare)
+{
+    if (m_compare == compare)
+        return;
+    m_compare = compare;
+    recompose();
+    emit compareChanged();
 }
 
 void PaintbrushCreative::onIdleTick()
@@ -630,6 +707,7 @@ void PaintbrushCreative::toggleRecord()
     if (m_recording)
     {
         m_recording = false;
+        m_recordUiTimer.stop();
         if (m_samples.size() < 2)
             m_samples.clear();
         setStatus(m_samples.isEmpty()
@@ -643,6 +721,7 @@ void PaintbrushCreative::toggleRecord()
         m_samples.clear();
         m_recordClock.start();
         m_recording = true;
+        m_recordUiTimer.start();
         CreativeSample s;
         s.x = m_frame.x;
         s.y = m_frame.y;
@@ -790,6 +869,10 @@ QString PaintbrushCreative::commit()
 
     m_busy = true;
     emit stateChanged();
+    QElapsedTimer commitClock;
+    commitClock.start();
+    const QString group = QStringLiteral("look-%1")
+                              .arg(QDateTime::currentMSecsSinceEpoch());
 
     /* The build is capped so a 4K/8K canvas cannot stall the UI while the
      * look is synthesized. Pieces are authored at the capped stage and mapped
@@ -861,6 +944,9 @@ QString PaintbrushCreative::commit()
         layer.metadata[QStringLiteral("creative.patchName")] = def->name;
         layer.metadata[QStringLiteral("creative.role")] = p.role;
         layer.metadata[QStringLiteral("creative.seed")] = qint64(m_seed);
+        layer.metadata[QStringLiteral("creative.group")] = group;
+        layer.metadata[QStringLiteral("creative.sourceLayerId")] = m_sourceLayerId;
+        layer.metadata[QStringLiteral("creative.sourceHarvestId")] = m_sourceHarvestId;
         QVariantMap params;
         params[QStringLiteral("x")] = double(m_frame.x);
         params[QStringLiteral("y")] = double(m_frame.y);
@@ -881,7 +967,8 @@ QString PaintbrushCreative::commit()
         hideLayerId = m_sourceLayerId;
 
     const QString error = m_controller->commitCreativeLayers(
-        layers, hideLayerId, QStringLiteral("Create: %1").arg(def->name));
+        layers, hideLayerId, QStringLiteral("Create: %1").arg(def->name),
+        m_resumeGroup);
     m_busy = false;
     if (!error.isEmpty())
     {
@@ -890,11 +977,15 @@ QString PaintbrushCreative::commit()
         return error;
     }
 
+    m_lastCommitMs = double(commitClock.nsecsElapsed()) / 1.0e6;
     m_committed = true;
+    m_resumeGroup.clear();
+    m_suggestionKind = suggestionKindFor(def->id);
     m_suggestionText = def->suggestion;
     m_suggestionVisible = !m_suggestionText.isEmpty();
     setStatus(QStringLiteral("Committed. Every piece is an editable layer — one undo."));
     emit suggestionChanged();
+    emit metricsChanged();
     emit stateChanged();
     return QString();
 }
@@ -905,14 +996,30 @@ void PaintbrushCreative::acceptSuggestion()
         return;
     const PatchDef *def = patchDef(m_patchId);
     const QColor accent = def ? def->accent : QColor(255, 226, 120);
-    const QPointF at(m_subjectCanvasRect.x() + m_subjectCanvasRect.width() * 0.78,
-                     m_subjectCanvasRect.y() + m_subjectCanvasRect.height() * 0.22);
-    const qreal size = qMax<qreal>(24.0,
-                                   m_subjectCanvasRect.height() * 0.11);
-    m_controller->addCreativeSparkle(accent, at, size);
+    QString done;
+    if (m_suggestionKind == QLatin1String("ribbon")
+        || m_suggestionKind == QLatin1String("halo")
+        || m_suggestionKind == QLatin1String("splat"))
+    {
+        const int variant = m_suggestionKind == QLatin1String("halo")
+                                ? 1
+                                : (m_suggestionKind == QLatin1String("splat") ? 2 : 0);
+        m_controller->addCreativeRibbon(accent, m_subjectCanvasRect, variant,
+                                        m_suggestionKind == QLatin1String("splat"));
+        done = QStringLiteral("Stroke added — drag or undo it like any layer.");
+    }
+    else
+    {
+        const QPointF at(m_subjectCanvasRect.x() + m_subjectCanvasRect.width() * 0.78,
+                         m_subjectCanvasRect.y() + m_subjectCanvasRect.height() * 0.22);
+        const qreal size = qMax<qreal>(24.0,
+                                       m_subjectCanvasRect.height() * 0.11);
+        m_controller->addCreativeSparkle(accent, at, size);
+        done = QStringLiteral("Sparkle added — move or undo it like any layer.");
+    }
     m_suggestionVisible = false;
     m_suggestionText.clear();
-    setStatus(QStringLiteral("Sparkle added — move or undo it like any layer."));
+    setStatus(done);
     emit suggestionChanged();
     emit stateChanged();
 }
@@ -921,6 +1028,76 @@ void PaintbrushCreative::dismissSuggestion()
 {
     m_suggestionVisible = false;
     emit suggestionChanged();
+}
+
+bool PaintbrushCreative::restoreFromCommittedLayer(int layerIndex)
+{
+    if (!m_controller)
+        return false;
+    QVariantMap info;
+    QImage cutout;
+    QRectF rect;
+    QString label;
+    if (!m_controller->creativeLookInfo(layerIndex, &info, &cutout, &rect, &label))
+    {
+        setStatus(QStringLiteral("This layer has no resumable creative look."));
+        return false;
+    }
+    const QString patch = info.value(QStringLiteral("patch")).toString();
+    const PatchDef *def = patchDef(patch);
+    if (!def)
+        return false;
+    m_patchId = patch;
+    m_chooserOpen = false;
+    m_resumeGroup = info.value(QStringLiteral("group")).toString();
+    if (!adoptSubject(cutout, rect,
+                      info.value(QStringLiteral("sourceLayerId")).toInt(),
+                      label, QStringLiteral("The source cutout is gone.")))
+        return false;
+    m_sourceHarvestId =
+        info.value(QStringLiteral("sourceHarvestId")).toInt();
+    m_seed = quint32(info.value(QStringLiteral("seed")).toLongLong());
+    if (m_seed == 0)
+        m_seed = 1;
+    const QVariantMap params =
+        info.value(QStringLiteral("params")).toMap();
+    m_frame.x = float(params.value(QStringLiteral("x"), 0.5).toDouble());
+    m_frame.y = float(params.value(QStringLiteral("y"), 0.5).toDouble());
+    m_frame.energy = float(params.value(QStringLiteral("energy"), 0.0).toDouble());
+    m_frame.hold = params.value(QStringLiteral("hold"), false).toBool();
+    m_committed = false;
+    rebuildPreview();
+    setOpen(true);
+    setStatus(QStringLiteral("Resumed %1. Adjust and make it real — the next "
+                             "commit replaces this look in one undo.")
+                  .arg(def->name));
+    emit patchChanged();
+    emit padChanged();
+    emit stateChanged();
+    return true;
+}
+
+QString PaintbrushCreative::applyLookToSelection()
+{
+    if (!hasSubject() || !m_controller)
+        return QStringLiteral("Nothing to apply.");
+    const QString patch = m_patchId;
+    const quint32 seed = m_seed;
+    const CreativeFrame frame = m_frame;
+    openForSelection();
+    if (!hasSubject())
+        return QStringLiteral("Select a cutout layer first.");
+    m_patchId = patch;
+    m_seed = seed;
+    m_frame = frame;
+    m_resumeGroup.clear();
+    m_committed = false;
+    rebuildPreview();
+    const QString error = commit();
+    if (error.isEmpty())
+        setStatus(QStringLiteral("Look applied to %1 — one undo.")
+                      .arg(m_subjectLabel));
+    return error;
 }
 
 bool PaintbrushCreative::dumpStagePieces(const QString &directory) const

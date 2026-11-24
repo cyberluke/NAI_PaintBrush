@@ -11,17 +11,40 @@ preview electric-kpop 544x680
 preview holo-fashion 544x680
 gesture record: OK
 gesture loop: OK
+preview p95: 3.20 ms (10 samples)
 commit neon: +11 layers
+commit neon: 597.3 ms
+save/reopen/export: OK (13 layers, 10143 KB)
+suggestion kind: ribbon
 suggestion: +1 layer
+resume look: OK (neon-idol)
+resume replace: 13 layers
+resume one-undo: OK
 one-undo contract: OK
+apply look: +11 layers
+apply look undo: OK
 commit sticker: +11 layers
 sticker undo: OK
 commit electric: +10 layers
+source content 304x864.8 raster 720x1120 scale 0.8
+subject content 305x867 raster 271x771 scale 1.125
+committed subject scale: OK
+repeated apply: original source kept
 electric undo: OK
 commit holo: +9 layers
 holo undo: OK
 lineup: +5 linked poses
 lineup undo: OK
+pastel lineup: +8 layers
+pastel lineup undo: OK
+motion echo: +8 layers
+motion echo undo: OK
+duplicate preset 1: OK
+duplicate preset 2: OK
+duplicate preset 3: OK
+agent stroke: +1 layer
+agent stroke undo: OK
+assistant stroke tool: OK
 post-keep chooser: OK
 chooser selection: OK
 RESULT: PASS

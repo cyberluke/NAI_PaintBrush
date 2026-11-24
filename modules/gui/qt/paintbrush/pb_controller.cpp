@@ -6422,7 +6422,11 @@ QString PaintbrushController::assistantSystemPrompt() const
               "editable layers in one undo. It never generates a new image, "
               "a new pose, new clothing or new anatomy; it only restyles the "
               "pixels that are already there. "
-              "(5) If no tool covers the request, say so and give the manual "
+              "(5) draw_creative_stroke adds one native editable vector "
+              "stroke accent (ribbon/halo/splat/ink) around the selected "
+              "cutout; use it when the user asks you to draw with them or to "
+              "add a decorative line. "
+              "(6) If no tool covers the request, say so and give the manual "
               "step.");
 }
 
@@ -6655,6 +6659,22 @@ QByteArray PaintbrushController::assistantToolsJson() const
                        stringProp(QStringLiteral("Look id."),
                                   creativePatchEnum) } },
         required(QStringLiteral("patch"))));
+
+    QJsonArray strokeEnum;
+    for (const char *kind : { "ribbon", "halo", "splat", "ink" })
+        strokeEnum.append(QString::fromLatin1(kind));
+    tools.append(make(
+        QStringLiteral("draw_creative_stroke"),
+        QStringLiteral(
+            "Add ONE editable vector stroke accent around the selected "
+            "cutout: a flowing ribbon, a halo ring, an ink burst or an ink "
+            "line. This is the offline co-drawing action: deterministic, "
+            "native vector geometry, committed as a single layer in one undo. "
+            "It never draws over the face unless the geometry would, and it "
+            "does not need a network model."),
+        QJsonObject{ { QStringLiteral("kind"),
+                       stringProp(QStringLiteral("Stroke kind."), strokeEnum) } },
+        required(QStringLiteral("kind"))));
 
     return QJsonDocument(tools).toJson(QJsonDocument::Compact);
 }
@@ -7100,6 +7120,14 @@ QVariantMap PaintbrushController::executeAssistantTool(const QString &name,
         return ok(QStringLiteral("Applied the '%1' look.").arg(title),
                   QStringLiteral("Every piece is a separate editable layer. "
                                  "One undo reverts the whole look."));
+    }
+    if (name == QStringLiteral("draw_creative_stroke"))
+    {
+        const QString kind = args.value(QStringLiteral("kind")).toString();
+        addCreativeStrokeAccent(kind);
+        return ok(QStringLiteral("Added an editable %1 stroke.").arg(kind),
+                  QStringLiteral("It is a native vector layer; one undo "
+                                 "removes it."));
     }
     return fail(QStringLiteral("Unknown tool '%1'.").arg(name));
 }

@@ -220,7 +220,8 @@ Item {
                 spacing: VLCStyle.margin_xsmall
 
                 Rectangle {
-                    width: VLCStyle.dp(38)
+                    id: liveBadge
+                    width: VLCStyle.dp(48)
                     height: VLCStyle.dp(18)
                     radius: height / 2
                     color: Qt.rgba(0, 0, 0, 0.55)
@@ -228,13 +229,32 @@ Item {
                     border.color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.5)
                     Widgets.LabelExt {
                         anchors.centerIn: parent
-                        text: qsTr("LIVE")
-                        color: root.accent
+                        text: root.creative.compareMode ? qsTr("BEFORE") : qsTr("LIVE")
+                        color: root.creative.compareMode ? root.secondary : root.accent
                         font.pixelSize: VLCStyle.dp(9)
                         font.weight: Font.Bold
-                        font.letterSpacing: 1.2
+                        font.letterSpacing: 1.0
                     }
+                    HoverHandler { id: liveHover }
+                    ToolTip.visible: liveHover.hovered
+                    ToolTip.delay: 400
+                    ToolTip.text: qsTr("Preview p95 %1 ms · commit %2 ms")
+                                      .arg(root.creative.previewP95Ms.toFixed(1))
+                                      .arg(root.creative.lastCommitMs.toFixed(0))
                 }
+            }
+
+            /* A/B: the untouched source vs the live look */
+            PadButton {
+                anchors.top: parent.top
+                anchors.right: parent.right
+                anchors.margins: VLCStyle.margin_small
+                implicitWidth: VLCStyle.dp(72)
+                implicitHeight: VLCStyle.dp(28)
+                text: root.creative.compareMode ? qsTr("After") : qsTr("Before")
+                selected: root.creative.compareMode
+                enabledAction: root.creative.hasSubject
+                onClicked: root.creative.setCompare(!root.creative.compareMode)
             }
 
             Widgets.LabelExt {
@@ -581,7 +601,7 @@ Item {
 
             PadButton {
                 Layout.fillWidth: true
-                text: root.creative.recording ? qsTr("Stop") : qsTr("Record")
+                text: root.creative.recording ? qsTr("Stop %1s").arg(root.creative.recordSeconds.toFixed(1)) : qsTr("Record")
                 selected: root.creative.recording
                 enabledAction: root.creative.hasSubject
                 onClicked: root.creative.toggleRecord()

@@ -133,6 +133,13 @@ class PaintbrushCreative : public QObject
 
     Q_PROPERTY(bool suggestionVisible READ suggestionVisible NOTIFY suggestionChanged)
     Q_PROPERTY(QString suggestionText READ suggestionText NOTIFY suggestionChanged)
+    Q_PROPERTY(QString suggestionKind READ suggestionKind NOTIFY suggestionChanged)
+
+    /* Live performance telemetry (real measurements from recompose/commit). */
+    Q_PROPERTY(double previewP95Ms READ previewP95Ms NOTIFY metricsChanged)
+    Q_PROPERTY(double lastCommitMs READ lastCommitMs NOTIFY metricsChanged)
+    Q_PROPERTY(bool compareMode READ compareMode WRITE setCompare
+                   NOTIFY compareChanged)
 
 public:
     explicit PaintbrushCreative(PaintbrushController *controller,
@@ -171,6 +178,12 @@ public:
 
     bool suggestionVisible() const { return m_suggestionVisible; }
     QString suggestionText() const { return m_suggestionText; }
+    QString suggestionKind() const { return m_suggestionKind; }
+
+    double previewP95Ms() const { return m_previewP95Ms; }
+    double lastCommitMs() const { return m_lastCommitMs; }
+    bool compareMode() const { return m_compare; }
+    void setCompare(bool compare);
 
     /* Frame for the image provider. Safe from any thread. */
     QImage previewImage() const;
@@ -193,6 +206,12 @@ public:
     Q_INVOKABLE QString commit();
     Q_INVOKABLE void acceptSuggestion();
     Q_INVOKABLE void dismissSuggestion();
+    /* Resume a committed look from its layer metadata: re-adopts the original
+     * cutout, restores patch/seed/pad and, on the next commit, replaces the
+     * old group in the same one-undo transaction. */
+    Q_INVOKABLE bool restoreFromCommittedLayer(int layerIndex);
+    /* Apply the current patch/seed/pad to the currently selected cutout. */
+    Q_INVOKABLE QString applyLookToSelection();
     /* Art QA aid: save each preview piece and its stage rect. Used by the
      * creative acceptance self-test; not part of the product surface. */
     Q_INVOKABLE bool dumpStagePieces(const QString &directory) const;
@@ -205,6 +224,8 @@ signals:
     void previewChanged();
     void stateChanged();
     void suggestionChanged();
+    void metricsChanged();
+    void compareChanged();
 
 private slots:
     void onIdleTick();
@@ -252,6 +273,7 @@ private:
     mutable QMutex m_previewMutex;
     QImage m_preview;
     QSize m_previewSize;
+    QRectF m_previewSubjectRect;
     int m_previewRevision = 0;
 
     QImage m_subject;       /* cutout at preview resolution */
@@ -259,6 +281,7 @@ private:
     QRectF m_subjectCanvasRect;
     QString m_subjectLabel;
     int m_sourceLayerId = -1;
+    int m_sourceHarvestId = -1;
 
     QString m_patchId;
     quint32 m_seed = 1;
@@ -266,12 +289,19 @@ private:
     bool m_chooserOpen = false;
     bool m_busy = false;
     bool m_committed = false;
+    bool m_compare = false;
+    QString m_resumeGroup;
+
+    QVector<double> m_previewTimes;
+    double m_previewP95Ms = 0.0;
+    double m_lastCommitMs = 0.0;
 
     CreativeFrame m_frame;
     QVector<CreativePiece> m_pieces;
 
     QTimer m_idleTimer;
     QTimer m_replayTimer;
+    QTimer m_recordUiTimer;
     QElapsedTimer m_replayClock;
     QElapsedTimer m_recordClock;
 
@@ -280,6 +310,7 @@ private:
 
     QString m_status;
     QString m_suggestionText;
+    QString m_suggestionKind;
     bool m_suggestionVisible = false;
 };
 
