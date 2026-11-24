@@ -59,6 +59,8 @@ segmentation. Part masks (hair / clothing / accessories) remain future work.
   the harness asserts this.
 - **Non-destructive**: the source layer is hidden, never modified. Every result
   layer is a normal layer with its own blend mode, opacity and finish chain.
+- **Repeatable**: a second look reuses the hidden source cutout, never the
+  previous look's effect layers.
 - **No generation**: the looks cannot invent clothing, hairstyles, anatomy,
   poses or a new camera perspective. They only restyle pixels that already
   exist.
@@ -75,11 +77,12 @@ generation.
 
 ## Performance bounds
 
-Canvas-space effects are rasterised at most at 1600 px on the long side; the
-subject recolour is capped at 2400 px. Larger canvases upscale the effect
-layers, which keeps memory bounded and commit time predictable. The look is
-built synchronously on the UI thread; on a 4K canvas expect a visible pause of
-a second or more. If that becomes a problem, the next step is to move the
+The commit builds at most at 1600 px on the long side and maps every piece onto
+its real canvas rectangle; the subject recolour is resampled to at most 1.25×
+the subject's displayed size. Larger canvases therefore get a slightly softer
+effect layer instead of a multi-hundred-megabyte buffer, and commit time stays
+bounded. The look is still built synchronously on the UI thread; on a 4K canvas
+expect a short pause. If that becomes a problem, the next step is to move the
 builder to a worker and stream progress.
 
 ## Verification
@@ -90,6 +93,10 @@ pwsh scripts/pb-creative-art-tests.ps1
 
 # controller/QML surface + existing probes
 pwsh modules/gui/qt/paintbrush/probes/run-probes.ps1
+
+# in-app acceptance: needs a pristine canvas, writes previews to
+# %TEMP%\nai-paintbrush-creative-selftest
+pwsh scripts/launch-pb-noskip.ps1 -CreativeSelfTest
 
 # rebuild the plugin
 pwsh scripts/pb-build-plugin.ps1

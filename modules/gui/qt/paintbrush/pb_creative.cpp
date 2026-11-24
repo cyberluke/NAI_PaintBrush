@@ -19,6 +19,7 @@
 #include <QPainterPath>
 #include <QRadialGradient>
 #include <QRandomGenerator>
+#include <QTransform>
 #include <QtMath>
 #include <QDir>
 #include <QFile>
@@ -34,22 +35,6 @@ namespace {
 constexpr double kTau = 6.283185307179586;
 
 inline float clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
-
-QImage alphaMask(const QImage &img)
-{
-    if (img.isNull())
-        return {};
-    const QImage src = img.convertToFormat(QImage::Format_ARGB32);
-    QImage mask(src.size(), QImage::Format_Grayscale8);
-    for (int y = 0; y < src.height(); ++y)
-    {
-        const QRgb *line = reinterpret_cast<const QRgb *>(src.constScanLine(y));
-        uchar *dst = mask.scanLine(y);
-        for (int x = 0; x < src.width(); ++x)
-            dst[x] = uchar(qAlpha(line[x]));
-    }
-    return mask;
-}
 
 QImage tintPreserveAlpha(const QImage &img, const QColor &color)
 {
@@ -806,9 +791,49 @@ QString PaintbrushCreative::commit()
     m_busy = true;
     emit stateChanged();
 
+    /* The build is capped so a 4K/8K canvas cannot stall the UI while the
+     * look is synthesized. Pieces are authored at the capped stage and mapped
+     * onto their real canvas rectangles below; the live preview already runs
+     * on a smaller stage, so its geometry is unchanged. */
+    constexpr int kMaxBuildSide = 1600;
+    const qreal buildScale =
+        qMin(1.0, double(kMaxBuildSide)
+                      / double(qMax(canvas.width(), canvas.height())));
+    const QSize buildStage(
+        qMax(1, int(std::lround(canvas.width() * buildScale))),
+        qMax(1, int(std::lround(canvas.height() * buildScale))));
+    const QRectF buildRect(
+        m_subjectCanvasRect.x() * buildScale,
+        m_subjectCanvasRect.y() * buildScale,
+        m_subjectCanvasRect.width() * buildScale,
+        m_subjectCanvasRect.height() * buildScale);
+
+    QImage buildSubject = m_subjectNative;
+    const QSize subjectWant(
+        qMax(1, int(std::lround(buildRect.width() * 1.25))),
+        qMax(1, int(std::lround(buildRect.height() * 1.25))));
+    if (buildSubject.width() > subjectWant.width()
+        || buildSubject.height() > subjectWant.height())
+        buildSubject = buildSubject.scaled(subjectWant, Qt::KeepAspectRatio,
+                                           Qt::SmoothTransformation);
+
     QVector<CreativePiece> pieces =
-        buildPatch(m_patchId, m_subjectNative, m_subjectCanvasRect, canvas, m_seed);
-    pieces = bakeFrame(pieces, canvas);
+        buildPatch(m_patchId, buildSubject, buildRect, buildStage, m_seed);
+    /* Motion offsets are proportional to the stage, so bake on the build stage
+     * first and map the baked rectangles onto the real canvas afterwards. */
+    pieces = bakeFrame(pieces, buildStage);
+    if (buildScale < 1.0)
+    {
+        for (CreativePiece &p : pieces)
+        {
+            p.rect = QRectF(p.rect.x() / buildScale, p.rect.y() / buildScale,
+                            p.rect.width() / buildScale,
+                            p.rect.height() / buildScale);
+            if (!p.pivot.isNull())
+                p.pivot = QPointF(p.pivot.x() / buildScale,
+                                  p.pivot.y() / buildScale);
+        }
+    }
 
     QList<CanvasLayer> layers;
     for (const CreativePiece &p : pieces)
@@ -819,8 +844,16 @@ QString PaintbrushCreative::commit()
         QImage trimmed = creative::trimTransparent(p.image, &offset);
         if (trimmed.isNull())
             continue;
-        CanvasLayer layer = CanvasLayer::createImage(
-            trimmed, p.rect.topLeft() + QPointF(offset), p.name);
+        /* The piece image can be authored below the canvas resolution (capped
+         * build stage) or above it (native subject), so map it onto its real
+         * canvas rectangle instead of assuming 1 image px == 1 canvas unit. */
+        const qreal pxScale = p.rect.width() / qMax(1, p.image.width());
+        const QPointF target =
+            p.rect.topLeft() + QPointF(offset) * pxScale;
+        CanvasLayer layer =
+            CanvasLayer::createImage(trimmed, QPointF(0, 0), p.name);
+        layer.setTransform(QTransform(pxScale, 0.0, 0.0, pxScale, target.x(),
+                                      target.y()));
         layer.type = LAYER_IMAGE;
         layer.opacity = p.opacity;
         layer.blendMode = p.blendMode;
@@ -997,7 +1030,7 @@ QVector<CreativePiece> PaintbrushCreative::buildPatch(const QString &patchId,
 
     const qreal W = stage.width();
     const qreal H = stage.height();
-    const QImage subjMask = alphaMask(s);
+    const QImage subjMask = creative::maskFromAlpha(s);
 
     struct Add
     {
@@ -1213,7 +1246,7 @@ QVector<CreativePiece> PaintbrushCreative::buildPatch(const QString &patchId,
         /* bolts land on the real silhouette, not on its bounding box */
         QImage subjectOnStage = stageCanvas(stage);
         drawAt(subjectOnStage, s, subjectRect);
-        const QImage stageMask = alphaMask(subjectOnStage);
+        const QImage stageMask = creative::maskFromAlpha(subjectOnStage);
         int leftX = stage.width(), rightX = -1;
         int leftY = int(subjectRect.center().y());
         int rightY = leftY;
@@ -1397,7 +1430,7 @@ QVector<CreativePiece> PaintbrushCreative::buildPatch(const QString &patchId,
         QImage mirrorFull = stageCanvas(stage);
         drawAt(mirrorFull, mirrored,
                QRectF(subjectRect.x(), subjectRect.bottom() + H * 0.004,
-                      subjectRect.width(), mirrored.height()));
+                      subjectRect.width(), subjectRect.height()));
         add(QStringLiteral("Pastel reflection"), QStringLiteral("echo"),
             mirrorFull, full, BLEND_NORMAL, 0.55f);
 
@@ -1576,7 +1609,7 @@ QVector<CreativePiece> PaintbrushCreative::buildPatch(const QString &patchId,
         QImage mirrorFull = stageCanvas(stage);
         drawAt(mirrorFull, mirror,
                QRectF(subjectRect.x(), subjectRect.bottom() + H * 0.004,
-                      subjectRect.width(), mirror.height()));
+                      subjectRect.width(), subjectRect.height()));
         CreativeMotion mirrorM;
         mirrorM.opacityY = -0.10f;
         add(QStringLiteral("Holo reflection"), QStringLiteral("echo"),

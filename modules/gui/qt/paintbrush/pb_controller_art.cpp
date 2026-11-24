@@ -26,6 +26,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QPainter>
+#include <QStandardPaths>
 #include <algorithm>
 #include <cmath>
 
@@ -1091,11 +1092,56 @@ QString PaintbrushController::runCreativeSelfTest()
         return false;
     };
 
+    /* The test replaces the document. Never do that over real work: a
+     * startup flag must not be able to discard a project or the recovery
+     * copy, and a blank default canvas (one empty layer) is safe. */
+    bool hasWork = m_recoveryAvailable || !m_document.projectPath().isEmpty();
+    if (!hasWork)
+    {
+        for (const CanvasLayer &l : m_document.layers())
+        {
+            if (l.raster.isNull())
+                continue;
+            const QImage img =
+                l.raster.convertToFormat(QImage::Format_ARGB32);
+            for (int y = 0; y < img.height() && !hasWork; y += 4)
+            {
+                const QRgb *line = reinterpret_cast<const QRgb *>(
+                    img.constScanLine(y));
+                for (int x = 0; x < img.width(); x += 4)
+                {
+                    if (qAlpha(line[x]) > 0)
+                    {
+                        hasWork = true;
+                        break;
+                    }
+                }
+            }
+            if (hasWork)
+                break;
+        }
+    }
+    if (hasWork)
+    {
+        note(QStringLiteral("SKIP: the document contains work; the self-test "
+                            "needs a pristine canvas"));
+        note(QStringLiteral("RESULT: SKIP"));
+        return report.join(QLatin1Char('\n'));
+    }
+
+    /* The test canvas must never become the recovery file that hides the
+     * user's next session. */
+    m_autosaveTimer.stop();
+
     newBlankCanvas(1440, 1800);
     const QImage idol = makeCreativeSelfTestIdol();
     addImageLayer(idol, QPointF(360, 340),
                   QStringLiteral("Self-test cutout"), LAYER_STICKER);
     m_document.setCurrentLayerIndex(m_document.layers().size() - 1);
+    /* scale the source so the commit must honour the on-canvas size, not the
+     * raster's pixel size */
+    if (!m_document.layers().isEmpty())
+        m_document.layersRef().last().scale = 0.8f;
     emit documentChanged();
 
     m_creative->openForSelection();
@@ -1107,7 +1153,8 @@ QString PaintbrushController::runCreativeSelfTest()
     note(QStringLiteral("subject: %1").arg(m_creative->subjectLabel()));
 
     const QString dir =
-        QStringLiteral("D:/_SATIN_AI/NAI-OS/vlc/paintbrush/docs/creative-synthesis-assets");
+        QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation))
+            .filePath(QStringLiteral("nai-paintbrush-creative-selftest"));
     QDir().mkpath(dir);
     const QStringList patches = {
         QStringLiteral("neon-idol"), QStringLiteral("sticker-forge"),
@@ -1211,6 +1258,45 @@ QString PaintbrushController::runCreativeSelfTest()
     else
         note(QStringLiteral("commit electric: +%1 layers")
                  .arg(electricAfter - baseLayers));
+
+    /* The committed subject must honour the on-canvas scale (0.8), and a
+     * second open must reuse the hidden source rather than an effect layer. */
+    {
+        const QList<CanvasLayer> built = m_document.layers();
+        const CanvasLayer *source = nullptr;
+        const CanvasLayer *subject = nullptr;
+        for (const CanvasLayer &l : built)
+        {
+            if (l.name == QStringLiteral("Self-test cutout"))
+                source = &l;
+            else if (l.name == QStringLiteral("Voltage idol"))
+                subject = &l;
+        }
+        if (!source || !subject)
+            note(QStringLiteral("FAIL: committed subject layer missing"));
+        else
+        {
+            const QRectF srcRect =
+                source->transform().mapRect(source->raster.rect());
+            const QRectF outRect =
+                subject->transform().mapRect(subject->raster.rect());
+            const qreal ratio = outRect.width() / qMax(1.0, srcRect.width());
+            if (std::fabs(ratio - 1.0) > 0.03)
+                note(QStringLiteral(
+                         "FAIL: committed subject scale %1 vs source %2")
+                         .arg(outRect.width()).arg(srcRect.width()));
+            else
+                note(QStringLiteral("committed subject scale: OK"));
+        }
+    }
+    m_creative->openForSelection();
+    if (m_creative->subjectLabel() != QStringLiteral("Self-test cutout"))
+        note(QStringLiteral("FAIL: repeated apply picked '%1' instead of the "
+                            "hidden source")
+                 .arg(m_creative->subjectLabel()));
+    else
+        note(QStringLiteral("repeated apply: original source kept"));
+
     undo();
     if (m_document.layers().size() != baseLayers)
         note(QStringLiteral("FAIL: electric undo (%1 != %2)")
