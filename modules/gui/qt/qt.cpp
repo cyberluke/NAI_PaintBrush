@@ -495,6 +495,10 @@ vlc_module_begin ()
                             N_( "Matte temporal stability (0-100)" ), nullptr )
     add_bool( "paintbrush-matte-selftest", false, PB_MATTE_SELFTEST_TEXT,
               PB_MATTE_SELFTEST_LONGTEXT )
+    add_bool( "paintbrush-creative-selftest", false,
+              N_( "Run the Creative Play Pad acceptance self-test" ),
+              N_( "Commits every synthesis patch against a synthetic subject, "
+                  "saves previews and verifies one-undo layer counts." ) )
     add_string( "paintbrush-open", NULL, PB_OPEN_TEXT, PB_OPEN_LONGTEXT )
     add_string( "paintbrush-powder-renderer", "auto", PB_POWDER_RENDERER_TEXT,
                 PB_POWDER_RENDERER_LONGTEXT )

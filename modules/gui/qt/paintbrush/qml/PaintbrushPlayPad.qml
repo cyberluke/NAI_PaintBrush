@@ -37,7 +37,7 @@ Item {
     z: 30
 
     width: Math.min(VLCStyle.dp(430), parent ? parent.width - VLCStyle.margin_normal * 4 : 430)
-    height: Math.min(VLCStyle.dp(720), parent ? parent.height - VLCStyle.margin_normal * 4 : 720)
+    height: Math.min(VLCStyle.dp(680), parent ? parent.height - VLCStyle.margin_normal * 4 : 680)
 
     ColorContext {
         palette: VLCStyle.palette
@@ -51,6 +51,60 @@ Item {
             if (list[i].id === id)
                 return list[i]
         return ({})
+    }
+
+    /* Tactile pad control: the VLC flat ButtonExt is right for toolbars, but
+     * a performance surface needs a visible hit area and a primary CTA. */
+    component PadButton: Rectangle {
+        id: btn
+
+        property string text
+        property bool primary: false
+        property bool selected: false
+        property bool enabledAction: true
+
+        signal clicked()
+        signal held(bool down)
+
+        implicitWidth: Math.max(VLCStyle.dp(64), btnLabel.implicitWidth + VLCStyle.dp(24))
+        implicitHeight: VLCStyle.dp(36)
+        radius: VLCStyle.dp(8)
+        color: !enabledAction
+                   ? "#0F1018"
+                   : primary
+                       ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.92)
+                       : (hover.hovered ? "#232738" : "#171926")
+        border.width: 1
+        border.color: primary
+                          ? root.accent
+                          : (selected ? root.accent : "#2C3045")
+        opacity: enabledAction ? 1.0 : 0.45
+
+        Widgets.LabelExt {
+            id: btnLabel
+            anchors.centerIn: parent
+            text: btn.text
+            color: !btn.enabledAction ? "#7A7F94"
+                                      : (btn.primary ? "#071018" : "#EDEFF7")
+            font.pixelSize: VLCStyle.fontSize_small
+            font.weight: btn.primary ? Font.DemiBold : Font.Medium
+        }
+
+        HoverHandler { id: hover }
+
+        MouseArea {
+            anchors.fill: parent
+            enabled: btn.enabledAction
+            cursorShape: Qt.PointingHandCursor
+            onClicked: btn.clicked()
+            onPressed: btn.held(true)
+            onReleased: btn.held(false)
+            onCanceled: btn.held(false)
+        }
+
+        Accessible.role: Accessible.Button
+        Accessible.name: btn.text
+        Accessible.onPressAction: btn.clicked()
     }
 
     Rectangle {
@@ -116,9 +170,9 @@ Item {
                 }
             }
 
-            Widgets.ButtonExt {
+            PadButton {
+                Layout.preferredWidth: VLCStyle.dp(64)
                 text: qsTr("Close")
-                Accessible.name: qsTr("Close the Play Pad")
                 onClicked: creative.close()
             }
         }
@@ -131,6 +185,10 @@ Item {
             Layout.minimumHeight: VLCStyle.dp(160)
             radius: VLCStyle.dp(12)
             color: "#05060B"
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#0B0C17" }
+                GradientStop { position: 1.0; color: "#04050A" }
+            }
             border.width: 1
             border.color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.35)
             clip: true
@@ -139,20 +197,6 @@ Item {
                 root.creative.previewHeight > 0
                     ? root.creative.previewWidth / root.creative.previewHeight
                     : 0.8
-
-            /* ambient blow-up of the stage fills the frame; the real stage is
-             * fitted on top, so the preview is never letterboxed into a stamp */
-            Image {
-                anchors.fill: parent
-                fillMode: Image.PreserveAspectCrop
-                opacity: 0.30
-                cache: false
-                asynchronous: false
-                smooth: true
-                source: root.creative.hasSubject
-                            ? "image://pbcreative/live/" + root.creative.previewRevision
-                            : ""
-            }
 
             Image {
                 id: stageImage
@@ -166,12 +210,6 @@ Item {
                 source: root.creative.hasSubject
                             ? "image://pbcreative/live/" + root.creative.previewRevision
                             : ""
-            }
-
-            /* darken the ambient copy so the live stage reads first */
-            Rectangle {
-                anchors.fill: parent
-                color: Qt.rgba(0, 0, 0, 0.18)
             }
 
             /* live badge + subject label */
@@ -532,29 +570,28 @@ Item {
             Layout.fillWidth: true
             spacing: VLCStyle.margin_xsmall
 
-            Widgets.ButtonExt {
+            PadButton {
                 id: holdButton
                 Layout.fillWidth: true
                 text: qsTr("Hold")
-                Accessible.name: qsTr("Bloom while pressed")
-                onPressed: root.creative.setHold(true)
-                onPressedChanged: {
-                    if (!pressed)
-                        root.creative.setHold(false)
-                }
+                selected: root.creative.holdActive
+                enabledAction: root.creative.hasSubject
+                onHeld: (down) => root.creative.setHold(down)
             }
 
-            Widgets.ButtonExt {
+            PadButton {
                 Layout.fillWidth: true
                 text: root.creative.recording ? qsTr("Stop") : qsTr("Record")
-                Accessible.name: qsTr("Capture the movement")
+                selected: root.creative.recording
+                enabledAction: root.creative.hasSubject
                 onClicked: root.creative.toggleRecord()
             }
 
-            Widgets.ButtonExt {
+            PadButton {
                 Layout.fillWidth: true
                 text: root.creative.replaying ? qsTr("Stop loop") : qsTr("Loop")
-                enabled: root.creative.hasRecording || root.creative.replaying
+                selected: root.creative.replaying
+                enabledAction: root.creative.hasRecording || root.creative.replaying
                 onClicked: root.creative.toggleReplay()
             }
         }
@@ -563,34 +600,26 @@ Item {
             Layout.fillWidth: true
             spacing: VLCStyle.margin_xsmall
 
-            Widgets.ButtonExt {
+            PadButton {
                 Layout.fillWidth: true
                 text: qsTr("Surprise")
-                Accessible.name: qsTr("Try another patch with a new seed")
                 onClicked: root.creative.surprise()
             }
 
-            Widgets.ButtonExt {
+            PadButton {
                 Layout.fillWidth: true
                 text: qsTr("Reseed")
-                Accessible.name: qsTr("New seed for this patch")
                 onClicked: root.creative.reseed()
             }
 
-            Widgets.ButtonExt {
+            PadButton {
                 Layout.fillWidth: true
                 Layout.preferredHeight: VLCStyle.dp(40)
                 text: root.creative.committed ? qsTr("Committed")
                                               : qsTr("Make it real")
-                enabled: root.creative.canCommit
-                Accessible.name: qsTr("Commit every piece as editable layers, one undo")
+                primary: true
+                enabledAction: root.creative.canCommit
                 onClicked: root.creative.commit()
-            }
-
-            Widgets.ButtonExt {
-                Layout.preferredWidth: VLCStyle.dp(88)
-                text: qsTr("Close")
-                onClicked: root.creative.close()
             }
         }
 
@@ -617,15 +646,25 @@ Item {
                     font.pixelSize: VLCStyle.fontSize_small
                     wrapMode: Text.WordWrap
                 }
-                Widgets.ButtonExt {
+                PadButton {
                     text: qsTr("Add")
+                    primary: true
                     onClicked: root.creative.acceptSuggestion()
                 }
-                Widgets.ButtonExt {
+                PadButton {
                     text: qsTr("Not now")
                     onClicked: root.creative.dismissSuggestion()
                 }
             }
+        }
+
+        /* ---------------------------------------------------------- status */
+        Widgets.LabelExt {
+            Layout.fillWidth: true
+            text: root.creative.status
+            color: theme.fg.secondary
+            font.pixelSize: VLCStyle.fontSize_small
+            elide: Text.ElideRight
         }
 
         /* ------------------------------------------------------ patch rail */
@@ -677,15 +716,6 @@ Item {
                     onClicked: root.creative.selectPatch(chip.modelData.id)
                 }
             }
-        }
-
-        /* ---------------------------------------------------------- status */
-        Widgets.LabelExt {
-            Layout.fillWidth: true
-            text: root.creative.status
-            color: theme.fg.secondary
-            font.pixelSize: VLCStyle.fontSize_small
-            elide: Text.ElideRight
         }
     }
 

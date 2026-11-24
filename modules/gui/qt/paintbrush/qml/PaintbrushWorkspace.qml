@@ -462,7 +462,9 @@ Item {
              * Inspector, or the exact moment a Keep completes. */
             PaintbrushPlayPad {
                 id: playPad
-                anchors.centerIn: parent
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.verticalCenterOffset: -VLCStyle.dp(40)
                 canvas: paintbrushCanvas
                 z: 30
             }

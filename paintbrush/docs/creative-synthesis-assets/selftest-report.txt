@@ -1,0 +1,27 @@
+subject: Self-test cutout
+preview neon-idol 544x680
+preview sticker-forge 544x680
+preview pastel-stage 544x680
+preview nocturne 544x680
+preview ink-creature 544x680
+preview spark-storm 544x680
+preview kaleido 544x680
+preview motion-echo 544x680
+preview electric-kpop 544x680
+preview holo-fashion 544x680
+gesture record: OK
+gesture loop: OK
+commit neon: +11 layers
+suggestion: +1 layer
+one-undo contract: OK
+commit sticker: +11 layers
+sticker undo: OK
+commit electric: +10 layers
+electric undo: OK
+commit holo: +9 layers
+holo undo: OK
+lineup: +5 linked poses
+lineup undo: OK
+post-keep chooser: OK
+chooser selection: OK
+RESULT: PASS

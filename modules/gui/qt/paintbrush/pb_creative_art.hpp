@@ -45,6 +45,11 @@ namespace creative {
 /* Alpha channel of `raster` as a grayscale mask (the cutout silhouette). */
 QImage maskFromAlpha(const QImage &raster);
 
+/* The layer's editable mask when it has one, otherwise its alpha. The result
+ * is always the size of the layer raster. Implemented in pb_creative_art.cpp
+ * when the canvas model is available (not in the standalone harness). */
+QImage layerMask(const CanvasLayer &layer);
+
 /* Apply `mask` to the alpha of `raster` (layer mask or object cutout). */
 QImage maskToCutout(const QImage &raster, const QImage &mask);
 

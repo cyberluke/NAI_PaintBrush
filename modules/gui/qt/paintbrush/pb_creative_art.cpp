@@ -1258,8 +1258,19 @@ QImage glossOverlay(const QSize &stage, const QImage &subject,
     sheet.setColorAt(1.0, c);
     p.fillRect(QRectF(0, 0, stage.width(), stage.height()), sheet);
 
+    /* DestinationIn must see the subject silhouette across the WHOLE stage.
+     * Drawing the subject at subjectRect only composites inside that rect and
+     * leaves the gradient outside it — which reads as a lit rectangle behind
+     * the subject. Build a stage-sized alpha mask first. */
+    QImage mask(stage, QImage::Format_ARGB32);
+    mask.fill(Qt::transparent);
+    {
+        QPainter mp(&mask);
+        mp.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        mp.drawImage(subjectRect, subject);
+    }
     p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
-    p.drawImage(subjectRect, subject);
+    p.drawImage(0, 0, mask);
     return out;
 }
 

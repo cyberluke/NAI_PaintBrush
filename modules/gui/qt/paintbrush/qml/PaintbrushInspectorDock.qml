@@ -390,12 +390,12 @@ Item {
                             onClicked: PaintbrushCtx.openCreativePad("")
                         }
                         InspectorAction {
-                            label: qsTr("Electric K-pop look")
+                            label: qsTr("Voltage Idol")
                             iconText: VLCIcons.effect_filter
                             onClicked: PaintbrushCtx.applyCreativePatch("electric-kpop")
                         }
                         InspectorAction {
-                            label: qsTr("Holographic fashion look")
+                            label: qsTr("Prism Muse")
                             iconText: VLCIcons.effect_filter
                             onClicked: PaintbrushCtx.applyCreativePatch("holo-fashion")
                         }

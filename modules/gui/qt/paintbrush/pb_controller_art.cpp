@@ -38,22 +38,12 @@ QString creativeLinkGroup(const CanvasLayer &layer)
     return layer.metadata.value(QStringLiteral("creative.linkGroup")).toString();
 }
 
-/* The silhouette the pad works on: the layer's editable mask when it has one,
- * otherwise the shape its own alpha already encodes. */
-QImage layerMaskFor(const CanvasLayer &layer)
+/* Committed playlist layers are results, never subjects for the next look. */
+bool isCreativeResult(const CanvasLayer &layer)
 {
-    if (!layer.mask.isNull())
-    {
-        QImage mask =
-            layer.mask.format() == QImage::Format_Grayscale8
-                ? layer.mask
-                : layer.mask.convertToFormat(QImage::Format_Grayscale8);
-        if (!layer.raster.isNull() && mask.size() != layer.raster.size())
-            mask = mask.scaled(layer.raster.size(), Qt::IgnoreAspectRatio,
-                               Qt::SmoothTransformation);
-        return mask;
-    }
-    return creative::maskFromAlpha(layer.raster);
+    return !layer.metadata.value(QStringLiteral("creative.patch"))
+                .toString()
+                .isEmpty();
 }
 
 } /* namespace */
@@ -1144,6 +1134,20 @@ QString PaintbrushController::runCreativeSelfTest()
                      .arg(id).arg(preview.width()).arg(preview.height()));
     }
 
+    /* Gesture capture: record a two-point move, verify the loop starts. */
+    m_creative->toggleRecord();
+    m_creative->movePad(0.22, 0.24, 0.12, false);
+    m_creative->movePad(0.78, 0.68, 0.55, true);
+    m_creative->toggleRecord();
+    note(m_creative->hasRecording()
+             ? QStringLiteral("gesture record: OK")
+             : QStringLiteral("FAIL: gesture record empty"));
+    m_creative->toggleReplay();
+    note(m_creative->replaying() ? QStringLiteral("gesture loop: OK")
+                                 : QStringLiteral("FAIL: loop did not start"));
+    m_creative->toggleReplay();
+    m_creative->setHold(false);
+
     const int baseLayers = m_document.layers().size();
 
     /* Neon Idol: commit + optional suggestion + one undo restores exactly. */
@@ -1252,6 +1256,22 @@ QString PaintbrushController::runCreativeSelfTest()
     else
         note(QStringLiteral("lineup undo: OK"));
 
+    /* Post-Keep moment: a kept cutout opens the pad on the two-card chooser. */
+    HarvestItem kept;
+    kept.cutout = idol;
+    kept.sourceFrame.ptsMs = 4200;
+    kept.sourceFrame.title = QStringLiteral("Self-test");
+    kept.semanticLabel = QStringLiteral("Self-test kept");
+    const int keptId = m_document.harvest()->add(kept);
+    m_creative->openFromHarvest(keptId);
+    note(m_creative->chooserOpen() && m_creative->hasSubject()
+             ? QStringLiteral("post-keep chooser: OK")
+             : QStringLiteral("FAIL: post-keep chooser did not open"));
+    m_creative->selectPatch(QStringLiteral("sticker-forge"));
+    note(!m_creative->chooserOpen()
+             ? QStringLiteral("chooser selection: OK")
+             : QStringLiteral("FAIL: chooser stayed open"));
+
     /* leave a composed stage open for the screenshot */
     for (int i = 0; i < m_document.layers().size(); ++i)
     {
@@ -1265,7 +1285,8 @@ QString PaintbrushController::runCreativeSelfTest()
     }
     m_creative->openForSelection();
     m_creative->selectPatch(QStringLiteral("neon-idol"));
-    m_creative->movePad(0.74, 0.58, 0.42, true);
+    m_creative->movePad(0.74, 0.58, 0.42, false);
+    m_creative->setHold(false);
     const QImage finalPreview = m_creative->previewImage();
     if (!finalPreview.isNull())
         finalPreview.save(QStringLiteral("%1/selftest-final.png").arg(dir));
@@ -1349,9 +1370,40 @@ QImage PaintbrushController::creativePadSubject(int *sourceLayerId,
         label->clear();
 
     const QList<CanvasLayer> layers = m_document.layers();
+    auto layerRole = [](const CanvasLayer &l) {
+        return l.metadata.value(QStringLiteral("creative.role")).toString();
+    };
+    auto isFinishRole = [](const QString &role) {
+        return role == QLatin1String("backdrop")
+               || role == QLatin1String("finish")
+               || role == QLatin1String("rim")
+               || role == QLatin1String("accent")
+               || role == QLatin1String("echo")
+               || role == QLatin1String("texture");
+    };
     const CanvasLayer *chosen = m_document.layerAt(m_document.currentLayerIndex());
-    if (!chosen || chosen->raster.isNull() || !rasterQualifiesAsCutout(chosen->raster))
+    if (!chosen || chosen->raster.isNull()
+        || !rasterQualifiesAsCutout(chosen->raster)
+        || isCreativeResult(*chosen)
+        || isFinishRole(layerRole(*chosen)))
         chosen = nullptr;
+    if (!chosen)
+    {
+        /* after a commit the top layer is a finish; prefer a real subject
+         * layer over a scanline/glow layer */
+        for (int i = layers.size() - 1; i >= 0; --i)
+        {
+            const CanvasLayer &l = layers.at(i);
+            if (!l.visible || l.raster.isNull() || isCreativeResult(l))
+                continue;
+            if (layerRole(l) != QLatin1String("subject"))
+                continue;
+            if (!rasterQualifiesAsCutout(l.raster))
+                continue;
+            chosen = &layers.at(i);
+            break;
+        }
+    }
     if (!chosen)
     {
         for (int i = layers.size() - 1; i >= 0; --i)
@@ -1359,7 +1411,29 @@ QImage PaintbrushController::creativePadSubject(int *sourceLayerId,
             const CanvasLayer &l = layers.at(i);
             if (l.type == LAYER_TEXT || l.type == LAYER_VECTOR)
                 continue;
-            if (!l.visible || l.raster.isNull())
+            if (!l.visible || l.raster.isNull() || isCreativeResult(l))
+                continue;
+            if (isFinishRole(layerRole(l)))
+                continue;
+            if (!rasterQualifiesAsCutout(l.raster))
+                continue;
+            chosen = &layers.at(i);
+            break;
+        }
+    }
+    if (!chosen)
+    {
+        /* A committed look hides its source layer. On the next apply, that
+         * hidden source is the right subject; the visible effect layers were
+         * already filtered out above. */
+        for (int i = layers.size() - 1; i >= 0; --i)
+        {
+            const CanvasLayer &l = layers.at(i);
+            if (l.type == LAYER_TEXT || l.type == LAYER_VECTOR)
+                continue;
+            if (l.raster.isNull() || isCreativeResult(l))
+                continue;
+            if (isFinishRole(layerRole(l)))
                 continue;
             if (!rasterQualifiesAsCutout(l.raster))
                 continue;
@@ -1371,7 +1445,7 @@ QImage PaintbrushController::creativePadSubject(int *sourceLayerId,
     if (chosen)
     {
         QImage cutout = creative::maskToCutout(chosen->raster,
-                                                layerMaskFor(*chosen));
+                                                creative::layerMask(*chosen));
         if (cutout.isNull())
             return {};
         QRectF rect = chosen->transform().mapRect(chosen->raster.rect());

@@ -13,6 +13,7 @@
 #include "pb_common.hpp"
 #include "pb_i18n.hpp"
 #include "pb_creative.hpp"
+#include "pb_creative_art.hpp"
 #include "gpu/pb_sam3.h"
 
 #include <QQuickItem>
@@ -5773,32 +5774,6 @@ void PaintbrushController::autoCollage(int preset)
 
 /* ------------------------------------------------ creative layer actions */
 
-static QImage creativeLayerMask(const CanvasLayer &layer)
-{
-    if (!layer.mask.isNull())
-    {
-        QImage mask = layer.mask;
-        if (mask.format() != QImage::Format_Grayscale8)
-            mask = mask.convertToFormat(QImage::Format_Grayscale8);
-        if (mask.size() != layer.raster.size())
-            mask = mask.scaled(layer.raster.size(), Qt::IgnoreAspectRatio,
-                               Qt::SmoothTransformation);
-        return mask;
-    }
-    if (layer.raster.isNull())
-        return {};
-    QImage mask(layer.raster.size(), QImage::Format_Grayscale8);
-    for (int y = 0; y < layer.raster.height(); ++y)
-    {
-        const QRgb *src = reinterpret_cast<const QRgb *>(
-            layer.raster.constScanLine(y));
-        uchar *dst = mask.scanLine(y);
-        for (int x = 0; x < layer.raster.width(); ++x)
-            dst[x] = uchar(qAlpha(src[x]));
-    }
-    return mask;
-}
-
 /* Disc dilation by drawing the mask at 24 offsets around a circle: exact
  * enough for a decorative outline and far cheaper than a kernel at 4K. */
 static QImage creativeGrowMask(const QImage &mask, int radius)
@@ -5928,7 +5903,7 @@ void PaintbrushController::outlineObjectLayer(const QString &style)
         setStatus(QStringLiteral("Select an image or cutout layer to outline."));
         return;
     }
-    const QImage mask = creativeLayerMask(*src);
+    const QImage mask = creative::layerMask(*src);
     if (mask.isNull())
     {
         setStatus(QStringLiteral("This layer has no shape to outline."));

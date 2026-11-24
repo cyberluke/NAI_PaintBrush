@@ -42,6 +42,7 @@
 #include "util/item_key_event_filter.hpp"
 
 #include "paintbrush/pb_controller.hpp"
+#include "paintbrush/pb_creative.hpp"
 #include "paintbrush/pb_canvas_item.hpp"
 #include "paintbrush/pb_layer_model.hpp"
 #include "paintbrush/pb_segmentation_service.hpp"
@@ -230,6 +231,10 @@ bool MainUI::setup(QQmlEngine* engine)
         new EffectsImageProvider(engine);
     engine->addImageProvider(QStringLiteral("svgcolor"), new SVGColorImageImageProvider());
     engine->addImageProvider(QStringLiteral("vlcaccess"), new VLCAccessImageProvider());
+    if (m_paintbrushController && m_paintbrushController->creative())
+        engine->addImageProvider(QStringLiteral("pbcreative"),
+                                 new paintbrush::CreativePreviewProvider(
+                                     m_paintbrushController->creative()));
 
     m_component  = new QQmlComponent(engine, QStringLiteral("qrc:/qt/qml/VLC/MainInterface/MainInterface.qml"), QQmlComponent::PreferSynchronous, engine);
     if (m_component->isLoading())
@@ -583,6 +588,8 @@ void MainUI::registerQMLTypes()
                                                       "GenerationService", "");
         qmlRegisterUncreatableType<paintbrush::CompanionService>(uri, versionMajor, versionMinor,
                                                      "CompanionService", "");
+        qmlRegisterUncreatableType<paintbrush::PaintbrushCreative>(uri, versionMajor, versionMinor,
+                                                     "PaintbrushCreative", "");
         qmlRegisterUncreatableType<paintbrush::PaintbrushLayerModel>(uri, versionMajor, versionMinor,
                                                        "PaintbrushLayerModel", "");
 

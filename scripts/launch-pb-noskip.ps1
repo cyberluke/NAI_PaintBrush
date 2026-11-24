@@ -16,6 +16,7 @@
 param(
     [string[]]$Media = @(),
     [switch]$MatteSelfTest,
+    [switch]$CreativeSelfTest,
     [string]$SamModel = "",
     [string]$SamDevice = "",
     [string]$LogFile = "D:\_SATIN_AI\NAI-OS\vlc\pb_noskip.log",
@@ -49,6 +50,7 @@ if ((Test-Path -LiteralPath $qtPlugin) -and
 
 $extra = @()
 if ($MatteSelfTest) { $extra += "--paintbrush-matte-selftest" }
+if ($CreativeSelfTest) { $extra += "--paintbrush-creative-selftest" }
 foreach ($item in $Media) { if ($item -ne "") { $extra += "--paintbrush-open=$item" } }
 if ($NoAutosave) { $extra += "--no-paintbrush-autosave" }
 if ($SamModel -ne "") { $extra += "--paintbrush-sam-model=$SamModel" }
