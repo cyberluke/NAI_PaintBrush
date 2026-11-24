@@ -1163,7 +1163,9 @@ QString PaintbrushController::runCreativeSelfTest()
         QStringLiteral("pastel-stage"), QStringLiteral("nocturne"),
         QStringLiteral("ink-creature"), QStringLiteral("spark-storm"),
         QStringLiteral("kaleido"), QStringLiteral("motion-echo"),
-        QStringLiteral("electric-kpop"), QStringLiteral("holo-fashion")
+        QStringLiteral("electric-kpop"), QStringLiteral("holo-fashion"),
+        QStringLiteral("scene-forge"), QStringLiteral("auto-splatter"),
+        QStringLiteral("stage-mode")
     };
     for (const QString &id : patches)
     {

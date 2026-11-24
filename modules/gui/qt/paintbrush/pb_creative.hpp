@@ -53,6 +53,8 @@ struct CreativeMotion
     float dyY = 0.0f;
     float dxEnergy = 0.0f;
     float dyEnergy = 0.0f;
+    float dxHold = 0.0f;
+    float dyHold = 0.0f;
     float scaleY = 0.0f;
     float scaleEnergy = 0.0f;
     float scaleHold = 0.0f;

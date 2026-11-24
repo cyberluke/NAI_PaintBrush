@@ -112,9 +112,11 @@ QString suggestionKindFor(const QString &patchId)
         || patchId == QLatin1String("spark-storm"))
         return QStringLiteral("sparkle");
     if (patchId == QLatin1String("nocturne")
-        || patchId == QLatin1String("kaleido"))
+        || patchId == QLatin1String("kaleido")
+        || patchId == QLatin1String("stage-mode"))
         return QStringLiteral("halo");
-    if (patchId == QLatin1String("ink-creature"))
+    if (patchId == QLatin1String("ink-creature")
+        || patchId == QLatin1String("auto-splatter"))
         return QStringLiteral("splat");
     return QStringLiteral("ribbon");
 }
@@ -210,6 +212,24 @@ const QVector<PaintbrushCreative::PatchDef> &PaintbrushCreative::catalog()
           QStringLiteral("Drag for spacing, lift for fade, hold to freeze."),
           QStringLiteral("Add one star trail behind the last echo."),
           QColor(78, 123, 255), QColor(255, 111, 174), QColor(18, 19, 38) },
+        { QStringLiteral("scene-forge"), QStringLiteral("Scene Forge"),
+          QStringLiteral("Build a little world."),
+          QStringLiteral("Scene"),
+          QStringLiteral("Drag for parallax, lift for spotlight, hold to open the curtains."),
+          QStringLiteral("Add one paper star above the spotlight."),
+          QColor(242, 181, 68), QColor(46, 139, 122), QColor(36, 27, 20) },
+        { QStringLiteral("auto-splatter"), QStringLiteral("Auto Splatter"),
+          QStringLiteral("Print it loud."),
+          QStringLiteral("Street"),
+          QStringLiteral("Drag for spray, lift for contrast, hold for drips."),
+          QStringLiteral("Add one paint drip that cuts the outline."),
+          QColor(255, 77, 46), QColor(18, 16, 14), QColor(244, 237, 226) },
+        { QStringLiteral("stage-mode"), QStringLiteral("Stage Door"),
+          QStringLiteral("House lights down."),
+          QStringLiteral("Stage"),
+          QStringLiteral("Drag the spotlight, lift the floor, hold for the reveal."),
+          QStringLiteral("Add one halo over the spotlight."),
+          QColor(255, 211, 122), QColor(184, 51, 106), QColor(8, 6, 12) },
     };
     return defs;
 }
@@ -591,9 +611,13 @@ QVector<CreativePiece> PaintbrushCreative::bakeFrame(QVector<CreativePiece> piec
                                  + m.opacityEnergy * m_frame.energy
                                  + m.opacityHold * (m_frame.hold ? 1.0f : 0.0f));
         const qreal dx = (m.dxX * (m_frame.x - 0.5f)
-                          + m.dxEnergy * m_frame.energy) * stage.width();
+                          + m.dxEnergy * m_frame.energy
+                          + m.dxHold * (m_frame.hold ? 1.0f : 0.0f))
+                         * stage.width();
         const qreal dy = (m.dyY * (m_frame.y - 0.5f)
-                          + m.dyEnergy * m_frame.energy) * stage.height();
+                          + m.dyEnergy * m_frame.energy
+                          + m.dyHold * (m_frame.hold ? 1.0f : 0.0f))
+                         * stage.height();
         const qreal sc = 1.0 + m.scaleY * (m_frame.y - 0.5f)
                          + m.scaleEnergy * m_frame.energy
                          + m.scaleHold * (m_frame.hold ? 1.0 : 0.0);
@@ -1161,9 +1185,13 @@ QImage PaintbrushCreative::composeStage(const QVector<CreativePiece> &pieces,
             continue;
 
         const qreal dx = (m.dxX * (m_frame.x - 0.5f)
-                          + m.dxEnergy * m_frame.energy) * stage.width();
+                          + m.dxEnergy * m_frame.energy
+                          + m.dxHold * (m_frame.hold ? 1.0f : 0.0f))
+                         * stage.width();
         const qreal dy = (m.dyY * (m_frame.y - 0.5f)
-                          + m.dyEnergy * m_frame.energy) * stage.height();
+                          + m.dyEnergy * m_frame.energy
+                          + m.dyHold * (m_frame.hold ? 1.0f : 0.0f))
+                         * stage.height();
         const qreal sc = 1.0 + m.scaleY * (m_frame.y - 0.5f)
                          + m.scaleEnergy * m_frame.energy
                          + m.scaleHold * (m_frame.hold ? 1.0 : 0.0);
@@ -1985,6 +2013,334 @@ QVector<CreativePiece> PaintbrushCreative::buildPatch(const QString &patchId,
             full, BLEND_SCREEN, 0.45f, trailM);
         add(QStringLiteral("Echo grain"), QStringLiteral("finish"),
             creative::grainField(stage, seed + 3, 20), full,
+            BLEND_OVERLAY, 0.3f);
+    }
+    else if (patchId == QLatin1String("scene-forge"))
+    {
+        const QColor cream(244, 230, 200), teal(34, 92, 84),
+            ochre(214, 154, 64), ink(36, 27, 20), rust(178, 70, 44);
+        add(QStringLiteral("Paper sky"), QStringLiteral("backdrop"),
+            creative::gradientField(stage, QColor(248, 238, 214),
+                                    QColor(226, 198, 156),
+                                    QColor(255, 255, 255, 160), 0.18),
+            full);
+
+        const auto hill = [&](const QColor &color, qreal y, qreal amp,
+                              int phase) {
+            QImage img = stageCanvas(stage);
+            QPainter p(&img);
+            p.setRenderHint(QPainter::Antialiasing, true);
+            p.setPen(Qt::NoPen);
+            p.setBrush(color);
+            QPainterPath path;
+            path.moveTo(0, H);
+            path.lineTo(0, y);
+            const int steps = 8;
+            for (int i = 0; i < steps; ++i)
+            {
+                const qreal x0 = W * i / steps;
+                const qreal x1 = W * (i + 1) / steps;
+                const qreal yy = y + std::sin((i + phase) * 1.7) * amp;
+                path.quadTo((x0 + x1) / 2.0,
+                            y + std::sin((i + phase + 0.5) * 1.7) * amp * 1.2,
+                            x1, yy);
+            }
+            path.lineTo(W, H);
+            path.closeSubpath();
+            p.drawPath(path);
+            return img;
+        };
+        CreativeMotion hillBackM;
+        hillBackM.dxX = 0.018f;
+        add(QStringLiteral("Back hill"), QStringLiteral("backdrop"),
+            hill(teal, H * 0.46, H * 0.045, 0), full, BLEND_NORMAL, 0.95f,
+            hillBackM);
+        CreativeMotion hillMidM;
+        hillMidM.dxX = -0.022f;
+        add(QStringLiteral("Mid hill"), QStringLiteral("backdrop"),
+            hill(ochre, H * 0.57, H * 0.032, 1), full, BLEND_NORMAL, 0.95f,
+            hillMidM);
+        add(QStringLiteral("Front stage"), QStringLiteral("backdrop"),
+            hill(ink, H * 0.72, H * 0.012, 2), full, BLEND_NORMAL, 1.0f);
+
+        const auto curtain = [&](bool left) {
+            QImage img = stageCanvas(stage);
+            QPainter p(&img);
+            p.setRenderHint(QPainter::Antialiasing, true);
+            QPainterPath path;
+            if (left)
+            {
+                path.moveTo(0, 0);
+                path.lineTo(W * 0.26, 0);
+                path.cubicTo(W * 0.18, H * 0.35, W * 0.27, H * 0.70,
+                             W * 0.16, H);
+                path.lineTo(0, H);
+            }
+            else
+            {
+                path.moveTo(W, 0);
+                path.lineTo(W * 0.74, 0);
+                path.cubicTo(W * 0.82, H * 0.35, W * 0.73, H * 0.70,
+                             W * 0.84, H);
+                path.lineTo(W, H);
+            }
+            path.closeSubpath();
+            QLinearGradient g(0, 0, W * (left ? 0.3 : 0.7), 0);
+            g.setColorAt(0.0, rust.darker(170));
+            g.setColorAt(0.55, rust);
+            g.setColorAt(1.0, rust.lighter(125));
+            p.setPen(Qt::NoPen);
+            p.setBrush(g);
+            p.drawPath(path);
+            p.setPen(QPen(QColor(60, 12, 20, 110), qMax(1.0, W * 0.003)));
+            for (int i = 1; i <= 3; ++i)
+            {
+                const qreal x = W * (left ? 0.06 + 0.05 * i
+                                          : 0.94 - 0.05 * i);
+                p.drawLine(QPointF(x, 0), QPointF(x + (left ? 8 : -8), H));
+            }
+            return img;
+        };
+        CreativeMotion curtainL;
+        curtainL.dxX = -0.055f;
+        curtainL.dxHold = -0.045f;
+        add(QStringLiteral("Curtain left"), QStringLiteral("backdrop"),
+            curtain(true), full, BLEND_NORMAL, 0.95f, curtainL);
+        CreativeMotion curtainR;
+        curtainR.dxX = 0.055f;
+        curtainR.dxHold = 0.045f;
+        add(QStringLiteral("Curtain right"), QStringLiteral("backdrop"),
+            curtain(false), full, BLEND_NORMAL, 0.95f, curtainR);
+
+        QImage cone = stageCanvas(stage);
+        {
+            QPainter p(&cone);
+            p.setRenderHint(QPainter::Antialiasing, true);
+            QPainterPath beam;
+            beam.moveTo(W * 0.50, H * 0.04);
+            beam.lineTo(W * 0.16, H * 0.82);
+            beam.lineTo(W * 0.84, H * 0.82);
+            beam.closeSubpath();
+            QLinearGradient g(0, H * 0.04, 0, H * 0.82);
+            g.setColorAt(0.0, QColor(255, 240, 190, 120));
+            g.setColorAt(1.0, QColor(255, 230, 170, 0));
+            p.fillPath(beam, g);
+            p.setPen(Qt::NoPen);
+            p.setBrush(QColor(255, 240, 200, 90));
+            p.drawEllipse(QPointF(W * 0.5, H * 0.82), W * 0.34, H * 0.035);
+        }
+        CreativeMotion spotM;
+        spotM.opacityY = 0.20f;
+        spotM.opacityHold = 0.15f;
+        spotM.dxX = 0.035f;
+        add(QStringLiteral("Spotlight"), QStringLiteral("accent"), cone, full,
+            BLEND_SCREEN, 0.75f, spotM);
+
+        const QImage graded = creative::gradeImage(
+            s, creative::Grade{ 1.06f, 1.10f, 1.04f, teal, 0.12f, cream, 0.12f });
+        subjectFull(graded, QStringLiteral("Paper figure"), 1.0f,
+                    CreativeMotion());
+        CreativeMotion starM;
+        starM.opacityEnergy = 0.20f;
+        add(QStringLiteral("Paper stars"), QStringLiteral("accent"),
+            creative::starField(stage, seed, QColor(255, 244, 210), 80),
+            full, BLEND_SCREEN, 0.5f, starM);
+        add(QStringLiteral("Paper grain"), QStringLiteral("finish"),
+            creative::grainField(stage, seed + 5, 30), full,
+            BLEND_OVERLAY, 0.35f);
+    }
+    else if (patchId == QLatin1String("auto-splatter"))
+    {
+        const QColor paper(244, 237, 226), ink(18, 16, 14), red(255, 77, 46);
+        add(QStringLiteral("Torn paper"), QStringLiteral("backdrop"),
+            creative::gradientField(stage, paper, QColor(226, 214, 196),
+                                    QColor(255, 255, 255, 130), 0.18),
+            full);
+        add(QStringLiteral("Poster halftone"), QStringLiteral("backdrop"),
+            creative::halftoneField(stage, QColor(20, 18, 16, 34),
+                                    H * 0.022, H * 0.0045, 20, 0.0),
+            full, BLEND_MULTIPLY, 0.8f);
+
+        QImage spot = stageCanvas(stage);
+        {
+            QPainter p(&spot);
+            p.setRenderHint(QPainter::Antialiasing, true);
+            QRadialGradient g(QPointF(W * 0.30, H * 0.32), H * 0.32);
+            g.setColorAt(0.0, QColor(255, 77, 46, 230));
+            g.setColorAt(0.72, QColor(255, 77, 46, 200));
+            g.setColorAt(1.0, QColor(255, 77, 46, 0));
+            p.setPen(Qt::NoPen);
+            p.setBrush(g);
+            p.drawEllipse(QPointF(W * 0.30, H * 0.32), H * 0.30, H * 0.24);
+        }
+        add(QStringLiteral("Poster spot"), QStringLiteral("backdrop"), spot,
+            full, BLEND_MULTIPLY, 0.85f);
+
+        CreativeMotion splatM;
+        splatM.opacityEnergy = 0.25f;
+        splatM.scaleEnergy = 0.12f;
+        splatM.rotationEnergy = 8.0f;
+        add(QStringLiteral("Ink blast"), QStringLiteral("accent"),
+            creative::inkSplatter(stage, seed,
+                                  subjectRect.adjusted(-W * 0.20, -H * 0.14,
+                                                       W * 0.20, H * 0.14),
+                                  ink, 150),
+            full, BLEND_NORMAL, 0.85f, splatM);
+        CreativeMotion redM;
+        redM.opacityX = 0.20f;
+        redM.opacityHold = 0.20f;
+        add(QStringLiteral("Red blast"), QStringLiteral("accent"),
+            creative::inkSplatter(stage, seed + 9,
+                                  subjectRect.adjusted(-W * 0.14, -H * 0.10,
+                                                       W * 0.14, H * 0.10),
+                                  red, 80),
+            full, BLEND_MULTIPLY, 0.75f, redM);
+
+        QImage drips = stageCanvas(stage);
+        {
+            QPainter p(&drips);
+            p.setRenderHint(QPainter::Antialiasing, true);
+            p.setPen(Qt::NoPen);
+            QRandomGenerator rng(seed + 31);
+            for (int i = 0; i < 9; ++i)
+            {
+                const qreal x = W * (0.12 + 0.76 * rng.bounded(1000) / 1000.0);
+                const qreal y = H * (0.52 + 0.20 * rng.bounded(1000) / 1000.0);
+                const qreal len = H * (0.06 + 0.16 * rng.bounded(1000) / 1000.0);
+                const qreal r = qMax(2.0, H * 0.006);
+                p.setBrush(QColor(i % 3 == 0 ? red : ink));
+                p.drawRoundedRect(QRectF(x - r, y, r * 2.0, len), r, r);
+                p.drawEllipse(QPointF(x, y + len), r * 1.4, r * 1.4);
+            }
+        }
+        CreativeMotion dripM;
+        dripM.opacityHold = 0.55f;
+        add(QStringLiteral("Paint drips"), QStringLiteral("accent"), drips,
+            full, BLEND_NORMAL, 0.0f, dripM);
+
+        const QImage graded = creative::gradeImage(
+            s, creative::Grade{ 1.04f, 1.22f, 0.90f, ink, 0.18f, red, 0.10f });
+        subjectFull(graded, QStringLiteral("Poster figure"), 1.0f,
+                    CreativeMotion());
+
+        QImage tape = stageCanvas(stage);
+        {
+            QPainter p(&tape);
+            p.setRenderHint(QPainter::Antialiasing, true);
+            p.setPen(Qt::NoPen);
+            p.setBrush(QColor(255, 250, 235, 145));
+            p.translate(W * 0.16, H * 0.10);
+            p.rotate(-32);
+            p.drawRect(QRectF(-W * 0.06, -H * 0.015, W * 0.24, H * 0.03));
+            p.resetTransform();
+            p.translate(W * 0.84, H * 0.88);
+            p.rotate(28);
+            p.drawRect(QRectF(-W * 0.06, -H * 0.015, W * 0.24, H * 0.03));
+        }
+        add(QStringLiteral("Tape"), QStringLiteral("finish"), tape, full,
+            BLEND_NORMAL, 0.8f);
+        add(QStringLiteral("Poster grain"), QStringLiteral("finish"),
+            creative::grainField(stage, seed + 7, 34), full,
+            BLEND_OVERLAY, 0.4f);
+    }
+    else if (patchId == QLatin1String("stage-mode"))
+    {
+        const QColor night(8, 6, 12), gold(255, 211, 122),
+            rose(184, 51, 106), cream(255, 244, 226);
+        add(QStringLiteral("House lights"), QStringLiteral("backdrop"),
+            creative::gradientField(stage, night, QColor(18, 10, 24),
+                                    QColor(70, 20, 50, 120), 0.30),
+            full);
+        QImage floor = stageCanvas(stage);
+        {
+            QPainter p(&floor);
+            p.setRenderHint(QPainter::Antialiasing, true);
+            QLinearGradient g(0, H * 0.68, 0, H);
+            g.setColorAt(0.0, QColor(28, 16, 30, 230));
+            g.setColorAt(1.0, QColor(6, 4, 8, 255));
+            p.fillRect(QRectF(0, H * 0.68, W, H * 0.32), g);
+            p.setPen(Qt::NoPen);
+            p.setBrush(QColor(255, 220, 170, 30));
+            p.drawEllipse(QPointF(W * 0.5, H * 0.84), W * 0.40, H * 0.04);
+        }
+        add(QStringLiteral("Stage floor"), QStringLiteral("backdrop"), floor,
+            full);
+        const auto curtain = [&](bool left) {
+            QImage img = stageCanvas(stage);
+            QPainter p(&img);
+            p.setRenderHint(QPainter::Antialiasing, true);
+            QPainterPath path;
+            if (left)
+            {
+                path.moveTo(0, 0);
+                path.lineTo(W * 0.24, 0);
+                path.cubicTo(W * 0.17, H * 0.38, W * 0.25, H * 0.72,
+                             W * 0.14, H);
+                path.lineTo(0, H);
+            }
+            else
+            {
+                path.moveTo(W, 0);
+                path.lineTo(W * 0.76, 0);
+                path.cubicTo(W * 0.83, H * 0.38, W * 0.75, H * 0.72,
+                             W * 0.86, H);
+                path.lineTo(W, H);
+            }
+            path.closeSubpath();
+            QLinearGradient g(0, 0, W * (left ? 0.28 : 0.72), 0);
+            g.setColorAt(0.0, rose.darker(190));
+            g.setColorAt(0.5, rose.darker(135));
+            g.setColorAt(1.0, rose);
+            p.setPen(Qt::NoPen);
+            p.setBrush(g);
+            p.drawPath(path);
+            return img;
+        };
+        CreativeMotion curtainL;
+        curtainL.dxX = -0.05f;
+        curtainL.dxHold = -0.06f;
+        add(QStringLiteral("Stage curtain left"), QStringLiteral("backdrop"),
+            curtain(true), full, BLEND_NORMAL, 0.95f, curtainL);
+        CreativeMotion curtainR;
+        curtainR.dxX = 0.05f;
+        curtainR.dxHold = 0.06f;
+        add(QStringLiteral("Stage curtain right"), QStringLiteral("backdrop"),
+            curtain(false), full, BLEND_NORMAL, 0.95f, curtainR);
+
+        QImage cone = stageCanvas(stage);
+        {
+            QPainter p(&cone);
+            p.setRenderHint(QPainter::Antialiasing, true);
+            QPainterPath beam;
+            beam.moveTo(W * 0.50, H * 0.03);
+            beam.lineTo(W * 0.12, H * 0.86);
+            beam.lineTo(W * 0.88, H * 0.86);
+            beam.closeSubpath();
+            QLinearGradient g(0, H * 0.03, 0, H * 0.86);
+            g.setColorAt(0.0, QColor(255, 240, 200, 130));
+            g.setColorAt(1.0, QColor(255, 220, 160, 0));
+            p.fillPath(beam, g);
+        }
+        CreativeMotion spotM;
+        spotM.opacityY = 0.20f;
+        spotM.opacityHold = 0.20f;
+        spotM.dxX = 0.04f;
+        add(QStringLiteral("Stage spotlight"), QStringLiteral("accent"), cone,
+            full, BLEND_SCREEN, 0.8f, spotM);
+        add(QStringLiteral("Stage glow"), QStringLiteral("accent"),
+            creative::radialGlow(stage, subjectRect.center(), H * 0.45,
+                                  gold, 0.36f),
+            full, BLEND_SCREEN, 0.55f);
+        const QImage graded = creative::gradeImage(
+            s, creative::Grade{ 0.98f, 1.16f, 1.04f, QColor(40, 18, 50), 0.22f,
+                                gold, 0.08f });
+        subjectFull(graded, QStringLiteral("Stage figure"), 1.0f,
+                    CreativeMotion());
+        add(QStringLiteral("Stage dust"), QStringLiteral("finish"),
+            creative::starField(stage, seed, cream, 70), full,
+            BLEND_SCREEN, 0.45f);
+        add(QStringLiteral("Stage grain"), QStringLiteral("finish"),
+            creative::grainField(stage, seed + 2, 24), full,
             BLEND_OVERLAY, 0.3f);
     }
     else

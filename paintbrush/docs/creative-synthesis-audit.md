@@ -49,9 +49,10 @@ and the post-Keep moment.
   commit materializes, served through `image://pbcreative/live/<revision>`.
   The preview follows the real document aspect and the subject's real canvas
   rectangle, so what the pad shows is what gets committed.
-- Patch rail with ten starting recipes:
+- Patch rail with thirteen starting recipes:
   Neon Idol, Voltage Idol, Sticker Forge, Pastel Stage, Nocturne, Prism Muse,
-  Ink Creature, Spark Storm, Kaleido, Motion Echo.
+  Ink Creature, Spark Storm, Kaleido, Motion Echo, Scene Forge, Auto Splatter,
+  Stage Door.
 - Per-patch pad mapping: horizontal / vertical position, gesture speed (energy)
   and Hold drive different combinations of opacity, scale, rotation, tint
   balance, particle bloom and outline growth. The pad is not a debug shader;
@@ -146,13 +147,16 @@ idol fixture, then:
    report and leaves the pad open.
 
 Latest report: `paintbrush/docs/creative-synthesis-assets/selftest-report.txt`
-(**RESULT: PASS**, preview p95 **3.20 ms**, Neon commit **597.3 ms**, reload and
-export **13 layers / 10,143 KB**). Generated previews:
+(**RESULT: PASS**, 13-patch run: preview p95 **22.85 ms** (heaviest
+patch / test load), Neon commit **1,339.6 ms**, reload and export **13 layers /
+10,143 KB**; a clean 10-patch run measured 3.20 ms / 597.3 ms). Generated previews:
 `selftest-neon-idol.png`, `selftest-sticker-forge.png`,
 `selftest-pastel-stage.png`, `selftest-nocturne.png`,
 `selftest-ink-creature.png`, `selftest-spark-storm.png`,
 `selftest-kaleido.png`, `selftest-motion-echo.png`,
-`selftest-electric-kpop.png`, `selftest-holo-fashion.png`.
+`selftest-electric-kpop.png`, `selftest-holo-fashion.png`,
+`selftest-scene-forge.png`, `selftest-auto-splatter.png`,
+`selftest-stage-mode.png`.
 
 GUI verification:
 - Opened the pad from the real workspace, committed with UI Automation
@@ -197,18 +201,18 @@ GUI verification:
 | 12.4 pad mapping / hold / pressure | **Done** | Position, energy, hold; pressure on pen/touch, speed on mouse. |
 | 12.5 gesture recording / loop / surprise / reseed | **Done** | Duration is displayed while recording; loops; no delete/rename of a recording yet. |
 | 12.6 smart duplication, lineup, linked effects | **Done** | Lineup + Duo/Grid/Overlap presets, group-wide finish propagation, reuse on another cutout. |
-| 12.7 Scene Forge, Ink Creature family, Motion Calligraphy | **Partial** | Ink Creature and Motion Echo exist; Scene Forge / true contour calligraphy are not built. |
+| 12.7 Scene Forge, Ink Creature family, Motion Calligraphy | **Partial** | Scene Forge, Auto Splatter, Ink Creature, Motion Echo and editable agent strokes shipped. True contour calligraphy and the full scene-layer family still pending. |
 | 12.9 performance must become real layers, one undo | **Done** | Verified. |
 | 12.10 save / reopen / continue editing the performance | **Done** | Metadata includes group/source; Resume restores patch/seed/pad and replaces the old group in one undo. Save→reload→export verified in the self-test. |
 | 12.11 UX at rest / live / after creation | **Partial** | Idle shimmer, live stage, Before/After, suggestion, metrics. No performance history list or large-stage pan. |
 | Slice A end-to-end | **Done** | Keep → chooser → Neon/Sticker → pad → record → Make it real → suggestion → undo. Verified with the synthetic fixture and a real GUI commit. |
 | Slice B (Pastel Stage, Lineup, generic smart duplicate) | **Done** | Pastel Stage + Pastel Lineup + linked presets. |
 | Slice C (Nocturne, floral/butterfly/scene layer family) | **Partial** | Nocturne shipped; broader scene family pending. |
-| Slice D (Scene Forge / Motion Calligraphy / ink family) | **Partial** | Ink Creature, Motion Echo (real poses when tracked), editable agent strokes. Scene Forge and true contour calligraphy pending. |
+| Slice D (Scene Forge / Motion Calligraphy / ink family) | **Partial** | Scene Forge + Auto Splatter added; Ink Creature, Motion Echo (real poses when tracked) and editable agent strokes. True contour calligraphy pending. |
 | Slice E (generative patch language, authoring, savable looks) | **Not done** | Patch catalog is compiled in; no authoring/catalog UI. |
 | Slice F (beat/audio energy) | **Not done** | — |
 | Slice G (subject awareness / multi-subject) | **Partial** | Subject picking understands layers/roles; no automatic face/garment graph. |
-| Slice H (Photo Regime H / dark stage / Auto Splatter / Stage mode) | **Not done** | The existing puppet photo regime remains the precedent; not wired into the pad. |
+| Slice H (Photo Regime H / dark stage / Auto Splatter / Stage mode) | **Partial** | Auto Splatter and Stage Door are real recipes; Photo Regime H and the rigged Stage mode are not wired. |
 | Slice I (compact workflow) | **Partial** | Keep → pad → commit → resume/reuse is compact. No multi-look history rail. |
 | OpenFill Remove/Fill/Expand | **Partial** | Remove object, generative fill and replace background already exist behind the image provider; Expand canvas is not implemented. No provider was configured in this test. |
 
@@ -222,9 +226,8 @@ These are the things a reviewer should not assume are finished:
    video in this test.** `collectCreativePoses()` decodes real keyframes by PTS
    and the still fallback is verified; the self-test fixture has no track, so
    the real-pose path still needs a tracked-video acceptance run.
-2. **Scene Forge, Auto Splatter, Stage mode and the full Photo Regime H are
-   still missing.** Pastel Stage/Lineup, Nocturne and Ink Creature are real, but
-   the broader scene/motion system is not built.
+2. **Scene Forge, Auto Splatter and Stage Door are shipped, but Photo Regime H,
+   true contour calligraphy and the rigged Stage mode are still missing.**
 3. **Agent strokes are deterministic/offline, not model-planned.** The assistant
    can call `draw_creative_stroke` (ribbon/halo/splat/ink) and it commits a real
    editable vector layer, but no LLM authoring path chooses multi-stroke plans.
@@ -306,8 +309,9 @@ value next work is, in order:
 
 1. **Tracked-video acceptance** for Pastel Lineup and Motion Echo: open a real
    tracked clip, verify pose diversity, PTS order and the one-undo replacement.
-2. **Scene Forge / Auto Splatter / Stage mode**, then the Photo Regime H
-   amplitude safety, as separate real recipes rather than more pad parameters.
+2. **Photo Regime H, true contour calligraphy and the rigged Stage mode**, plus
+   the remaining scene-layer family, now that Scene Forge / Auto Splatter /
+   Stage Door are real recipes.
 3. **Full-stage pan/zoom and a performance history rail** (rename/delete/reuse),
    plus a layer-level Before/After.
 4. **OpenFill Expand** on top of the existing provider-gated Remove/Fill/
