@@ -12,7 +12,7 @@ $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $root = (Resolve-Path (Join-Path $here '..\..\..')).Path
 $src = Join-Path $root 'modules\gui\qt\paintbrush'
 $build = Join-Path $here 'build'
-$outdir = Join-Path $build 'live'
+$outdir = if ($args.Count -ge 3 -and $args[2]) { $args[2] } else { Join-Path $build 'live' }
 New-Item -ItemType Directory -Force -Path $build, $outdir | Out-Null
 
 $video = if ($args.Count -ge 1) { $args[0] } else { 'C:\Users\lukes.COREI9\Downloads\NewJeans 뉴진스 Hype Boy Dance Practice.mkv' }
@@ -54,10 +54,12 @@ $sources = @(
     "$src\pb_common.cpp", "$src\pb_layer.cpp", "$src\pb_document.cpp",
     "$src\pb_history.cpp", "$src\pb_harvest.cpp", "$src\pb_boost.cpp",
     "$src\pb_project_store.cpp",
+    "$src\motion\pb_puppet.cpp", "$src\motion\pb_living.cpp",
     "$src\art\runtime\material_registry.cpp",
     "$src\art\surface\paper_stock.cpp", "$src\art\surface\paper_renderer.cpp",
     "$src\art\stroke\bristle_brush.cpp",
     "$src\art\materials\glitter\glitter_material.cpp",
+    "$src\art\materials\glitter\glitter_powder.cpp",
     "$src\art\finish\effects.cpp",
     "$src\art\style\mood.cpp", "$src\art\style\typography_style.cpp", "$src\art\style\badges.cpp",
     "$build\moc_pb_document.cpp", "$build\moc_pb_history.cpp",
@@ -80,7 +82,8 @@ $env:PATH = "$qt\bin;$root;$(Join-Path $root 'win64-meson');$(Join-Path $root 'w
 $env:VLC_PLUGIN_PATH = Join-Path $root 'win64-meson\modules'
 Push-Location $build
 $env:PB_LIVE_OUT = $outdir
-& "$build\pb_live_harness.exe" $videoArg $model $outdir
+& "$build\pb_live_harness.exe" $videoArg $model $outdir 2>&1 |
+    Tee-Object -FilePath (Join-Path $outdir 'acceptance.log')
 $code = $LASTEXITCODE
 Pop-Location
 exit $code

@@ -1,0 +1,82 @@
+sam3_load_model: loading model from 'D:\_SATIN_AI\models\sam3-q4_0.ggml'
+sam3_load_model: SAM3 format v3, ftype 2, 1464 tensors
+  img_size       = 1008
+  patch_size     = 14
+  vit_embed_dim  = 1024
+  vit_depth      = 32
+  vit_num_heads  = 16
+  vit_mlp_dim    = 4736
+  vit_window     = 24
+  text_width     = 1024
+  text_layers    = 24
+  neck_dim       = 256
+  fenc_layers    = 6
+  ddec_layers    = 6
+  ddec_queries   = 200
+  sam_embed_dim  = 256
+  mem_attn_lyrs  = 4
+  num_maskmem    = 7
+  visual_only    = 0
+sam3_load_model: using CPU backend
+sam3_load_model: registered 1464 tensors
+sam3_load_model: buffer size = 712.55 MB
+sam3_load_tensors: loaded 1464 tensors (registered 1464)
+Paintbrush Showroom — LIVE acceptance run (real video + real SAM3)
+
+  ok   SAM3 model loads
+sam3_load_bpe_vocab_from_stream: loaded 49408 vocab entries, 48888 merges
+sam3_load_model: model loaded successfully
+  ok   libvlc instance created
+  ok   media opened from path
+  ok   media player created
+  ok   player started
+  ok   player reached Playing state
+  ok   media duration known (178668000 ms)
+  ok   frame decoded at 53600 ms
+sam3_encode_image: graph computed in 54081.4 ms (24 threads)
+sam3_encode_image: image encoded successfully in 56585.9 ms
+sam3_populate_pe_cache: PE cache populated (256 embeddings, 10368.0 KB dense grids)
+sam3_segment_pvs: graph computed in 4850.9 ms (24 threads)
+sam3_segment_pvs: completed in 4994.1 ms
+  ok   SAM3 segmented a person at 53600 ms (coverage 2.7%)
+  ok   frame decoded at 64320 ms
+sam3_encode_image: graph computed in 54886.2 ms (24 threads)
+sam3_encode_image: image encoded successfully in 57404.1 ms
+sam3_populate_pe_cache: PE cache populated (256 embeddings, 10368.0 KB dense grids)
+sam3_segment_pvs: graph computed in 3971.3 ms (24 threads)
+sam3_segment_pvs: completed in 4120.7 ms
+  ok   SAM3 segmented a person at 64320 ms (coverage 3.7%)
+  ok   frame decoded at 96480 ms
+sam3_encode_image: graph computed in 55695.7 ms (24 threads)
+sam3_encode_image: image encoded successfully in 58063.8 ms
+sam3_populate_pe_cache: PE cache populated (256 embeddings, 10368.0 KB dense grids)
+sam3_segment_pvs: graph computed in 3678.1 ms (24 threads)
+sam3_segment_pvs: completed in 3810.6 ms
+  ok   SAM3 segmented a person at 96480 ms (coverage 13.1%)
+  ok   three real Keeps (frame + SAM3 mask) available
+  ok   analysis found the 3-pose same-source sequence
+  ok   sparsest temporal gap selected for a bridge pose
+  .. motion dir (0.99, 0.17), hero layer 4, bridge 64320 -> 96480 ms
+  ok   deterministic plan recorded typed operations
+  ok   hero role assigned
+  ok   real mid-gap frame scored best for the bridge
+sam3_encode_image: graph computed in 51483.5 ms (24 threads)
+sam3_encode_image: image encoded successfully in 53940.8 ms
+sam3_populate_pe_cache: PE cache populated (256 embeddings, 10368.0 KB dense grids)
+sam3_segment_pvs: graph computed in 4301.8 ms (24 threads)
+sam3_segment_pvs: completed in 4434.7 ms
+  ok   SAM3 segmented the bridge candidate
+  ok   bridge pose inserted as a derived Transition layer
+  summary: Faded 2 earlier pose(s) into ghosts with a short directional blur to carry the motion rightward. Added one real bridge pose (01:20.40) between 01:04.32 and 01:36.48 and pushed it behind.
+  ok   Boost visibly changed the render (mean diff 7.36/255)
+  ok   4K export renders at 4x canvas (4800x2400)
+  ok   4K export deterministic (byte-identical on re-render)
+  ok   bridge layer styled Transition
+  ok   bridge harvest item in tray
+  ok   bridge sits behind both neighbours
+  ok   transaction wraps into one CompositeCommand
+  ok   one top-level undo entry: Boost
+  ok   Undo Boost
+  ok   undo restores the raw composition (mean diff < 0.01)
+
+31/31 checks passed
