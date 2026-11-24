@@ -37,7 +37,7 @@ Item {
     z: 30
 
     width: Math.min(VLCStyle.dp(430), parent ? parent.width - VLCStyle.margin_normal * 4 : 430)
-    height: Math.min(VLCStyle.dp(680), parent ? parent.height - VLCStyle.margin_normal * 4 : 680)
+    height: Math.min(VLCStyle.dp(820), parent ? parent.height - VLCStyle.margin_normal * 4 : 820)
 
     ColorContext {
         palette: VLCStyle.palette
@@ -422,7 +422,7 @@ Item {
         Rectangle {
             id: pad
             Layout.alignment: Qt.AlignHCenter
-            Layout.preferredWidth: Math.min(stageFrame.width, VLCStyle.dp(220))
+            Layout.preferredWidth: Math.min(stageFrame.width, VLCStyle.dp(190))
             Layout.preferredHeight: Layout.preferredWidth
             radius: width / 2
             color: "#080910"
@@ -678,6 +678,60 @@ Item {
             }
         }
 
+        /* --------------------------------------------------- recent looks */
+        RowLayout {
+            Layout.fillWidth: true
+            visible: root.creative.history.length > 0
+            spacing: VLCStyle.margin_xsmall
+
+            Widgets.LabelExt {
+                text: qsTr("Recent")
+                color: theme.fg.secondary
+                font.pixelSize: VLCStyle.dp(9)
+                font.letterSpacing: 0.8
+            }
+
+            ListView {
+                Layout.fillWidth: true
+                height: VLCStyle.dp(28)
+                orientation: ListView.Horizontal
+                spacing: VLCStyle.margin_xsmall
+                clip: true
+                model: root.creative.history
+
+                delegate: Rectangle {
+                    required property var modelData
+                    width: Math.max(VLCStyle.dp(92), historyLabel.implicitWidth
+                                    + VLCStyle.margin_normal)
+                    height: VLCStyle.dp(24)
+                    radius: VLCStyle.dp(7)
+                    color: "#12141F"
+                    border.width: 1
+                    border.color: Qt.rgba(root.accent.r, root.accent.g,
+                                          root.accent.b, 0.28)
+
+                    Widgets.LabelExt {
+                        id: historyLabel
+                        anchors.centerIn: parent
+                        text: modelData.patchName
+                        color: "#E7E9F2"
+                        font.pixelSize: VLCStyle.fontSize_small
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: PaintbrushCtx.resumeCreativeLook(
+                                       modelData.layerIndex)
+                    }
+                    HoverHandler { id: historyHover }
+                    ToolTip.visible: historyHover.hovered
+                    ToolTip.delay: 400
+                    ToolTip.text: qsTr("Resume this look")
+                }
+            }
+        }
+
         /* ---------------------------------------------------------- status */
         Widgets.LabelExt {
             Layout.fillWidth: true
@@ -690,7 +744,8 @@ Item {
         /* ------------------------------------------------------ patch rail */
         ListView {
             Layout.fillWidth: true
-            Layout.preferredHeight: VLCStyle.dp(66)
+            Layout.preferredHeight: VLCStyle.dp(56)
+            visible: !root.creative.suggestionVisible
             orientation: ListView.Horizontal
             spacing: VLCStyle.margin_xsmall
             clip: true
@@ -701,7 +756,7 @@ Item {
                 required property var modelData
                 readonly property bool active: modelData.id === root.creative.activePatchId
                 width: Math.max(VLCStyle.dp(92), chipLabel.implicitWidth + VLCStyle.margin_normal * 2)
-                height: VLCStyle.dp(52)
+                height: VLCStyle.dp(46)
                 radius: VLCStyle.dp(9)
                 color: active ? Qt.rgba(root.accent.r, root.accent.g,
                                         root.accent.b, 0.22)

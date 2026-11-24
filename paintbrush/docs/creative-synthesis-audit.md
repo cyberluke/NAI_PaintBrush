@@ -57,6 +57,10 @@ and the post-Keep moment.
   and Hold drive different combinations of opacity, scale, rotation, tint
   balance, particle bloom and outline growth. The pad is not a debug shader;
   each animation maps to a named piece.
+- A universal **stage light** plus a small **subject breath/lift** answer every
+  patch, so no look is inert under the pad. The acceptance gate measures the
+  actual pixel delta for the four starter looks; a weak response fails the
+  test.
 - Record → loop: samples store x, y, energy, hold and relative time. Replay is
   time-interpolated at ~30 Hz and loops.
 - Hold is a real pressed state; mouse energy is derived from travel speed, while
@@ -127,16 +131,18 @@ prompt tells the model to use it when the user asks to draw with them.
 `scripts/launch-pb-noskip.ps1 -CreativeSelfTest`) builds a synthetic transparent
 idol fixture, then:
 
-1. opens the pad and renders every patch at preview scale; records preview p95;
+1. opens the pad and renders every patch at preview scale; records preview p95
+   and measures the pad-reaction pixel delta for Neon Idol, Voltage Idol,
+   Sticker Forge and Pastel Stage;
 2. records a two-point gesture and verifies the loop starts;
-3. commits Neon Idol (+11 layers), saves the project, reloads it into a
+3. commits Neon Idol (+12 layers), saves the project, reloads it into a
    separate document, exports it to PNG and verifies the creative metadata
    survived; adds the patch suggestion (one editable stroke, +1) and undoes;
 4. resumes the committed look from metadata, replaces it in one composite
-   (+13 layers), verifies one undo restores the previous look, then verifies
+   (+14 layers), verifies one undo restores the previous look, then verifies
    the original commit undo returns to the base document;
-5. applies the current look to the selected cutout (+11) and verifies one undo;
-6. commits Sticker Forge (+11), Voltage Idol (+10), Prism Muse (+9), each with
+5. applies the current look to the selected cutout (+12) and verifies one undo;
+6. commits Sticker Forge (+12), Voltage Idol (+11), Prism Muse (+10), each with
    one-undo verification;
 7. builds a linked lineup (+5), Pastel Lineup (+8, still-source fallback in this
    fixture), Motion Echo (+8) and the three duplicate presets (+2/+4/+3), each
@@ -147,9 +153,11 @@ idol fixture, then:
    report and leaves the pad open.
 
 Latest report: `paintbrush/docs/creative-synthesis-assets/selftest-report.txt`
-(**RESULT: PASS**, 13-patch run: preview p95 **22.85 ms** (heaviest
-patch / test load), Neon commit **1,339.6 ms**, reload and export **13 layers /
-10,143 KB**; a clean 10-patch run measured 3.20 ms / 597.3 ms). Generated previews:
+(**RESULT: PASS**, 13-patch run: preview p95 **6.81 ms**, Neon commit
+**696.4 ms**, reload and export **14 layers / 10,143 KB**. Pad-reaction pixel
+deltas per sampled channel: Neon Idol **16.84/255**, Voltage Idol **8.97/255**,
+Sticker Forge **5.79/255**, Pastel Stage **3.67/255** — all four visibly answer
+the pad.). Generated previews:
 `selftest-neon-idol.png`, `selftest-sticker-forge.png`,
 `selftest-pastel-stage.png`, `selftest-nocturne.png`,
 `selftest-ink-creature.png`, `selftest-spark-storm.png`,
@@ -204,7 +212,7 @@ GUI verification:
 | 12.7 Scene Forge, Ink Creature family, Motion Calligraphy | **Partial** | Scene Forge, Auto Splatter, Ink Creature, Motion Echo and editable agent strokes shipped. True contour calligraphy and the full scene-layer family still pending. |
 | 12.9 performance must become real layers, one undo | **Done** | Verified. |
 | 12.10 save / reopen / continue editing the performance | **Done** | Metadata includes group/source; Resume restores patch/seed/pad and replaces the old group in one undo. Save→reload→export verified in the self-test. |
-| 12.11 UX at rest / live / after creation | **Partial** | Idle shimmer, live stage, Before/After, suggestion, metrics. No performance history list or large-stage pan. |
+| 12.11 UX at rest / live / after creation | **Partial** | Idle shimmer, live stage, Before/After, suggestion, metrics, recent-look rail. No rename/delete of looks or large-stage pan. |
 | Slice A end-to-end | **Done** | Keep → chooser → Neon/Sticker → pad → record → Make it real → suggestion → undo. Verified with the synthetic fixture and a real GUI commit. |
 | Slice B (Pastel Stage, Lineup, generic smart duplicate) | **Done** | Pastel Stage + Pastel Lineup + linked presets. |
 | Slice C (Nocturne, floral/butterfly/scene layer family) | **Partial** | Nocturne shipped; broader scene family pending. |
@@ -213,7 +221,7 @@ GUI verification:
 | Slice F (beat/audio energy) | **Not done** | — |
 | Slice G (subject awareness / multi-subject) | **Partial** | Subject picking understands layers/roles; no automatic face/garment graph. |
 | Slice H (Photo Regime H / dark stage / Auto Splatter / Stage mode) | **Partial** | Auto Splatter and Stage Door are real recipes; Photo Regime H and the rigged Stage mode are not wired. |
-| Slice I (compact workflow) | **Partial** | Keep → pad → commit → resume/reuse is compact. No multi-look history rail. |
+| Slice I (compact workflow) | **Partial** | Keep → pad → commit → resume/reuse with a recent-look rail. No multi-look rename/delete or full pan. |
 | OpenFill Remove/Fill/Expand | **Partial** | Remove object, generative fill and replace background already exist behind the image provider; Expand canvas is not implemented. No provider was configured in this test. |
 
 ---
@@ -235,9 +243,8 @@ These are the things a reviewer should not assume are finished:
    a Neon commit is 597.3 ms at 544x680 preview / 1440x1800 canvas; there is no
    4K/HDR 60 fps claim, no GPU effect pass, and no large-stage pan/zoom or
    full layer panel.
-5. **No performance history rail.** Resume replaces the last look and reuse
-   applies the current look; there is no saved list of previous performances
-   with rename/delete.
+5. **The recent-look rail is read/resume only.** It lists committed groups and
+   resumes one; rename/delete and a full performance browser are not built.
 6. **OpenFill is provider-gated and partial.** Remove object, generative fill
    and replace background already exist behind the image provider; Expand
    canvas is not implemented, and no provider was configured in this test.
@@ -312,8 +319,8 @@ value next work is, in order:
 2. **Photo Regime H, true contour calligraphy and the rigged Stage mode**, plus
    the remaining scene-layer family, now that Scene Forge / Auto Splatter /
    Stage Door are real recipes.
-3. **Full-stage pan/zoom and a performance history rail** (rename/delete/reuse),
-   plus a layer-level Before/After.
+3. **Full-stage pan/zoom**, recent-look rename/delete and a layer-level
+   Before/After.
 4. **OpenFill Expand** on top of the existing provider-gated Remove/Fill/
    Replace Background, with an explicit provider-status surface.
 5. **Real-idol art review** and a small expressive type/sticker library.

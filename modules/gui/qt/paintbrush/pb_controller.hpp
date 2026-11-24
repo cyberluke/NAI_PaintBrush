@@ -269,6 +269,8 @@ public:
      * original cutout). The next Make it real replaces the old group in the
      * same one-undo transaction. */
     Q_INVOKABLE void resumeCreativeLook(int layerIndex);
+    /* Recent committed looks, newest first: {group,patchName,layerIndex,ageMs}. */
+    Q_INVOKABLE QVariantList creativeLookHistory() const;
     /* Re-apply the current Play Pad look to the selected cutout. */
     Q_INVOKABLE void applyCreativeLookToSelection();
     /* Real poses from a tracked video when a track exists; otherwise a still

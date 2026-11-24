@@ -12,29 +12,34 @@ preview holo-fashion 544x680
 preview scene-forge 544x680
 preview auto-splatter 544x680
 preview stage-mode 544x680
+pad reaction neon-idol: 16.84/255
+pad reaction electric-kpop: 8.97/255
+pad reaction sticker-forge: 5.79/255
+pad reaction pastel-stage: 3.67/255
 gesture record: OK
 gesture loop: OK
-preview p95: 22.85 ms (13 samples)
-commit neon: +11 layers
-commit neon: 1339.6 ms
-save/reopen/export: OK (13 layers, 10143 KB)
+preview p95: 6.81 ms (13 samples)
+commit neon: +12 layers
+commit neon: 696.4 ms
+recent look history: 1 (Neon Idol)
+save/reopen/export: OK (14 layers, 10143 KB)
 suggestion kind: ribbon
 suggestion: +1 layer
 resume look: OK (neon-idol)
-resume replace: 13 layers
+resume replace: 14 layers
 resume one-undo: OK
 one-undo contract: OK
-apply look: +11 layers
+apply look: +12 layers
 apply look undo: OK
-commit sticker: +11 layers
+commit sticker: +12 layers
 sticker undo: OK
-commit electric: +10 layers
+commit electric: +11 layers
 source content 304x864.8 raster 720x1120 scale 0.8
-subject content 305x867 raster 271x771 scale 1.125
+subject content 307x871 raster 273x774 scale 1.125
 committed subject scale: OK
 repeated apply: original source kept
 electric undo: OK
-commit holo: +9 layers
+commit holo: +10 layers
 holo undo: OK
 lineup: +5 linked poses
 lineup undo: OK

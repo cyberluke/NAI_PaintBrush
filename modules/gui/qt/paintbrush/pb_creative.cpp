@@ -121,6 +121,30 @@ QString suggestionKindFor(const QString &patchId)
     return QStringLiteral("ribbon");
 }
 
+QColor stageLightColor(const QString &patchId)
+{
+    if (patchId == QLatin1String("neon-idol")
+        || patchId == QLatin1String("electric-kpop")
+        || patchId == QLatin1String("kaleido")
+        || patchId == QLatin1String("motion-echo"))
+        return QColor(130, 232, 255);
+    if (patchId == QLatin1String("sticker-forge")
+        || patchId == QLatin1String("pastel-stage")
+        || patchId == QLatin1String("scene-forge")
+        || patchId == QLatin1String("stage-mode"))
+        return QColor(255, 236, 196);
+    if (patchId == QLatin1String("nocturne")
+        || patchId == QLatin1String("holo-fashion"))
+        return QColor(205, 160, 255);
+    if (patchId == QLatin1String("ink-creature"))
+        return QColor(255, 230, 180);
+    if (patchId == QLatin1String("auto-splatter"))
+        return QColor(255, 194, 164);
+    if (patchId == QLatin1String("spark-storm"))
+        return QColor(255, 216, 142);
+    return QColor(255, 244, 230);
+}
+
 } /* namespace */
 
 /* ------------------------------------------------------------- image provider */
@@ -413,6 +437,7 @@ bool PaintbrushCreative::adoptSubject(const QImage &cutout,
         emit suggestionChanged();
     }
     rebuildPreview();
+    refreshHistory();
     emit subjectChanged();
     emit stateChanged();
     return true;
@@ -1007,6 +1032,7 @@ QString PaintbrushCreative::commit()
     m_suggestionKind = suggestionKindFor(def->id);
     m_suggestionText = def->suggestion;
     m_suggestionVisible = !m_suggestionText.isEmpty();
+    refreshHistory();
     setStatus(QStringLiteral("Committed. Every piece is an editable layer — one undo."));
     emit suggestionChanged();
     emit metricsChanged();
@@ -1054,6 +1080,17 @@ void PaintbrushCreative::dismissSuggestion()
     emit suggestionChanged();
 }
 
+void PaintbrushCreative::refreshHistory()
+{
+    if (!m_controller)
+        return;
+    const QVariantList next = m_controller->creativeLookHistory();
+    if (next == m_history)
+        return;
+    m_history = next;
+    emit historyChanged();
+}
+
 bool PaintbrushCreative::restoreFromCommittedLayer(int layerIndex)
 {
     if (!m_controller)
@@ -1091,6 +1128,7 @@ bool PaintbrushCreative::restoreFromCommittedLayer(int layerIndex)
     m_frame.hold = params.value(QStringLiteral("hold"), false).toBool();
     m_committed = false;
     rebuildPreview();
+    refreshHistory();
     setOpen(true);
     setStatus(QStringLiteral("Resumed %1. Adjust and make it real — the next "
                              "commit replaces this look in one undo.")
@@ -1261,6 +1299,13 @@ QVector<CreativePiece> PaintbrushCreative::buildPatch(const QString &patchId,
 
     const QRectF full(QPointF(0, 0), QSizeF(stage));
 
+    /* a real body response: the subject itself breathes and lifts with Y so
+     * the pad is never just a subtle tint change */
+    CreativeMotion subjectM;
+    subjectM.scaleY = 0.045f;
+    subjectM.dyY = -0.020f;
+    subjectM.opacityY = 0.03f;
+
     auto drawAt = [](QImage &dst, const QImage &src, const QRectF &r) {
         drawScaled(dst, src, r);
     };
@@ -1347,7 +1392,7 @@ QVector<CreativePiece> PaintbrushCreative::buildPatch(const QString &patchId,
 
         const QImage graded = creative::gradeImage(
             s, creative::Grade{ 1.05f, 1.12f, 1.20f, cobalt, 0.22f, coral, 0.10f });
-        subjectFull(graded, QStringLiteral("Neon idol"), 1.0f, CreativeMotion());
+        subjectFull(graded, QStringLiteral("Neon idol"), 1.0f, subjectM);
 
         CreativeMotion rimCyanM;
         rimCyanM.opacityX = -0.34f;
@@ -1419,6 +1464,9 @@ QVector<CreativePiece> PaintbrushCreative::buildPatch(const QString &patchId,
             creative::recolorMasked(s, subjMask, recolor);
         CreativeMotion recolorM;
         recolorM.opacityX = 0.10f;
+        recolorM.scaleY = 0.045f;
+        recolorM.dyY = -0.020f;
+        recolorM.opacityY = 0.03f;
         subjectFull(voltageSubject, QStringLiteral("Voltage idol"), 1.0f,
                     recolorM);
 
@@ -1579,7 +1627,7 @@ QVector<CreativePiece> PaintbrushCreative::buildPatch(const QString &patchId,
 
         const QImage graded = creative::gradeImage(
             s, creative::Grade{ 1.07f, 1.05f, 1.18f, ink, 0.05f, yellow, 0.10f });
-        subjectFull(graded, QStringLiteral("Sticker idol"), 1.0f, CreativeMotion());
+        subjectFull(graded, QStringLiteral("Sticker idol"), 1.0f, subjectM);
 
         CreativeMotion glossM;
         glossM.opacityY = 0.30f;
@@ -1642,12 +1690,13 @@ QVector<CreativePiece> PaintbrushCreative::buildPatch(const QString &patchId,
         const QImage graded = creative::gradeImage(
             s, creative::Grade{ 1.10f, 0.94f, 0.92f, lavender, 0.16f,
                                 QColor(255, 255, 255), 0.12f });
-        subjectFull(graded, QStringLiteral("Pastel idol"), 1.0f, CreativeMotion());
+        subjectFull(graded, QStringLiteral("Pastel idol"), 1.0f, subjectM);
 
         CreativeMotion bloomM;
         bloomM.opacityY = 0.20f;
         bloomM.opacityHold = 0.30f;
         bloomM.scaleHold = 0.07f;
+        bloomM.dxX = 0.035f;
         add(QStringLiteral("Pastel bloom"), QStringLiteral("accent"),
             creative::radialGlow(stage, subjectRect.center(),
                                  H * 0.30, QColor(255, 255, 255), 0.45f),
@@ -1656,6 +1705,8 @@ QVector<CreativePiece> PaintbrushCreative::buildPatch(const QString &patchId,
         CreativeMotion confettiM;
         confettiM.opacityEnergy = 0.30f;
         confettiM.scaleEnergy = 0.12f;
+        confettiM.opacityX = 0.25f;
+        confettiM.dxX = 0.030f;
         add(QStringLiteral("Pastel confetti"), QStringLiteral("accent"),
             creative::confettiField(stage, seed, { pink, mint, lavender,
                                                    QColor(214, 236, 255) },
@@ -2352,6 +2403,34 @@ QVector<CreativePiece> PaintbrushCreative::buildPatch(const QString &patchId,
                                     0.4),
             full);
         subjectFull(s, QStringLiteral("Figure"), 1.0f, CreativeMotion());
+    }
+
+    /* Universal stage light: every patch visibly answers the pad. X sweeps
+     * the light, Y lifts it, Hold blooms it, speed lets it breathe. It is a
+     * normal committed layer, never a UI-only effect. */
+    {
+        const QPointF lightCenter =
+            subjectRect.isEmpty() ? full.center() : subjectRect.center();
+        CreativeMotion lightM;
+        lightM.opacityY = 0.30f;
+        lightM.opacityHold = 0.30f;
+        lightM.dxX = 0.040f;
+        lightM.dxEnergy = 0.015f;
+        lightM.scaleY = 0.18f;
+        lightM.scaleHold = 0.10f;
+        CreativePiece light;
+        light.name = QStringLiteral("Stage light");
+        light.role = QStringLiteral("finish");
+        light.image = creative::radialGlow(
+            stage, lightCenter,
+            qMax(subjectRect.width(), subjectRect.height()) * 0.95,
+            stageLightColor(patchId), 0.30f);
+        light.rect = full;
+        light.pivot = lightCenter;
+        light.blendMode = BLEND_SCREEN;
+        light.opacity = 0.14f;
+        light.motion = lightM;
+        pieces.append(light);
     }
 
     return pieces;

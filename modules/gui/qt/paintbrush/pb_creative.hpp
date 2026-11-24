@@ -136,6 +136,7 @@ class PaintbrushCreative : public QObject
     Q_PROPERTY(bool suggestionVisible READ suggestionVisible NOTIFY suggestionChanged)
     Q_PROPERTY(QString suggestionText READ suggestionText NOTIFY suggestionChanged)
     Q_PROPERTY(QString suggestionKind READ suggestionKind NOTIFY suggestionChanged)
+    Q_PROPERTY(QVariantList history READ history NOTIFY historyChanged)
 
     /* Live performance telemetry (real measurements from recompose/commit). */
     Q_PROPERTY(double previewP95Ms READ previewP95Ms NOTIFY metricsChanged)
@@ -181,6 +182,8 @@ public:
     bool suggestionVisible() const { return m_suggestionVisible; }
     QString suggestionText() const { return m_suggestionText; }
     QString suggestionKind() const { return m_suggestionKind; }
+    QVariantList history() const { return m_history; }
+    Q_INVOKABLE void refreshHistory();
 
     double previewP95Ms() const { return m_previewP95Ms; }
     double lastCommitMs() const { return m_lastCommitMs; }
@@ -226,6 +229,7 @@ signals:
     void previewChanged();
     void stateChanged();
     void suggestionChanged();
+    void historyChanged();
     void metricsChanged();
     void compareChanged();
 
@@ -314,6 +318,7 @@ private:
     QString m_suggestionText;
     QString m_suggestionKind;
     bool m_suggestionVisible = false;
+    QVariantList m_history;
 };
 
 } /* namespace paintbrush */

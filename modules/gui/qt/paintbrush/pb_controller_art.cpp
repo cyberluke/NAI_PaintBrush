@@ -1084,8 +1084,16 @@ QString PaintbrushController::runCreativeSelfTest()
     if (!m_creative)
         return QStringLiteral("FAIL: creative engine missing");
     QStringList report;
+    QFile progress(QDir::tempPath() + QStringLiteral("/nai-pb-selftest-progress.txt"));
+    progress.open(QIODevice::WriteOnly | QIODevice::Truncate);
     auto note = [&](const QString &line) {
         report << line;
+        if (progress.isOpen())
+        {
+            progress.write(line.toUtf8());
+            progress.write("\n");
+            progress.flush();
+        }
     };
     auto failed = [&]() {
         for (const QString &line : report)
@@ -1185,6 +1193,54 @@ QString PaintbrushController::runCreativeSelfTest()
                      .arg(id).arg(preview.width()).arg(preview.height()));
     }
 
+    /* Pad reaction gate: the four starter looks must visibly change pixels
+     * between a low/quiet pose and a high/energetic/hold pose. This is the
+     * regression test for "the pad does nothing" reports. */
+    {
+        const QStringList reactive = {
+            QStringLiteral("neon-idol"), QStringLiteral("electric-kpop"),
+            QStringLiteral("sticker-forge"), QStringLiteral("pastel-stage")
+        };
+        for (const QString &id : reactive)
+        {
+            m_creative->selectPatch(id);
+            m_creative->movePad(0.22, 0.22, 0.0, false);
+            const QImage low =
+                m_creative->previewImage().convertToFormat(QImage::Format_ARGB32);
+            m_creative->movePad(0.78, 0.78, 0.85, true);
+            const QImage high =
+                m_creative->previewImage().convertToFormat(QImage::Format_ARGB32);
+            if (low.isNull() || high.isNull() || low.size() != high.size())
+            {
+                note(QStringLiteral("FAIL: pad reaction %1 has no frames").arg(id));
+                continue;
+            }
+            qint64 sum = 0;
+            int count = 0;
+            for (int y = 0; y < low.height(); y += 3)
+            {
+                const QRgb *a = reinterpret_cast<const QRgb *>(
+                    low.constScanLine(y));
+                const QRgb *b = reinterpret_cast<const QRgb *>(
+                    high.constScanLine(y));
+                for (int x = 0; x < low.width(); x += 3)
+                {
+                    sum += qAbs(qRed(a[x]) - qRed(b[x]))
+                           + qAbs(qGreen(a[x]) - qGreen(b[x]))
+                           + qAbs(qBlue(a[x]) - qBlue(b[x]));
+                    ++count;
+                }
+            }
+            const double avg = count > 0 ? double(sum) / (count * 3.0) : 0.0;
+            note(QStringLiteral("pad reaction %1: %2/255")
+                     .arg(id).arg(avg, 0, 'f', 2));
+            if (avg < 0.5)
+                note(QStringLiteral("FAIL: pad does not change %1").arg(id));
+        }
+        m_creative->setHold(false);
+        m_creative->movePad(0.5, 0.5, 0.0, false);
+    }
+
     /* Gesture capture: record a two-point move, verify the loop starts. */
     m_creative->toggleRecord();
     m_creative->movePad(0.22, 0.24, 0.12, false);
@@ -1220,6 +1276,14 @@ QString PaintbrushController::runCreativeSelfTest()
         note(QStringLiteral("commit neon: +%1 layers").arg(neonAfter - baseLayers));
     note(QStringLiteral("commit neon: %1 ms")
              .arg(m_creative->lastCommitMs(), 0, 'f', 1));
+    m_creative->refreshHistory();
+    const QVariantList lookHistory = m_creative->history();
+    note(lookHistory.isEmpty()
+             ? QStringLiteral("FAIL: recent-look history empty")
+             : QStringLiteral("recent look history: %1 (%2)")
+                   .arg(lookHistory.size())
+                   .arg(lookHistory.first().toMap()
+                            .value(QStringLiteral("patchName")).toString()));
 
     /* Save -> load -> export round trip over the committed layers. */
     {
@@ -2230,6 +2294,46 @@ void PaintbrushController::resumeCreativeLook(int layerIndex)
     }
     if (!m_creative->restoreFromCommittedLayer(layerIndex))
         setStatus(QStringLiteral("Select a creative layer to resume its look."));
+}
+
+QVariantList PaintbrushController::creativeLookHistory() const
+{
+    QMap<QString, QVariantMap> groups;
+    const QList<CanvasLayer> layers = m_document.layers();
+    for (int i = 0; i < layers.size(); ++i)
+    {
+        const CanvasLayer &l = layers.at(i);
+        const QString group =
+            l.metadata.value(QStringLiteral("creative.group")).toString();
+        if (group.isEmpty())
+            continue;
+        auto it = groups.find(group);
+        if (it == groups.end())
+        {
+            QVariantMap entry;
+            entry[QStringLiteral("group")] = group;
+            entry[QStringLiteral("patchName")] =
+                l.metadata.value(QStringLiteral("creative.patchName")).toString();
+            entry[QStringLiteral("layerIndex")] = i;
+            const qint64 stamp = group.section(QLatin1Char('-'), -1).toLongLong();
+            entry[QStringLiteral("ageMs")] =
+                stamp > 0 ? QDateTime::currentMSecsSinceEpoch() - stamp : 0;
+            groups.insert(group, entry);
+        }
+        else
+        {
+            it->insert(QStringLiteral("layerIndex"), i);
+        }
+    }
+    QVariantList history;
+    for (auto it = groups.constBegin(); it != groups.constEnd(); ++it)
+        history.append(it.value());
+    std::sort(history.begin(), history.end(),
+              [](const QVariant &a, const QVariant &b) {
+                  return a.toMap().value(QStringLiteral("ageMs")).toLongLong()
+                         < b.toMap().value(QStringLiteral("ageMs")).toLongLong();
+              });
+    return history;
 }
 
 void PaintbrushController::applyCreativeLookToSelection()

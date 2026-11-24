@@ -463,8 +463,8 @@ Item {
             PaintbrushPlayPad {
                 id: playPad
                 anchors.horizontalCenter: parent.horizontalCenter
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.verticalCenterOffset: -VLCStyle.dp(40)
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: VLCStyle.dp(96)
                 canvas: paintbrushCanvas
                 z: 30
             }
