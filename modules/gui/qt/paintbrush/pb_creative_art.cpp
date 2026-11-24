@@ -185,6 +185,39 @@ QImage argb(const QImage &image)
     return image.convertToFormat(QImage::Format_ARGB32);
 }
 
+QImage luminanceImage(const QImage &image)
+{
+    const QImage src = argb(image);
+    if (src.isNull())
+        return {};
+    QImage out(src.size(), QImage::Format_Grayscale8);
+    for (int y = 0; y < src.height(); ++y)
+    {
+        const QRgb *line = reinterpret_cast<const QRgb *>(src.constScanLine(y));
+        uchar *dst = out.scanLine(y);
+        for (int x = 0; x < src.width(); ++x)
+        {
+            const int l = (54 * qRed(line[x]) + 183 * qGreen(line[x])
+                           + 19 * qBlue(line[x])) >> 8;
+            dst[x] = uchar(l);
+        }
+    }
+    return out;
+}
+
+float valueNoise(quint32 seed, float x, float y)
+{
+    const int x0 = int(std::floor(x));
+    const int y0 = int(std::floor(y));
+    const float fx = x - float(x0);
+    const float fy = y - float(y0);
+    const float a = hash01(seed, x0, y0);
+    const float b = hash01(seed, x0 + 1, y0);
+    const float c = hash01(seed, x0, y0 + 1);
+    const float d = hash01(seed, x0 + 1, y0 + 1);
+    return lerp(lerp(a, b, fx), lerp(c, d, fx), fy);
+}
+
 QImage tinted(const QImage &band, const QColor &color, float intensity)
 {
     if (band.isNull())
@@ -687,6 +720,328 @@ QImage spectralSheen(const QImage &source, const QImage &mask,
         }
     }
     return out;
+}
+
+HoloMaterial holoMaterialPreset(HoloMaterialId id)
+{
+    HoloMaterial m;
+    switch (id)
+    {
+    case HoloMaterialId::OpalDream:
+        m.name = QStringLiteral("Opal dream");
+        m.metallic = 0.08f;
+        m.roughness = 0.38f;
+        m.filmThickness = 520.0f;
+        m.filmVariation = 80.0f;
+        m.grating = 0.35f;
+        m.dispersion = 0.50f;
+        m.sheen = 0.95f;
+        m.sparkle = 0.06f;
+        m.saturation = 0.52f;
+        m.normalStrength = 0.35f;
+        m.palette = { QColor(184, 242, 230), QColor(255, 214, 224),
+                      QColor(201, 182, 255), QColor(232, 255, 201) };
+        break;
+    case HoloMaterialId::ChromaticChrome:
+        m.name = QStringLiteral("Chromatic chrome");
+        m.metallic = 0.95f;
+        m.roughness = 0.06f;
+        m.filmThickness = 180.0f;
+        m.filmVariation = 24.0f;
+        m.grating = 0.15f;
+        m.dispersion = 0.20f;
+        m.sheen = 0.15f;
+        m.sparkle = 0.18f;
+        m.saturation = 0.20f;
+        m.normalStrength = 0.85f;
+        m.palette = { QColor(232, 246, 255), QColor(143, 168, 255),
+                      QColor(192, 198, 208), QColor(255, 255, 255) };
+        break;
+    case HoloMaterialId::PrismaticFantasy:
+        m.name = QStringLiteral("Prismatic fantasy");
+        m.metallic = 0.40f;
+        m.roughness = 0.16f;
+        m.filmThickness = 300.0f;
+        m.filmVariation = 260.0f;
+        m.grating = 2.4f;
+        m.dispersion = 1.0f;
+        m.sheen = 0.50f;
+        m.sparkle = 0.80f;
+        m.saturation = 1.0f;
+        m.normalStrength = 0.95f;
+        m.palette = { QColor(255, 47, 185), QColor(0, 229, 255),
+                      QColor(182, 255, 0), QColor(255, 224, 102) };
+        break;
+    case HoloMaterialId::LiquidHologram:
+    default:
+        m.name = QStringLiteral("Liquid hologram");
+        m.metallic = 0.35f;
+        m.roughness = 0.12f;
+        m.filmThickness = 320.0f;
+        m.filmVariation = 180.0f;
+        m.grating = 0.90f;
+        m.dispersion = 0.90f;
+        m.sheen = 0.65f;
+        m.sparkle = 0.12f;
+        m.saturation = 0.95f;
+        m.normalStrength = 0.60f;
+        m.palette = { QColor(0, 229, 255), QColor(124, 77, 255),
+                      QColor(255, 61, 218), QColor(255, 230, 109) };
+        break;
+    }
+    return m;
+}
+
+QString holoMaterialName(HoloMaterialId id)
+{
+    return holoMaterialPreset(id).name;
+}
+
+QImage estimateNormals(const QImage &source, const QImage &mask, float strength)
+{
+    const QImage src = argb(source);
+    if (src.isNull())
+        return {};
+    const QImage lum = luminanceImage(src);
+    const QImage coarse = softBlur(lum, 18);
+    const QImage fine = softBlur(lum, 5);
+    const float k = qBound(0.0f, strength, 3.0f) / 64.0f;
+
+    QImage m = grayscale(mask);
+    if (!m.isNull() && m.size() != src.size())
+        m = m.scaled(src.size(), Qt::IgnoreAspectRatio,
+                     Qt::SmoothTransformation);
+
+    auto sampleAt = [](const QImage &img, int x, int y) -> int {
+        const int cx = qBound(0, x, img.width() - 1);
+        const int cy = qBound(0, y, img.height() - 1);
+        return int(img.constScanLine(cy)[cx]);
+    };
+
+    QImage out(src.size(), QImage::Format_ARGB32);
+    for (int y = 0; y < src.height(); ++y)
+    {
+        QRgb *dst = reinterpret_cast<QRgb *>(out.scanLine(y));
+        for (int x = 0; x < src.width(); ++x)
+        {
+            const float gx =
+                0.5f * float(sampleAt(coarse, x + 2, y)
+                             - sampleAt(coarse, x - 2, y))
+                + 0.5f * float(sampleAt(fine, x + 1, y)
+                               - sampleAt(fine, x - 1, y));
+            const float gy =
+                0.5f * float(sampleAt(coarse, x, y + 2)
+                             - sampleAt(coarse, x, y - 2))
+                + 0.5f * float(sampleAt(fine, x, y + 1)
+                               - sampleAt(fine, x, y - 1));
+            float nx = -gx * k;
+            float ny = -gy * k;
+            float nz = 1.0f;
+            const float len = std::sqrt(nx * nx + ny * ny + nz * nz);
+            if (len > 1e-6f)
+            {
+                nx /= len;
+                ny /= len;
+                nz /= len;
+            }
+            const int a = m.isNull() ? 255 : int(m.constScanLine(y)[x]);
+            dst[x] = qRgba(int((nx * 0.5f + 0.5f) * 255.0f + 0.5f),
+                           int((ny * 0.5f + 0.5f) * 255.0f + 0.5f),
+                           int((nz * 0.5f + 0.5f) * 255.0f + 0.5f), a);
+        }
+    }
+    return out;
+}
+
+HoloMaterialResult holographicMaterial(const QImage &source, const QImage &mask,
+                                       const QImage &normals,
+                                       const HoloMaterial &material,
+                                       float strength, quint32 seed)
+{
+    HoloMaterialResult result;
+    const QImage src = argb(source);
+    if (src.isNull())
+        return result;
+
+    QImage m = grayscale(mask);
+    if (!m.isNull() && m.size() != src.size())
+        m = m.scaled(src.size(), Qt::IgnoreAspectRatio,
+                     Qt::SmoothTransformation);
+    if (m.isNull())
+        m = maskFromAlpha(src);
+
+    QImage nrm = argb(normals);
+    if (!nrm.isNull() && nrm.size() != src.size())
+        nrm = nrm.scaled(src.size(), Qt::IgnoreAspectRatio,
+                         Qt::SmoothTransformation);
+
+    const float power = clamp01(strength);
+    const float metallic = clamp01(material.metallic);
+    const float roughness = qBound(0.02f, material.roughness, 1.0f);
+    const float shininess = qBound(8.0f, 2.0f / (roughness * roughness) - 2.0f,
+                                   512.0f);
+    const float nFilm = 1.45f;
+    const float lightX = -0.42f, lightY = -0.36f, lightZ = 0.83f;
+    const float halfX = lightX, halfY = lightY, halfZ = lightZ + 1.0f;
+    const float halfLen =
+        std::sqrt(halfX * halfX + halfY * halfY + halfZ * halfZ);
+    const float hx = halfX / halfLen, hy = halfY / halfLen,
+                hz = halfZ / halfLen;
+    const float phaseSeed = float(seed % 628) * 0.01f;
+    const float gratingCos = std::cos(0.73f);
+    const float gratingSin = std::sin(0.73f);
+    const float pi = 3.14159265358979323846f;
+
+    result.albedo = QImage(src.size(), QImage::Format_ARGB32);
+    result.albedo.fill(Qt::transparent);
+    result.sheen = QImage(src.size(), QImage::Format_ARGB32);
+    result.sheen.fill(Qt::transparent);
+
+    for (int y = 0; y < src.height(); ++y)
+    {
+        const QRgb *line = reinterpret_cast<const QRgb *>(src.constScanLine(y));
+        const uchar *mk = m.constScanLine(y);
+        const QRgb *nline =
+            nrm.isNull() ? nullptr
+                         : reinterpret_cast<const QRgb *>(nrm.constScanLine(y));
+        QRgb *albedo = reinterpret_cast<QRgb *>(result.albedo.scanLine(y));
+        QRgb *sheen = reinterpret_cast<QRgb *>(result.sheen.scanLine(y));
+        for (int x = 0; x < src.width(); ++x)
+        {
+            const int alpha = qAlpha(line[x]);
+            const int coverage = qMin(alpha, int(mk[x]));
+            if (coverage <= 2)
+                continue;
+
+            const float l = (54.0f * float(qRed(line[x]))
+                             + 183.0f * float(qGreen(line[x]))
+                             + 19.0f * float(qBlue(line[x])))
+                            / (255.0f * 256.0f);
+            float nx = 0.0f, ny = 0.0f, nz = 1.0f;
+            if (nline)
+            {
+                nx = (float(qRed(nline[x])) - 128.0f) / 127.0f;
+                ny = (float(qGreen(nline[x])) - 128.0f) / 127.0f;
+                nz = qMax(0.15f, (float(qBlue(nline[x])) - 128.0f) / 127.0f);
+                const float len = std::sqrt(nx * nx + ny * ny + nz * nz);
+                nx /= len;
+                ny /= len;
+                nz /= len;
+            }
+            const float ndl = qMax(0.0f, nx * lightX + ny * lightY + nz * lightZ);
+            const float ndv = qMax(0.02f, nz);
+            const float ndh = qMax(0.0f, nx * hx + ny * hy + nz * hz);
+            const float fresnel = 0.04f
+                                  + 0.96f * std::pow(1.0f - ndv, 5.0f);
+            const float spec = std::pow(ndh, shininess)
+                               * (0.20f + 0.80f * fresnel);
+
+            /* thin-film interference: two-beam reflectance at three
+             * representative wavelengths; thickness follows shading and the
+             * estimated orientation so the bands bend with the fabric */
+            float d = material.filmThickness
+                      + (l - 0.5f) * material.filmVariation
+                      + (nx * 0.6f + ny * 0.4f) * material.filmVariation
+                      + valueNoise(seed + 91, float(x) / 46.0f,
+                                   float(y) / 46.0f)
+                            * material.filmVariation * 0.85f;
+            d = qBound(40.0f, d, 1400.0f);
+            const float cosT = std::sqrt(
+                qMax(0.0f, 1.0f - (1.0f - nz * nz) / (nFilm * nFilm)));
+            const float phase = 4.0f * pi * nFilm * d * cosT;
+            float fr = 0.5f + 0.5f * std::cos(phase / 650.0f);
+            float fg = 0.5f + 0.5f * std::cos(phase / 550.0f + 2.1f);
+            float fb = 0.5f + 0.5f * std::cos(phase / 450.0f + 4.2f);
+
+            const float gPhase =
+                material.grating
+                    * (float(x) * gratingCos + float(y) * gratingSin) * 0.035f
+                + phaseSeed;
+            fr = lerp(fr, 0.5f + 0.5f * std::sin(gPhase),
+                      material.dispersion * 0.55f);
+            fg = lerp(fg, 0.5f + 0.5f * std::sin(gPhase + 2.1f),
+                      material.dispersion * 0.55f);
+            fb = lerp(fb, 0.5f + 0.5f * std::sin(gPhase + 4.2f),
+                      material.dispersion * 0.55f);
+
+            const QColor pal = sampleColor(
+                material.palette,
+                clamp01(0.5f + 0.5f * nx * 0.8f
+                        + 0.20f * std::sin(gPhase * 0.7f)));
+            const float sat = clamp01(material.saturation);
+            float sr = lerp(0.5f, fr, sat);
+            float sg = lerp(0.5f, fg, sat);
+            float sb = lerp(0.5f, fb, sat);
+            sr = lerp(sr, float(pal.redF()), 0.35f);
+            sg = lerp(sg, float(pal.greenF()), 0.35f);
+            sb = lerp(sb, float(pal.blueF()), 0.35f);
+
+            const float srcR = float(qRed(line[x])) / 255.0f;
+            const float srcG = float(qGreen(line[x])) / 255.0f;
+            const float srcB = float(qBlue(line[x])) / 255.0f;
+            float r = srcR;
+            float g = srcG;
+            float b = srcB;
+            const float diffuse = (0.55f + 0.45f * ndl)
+                                  * (1.0f - 0.35f * metallic);
+            r *= diffuse;
+            g *= diffuse;
+            b *= diffuse;
+
+            const QColor env = sampleColor(material.palette,
+                                           clamp01(0.5f + 0.5f * nx));
+            r += float(env.redF()) * 0.16f * metallic;
+            g += float(env.greenF()) * 0.16f * metallic;
+            b += float(env.blueF()) * 0.16f * metallic;
+
+            const float spectral =
+                (0.16f + 0.48f * clamp01(material.sheen) * fresnel)
+                * (0.5f + 0.5f * clamp01(material.dispersion));
+            r += sr * spectral;
+            g += sg * spectral;
+            b += sb * spectral;
+
+            const float specR = lerp(1.0f, sr, metallic);
+            const float specG = lerp(1.0f, sg, metallic);
+            const float specB = lerp(1.0f, sb, metallic);
+            const float specAmt = spec * (0.45f + 0.55f * metallic);
+            r += specR * specAmt;
+            g += specG * specAmt;
+            b += specB * specAmt;
+
+            const bool glint =
+                hash01(seed + 7, x, y) < clamp01(material.sparkle) * 0.012f
+                && ndh > 0.20f;
+            if (glint)
+            {
+                r = lerp(r, 0.98f, 0.85f);
+                g = lerp(g, 0.97f, 0.85f);
+                b = lerp(b, 0.92f, 0.85f);
+            }
+
+            const int outR = qBound(
+                0, int(clamp01(lerp(srcR, r, power)) * 255.0f + 0.5f), 255);
+            const int outG = qBound(
+                0, int(clamp01(lerp(srcG, g, power)) * 255.0f + 0.5f), 255);
+            const int outB = qBound(
+                0, int(clamp01(lerp(srcB, b, power)) * 255.0f + 0.5f), 255);
+            albedo[x] = qRgba(outR, outG, outB, coverage);
+
+            const float sheenAlpha =
+                clamp01(clamp01(material.sheen) * (0.12f + 0.88f * fresnel)
+                        + spec * 0.55f + (glint ? 0.55f : 0.0f))
+                * (float(coverage) / 255.0f);
+            if (sheenAlpha > 0.01f)
+            {
+                sheen[x] = qRgba(
+                    qBound(0, int((sr * 0.7f + 0.3f) * 255.0f), 255),
+                    qBound(0, int((sg * 0.7f + 0.3f) * 255.0f), 255),
+                    qBound(0, int((sb * 0.7f + 0.3f) * 255.0f), 255),
+                    int(clamp01(sheenAlpha * power) * 235.0f + 0.5f));
+            }
+        }
+    }
+    return result;
 }
 
 QImage glowField(const QImage &mask, int radius, const QColor &color,

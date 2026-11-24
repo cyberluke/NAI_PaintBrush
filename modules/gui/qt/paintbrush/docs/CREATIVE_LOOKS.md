@@ -15,10 +15,12 @@ one-undo layer commit, the deterministic art library and the acceptance
 harness. The plugin was relinked from `21d296b45f` and its embedded
 `PB_BUILD_SHA` matches that commit.
 
-Not implemented yet: independent garment / hair / skin / accessory masks, the
-four named holo materials, cancellable async rendering, and full-resolution
-effect synthesis above the 1600 px build cap. Those are the next
-material-intelligence phase, not part of this milestone.
+Not implemented yet: independent garment / hair / skin / accessory masks,
+cancellable async rendering, and full-resolution effect synthesis above the
+1600 px build cap. A four-recipe holographic material engine and the pinned
+FASHN parser export are implemented and tested as libraries; exposing them in
+the pad and adding the native parser service are the next integration steps
+(see `docs/HOLO_MATERIALS.md`).
 
 `master` is pushed to `origin/master`; `11e2cb1b47` and the follow-up fixes
 are visible on GitHub (`cyberluke/NAI_PaintBrush`).

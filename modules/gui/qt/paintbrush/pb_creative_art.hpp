@@ -19,6 +19,7 @@
 #include <QPointF>
 #include <QRectF>
 #include <QSize>
+#include <QString>
 #include <QVector>
 #include <QtGlobal>
 
@@ -126,6 +127,59 @@ QImage recolorMasked(const QImage &source, const QImage &mask,
 QImage spectralSheen(const QImage &source, const QImage &mask,
                      const QVector<QColor> &palette, float strength,
                      float angleDeg, float phase);
+
+/* --- holographic materials --------------------------------------------- */
+
+/* One material engine, four recipes. The recipes differ only in their optical
+ * parameters (film thickness, diffraction scale, metallic response, sheen,
+ * sparkle); the shader and the layer contract are identical. */
+enum class HoloMaterialId
+{
+    LiquidHologram = 0,
+    OpalDream = 1,
+    ChromaticChrome = 2,
+    PrismaticFantasy = 3,
+};
+
+struct HoloMaterial
+{
+    QString name;
+    float metallic = 0.35f;       /* 0 dielectric .. 1 metal               */
+    float roughness = 0.15f;      /* sharpness of the specular lobe        */
+    float filmThickness = 320.0f; /* thin-film thickness in nm, base       */
+    float filmVariation = 160.0f; /* nm variation with shading/orientation */
+    float grating = 1.0f;         /* diffraction cycles across the surface */
+    float dispersion = 0.8f;      /* spectral separation 0..1              */
+    float sheen = 0.6f;           /* broad clearcoat response 0..1         */
+    float sparkle = 0.15f;        /* discrete glints 0..1                  */
+    float saturation = 0.9f;      /* palette chroma 0..1                   */
+    float normalStrength = 0.6f;  /* how much the source normals matter    */
+    QVector<QColor> palette;
+};
+
+HoloMaterial holoMaterialPreset(HoloMaterialId id);
+QString holoMaterialName(HoloMaterialId id);
+
+/* Screen-space orientation from the source's own shading. The result is an
+ * ARGB32 image whose RGB channels encode a unit normal
+ * (x right, y down, z toward the viewer). This is an approximation, not 3D
+ * reconstruction; it gives the material directional highlights that follow
+ * folds instead of a flat rainbow overlay. */
+QImage estimateNormals(const QImage &source, const QImage &mask, float strength);
+
+/* Albedo (replaces the subject inside the mask) and a transparent sheen layer
+ * (screen-blended above it). Both are pure functions of the inputs and seed. */
+struct HoloMaterialResult
+{
+    QImage albedo;
+    QImage sheen;
+};
+
+HoloMaterialResult holographicMaterial(const QImage &source,
+                                       const QImage &mask,
+                                       const QImage &normals,
+                                       const HoloMaterial &material,
+                                       float strength, quint32 seed);
 
 /* --- light -------------------------------------------------------------- */
 

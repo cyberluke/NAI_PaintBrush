@@ -23,7 +23,9 @@
 #include <QImage>
 #include <QPainter>
 #include <QPoint>
+#include <QSet>
 #include <QString>
+#include <QStringList>
 
 #include <cmath>
 #include <cstdio>
@@ -432,6 +434,90 @@ void testSceneHelpers()
     check("reflection.size", reflected.size() == subjectImage().size());
 }
 
+void testHoloMaterials()
+{
+    const QImage subject = subjectImage();
+    const QImage mask = creative::maskFromAlpha(subject);
+    const QImage normals = creative::estimateNormals(subject, mask, 0.8f);
+    check("normals.size", normals.size() == subject.size());
+    check("normals.deterministic",
+          hashImage(normals)
+              == hashImage(creative::estimateNormals(subject, mask, 0.8f)));
+
+    const QImage flat = flatPatch(QColor(128, 128, 128), 64);
+    const QImage flatNormals =
+        creative::estimateNormals(flat, fullMask(flat.size()), 0.8f);
+    check("normals.flat-z",
+          qBlue(flatNormals.pixel(32, 32)) >= 253
+              && qAbs(qRed(flatNormals.pixel(32, 32)) - 128) <= 2);
+
+    const char *labels[4] = { "liquid", "opal", "chrome", "prism" };
+    QSet<quint64> fingerprints;
+    QSet<QString> names;
+    for (int i = 0; i < 4; ++i)
+    {
+        const auto id = static_cast<creative::HoloMaterialId>(i);
+        const creative::HoloMaterial material =
+            creative::holoMaterialPreset(id);
+        const QByteArray tag =
+            QStringLiteral("holo.%1").arg(labels[i]).toUtf8();
+        check((tag + ".name").constData(), !material.name.isEmpty());
+        names.insert(material.name);
+
+        const creative::HoloMaterialResult a = creative::holographicMaterial(
+            subject, mask, normals, material, 1.0f, 4242);
+        const creative::HoloMaterialResult b = creative::holographicMaterial(
+            subject, mask, normals, material, 1.0f, 4242);
+        check((tag + ".size").constData(),
+              a.albedo.size() == subject.size()
+                  && a.sheen.size() == subject.size());
+        check((tag + ".deterministic").constData(),
+              hashImage(a.albedo) == hashImage(b.albedo)
+                  && hashImage(a.sheen) == hashImage(b.sheen));
+        check((tag + ".outside").constData(),
+              qAlpha(a.albedo.pixel(0, 0)) == 0
+                  && qAlpha(a.sheen.pixel(0, 0)) == 0);
+        check((tag + ".inside").constData(),
+              qAlpha(a.albedo.pixel(110, 150)) == 255);
+        check((tag + ".sheen").constData(), hasAlpha(a.sheen));
+        fingerprints.insert(hashImage(a.albedo) ^ (hashImage(a.sheen) << 1));
+    }
+    check("holo.four-unique", fingerprints.size() == 4);
+    check("holo.names-unique", names.size() == 4);
+
+    const QImage styled =
+        creative::holographicMaterial(
+            subject, mask, normals,
+            creative::holoMaterialPreset(
+                creative::HoloMaterialId::LiquidHologram),
+            1.0f, 4242)
+            .albedo;
+    double sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
+    int n = 0;
+    for (int y = 80; y < 220; y += 3)
+    {
+        for (int x = 40; x < 180; x += 3)
+        {
+            if (qAlpha(subject.pixel(x, y)) < 200)
+                continue;
+            const double a =
+                creative::oklabLightness(QColor::fromRgba(subject.pixel(x, y)));
+            const double b =
+                creative::oklabLightness(QColor::fromRgba(styled.pixel(x, y)));
+            sx += a;
+            sy += b;
+            sxx += a * a;
+            syy += b * b;
+            sxy += a * b;
+            ++n;
+        }
+    }
+    const double denom = std::sqrt((n * sxx - sx * sx) * (n * syy - sy * sy));
+    const double corr = denom > 0 ? (n * sxy - sx * sy) / denom : 0.0;
+    std::printf("METRIC.holo.luminance-correlation|%.4f\n", corr);
+    check("holo.luminance-correlation", corr > 0.35);
+}
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -444,6 +530,7 @@ int main(int argc, char **argv)
     testElectricity();
     testColorOps();
     testSceneHelpers();
+    testHoloMaterials();
 
     std::printf("SUMMARY|%s|failures=%d\n", failures == 0 ? "PASS" : "FAIL",
                 failures);

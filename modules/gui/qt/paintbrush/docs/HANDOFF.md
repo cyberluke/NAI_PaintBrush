@@ -47,14 +47,23 @@ commit `21d296b45f`), compiled Nov 24 2026 06:09, `plugins.dat` regenerated
 effects catalogue:**
 - independent garment / hair / skin / accessory masks; the recolour uses the
   subject silhouette plus a heuristic skin guard only;
-- the four named holo materials (Liquid Hologram, Opal Dream, Chromatic
-  Chrome, Prismatic Fantasy); there is one `holo-fashion` material, displayed
-  in the pad as **Prism Muse** and exposed to the Inspector/assistant as the
-  Holographic fashion look;
+- the four named holo materials exist as tested recipes in `pb_creative_art`
+  (Liquid Hologram, Opal Dream, Chromatic Chrome, Prismatic Fantasy), but are
+  not yet exposed in the pad/assistant; `holo-fashion` remains the one shipped
+  look, displayed as **Prism Muse**;
 - cancellable async rendering; the creative build is synchronous and capped at
   1600 px, so large exports upscale effect layers rather than synthesising at
   the target resolution;
 - material-aware Play Pad gestures.
+
+**Foundation added 2026-11-24 (not yet wired):** the material engine has a
+normal estimator and four recipes (art harness passes; Liquid keeps 0.9235
+lightness correlation with the source). `scripts/pb-fashn-export.py` exports
+the pinned 18-class FASHN parser (rev `1f80c34...`, ONNX sha
+`085df81a...`) and validates real class counts on a fashion example. The pad
+wiring and the native parser service are the next integration step; see
+`docs/HOLO_MATERIALS.md`. The active uncommitted Play Pad work in the tree was
+left untouched.
 
 ## 1. Repository / build (historical 2026-11-22 — see §0 for current)
 
