@@ -28,6 +28,7 @@
 #include <QFileInfo>
 #include <QPainter>
 #include <QStandardPaths>
+#include <QUrl>
 #include <algorithm>
 #include <cmath>
 
@@ -1755,6 +1756,95 @@ QString PaintbrushController::runCreativeSelfTest()
     note(!m_creative->chooserOpen()
              ? QStringLiteral("chooser selection: OK")
              : QStringLiteral("FAIL: chooser stayed open"));
+
+    /* Opt-in real-video track: decode three real PTS frames through the same
+     * edit source used by tracking, then exercise the controller pose path and
+     * both tracked recipes. The test track uses a synthetic foreground mask;
+     * the acceptance harness covers real SAM3 masks separately. */
+    const QString realTrackVideo =
+        qEnvironmentVariable("PB_CREATIVE_TRACK_VIDEO");
+    if (!realTrackVideo.isEmpty() && QFileInfo::exists(realTrackVideo))
+    {
+        const QString mrl = QUrl::fromLocalFile(realTrackVideo).toString();
+        const QVector<qint64> times{ 53600, 64320, 96480 };
+        const DecodedFrame probe =
+            m_editSource.request(FrameRef{ mrl, {}, times.first() });
+        if (!probe.ok())
+        {
+            note(QStringLiteral("FAIL: real-track decode at %1 ms")
+                     .arg(times.first()));
+        }
+        else
+        {
+            QImage mask(probe.image.size(), QImage::Format_ARGB32);
+            mask.fill(Qt::transparent);
+            QPainter maskPainter(&mask);
+            maskPainter.setRenderHint(QPainter::Antialiasing, true);
+            maskPainter.setPen(Qt::NoPen);
+            maskPainter.setBrush(Qt::white);
+            maskPainter.drawEllipse(
+                QRectF(mask.width() * 0.18, mask.height() * 0.08,
+                       mask.width() * 0.64, mask.height() * 0.84));
+            maskPainter.end();
+
+            ObjectTrack track;
+            track.id = 9001;
+            track.sourceMRL = mrl;
+            track.startMs = times.first();
+            track.endMs = times.last();
+            track.complete = true;
+            for (int i = 0; i < times.size(); ++i)
+            {
+                TrackKeyframe kf;
+                kf.frameIndex = i;
+                kf.timeMs = times.at(i);
+                kf.mask = mask;
+                kf.confidence = 0.9f;
+                track.keyframes.append(kf);
+            }
+
+            const QVector<ObjectTrack> oldTracks = m_document.tracks();
+            const int oldSelected = m_selectedTrackId;
+            QVector<ObjectTrack> tracks = oldTracks;
+            tracks.append(track);
+            m_document.setTracks(tracks);
+            setSelectedTrackId(track.id);
+
+            QVector<qint64> posePts;
+            const QVector<QImage> poses = collectCreativePoses(3, &posePts);
+            note(poses.size() == 3 && posePts == times
+                     ? QStringLiteral("real-track controller decode: 3 exact PTS")
+                     : QStringLiteral("FAIL: real-track controller decode (%1 poses)")
+                           .arg(poses.size()));
+
+            const int beforeLineup = m_document.layers().size();
+            const QString lineupError = createPastelLineup();
+            const int lineupAdded = m_document.layers().size() - beforeLineup;
+            note(lineupError.isEmpty() && lineupAdded > 0
+                     ? QStringLiteral("real-track pastel lineup: +%1 layers")
+                           .arg(lineupAdded)
+                     : QStringLiteral("FAIL: real-track pastel lineup %1")
+                           .arg(lineupError));
+            undo();
+            if (m_document.layers().size() != beforeLineup)
+                note(QStringLiteral("FAIL: real-track lineup undo"));
+
+            const int beforeEcho = m_document.layers().size();
+            const QString echoError = createMotionEcho();
+            const int echoAdded = m_document.layers().size() - beforeEcho;
+            note(echoError.isEmpty() && echoAdded > 0
+                     ? QStringLiteral("real-track motion echo: +%1 layers")
+                           .arg(echoAdded)
+                     : QStringLiteral("FAIL: real-track motion echo %1")
+                           .arg(echoError));
+            undo();
+            if (m_document.layers().size() != beforeEcho)
+                note(QStringLiteral("FAIL: real-track echo undo"));
+
+            m_document.setTracks(oldTracks);
+            setSelectedTrackId(oldSelected);
+        }
+    }
 
     /* leave a composed stage open for the screenshot */
     for (int i = 0; i < m_document.layers().size(); ++i)

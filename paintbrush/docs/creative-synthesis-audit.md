@@ -235,6 +235,24 @@ the same shared pose-selection helper used by `collectCreativePoses()`, but the
 track object is built in the harness from real frames rather than by driving
 the app's `TrackingService`; the end-to-end UI track path remains open.
 
+### 2.8 Opt-in controller real-track test
+
+`scripts/pb-creative-real-track.ps1 -Video <clip>` launches the creative
+self-test with `PB_CREATIVE_TRACK_VIDEO` set. The test decodes the three real
+PTS frames through the controller's `EditFrameSource`, builds a temporary
+three-keyframe `ObjectTrack` with a synthetic foreground mask (real SAM3 masks
+are covered by the harness above), then exercises the controller itself:
+
+- `collectCreativePoses()` returns **3 exact PTS poses**
+- `createPastelLineup()` adds **+6 layers**, one undo restores the prior count
+- `createMotionEcho()` adds **+5 layers**, one undo restores the prior count
+- full self-test: **RESULT: PASS**
+
+The run is archived at
+`paintbrush/docs/creative-synthesis-assets/real-track-selftest-report.txt`.
+This closes the controller decode + recipe wiring with real video; creating the
+track through the live `TrackingService` UI is still the remaining step.
+
 ## 3. Coverage against the spec
 
 | Spec area | Status | Notes |
@@ -270,12 +288,12 @@ the app's `TrackingService`; the end-to-end UI track path remains open.
 
 These are the things a reviewer should not assume are finished:
 
-1. **Tracked-pose Lineup/Echo still needs an end-to-end app track.** The shared
-   `creative::collectTrackedPoses()` helper is now verified with three real
-   frames/masks at exact PTS (34/34 harness checks), and the controller uses the
-   same helper; the self-test fixture itself has no track. What remains is
-   driving a live `TrackingService` track through `collectCreativePoses()` and
-   the Lineup/Echo recipes in the app UI.
+1. **Tracked-pose Lineup/Echo needs a live TrackingService UI track.** The
+   controller pose path and both recipes now pass an opt-in real-video test
+   (3 exact PTS, Pastel +6, Motion Echo +5, one undo), and the shared selection
+   helper is covered with real frames/masks; the test builds its own track with
+   a synthetic mask. What remains is creating that track through the live
+   `TrackingService` UI instead of a test-constructed `ObjectTrack`.
 2. **Scene Forge, Auto Splatter and Stage Door are shipped, but Photo Regime H,
    the rigged Stage mode and the broader scene-layer family are still missing.**
 3. **Agent strokes are deterministic/offline, not model-planned.** The assistant
