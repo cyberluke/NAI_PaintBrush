@@ -128,9 +128,11 @@ QColor stageLightColor(const QString &patchId)
         || patchId == QLatin1String("kaleido")
         || patchId == QLatin1String("motion-echo"))
         return QColor(130, 232, 255);
-    if (patchId == QLatin1String("sticker-forge")
-        || patchId == QLatin1String("pastel-stage")
-        || patchId == QLatin1String("scene-forge")
+    if (patchId == QLatin1String("sticker-forge"))
+        return QColor(255, 205, 90);
+    if (patchId == QLatin1String("pastel-stage"))
+        return QColor(180, 150, 255);
+    if (patchId == QLatin1String("scene-forge")
         || patchId == QLatin1String("stage-mode"))
         return QColor(255, 236, 196);
     if (patchId == QLatin1String("nocturne")
@@ -1302,8 +1304,8 @@ QVector<CreativePiece> PaintbrushCreative::buildPatch(const QString &patchId,
     /* a real body response: the subject itself breathes and lifts with Y so
      * the pad is never just a subtle tint change */
     CreativeMotion subjectM;
-    subjectM.scaleY = 0.045f;
-    subjectM.dyY = -0.020f;
+    subjectM.scaleY = 0.060f;
+    subjectM.dyY = -0.025f;
     subjectM.opacityY = 0.03f;
 
     auto drawAt = [](QImage &dst, const QImage &src, const QRectF &r) {

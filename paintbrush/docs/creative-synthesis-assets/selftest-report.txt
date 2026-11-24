@@ -12,15 +12,15 @@ preview holo-fashion 544x680
 preview scene-forge 544x680
 preview auto-splatter 544x680
 preview stage-mode 544x680
-pad reaction neon-idol: 16.84/255
-pad reaction electric-kpop: 8.97/255
-pad reaction sticker-forge: 5.79/255
-pad reaction pastel-stage: 3.67/255
+pad reaction neon-idol: 19.31/255
+pad reaction electric-kpop: 8.90/255
+pad reaction sticker-forge: 5.83/255
+pad reaction pastel-stage: 3.80/255
 gesture record: OK
 gesture loop: OK
-preview p95: 6.81 ms (13 samples)
+preview p95: 5.98 ms (13 samples)
 commit neon: +12 layers
-commit neon: 696.4 ms
+commit neon: 830.8 ms
 recent look history: 1 (Neon Idol)
 save/reopen/export: OK (14 layers, 10143 KB)
 suggestion kind: ribbon

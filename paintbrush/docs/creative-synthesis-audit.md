@@ -153,10 +153,10 @@ idol fixture, then:
    report and leaves the pad open.
 
 Latest report: `paintbrush/docs/creative-synthesis-assets/selftest-report.txt`
-(**RESULT: PASS**, 13-patch run: preview p95 **6.81 ms**, Neon commit
-**696.4 ms**, reload and export **14 layers / 10,143 KB**. Pad-reaction pixel
-deltas per sampled channel: Neon Idol **16.84/255**, Voltage Idol **8.97/255**,
-Sticker Forge **5.79/255**, Pastel Stage **3.67/255** — all four visibly answer
+(**RESULT: PASS**, 13-patch run: preview p95 **5.98 ms**, Neon commit
+**830.8 ms**, reload and export **14 layers / 10,143 KB**. Pad-reaction pixel
+deltas per sampled channel: Neon Idol **19.31/255**, Voltage Idol **8.90/255**,
+Sticker Forge **5.83/255**, Pastel Stage **3.80/255** — all four visibly answer
 the pad.). Generated previews:
 `selftest-neon-idol.png`, `selftest-sticker-forge.png`,
 `selftest-pastel-stage.png`, `selftest-nocturne.png`,
