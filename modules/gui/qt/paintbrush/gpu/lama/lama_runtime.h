@@ -126,12 +126,29 @@ typedef struct PblmMask
     int32_t threshold;
 } PblmMask;
 
+/* Phase timing, all in milliseconds from std::chrono::steady_clock:
+ *
+ *   mask_analysis_ms  mask scan + connected-component/pass planning (plus the
+ *                     source-to-RGBA setup copy); done once per request
+ *   preprocess_ms     per-pass ROI mask + dilation + 512 tensor resampling
+ *   inference_ms      Ort::Session::Run for the pass(es)
+ *   postprocess_ms    COMPOSITING: output decode, feather alpha and the
+ *                     feathered write-back of every pass into the caller's
+ *                     full-canvas RGBA buffer
+ *   total_ms          whole pblm_inpaint() call (DLL side)
+ *   load_ms           persistent session/model load, measured once at
+ *                     create_session(); repeated here for context
+ *
+ * Timing fields are appended only; callers that pass an older struct_size get
+ * the fields that fit and zero for the rest (see the bounded copy in
+ * pblm_inpaint / pblm_get_backend_info). Fields are valid only on PBLM_OK.
+ * There is no per-pixel logging: at most a fixed set of phase totals per run. */
 typedef struct PblmRunInfo
 {
     uint32_t struct_size;
     double preprocess_ms;
     double inference_ms;
-    double postprocess_ms;
+    double postprocess_ms;   /* compositing; see the phase list above */
     double total_ms;
     int32_t input_size;      /* model-space square size                        */
     int32_t roi_x;           /* context ROI in source pixels                   */
@@ -146,6 +163,9 @@ typedef struct PblmRunInfo
     char backend[96];        /* e.g. "CUDAExecutionProvider (NVIDIA RTX 4090)"  */
     char model_sha256[65];   /* actual hash of the loaded graph                */
     char error[512];
+    /* Appended in ABI 1 without moving any earlier field. */
+    double load_ms;          /* persistent session/model load                  */
+    double mask_analysis_ms; /* mask scan + component/pass planning            */
 } PblmRunInfo;
 
 typedef struct PblmApi

@@ -128,9 +128,13 @@ static QString layerToJson(const CanvasLayer &layer)
             QString::fromLatin1(layer.materialState.toBase64());
     if (layer.harvestId > 0)
         obj[QStringLiteral("harvestId")] = layer.harvestId;
-    if (layer.puppetAssetId > 0)
+    /* Stored Living Harvest assets and derived Photo Regime H / Rigged Stage
+     * layers both persist their typed effect envelope; only stored assets
+     * carry an id (derived rigs rebuild from the committed layer raster). */
+    if (layer.puppetAssetId > 0 || layer.hasPuppet())
     {
-        obj[QStringLiteral("puppetAssetId")] = layer.puppetAssetId;
+        if (layer.puppetAssetId > 0)
+            obj[QStringLiteral("puppetAssetId")] = layer.puppetAssetId;
         const QByteArray fx = layer.puppetEffect.serialize();
         if (!fx.isEmpty())
             obj[QStringLiteral("puppetEffect")] =

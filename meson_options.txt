@@ -821,6 +821,11 @@ option('sam3',
        value: 'auto',
        description: 'sam3.cpp inference library')
 
+option('paintbrush_test_hook',
+       type: 'feature',
+       value: 'auto',
+       description: 'Paintbrush real-process acceptance hook (dev/test builds only; never in release)')
+
 option('ndi',
        type: 'feature',
        value: 'auto',

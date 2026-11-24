@@ -701,6 +701,37 @@ Item {
                                     onToggled: PaintbrushCtx.setLivingPreviewPaused(checked)
                                 }
                             }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: VLCStyle.margin_xsmall
+
+                                Switch {
+                                    Layout.fillWidth: true
+                                    text: qsTr("Living motion")
+                                    checked: PaintbrushCtx.creative.livingMotion
+                                    onToggled: PaintbrushCtx.creative.setLivingMotion(checked)
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: VLCStyle.margin_xsmall
+
+                                Widgets.LabelExt {
+                                    text: qsTr("Motion amount")
+                                    color: theme.fg.secondary
+                                    font.pixelSize: VLCStyle.fontSize_small
+                                }
+                                Slider {
+                                    Layout.fillWidth: true
+                                    from: 0.35
+                                    to: 1.0
+                                    stepSize: 0.05
+                                    value: PaintbrushCtx.creative.motionAmount
+                                    onMoved: PaintbrushCtx.creative.motionAmount = value
+                                }
+                            }
                         }
                     }
 

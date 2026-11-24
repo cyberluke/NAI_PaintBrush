@@ -6,6 +6,7 @@
 
 #include "pb_document.hpp"
 #include "pb_history.hpp"
+#include "pb_stage.hpp"
 #include "art/style/mood.hpp"
 #include "art/style/typography_style.hpp"
 #include "art/surface/paper_renderer.hpp"
@@ -43,8 +44,14 @@ PaintbrushDocument::PaintbrushDocument(QObject *parent)
 bool PaintbrushDocument::hasVisibleLivingLayer() const
 {
     for (const CanvasLayer &l : m_layers)
-        if (l.visible && l.hasPuppet() && m_puppets.byId(l.puppetAssetId))
+    {
+        if (!l.visible || !l.hasPuppet())
+            continue;
+        /* stored assets must still exist; derived stage rigs are rebuilt from
+         * the committed raster on demand */
+        if (l.puppetAssetId <= 0 || m_puppets.byId(l.puppetAssetId))
             return true;
+    }
     return false;
 }
 
@@ -631,9 +638,18 @@ QImage DocumentRenderer::effectiveSourceAt(const CanvasLayer &layer, const Conte
      * puppet frame is cutout-sized and flows through the same scale/mask/
      * finish path as any other source. */
     if (layer.hasPuppet() && doc) {
-        const motion::PuppetAsset *asset = doc->puppets()->byId(layer.puppetAssetId);
-        if (asset)
-            src = motion::PuppetRuntime::renderAtTime(*asset, layer.puppetEffect, timeMs);
+        if (layer.puppetAssetId > 0) {
+            const motion::PuppetAsset *asset =
+                doc->puppets()->byId(layer.puppetAssetId);
+            if (asset)
+                src = motion::PuppetRuntime::renderAtTime(*asset,
+                                                          layer.puppetEffect,
+                                                          timeMs);
+        } else if (StageRuntime::isDerivedLiving(layer)) {
+            /* Photo Regime H / Rigged Stage: same canonical time path, rig
+             * derived from the committed cutout layer itself. */
+            src = StageRuntime::renderDerivedFrame(layer, timeMs);
+        }
     }
 
     /* 1) source pixels at the context scale */
@@ -775,18 +791,34 @@ void DocumentRenderer::compositeLayerAt(QImage &target, const QRect &region,
     }
     if (layer.raster.isNull())
         return;
-    if (!layer.hasEnabledEffects() && !layer.hasPuppet())
+
+    /* Rigged Stage: deterministic parallax + light pulse are applied to the
+     * normal layer placement/opacity, from the SAME canonical time as Living
+     * Harvest. The layer raster/metadata are read-only here. */
+    CanvasLayer work = layer;
+    const bool stageAnimated = StageRuntime::isStageAnimated(layer);
+    if (stageAnimated)
+    {
+        work.position += StageRuntime::parallaxOffset(layer, doc.canvasSize(),
+                                                      timeMs);
+        work.opacity = qBound(0.0f,
+                              layer.opacity
+                                  * StageRuntime::lightGain(layer, timeMs),
+                              1.0f);
+    }
+
+    if (!layer.hasEnabledEffects() && !layer.hasPuppet() && !stageAnimated)
     {
         compositeLayerRaw(target, region, layer);
         return;
     }
     QPoint off;
-    QImage src = effectiveSourceAt(layer, ctx, &off, &doc, timeMs);
-    CanvasLayer tmp = layer;
+    QImage src = effectiveSourceAt(work, ctx, &off, &doc, timeMs);
+    CanvasLayer tmp = work;
     tmp.raster = src;
     tmp.mask = QImage();
     tmp.effects.clear();
-    tmp.position = layer.position + QPointF(off);
+    tmp.position = work.position + QPointF(off);
     compositeLayerRaw(target, region, tmp);
 }
 
@@ -925,8 +957,20 @@ QImage renderScaledFrame(const PaintbrushDocument &doc, float scale,
     {
         if (!layer.visible || layer.raster.isNull())
             continue;
+
+        CanvasLayer work = layer;
+        if (StageRuntime::isStageAnimated(layer))
+        {
+            work.position += StageRuntime::parallaxOffset(layer, canvas,
+                                                          timeMs);
+            work.opacity = qBound(0.0f,
+                                  layer.opacity
+                                      * StageRuntime::lightGain(layer, timeMs),
+                                  1.0f);
+        }
+
         QPoint off;
-        const QImage src = DocumentRenderer::effectiveSourceAt(layer, ctx, &off, &doc, timeMs);
+        const QImage src = DocumentRenderer::effectiveSourceAt(work, ctx, &off, &doc, timeMs);
         if (src.isNull())
             continue;
         /* src pixel -> (translate off) -> local/scale -> layer transform ->
@@ -934,13 +978,13 @@ QImage renderScaledFrame(const PaintbrushDocument &doc, float scale,
         const QTransform full =
             QTransform::fromTranslate(off.x(), off.y()) *
             QTransform::fromScale(1.0 / scale, 1.0 / scale) *
-            layer.transform() *
+            work.transform() *
             QTransform::fromScale(scale, scale);
         QPainter p(&result);
         p.setRenderHint(QPainter::SmoothPixmapTransform, true);
         p.setRenderHint(QPainter::Antialiasing, true);
-        p.setOpacity(layer.opacity);
-        p.setCompositionMode(toCompositionMode(layer.blendMode));
+        p.setOpacity(work.opacity);
+        p.setCompositionMode(toCompositionMode(work.blendMode));
         p.setTransform(full);
         p.drawImage(QPoint(0, 0), src);
         p.end();

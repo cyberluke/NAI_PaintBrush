@@ -13,6 +13,7 @@
 #define PB_CONTROLLER_HPP
 
 #include "pb_common.hpp"
+#include "pb_test_hook_gate.h"
 #include "pb_selection.hpp"
 #include "pb_document.hpp"
 #include "pb_layer_model.hpp"
@@ -41,6 +42,7 @@
 #include <QTransform>
 #include <QUrl>
 #include <QTimer>
+#include <QElapsedTimer>
 #include <QVariantList>
 
 #ifdef HAVE_CONFIG_H
@@ -57,7 +59,9 @@ namespace paintbrush {
 
 class PaintbrushCanvasItem;
 class PaintbrushCreative;
+#if PAINTBRUSH_HAS_TEST_HOOK
 class PaintbrushTestHook;
+#endif
 
 /* The presentation mode of the central canvas area.
  *
@@ -190,6 +194,14 @@ class PaintbrushController : public QObject
     Q_PROPERTY(QVariantList assistantToolCalls READ assistantToolCalls NOTIFY assistantToolsChanged FINAL)
     Q_PROPERTY(bool assistantBusy READ assistantBusy NOTIFY assistantStateChanged FINAL)
     Q_PROPERTY(bool kidsNetworkAllowed READ kidsNetworkAllowed NOTIFY companionStateChanged FINAL)
+    /* Deterministic, state-driven Buddy/Kids nudge. It is not an AI reply
+     * and it never blocks painting; accepting it only performs a small,
+     * reversible editor action: pick a tool, add a layer or reopen a look. */
+    Q_PROPERTY(bool companionSuggestionVisible READ companionSuggestionVisible NOTIFY companionSuggestionChanged FINAL)
+    Q_PROPERTY(QString companionSuggestionText READ companionSuggestionText NOTIFY companionSuggestionChanged FINAL)
+    Q_PROPERTY(QString companionSuggestionKind READ companionSuggestionKind NOTIFY companionSuggestionChanged FINAL)
+    Q_PROPERTY(QString companionSuggestionAction READ companionSuggestionAction NOTIFY companionSuggestionChanged FINAL)
+    Q_PROPERTY(QString companionSuggestionActionLabel READ companionSuggestionActionLabel NOTIFY companionSuggestionChanged FINAL)
 
     Q_PROPERTY(QString currentMediaTitle READ currentMediaTitle NOTIFY mediaStateChanged FINAL)
     Q_PROPERTY(QString currentMediaMRL READ currentMediaMRL NOTIFY mediaStateChanged FINAL)
@@ -291,6 +303,10 @@ public:
     Q_INVOKABLE QString renameCreativeGroup(const QString &group,
                                             const QString &name);
     Q_INVOKABLE QString deleteCreativeGroup(const QString &group);
+    /* Rigged Stage: commit the Play Pad subject (or the selected cutout) as a
+     * non-destructive 2D stage scene — living subject + editable foreground/
+     * background props + parallax + light + real Powder, as ONE undo. */
+    Q_INVOKABLE QString makeRiggedStage();
     Q_INVOKABLE void addCreativeSparkle(const QColor &color,
                                         const QPointF &canvasPos, double sizePx);
     void addCreativeRibbon(const QColor &color, const QRectF &subjectRect,
@@ -304,6 +320,12 @@ public:
                                     QString *label) const;
     bool creativeLookInfo(int layerIndex, QVariantMap *info, QImage *cutout,
                           QRectF *canvasRect, QString *label) const;
+    /* Photo Regime H bridge: resolve the existing photo-safe motion clip for
+     * the pad subject (stored Living Harvest asset or derived stage layer).
+     * Never rigs, never mutates the document. */
+    bool creativeLivingSource(int sourceLayerId, int harvestId,
+                              motion::PuppetMotionClip *clip, int *assetId,
+                              float *defaultAmplitude) const;
     QSize creativePadCanvasSize() const;
     /* Append the committed creative pieces as ONE undoable composite and
      * hide the source layer (by id) so the derivative never doubles it.
@@ -611,9 +633,11 @@ public:
                                                   int outline,
                                                   const QString &outlineColor,
                                                   bool shadow, double scale) const;
-    /* TEST-ONLY (PB_TEST_HOOK): apply a real SAM3 mask through the same
-     * authoritative object-selection state the production segmentation path
-     * uses. Inert unless the PB_TEST_HOOK environment variable is set. */
+    /* TEST-ONLY (PAINTBRUSH_TEST_HOOK): apply a real SAM3 mask through the
+     * same authoritative object-selection state the production segmentation
+     * path uses. The hook is compiled in only for dev/test builds (Meson
+     * option `paintbrush_test_hook`); in a release build these return
+     * false/an empty string and nothing listens. */
     Q_INVOKABLE bool testApplyObjectMask(const QImage &mask);
     Q_INVOKABLE QString testLamaBackend() const;
     Q_INVOKABLE void removeObject(const QString &prompt);
@@ -638,6 +662,9 @@ public:
     Q_INVOKABLE void companionClearConversation();
     Q_INVOKABLE void cancelAssistant();
     Q_INVOKABLE void setKidsNetworkAllowed(bool allowed);
+    Q_INVOKABLE void refreshCompanionSuggestion();
+    Q_INVOKABLE void acceptCompanionSuggestion();
+    Q_INVOKABLE void dismissCompanionSuggestion();
     int companionTalkLevel() const;
     void setCompanionTalkLevel(int level);
 
@@ -763,6 +790,20 @@ public:
     QVariantList assistantToolCalls() const { return m_assistantToolCalls; }
     bool assistantBusy() const { return m_assistantBusy; }
     bool kidsNetworkAllowed() const { return m_companion.networkAllowed(); }
+    bool companionSuggestionVisible() const
+    {
+        return (m_companion.mode() == CompanionService::MODE_BUDDY
+                || m_companion.mode() == CompanionService::MODE_KIDS)
+               && m_companion.talkLevel() > 0
+               && !m_companionSuggestion.text.isEmpty();
+    }
+    QString companionSuggestionText() const { return m_companionSuggestion.text; }
+    QString companionSuggestionKind() const { return m_companionSuggestion.kind; }
+    QString companionSuggestionAction() const { return m_companionSuggestion.action; }
+    QString companionSuggestionActionLabel() const
+    {
+        return m_companionSuggestion.actionLabel;
+    }
 
     QString currentMediaTitle() const;
     QString currentMediaMRL() const;
@@ -1069,6 +1110,7 @@ signals:
     void visionStateChanged();
     void generationStateChanged();
     void companionStateChanged();
+    void companionSuggestionChanged();
     void assistantStreamChanged();
     void assistantToolsChanged();
     void assistantStateChanged();
@@ -1214,6 +1256,10 @@ private:
     void pushRecentProject(const QString &path);
     void buildTrackObject();
     void triggerCompanionEvent(const QString &event);
+    /* Deterministic Buddy/Kids suggestion plumbing (no AI, no new service). */
+    QVariantMap companionContext() const;
+    void scheduleCompanionSuggestion();
+    void clearCompanionSuggestion();
     QImage objectCrop() const;
     QImage selectionCrop() const;
     /* P1 source split: native vs composition AI source.
@@ -1340,7 +1386,9 @@ private:
     PaintbrushLayerModel *m_layerModel = nullptr;
     UndoStack m_undoStack;
     PaintbrushCanvasItem *m_canvas = nullptr;
+#if PAINTBRUSH_HAS_TEST_HOOK
     PaintbrushTestHook *m_testHook = nullptr;
+#endif
 
     SegmentationService m_segmentation;
     MattingService m_matting;
@@ -1528,6 +1576,11 @@ private:
     QString m_assistantConversationId;
     QVariantList m_lookupMatches;
     QString m_companionModeOffReason;
+    CompanionService::Suggestion m_companionSuggestion;
+    QString m_companionSuggestionSignature;
+    QString m_companionSuggestionDismissed;
+    QTimer m_companionSuggestionTimer;
+    QElapsedTimer m_companionSuggestionCooldown;
     /* recovery autosave state */
     bool m_recoveryAvailable = false;
     QString m_recoveryDescription;

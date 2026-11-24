@@ -140,10 +140,25 @@ public:
                 return true;
         return false;
     }
-    /* Living layer: a puppet asset attached AND an audible amplitude. */
+    /* Derived Living Harvest (Photo Regime H / Rigged Stage): the rig is
+     * rebuilt deterministically from this layer's own committed raster, so
+     * no store id is needed. The raster is never mutated. */
+    bool hasDerivedLiving() const
+    {
+        return puppetAssetId <= 0 && puppetEffect.amplitude > 0.01f
+            && metadata.value(QStringLiteral("stage.living")).toBool();
+    }
+    /* Living layer: a stored puppet asset OR a derived stage rig attached,
+     * with an audible amplitude. */
     bool hasPuppet() const
     {
-        return puppetAssetId > 0 && puppetEffect.amplitude > 0.01f;
+        return puppetEffect.amplitude > 0.01f
+            && (puppetAssetId > 0 || hasDerivedLiving());
+    }
+    /* A member of a Rigged Stage scene (subject/props/powder). */
+    bool isStageLayer() const
+    {
+        return metadata.contains(QStringLiteral("stage.scene"));
     }
 };
 

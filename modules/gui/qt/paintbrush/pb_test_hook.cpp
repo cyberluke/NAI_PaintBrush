@@ -34,6 +34,8 @@
 #include <QUuid>
 #include <QDebug>
 
+#if PAINTBRUSH_HAS_TEST_HOOK
+
 namespace paintbrush {
 
 PaintbrushTestHook::PaintbrushTestHook(PaintbrushController *controller,
@@ -620,3 +622,5 @@ void PaintbrushTestHook::dispatch(QTcpSocket *socket, const QJsonObject &request
 }
 
 } // namespace paintbrush
+
+#endif /* PAINTBRUSH_HAS_TEST_HOOK */

@@ -13,6 +13,7 @@
 #include "pb_controller.hpp"
 #include "pb_document.hpp"
 #include "pb_creative_art.hpp"
+#include "pb_stage.hpp"
 
 #include <QLinearGradient>
 #include <QPainter>
@@ -122,6 +123,48 @@ QString suggestionKindFor(const QString &patchId)
     return QStringLiteral("ribbon");
 }
 
+/* The material looks are one engine with surface-specific recipes (see
+ * pb_creative_art.hpp). The patch id selects a preset; it never selects a
+ * second renderer. */
+bool isHoloMaterialPatch(const QString &patchId)
+{
+    return patchId == QLatin1String("holo-liquid")
+           || patchId == QLatin1String("holo-opal")
+           || patchId == QLatin1String("holo-chrome")
+           || patchId == QLatin1String("holo-prism")
+           || patchId == QLatin1String("holo-wrap")
+           || patchId == QLatin1String("holo-chameleon")
+           || patchId == QLatin1String("holo-glitter")
+           || patchId == QLatin1String("holo-livery");
+}
+
+bool isAutomotivePatch(const QString &patchId)
+{
+    return patchId == QLatin1String("holo-wrap")
+           || patchId == QLatin1String("holo-chameleon")
+           || patchId == QLatin1String("holo-glitter")
+           || patchId == QLatin1String("holo-livery");
+}
+
+creative::HoloMaterialId holoMaterialIdForPatch(const QString &patchId)
+{
+    if (patchId == QLatin1String("holo-opal"))
+        return creative::HoloMaterialId::OpalDream;
+    if (patchId == QLatin1String("holo-chrome"))
+        return creative::HoloMaterialId::ChromaticChrome;
+    if (patchId == QLatin1String("holo-prism"))
+        return creative::HoloMaterialId::PrismaticFantasy;
+    if (patchId == QLatin1String("holo-wrap"))
+        return creative::HoloMaterialId::HolographicWrap;
+    if (patchId == QLatin1String("holo-chameleon"))
+        return creative::HoloMaterialId::ChameleonPaint;
+    if (patchId == QLatin1String("holo-glitter"))
+        return creative::HoloMaterialId::GlitterMetallic;
+    if (patchId == QLatin1String("holo-livery"))
+        return creative::HoloMaterialId::ElectricLivery;
+    return creative::HoloMaterialId::LiquidHologram;
+}
+
 QColor stageLightColor(const QString &patchId)
 {
     if (patchId == QLatin1String("neon-idol")
@@ -139,6 +182,21 @@ QColor stageLightColor(const QString &patchId)
     if (patchId == QLatin1String("nocturne")
         || patchId == QLatin1String("holo-fashion"))
         return QColor(205, 160, 255);
+    if (patchId == QLatin1String("holo-liquid")
+        || patchId == QLatin1String("holo-opal"))
+        return QColor(205, 160, 255);
+    if (patchId == QLatin1String("holo-chrome"))
+        return QColor(232, 246, 255);
+    if (patchId == QLatin1String("holo-prism"))
+        return QColor(255, 61, 218);
+    if (patchId == QLatin1String("holo-wrap"))
+        return QColor(0, 140, 255);
+    if (patchId == QLatin1String("holo-chameleon"))
+        return QColor(0, 195, 135);
+    if (patchId == QLatin1String("holo-glitter"))
+        return QColor(255, 224, 130);
+    if (patchId == QLatin1String("holo-livery"))
+        return QColor(0, 234, 255);
     if (patchId == QLatin1String("ink-creature"))
         return QColor(255, 230, 180);
     if (patchId == QLatin1String("auto-splatter"))
@@ -215,6 +273,54 @@ const QVector<PaintbrushCreative::PatchDef> &PaintbrushCreative::catalog()
           QStringLiteral("Drag across the spectrum, lift for chrome, hold for the sheen."),
           QStringLiteral("Give the next pose a different colourway."),
           QColor(255, 61, 218), QColor(0, 229, 255), QColor(4, 16, 26) },
+        { QStringLiteral("holo-liquid"), QStringLiteral("Liquid Hologram"),
+          QStringLiteral("Liquid light, zero filter."),
+          QStringLiteral("Material"),
+          QStringLiteral("Drag for flow, lift for the rainbow, hold for the gloss."),
+          QStringLiteral("Let one fold keep a pure white highlight."),
+          QColor(0, 229, 255), QColor(124, 77, 255), QColor(4, 16, 26) },
+        { QStringLiteral("holo-opal"), QStringLiteral("Opal Dream"),
+          QStringLiteral("Pearl light, soft future."),
+          QStringLiteral("Material"),
+          QStringLiteral("Drag for pearl drift, lift for softness."),
+          QStringLiteral("Pair it with pastel paper."),
+          QColor(184, 242, 230), QColor(255, 214, 224), QColor(4, 16, 26) },
+        { QStringLiteral("holo-chrome"), QStringLiteral("Chromatic Chrome"),
+          QStringLiteral("Liquid metal, main character."),
+          QStringLiteral("Material"),
+          QStringLiteral("Drag for the reflection, lift for the shine."),
+          QStringLiteral("Add one hard white glint."),
+          QColor(200, 205, 215), QColor(110, 140, 190), QColor(4, 16, 26) },
+        { QStringLiteral("holo-prism"), QStringLiteral("Prismatic Fantasy"),
+          QStringLiteral("Full-spectrum glitter storm."),
+          QStringLiteral("Material"),
+          QStringLiteral("Drag for diffraction, lift for the sparkle."),
+          QStringLiteral("Scatter three more butterflies."),
+          QColor(255, 47, 185), QColor(0, 229, 255), QColor(4, 16, 26) },
+        { QStringLiteral("holo-wrap"), QStringLiteral("Holographic Wrap"),
+          QStringLiteral("The whole body is the material."),
+          QStringLiteral("Automotive"),
+          QStringLiteral("Drag for the wrap flow, lift for the clearcoat."),
+          QStringLiteral("Keep the panel lines readable."),
+          QColor(0, 140, 255), QColor(110, 60, 200), QColor(4, 16, 26) },
+        { QStringLiteral("holo-chameleon"), QStringLiteral("Chameleon Paint"),
+          QStringLiteral("One colour, every angle."),
+          QStringLiteral("Automotive"),
+          QStringLiteral("Drag to shift the hue, lift for the gloss."),
+          QStringLiteral("Let the roofline catch the shift."),
+          QColor(0, 190, 130), QColor(80, 30, 150), QColor(4, 16, 26) },
+        { QStringLiteral("holo-glitter"), QStringLiteral("Glitter Metallic"),
+          QStringLiteral("Metal with a pulse."),
+          QStringLiteral("Automotive"),
+          QStringLiteral("Drag for the flake, lift for the glare."),
+          QStringLiteral("Keep the glass clean."),
+          QColor(255, 224, 130), QColor(120, 180, 255), QColor(4, 16, 26) },
+        { QStringLiteral("holo-livery"), QStringLiteral("Electric Livery"),
+          QStringLiteral("Neon on the bodywork."),
+          QStringLiteral("Automotive"),
+          QStringLiteral("Drag for the current, lift for the discharge."),
+          QStringLiteral("Leave the badges untouched."),
+          QColor(0, 234, 255), QColor(255, 0, 180), QColor(2, 2, 8) },
         { QStringLiteral("ink-creature"), QStringLiteral("Ink Creature"),
           QStringLiteral("Your silhouette grew a friend."),
           QStringLiteral("Mischief"),
@@ -433,12 +539,20 @@ bool PaintbrushCreative::adoptSubject(const QImage &cutout,
     if (m_seed == 0)
         m_seed = 1;
     m_committed = false;
+    m_living = false;
+    m_livingAssetId = -1;
+    m_livingClip = motion::PuppetMotionClip();
+    m_previewRig = motion::PuppetRig();
+    m_previewRigKey.clear();
+    m_livingFrame = QImage();
+    m_livingFrameClock.invalidate();
     if (m_suggestionVisible || !m_suggestionText.isEmpty())
     {
         m_suggestionVisible = false;
         m_suggestionText.clear();
         emit suggestionChanged();
     }
+    refreshLivingSource();
     rebuildPreview();
     refreshHistory();
     emit subjectChanged();
@@ -450,11 +564,19 @@ void PaintbrushCreative::clearSubject()
 {
     m_subjectNative = QImage();
     m_subject = QImage();
+    m_subjectStatic = QImage();
     m_subjectCanvasRect = QRectF();
     m_subjectLabel.clear();
     m_sourceLayerId = -1;
     m_sourceHarvestId = -1;
     m_resumeGroup.clear();
+    m_living = false;
+    m_livingAssetId = -1;
+    m_livingClip = motion::PuppetMotionClip();
+    m_previewRig = motion::PuppetRig();
+    m_previewRigKey.clear();
+    m_livingFrame = QImage();
+    m_livingFrameClock.invalidate();
     m_pieces.clear();
     {
         QMutexLocker locker(&m_previewMutex);
@@ -463,6 +585,278 @@ void PaintbrushCreative::clearSubject()
     ++m_previewRevision;
     emit subjectChanged();
     emit previewChanged();
+    emit stateChanged();
+}
+
+/* ------------------------------------------------------- Photo Regime H */
+
+void PaintbrushCreative::refreshLivingSource()
+{
+    m_living = false;
+    m_livingAssetId = -1;
+    m_livingClip = motion::PuppetMotionClip();
+    m_motionAmount = 0.65f;
+    if (m_controller)
+    {
+        motion::PuppetMotionClip clip;
+        int assetId = -1;
+        float amount = 0.65f;
+        if (m_controller->creativeLivingSource(m_sourceLayerId, m_sourceHarvestId,
+                                              &clip, &assetId, &amount))
+        {
+            m_living = true;
+            m_livingAssetId = assetId;
+            m_livingClip = clip;
+            m_motionAmount = qBound(0.01f, amount, 1.0f);
+        }
+    }
+    m_previewRig = motion::PuppetRig();
+    m_previewRigKey.clear();
+    m_livingFrame = QImage();
+    m_livingFrameClock.invalidate();
+    emit livingChanged();
+}
+
+void PaintbrushCreative::ensureLivingPreview()
+{
+    if ((!m_living && !m_stageCommit) || m_subjectStatic.isNull())
+        return;
+    const QString key = QStringLiteral("%1x%2:%3")
+                            .arg(m_subjectStatic.width())
+                            .arg(m_subjectStatic.height())
+                            .arg(m_seed);
+    if (m_previewRig.isValid() && key == m_previewRigKey)
+    {
+        if (m_livingClip.keys.size() < 2)
+            m_livingClip = motion::PuppetMotionScanner::proceduralFallback(
+                m_previewRig, quint32(StageRuntime::kLoopPeriodMs), m_seed | 1u);
+        m_livingClip.loop = motion::LoopMode::Loop;
+        return;
+    }
+
+    /* Rig ONCE per preview subject (never per gesture). The stored source clip
+     * is rig-independent; a procedural photo-safe sway is the fallback. */
+    m_previewRig = motion::PuppetRuntime::build(m_subjectStatic, QImage());
+    m_previewRigKey = key;
+    if (!m_previewRig.isValid())
+    {
+        m_livingClip = motion::PuppetMotionClip();
+        return;
+    }
+    if (!m_livingClip.isValid(m_previewRig.skeleton))
+        m_livingClip = motion::PuppetMotionScanner::proceduralFallback(
+            m_previewRig, quint32(StageRuntime::kLoopPeriodMs), m_seed | 1u);
+    m_livingClip.loop = motion::LoopMode::Loop;
+}
+
+qint64 PaintbrushCreative::livingTimeMs() const
+{
+    if (m_replayTimer.isActive() && hasRecording())
+        return qint64(replayProgress() * double(StageRuntime::kLoopPeriodMs));
+    return qint64(m_frame.time * 1000.0f);
+}
+
+QImage PaintbrushCreative::livingSubjectFrame()
+{
+    if (!m_living || m_subjectStatic.isNull())
+        return QImage();
+    /* exact static frame at the loop boundary (same contract as export) */
+    if (((livingTimeMs() % StageRuntime::kLoopPeriodMs)
+         + StageRuntime::kLoopPeriodMs)
+            % StageRuntime::kLoopPeriodMs
+        == 0)
+        return m_subjectStatic;
+    ensureLivingPreview();
+    if (!m_previewRig.isValid() || m_livingClip.keys.size() < 2)
+        return QImage();
+    if (m_livingFrameClock.isValid() && m_livingFrameClock.elapsed() < 40
+        && !m_livingFrame.isNull())
+        return m_livingFrame;
+
+    motion::PuppetEffect fx;
+    fx.kind = motion::MotionKind::Custom;
+    /* selected photo-safe amount is the floor; the pad gesture adds at most
+     * +12% and never exceeds the Strong/photo-safe ceiling */
+    float amplitude = m_motionAmount * (1.0f + 0.12f * m_frame.energy)
+                      * (m_frame.hold ? 1.05f : 1.0f);
+    fx.amplitude = qBound(0.01f, amplitude, 1.0f);
+    fx.speed = 1.0f;
+    fx.loop = motion::LoopMode::Loop;
+    fx.durationMs = quint32(StageRuntime::kLoopPeriodMs);
+    fx.phase = 0.0f;
+    const qint64 clipDuration = m_livingClip.durationMs();
+    if (clipDuration > 0)
+        fx.speed = float(double(clipDuration)
+                         / double(StageRuntime::kLoopPeriodMs));
+
+    QImage frame = motion::PuppetRuntime::renderClipFrame(
+        m_previewRig, m_livingClip, fx, livingTimeMs());
+    if (frame.isNull())
+        return QImage();
+    if (frame.size() != m_subjectStatic.size())
+        frame = frame.scaled(m_subjectStatic.size(), Qt::IgnoreAspectRatio,
+                             Qt::SmoothTransformation);
+    m_livingFrame = frame;
+    m_livingFrameClock.restart();
+    return frame;
+}
+
+QByteArray PaintbrushCreative::stageEnvelopeBytes() const
+{
+    if (m_samples.size() < 2)
+        return QByteArray();
+    QVector<StageSample> samples;
+    const int stride = qMax(1, (m_samples.size() + 399) / 400);
+    for (int i = 0; i < m_samples.size(); i += stride)
+    {
+        const CreativeSample &s = m_samples.at(i);
+        StageSample out;
+        out.x = s.x;
+        out.y = s.y;
+        out.energy = s.energy;
+        out.hold = s.hold;
+        out.tMs = s.tMs;
+        samples.append(out);
+    }
+    if (samples.size() < 2)
+        return QByteArray();
+    return StageEnvelope::fromSamples(samples, StageRuntime::kLoopPeriodMs)
+        .serialize();
+}
+
+CanvasLayer PaintbrushCreative::makeLivingSubjectLayer(const QString &group,
+                                                       const QString &patchName) const
+{
+    CanvasLayer layer;
+    if (m_subjectNative.isNull())
+        return layer;
+
+    layer = CanvasLayer::createImage(m_subjectNative, QPointF(0, 0),
+                                     QStringLiteral("Living subject"));
+    if (!m_subjectCanvasRect.isEmpty() && m_subjectNative.width() > 0)
+    {
+        const qreal scale = m_subjectCanvasRect.width()
+                            / qreal(m_subjectNative.width());
+        layer.setTransform(QTransform(scale, 0.0, 0.0, scale,
+                                      m_subjectCanvasRect.x(),
+                                      m_subjectCanvasRect.y()));
+    }
+    layer.type = LAYER_IMAGE;
+    layer.visible = true;
+    layer.metadata[QStringLiteral("creative.patch")] = m_patchId;
+    layer.metadata[QStringLiteral("creative.patchName")] = patchName;
+    layer.metadata[QStringLiteral("creative.role")] = QStringLiteral("subject");
+    layer.metadata[QStringLiteral("creative.seed")] = qint64(m_seed);
+    layer.metadata[QStringLiteral("creative.group")] = group;
+    layer.metadata[QStringLiteral("creative.sourceLayerId")] = m_sourceLayerId;
+    layer.metadata[QStringLiteral("creative.sourceHarvestId")] = m_sourceHarvestId;
+    QVariantMap params;
+    params[QStringLiteral("x")] = double(m_frame.x);
+    params[QStringLiteral("y")] = double(m_frame.y);
+    params[QStringLiteral("energy")] = double(m_frame.energy);
+    params[QStringLiteral("hold")] = m_frame.hold;
+    layer.metadata[QStringLiteral("creative.params")] = params;
+
+    motion::PuppetMotionClip clip = m_livingClip;
+    if (clip.keys.size() < 2)
+    {
+        const motion::PuppetRig rig =
+            motion::PuppetRuntime::build(m_subjectNative, QImage());
+        if (rig.isValid())
+            clip = motion::PuppetMotionScanner::proceduralFallback(
+                rig, quint32(StageRuntime::kLoopPeriodMs), m_seed | 1u);
+    }
+    if (clip.keys.size() >= 2)
+    {
+        clip.loop = motion::LoopMode::Loop;
+        motion::PuppetEffect fx;
+        fx.kind = motion::MotionKind::Custom;
+        fx.amplitude = qBound(0.01f, m_motionAmount, 1.0f);
+        fx.loop = motion::LoopMode::Loop;
+        fx.durationMs = quint32(StageRuntime::kLoopPeriodMs);
+        const qint64 clipDuration = clip.durationMs();
+        fx.speed = clipDuration > 0
+                       ? float(double(clipDuration)
+                               / double(StageRuntime::kLoopPeriodMs))
+                       : 1.0f;
+        layer.puppetAssetId = -1;
+        layer.puppetEffect = fx;
+        layer.metadata[stagekeys::living()] = true;
+        layer.metadata[stagekeys::motionClip()] =
+            QString::fromLatin1(StageRuntime::encodeClip(clip));
+        layer.metadata[stagekeys::loopPeriodMs()] =
+            qint64(StageRuntime::kLoopPeriodMs);
+        const QByteArray envelope = stageEnvelopeBytes();
+        if (!envelope.isEmpty())
+            layer.metadata[stagekeys::envelope()] =
+                QString::fromLatin1(envelope.toBase64());
+        StageRuntime::applyStageMetadata(&layer, group,
+                                         QStringLiteral("subject"), 0.0f,
+                                         0.0f, 0.0f, envelope);
+    }
+    return layer;
+}
+
+void PaintbrushCreative::attachDerivedLiving(CanvasLayer *layer,
+                                             const QString &scene, bool stage) const
+{
+    if (!layer || m_livingClip.keys.size() < 2)
+        return;
+    motion::PuppetEffect fx;
+    fx.kind = motion::MotionKind::Custom;
+    fx.amplitude = qBound(0.01f, m_motionAmount, 1.0f);
+    fx.loop = motion::LoopMode::Loop;
+    fx.durationMs = quint32(StageRuntime::kLoopPeriodMs);
+    const qint64 clipDuration = m_livingClip.durationMs();
+    fx.speed = clipDuration > 0
+                   ? float(double(clipDuration)
+                           / double(StageRuntime::kLoopPeriodMs))
+                   : 1.0f;
+    layer->puppetAssetId = -1;
+    layer->puppetEffect = fx;
+    layer->metadata[stagekeys::living()] = true;
+    layer->metadata[stagekeys::motionClip()] =
+        QString::fromLatin1(StageRuntime::encodeClip(m_livingClip));
+    layer->metadata[stagekeys::loopPeriodMs()] =
+        qint64(StageRuntime::kLoopPeriodMs);
+    const QByteArray envelope = stageEnvelopeBytes();
+    if (!envelope.isEmpty())
+        layer->metadata[stagekeys::envelope()] =
+            QString::fromLatin1(envelope.toBase64());
+    if (stage)
+        StageRuntime::applyStageMetadata(layer, scene,
+                                         QStringLiteral("subject"), 0.0f,
+                                         0.0f, 0.0f, envelope);
+}
+
+void PaintbrushCreative::setMotionAmount(double amount)
+{
+    const float next = qBound(0.01f, float(amount), 1.0f);
+    if (qFuzzyCompare(next, m_motionAmount))
+        return;
+    m_motionAmount = next;
+    m_committed = false;
+    m_livingFrame = QImage();
+    m_livingFrameClock.invalidate();
+    if (!m_subjectNative.isNull())
+        recompose();
+    emit livingChanged();
+    emit stateChanged();
+}
+
+void PaintbrushCreative::setLivingMotion(bool enabled)
+{
+    if (m_living == enabled)
+        return;
+    m_living = enabled;
+    m_livingFrame = QImage();
+    m_livingFrameClock.invalidate();
+    if (m_living && !m_subjectNative.isNull())
+        ensureLivingPreview();
+    m_committed = false;
+    if (!m_subjectNative.isNull())
+        recompose();
+    emit livingChanged();
     emit stateChanged();
 }
 
@@ -484,6 +878,8 @@ void PaintbrushCreative::openFromHarvest(int harvestId)
     }
     m_sourceHarvestId = harvestId;
     m_committed = false;
+    refreshLivingSource();
+    rebuildPreview();
     setOpen(true);
     setStatus(QStringLiteral("Start with Neon Idol or Sticker Forge."));
     emit patchChanged();
@@ -542,6 +938,11 @@ void PaintbrushCreative::rebuildPreview()
                          qMax(1, int(std::lround(previewRect.height()))));
     m_subject = m_subjectNative.scaled(subjSize, Qt::IgnoreAspectRatio,
                                        Qt::SmoothTransformation);
+    m_subjectStatic = m_subject;
+    m_livingFrame = QImage();
+    m_livingFrameClock.invalidate();
+    if (m_living || m_stageCommit)
+        ensureLivingPreview();
 
     m_pieces = buildPatch(m_patchId, m_subject, previewRect, previewSize, m_seed);
     recompose();
@@ -580,6 +981,13 @@ void PaintbrushCreative::recompose()
     }
     else
     {
+        if (m_living && !m_subjectStatic.isNull())
+        {
+            const QImage live = livingSubjectFrame();
+            if (!live.isNull())
+                m_pieces = buildPatch(m_patchId, live, m_previewSubjectRect,
+                                      m_previewSize, m_seed);
+        }
         frame = composeStage(m_pieces, m_previewSize, QColor(12, 12, 18));
     }
 
@@ -900,6 +1308,8 @@ void PaintbrushCreative::surprise()
 
 QString PaintbrushCreative::commit()
 {
+    const bool stageCommit = m_stageCommit;
+    m_stageCommit = false;
     if (!hasSubject() || !m_controller)
         return QStringLiteral("Pick a cutout first.");
     if (m_patchId.isEmpty())
@@ -925,6 +1335,11 @@ QString PaintbrushCreative::commit()
     commitClock.start();
     const QString group = QStringLiteral("look-%1")
                               .arg(QDateTime::currentMSecsSinceEpoch());
+    const bool livingCommit = m_living || stageCommit;
+    if (livingCommit)
+        ensureLivingPreview();
+    const QByteArray stageEnvelope =
+        livingCommit ? stageEnvelopeBytes() : QByteArray();
 
     /* The build is capped so a 4K/8K canvas cannot stall the UI while the
      * look is synthesized. Pieces are authored at the capped stage and mapped
@@ -957,6 +1372,36 @@ QString PaintbrushCreative::commit()
     /* Motion offsets are proportional to the stage, so bake on the build stage
      * first and map the baked rectangles onto the real canvas afterwards. */
     pieces = bakeFrame(pieces, buildStage);
+
+    /* Rigged Stage: a real Powder prop from the existing GlitterPowder engine
+     * (materialState persisted, re-rendered at export scale). It is inserted
+     * behind the subject so the living cutout stays clean. */
+    if (stageCommit)
+    {
+        QByteArray powderState;
+        const QImage powder = StageRuntime::renderPowderField(
+            buildStage, m_seed | 1u, stageLightColor(def->id), &powderState);
+        if (!powder.isNull())
+        {
+            CreativePiece pw;
+            pw.name = QStringLiteral("Stage powder");
+            pw.role = QStringLiteral("powder");
+            pw.image = powder;
+            pw.rect = QRectF(QPointF(0, 0), QSizeF(buildStage));
+            pw.pivot = pw.rect.center();
+            pw.blendMode = BLEND_SCREEN;
+            pw.opacity = 0.72f;
+            pw.metadata[QStringLiteral("powderPreset")] =
+                QStringLiteral("material.glitter.powder");
+            pw.metadata[QStringLiteral("powderState")] = powderState;
+            int at = 0;
+            while (at < pieces.size()
+                   && pieces.at(at).role != QLatin1String("subject"))
+                ++at;
+            pieces.insert(at, pw);
+        }
+    }
+
     if (buildScale < 1.0)
     {
         for (CreativePiece &p : pieces)
@@ -969,14 +1414,41 @@ QString PaintbrushCreative::commit()
                                   p.pivot.y() / buildScale);
         }
     }
-
     QList<CanvasLayer> layers;
+    bool stageSubjectAdded = false;
+
     for (const CreativePiece &p : pieces)
     {
+        /* Stage keeps the ORIGINAL cutout as the subject (non-destructive:
+         * the source layer is hidden by the same transaction). */
+        if (stageCommit && p.role == QLatin1String("subject"))
+        {
+            if (!stageSubjectAdded)
+            {
+                CanvasLayer subject =
+                    makeLivingSubjectLayer(group, def->name);
+                if (!subject.raster.isNull())
+                {
+                    layers.append(subject);
+                    stageSubjectAdded = true;
+                }
+            }
+            continue;
+        }
         if (p.image.isNull())
             continue;
         QPoint offset;
-        QImage trimmed = creative::trimTransparent(p.image, &offset);
+        QImage trimmed;
+        if (p.role == QLatin1String("powder"))
+        {
+            /* Powder materialState is expressed in the full stage/world
+             * coordinates; trimming the raster would shift it at export. */
+            trimmed = p.image;
+        }
+        else
+        {
+            trimmed = creative::trimTransparent(p.image, &offset);
+        }
         if (trimmed.isNull())
             continue;
         /* The piece image can be authored below the canvas resolution (capped
@@ -1005,7 +1477,72 @@ QString PaintbrushCreative::commit()
         params[QStringLiteral("energy")] = double(m_frame.energy);
         params[QStringLiteral("hold")] = m_frame.hold;
         layer.metadata[QStringLiteral("creative.params")] = params;
+
+        if (p.role == QLatin1String("powder"))
+        {
+            layer.materialPreset =
+                p.metadata.value(QStringLiteral("powderPreset")).toString();
+            layer.materialState =
+                p.metadata.value(QStringLiteral("powderState")).toByteArray();
+        }
+
+        if (stageCommit)
+        {
+            /* Foreground/background props move at distinct depths on the
+             * canonical 3 s clock; accents pulse with the stage light. */
+            float depth = 0.0f;
+            float parallax = 0.0f;
+            float lightPulse = 0.0f;
+            if (p.role == QLatin1String("backdrop"))
+            {
+                depth = -0.65f;
+                parallax = 0.60f;
+            }
+            else if (p.role == QLatin1String("echo"))
+            {
+                depth = -0.35f;
+                parallax = 0.75f;
+            }
+            else if (p.role == QLatin1String("accent"))
+            {
+                depth = 0.30f;
+                parallax = 0.90f;
+                lightPulse = 0.90f;
+            }
+            else if (p.role == QLatin1String("rim"))
+            {
+                depth = 0.38f;
+                parallax = 1.0f;
+                lightPulse = 0.60f;
+            }
+            else if (p.role == QLatin1String("finish"))
+            {
+                depth = 0.46f;
+                parallax = 0.85f;
+                lightPulse = 0.35f;
+            }
+            else if (p.role == QLatin1String("powder"))
+            {
+                depth = 0.25f;
+                parallax = 0.90f;
+            }
+            StageRuntime::applyStageMetadata(&layer, group, p.role, depth,
+                                             parallax, lightPulse,
+                                             stageEnvelope);
+        }
+        else if (livingCommit && p.role == QLatin1String("subject"))
+        {
+            /* Photo Regime H: the creative look keeps its exact subject
+             * treatment; the derived rig animates that committed cutout. */
+            attachDerivedLiving(&layer, group, false);
+        }
         layers.append(layer);
+    }
+    if (stageCommit && !stageSubjectAdded)
+    {
+        CanvasLayer subject = makeLivingSubjectLayer(group, def->name);
+        if (!subject.raster.isNull())
+            layers.append(subject);
     }
     if (layers.isEmpty())
     {
@@ -1019,7 +1556,9 @@ QString PaintbrushCreative::commit()
         hideLayerId = m_sourceLayerId;
 
     const QString error = m_controller->commitCreativeLayers(
-        layers, hideLayerId, QStringLiteral("Create: %1").arg(def->name),
+        layers, hideLayerId,
+        stageCommit ? QStringLiteral("Rigged Stage: %1").arg(def->name)
+                    : QStringLiteral("Create: %1").arg(def->name),
         m_resumeGroup);
     m_busy = false;
     if (!error.isEmpty())
@@ -1036,11 +1575,33 @@ QString PaintbrushCreative::commit()
     m_suggestionText = def->suggestion;
     m_suggestionVisible = !m_suggestionText.isEmpty();
     refreshHistory();
-    setStatus(QStringLiteral("Committed. Every piece is an editable layer — one undo."));
+    setStatus(stageCommit
+                  ? QStringLiteral("Rigged Stage — one undo returns the static cutout.")
+                  : (livingCommit
+                         ? QStringLiteral("Living look — one undo returns the static cutout.")
+                         : QStringLiteral("Committed. Every piece is an editable layer — one undo.")));
     emit suggestionChanged();
     emit metricsChanged();
     emit stateChanged();
     return QString();
+}
+
+QString PaintbrushCreative::makeRiggedStage()
+{
+    if (!hasSubject() || !m_controller)
+        return QStringLiteral("Pick a cutout first.");
+    if (m_committed)
+        return QStringLiteral("Already committed. Pick a patch to start a new run.");
+    /* Stage is a product mode with a predictable 2D scene; the existing Stage
+     * Door recipe supplies the editable curtains/floor/spotlight props. */
+    m_patchId = QStringLiteral("stage-mode");
+    m_chooserOpen = false;
+    m_stageCommit = true;
+    m_living = true;
+    m_committed = false;
+    rebuildPreview();
+    ensureLivingPreview();
+    return commit();
 }
 
 void PaintbrushCreative::acceptSuggestion()
@@ -1126,6 +1687,7 @@ bool PaintbrushCreative::restoreFromCommittedLayer(int layerIndex)
         return false;
     m_sourceHarvestId =
         info.value(QStringLiteral("sourceHarvestId")).toInt();
+    refreshLivingSource();
     m_seed = quint32(info.value(QStringLiteral("seed")).toLongLong());
     if (m_seed == 0)
         m_seed = 1;
@@ -1878,6 +2440,120 @@ QVector<CreativePiece> PaintbrushCreative::buildPatch(const QString &patchId,
         CreativeMotion mirrorM;
         mirrorM.opacityY = -0.10f;
         add(QStringLiteral("Holo reflection"), QStringLiteral("echo"),
+            mirrorFull, full, BLEND_SCREEN, 0.45f, mirrorM);
+    }
+    else if (isHoloMaterialPatch(patchId))
+    {
+        /* One material engine, surface-specific presets. Fashion recipes keep
+         * a film-like replace value; the automotive recipes let the palette
+         * own the paint hue while the source lightness keeps panel shading,
+         * clearcoat, flake and the view-angle colour shift. */
+        const creative::HoloMaterial material =
+            creative::holoMaterialPreset(holoMaterialIdForPatch(patchId));
+        const bool automotive = isAutomotivePatch(patchId);
+        const QColor deep(4, 16, 26);
+        const QColor c0 = material.palette.value(0, QColor(0, 229, 255));
+        const QColor c1 = material.palette.value(1, QColor(124, 77, 255));
+        const QColor c2 = material.palette.value(2, QColor(255, 61, 218));
+        const QColor c3 = material.palette.value(3, QColor(255, 230, 109));
+
+        add(QStringLiteral("Holo night"), QStringLiteral("backdrop"),
+            creative::gradientField(stage, deep, QColor(4, 3, 10),
+                                    c1.darker(260), 0.50),
+            full);
+        CreativeMotion auraM;
+        auraM.opacityX = -0.18f;
+        auraM.opacityY = 0.20f;
+        add(QStringLiteral("Material aura"), QStringLiteral("accent"),
+            creative::radialGlow(
+                stage, subjectRect.center(),
+                qMax(subjectRect.width(), subjectRect.height()) * 0.66, c1,
+                0.52f),
+            full, BLEND_SCREEN, 0.70f, auraM);
+
+        QImage confidence;
+        const QImage normals = creative::estimateNormals(
+            s, subjMask, material.normalStrength, &confidence);
+        /* Coverage comes from the existing subject mask (the layer's editable
+         * mask/cutout), so windows or trim the user has masked out are already
+         * excluded. When a part/detail protection plane exists it is honored
+         * by the engine; this path never derives new segmentation. */
+        const creative::HoloMaterialResult mat =
+            creative::holographicMaterial(
+                s, subjMask, normals, material, 1.0f, seed,
+                creative::CoverageMode::InheritedCoverage, confidence);
+        CreativeMotion holoM;
+        holoM.opacityX = 0.06f;
+        holoM.opacityY = 0.14f;
+        subjectFull(mat.albedo, material.name, 1.0f, holoM);
+
+        QImage sheenFull = stageCanvas(stage);
+        drawAt(sheenFull, mat.sheen, subjectRect);
+        CreativeMotion sheenM;
+        sheenM.opacityY = 0.30f;
+        sheenM.opacityHold = 0.20f;
+        add(QStringLiteral("Material sheen"), QStringLiteral("finish"),
+            sheenFull, full, BLEND_SCREEN, 0.92f, sheenM);
+
+        CreativeMotion edgeM;
+        edgeM.opacityY = 0.24f;
+        band(0.007, c3, QStringLiteral("Material edge"),
+             QStringLiteral("rim"), 0.90f, BLEND_SCREEN, edgeM);
+        CreativeMotion bloomM;
+        bloomM.opacityX = -0.24f;
+        bloomM.opacityY = 0.18f;
+        band(0.020, c2, QStringLiteral("Material bloom"),
+             QStringLiteral("rim"), 0.50f, BLEND_SCREEN, bloomM);
+
+        if (!automotive)
+        {
+            QList<QPointF> anchors;
+            anchors << QPointF(subjectRect.x() + subjectRect.width() * 0.12,
+                               subjectRect.y() + subjectRect.height() * 0.20)
+                    << QPointF(subjectRect.right()
+                                   - subjectRect.width() * 0.10,
+                               subjectRect.y() + subjectRect.height() * 0.38)
+                    << QPointF(subjectRect.x() + subjectRect.width() * 0.18,
+                               subjectRect.bottom()
+                                   - subjectRect.height() * 0.14)
+                    << QPointF(subjectRect.right()
+                                   - subjectRect.width() * 0.22,
+                               subjectRect.y() + subjectRect.height() * 0.62)
+                    << QPointF(subjectRect.center());
+            CreativeMotion flightM;
+            flightM.dyY = 0.05f;
+            flightM.rotationHold = 12.0f;
+            flightM.opacityHold = 0.18f;
+            add(QStringLiteral("Material butterflies"),
+                QStringLiteral("accent"),
+                creative::butterflyField(stage, seed, { c2, c0, c1, c3 },
+                                         anchors, 9),
+                full, BLEND_SCREEN, 0.90f, flightM);
+            CreativeMotion sparkleM;
+            sparkleM.opacityEnergy = 0.30f;
+            sparkleM.opacityHold = 0.25f;
+            add(QStringLiteral("Material sparkle"), QStringLiteral("accent"),
+                creative::starField(stage, seed + 4, { c3, c0, c2 }, 70),
+                full, BLEND_SCREEN, 0.62f, sparkleM);
+        }
+        else if (holoMaterialIdForPatch(patchId)
+                 == creative::HoloMaterialId::GlitterMetallic)
+        {
+            CreativeMotion flakeM;
+            flakeM.opacityEnergy = 0.25f;
+            add(QStringLiteral("Glitter sparkle"), QStringLiteral("accent"),
+                creative::starField(stage, seed + 4, { c3, c0 }, 55),
+                full, BLEND_SCREEN, 0.55f, flakeM);
+        }
+
+        QImage mirror = creative::reflection(s, 0.20, 0.15);
+        QImage mirrorFull = stageCanvas(stage);
+        drawAt(mirrorFull, mirror,
+               QRectF(subjectRect.x(), subjectRect.bottom() + H * 0.004,
+                      subjectRect.width(), subjectRect.height()));
+        CreativeMotion mirrorM;
+        mirrorM.opacityY = -0.10f;
+        add(QStringLiteral("Material reflection"), QStringLiteral("echo"),
             mirrorFull, full, BLEND_SCREEN, 0.45f, mirrorM);
     }
     else if (patchId == QLatin1String("ink-creature"))

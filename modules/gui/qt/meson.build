@@ -174,9 +174,9 @@ moc_headers = files(
     'paintbrush/pb_history.hpp',
     'paintbrush/pb_canvas_item.hpp',
     'paintbrush/pb_controller.hpp',
-    'paintbrush/pb_test_hook.hpp',
     'paintbrush/pb_creative.hpp',
     'paintbrush/pb_creative_poses.hpp',
+    'paintbrush/pb_stage.hpp',
     'paintbrush/pb_frame_capture.hpp',
     'paintbrush/pb_segmentation_service.hpp',
     'paintbrush/pb_matting_service.hpp',
@@ -591,12 +591,13 @@ qt_plugin_sources = files(
     'paintbrush/pb_history.cpp',
     'paintbrush/pb_canvas_item.cpp',
     'paintbrush/pb_controller.cpp',
-    'paintbrush/pb_test_hook.cpp',
-    'paintbrush/pb_test_hook.hpp',
+    'paintbrush/pb_test_hook_gate.h',
     'paintbrush/pb_creative.cpp',
     'paintbrush/pb_creative_poses.cpp',
     'paintbrush/pb_creative_art.cpp',
     'paintbrush/pb_creative_art.hpp',
+    'paintbrush/pb_stage.cpp',
+    'paintbrush/pb_stage.hpp',
     'paintbrush/pb_frame_capture.cpp',
     'paintbrush/pb_segmentation_service.cpp',
     'paintbrush/pb_tracking_service.cpp',
@@ -1411,9 +1412,40 @@ if qt6_dep.found()
     paintbrush_extra_cppargs += '-DPB_BUILD_SHA="' + pb_build_sha + '"'
     paintbrush_extra_cppargs += '-DPB_QML_REV="live-harvest-v3"'
 
+    # NAI Paintbrush: the real-process acceptance hook (loopback JSON control
+    # channel) is dev/test infrastructure, never part of a public release.
+    # `auto` compiles it only for debug/debugoptimized builds; an explicit
+    # -Dpaintbrush_test_hook=enabled is refused for release/minsize. The source
+    # additionally vetoes NDEBUG, and the PB_TEST_HOOK environment variable can
+    # only start a hook that was already compiled in.
+    paintbrush_test_hook = get_option('paintbrush_test_hook')
+    if paintbrush_test_hook.auto()
+        paintbrush_test_hook_enabled = get_option('buildtype') == 'debug' \
+            or get_option('buildtype') == 'debugoptimized'
+    else
+        paintbrush_test_hook_enabled = paintbrush_test_hook.enabled() \
+            and get_option('buildtype') != 'release' \
+            and get_option('buildtype') != 'minsize'
+        if paintbrush_test_hook.enabled() and not paintbrush_test_hook_enabled
+            warning('paintbrush_test_hook is refused for release/minsize builds')
+        endif
+    endif
+    paintbrush_test_hook_moc_args = []
+    if paintbrush_test_hook_enabled
+        paintbrush_extra_cppargs += '-DPAINTBRUSH_TEST_HOOK'
+        # moc must see the same gate as the C++ compile, otherwise the Q_OBJECT
+        # class is invisible to moc and the plugin fails to link.
+        paintbrush_test_hook_moc_args += '-DPAINTBRUSH_TEST_HOOK'
+        moc_headers += files('paintbrush/pb_test_hook.hpp')
+        qt_plugin_sources += files(
+            'paintbrush/pb_test_hook.cpp',
+            'paintbrush/pb_test_hook.hpp',
+        )
+    endif
+
     qt6pre_files = qt6.preprocess(ui_files: ui_sources,
         moc_headers: moc_headers,
-        moc_extra_arguments: qt_extra_flags,
+        moc_extra_arguments: qt_extra_flags + paintbrush_test_hook_moc_args,
         include_directories: qt_include_dir,
         dependencies: qt6_dep,
         rcc_extra_arguments: qt_rcc_extra_arguments)

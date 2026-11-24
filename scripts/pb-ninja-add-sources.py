@@ -27,6 +27,7 @@ SOURCES = [
     ("paintbrush/pb_harvest.cpp", "paintbrush/pb_harvest.hpp"),
     ("paintbrush/pb_boost.cpp", None),
     ("paintbrush/pb_controller_art.cpp", None),
+    ("paintbrush/pb_stage.cpp", "paintbrush/pb_stage.hpp"),
     ("paintbrush/art/runtime/material_registry.cpp", None),
     ("paintbrush/art/surface/paper_stock.cpp", None),
     ("paintbrush/art/surface/paper_renderer.cpp", None),

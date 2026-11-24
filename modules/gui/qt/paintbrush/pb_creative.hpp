@@ -15,6 +15,7 @@
 #include "pb_common.hpp"
 #include "pb_layer.hpp"
 
+#include <QByteArray>
 #include <QElapsedTimer>
 #include <QImage>
 #include <QMutex>
@@ -138,6 +139,12 @@ class PaintbrushCreative : public QObject
     Q_PROPERTY(QString suggestionKind READ suggestionKind NOTIFY suggestionChanged)
     Q_PROPERTY(QVariantList history READ history NOTIFY historyChanged)
 
+    /* Photo Regime H: the pad's living motion source (existing photo-safe
+     * PuppetEffect). QML can expose the amount; the pad energy modulates it. */
+    Q_PROPERTY(bool livingMotion READ livingMotion NOTIFY livingChanged)
+    Q_PROPERTY(double motionAmount READ motionAmount WRITE setMotionAmount
+                   NOTIFY livingChanged)
+
     /* Live performance telemetry (real measurements from recompose/commit). */
     Q_PROPERTY(double previewP95Ms READ previewP95Ms NOTIFY metricsChanged)
     Q_PROPERTY(double lastCommitMs READ lastCommitMs NOTIFY metricsChanged)
@@ -190,6 +197,11 @@ public:
     bool compareMode() const { return m_compare; }
     void setCompare(bool compare);
 
+    bool livingMotion() const { return m_living; }
+    double motionAmount() const { return double(m_motionAmount); }
+    void setMotionAmount(double amount);
+    Q_INVOKABLE void setLivingMotion(bool enabled);
+
     /* Frame for the image provider. Safe from any thread. */
     QImage previewImage() const;
 
@@ -209,6 +221,10 @@ public:
     Q_INVOKABLE void surprise();
 
     Q_INVOKABLE QString commit();
+    /* Rigged Stage: commit the current pad subject as a non-destructive 2D
+     * stage scene (living subject + editable props/background/foreground +
+     * parallax + light automation + real Powder). One undo. */
+    Q_INVOKABLE QString makeRiggedStage();
     Q_INVOKABLE void acceptSuggestion();
     Q_INVOKABLE void dismissSuggestion();
     /* Resume a committed look from its layer metadata: re-adopts the original
@@ -232,6 +248,7 @@ signals:
     void historyChanged();
     void metricsChanged();
     void compareChanged();
+    void livingChanged();
 
 private slots:
     void onIdleTick();
@@ -265,6 +282,17 @@ private:
     void startIdle();
     void stopIdle();
 
+    /* Photo Regime H / Rigged Stage helpers (existing Living Harvest runtime). */
+    void refreshLivingSource();
+    void ensureLivingPreview();
+    qint64 livingTimeMs() const;
+    QImage livingSubjectFrame();
+    QByteArray stageEnvelopeBytes() const;
+    CanvasLayer makeLivingSubjectLayer(const QString &group,
+                                       const QString &patchName) const;
+    void attachDerivedLiving(CanvasLayer *layer, const QString &scene,
+                             bool stage) const;
+
     QVector<CreativePiece> buildPatch(const QString &patchId,
                                       const QImage &subject,
                                       const QRectF &subjectRect,
@@ -283,11 +311,24 @@ private:
     int m_previewRevision = 0;
 
     QImage m_subject;       /* cutout at preview resolution */
+    QImage m_subjectStatic; /* unanimated preview cutout (compare/rebuild) */
     QImage m_subjectNative; /* cutout at source resolution */
     QRectF m_subjectCanvasRect;
     QString m_subjectLabel;
     int m_sourceLayerId = -1;
     int m_sourceHarvestId = -1;
+
+    /* Photo Regime H motion source (existing PuppetEffect/clip, no second
+     * rigging pass per gesture). */
+    bool m_living = false;
+    bool m_stageCommit = false;
+    float m_motionAmount = 0.65f;
+    int m_livingAssetId = -1;
+    motion::PuppetRig m_previewRig;
+    motion::PuppetMotionClip m_livingClip;
+    QString m_previewRigKey;
+    QImage m_livingFrame;
+    QElapsedTimer m_livingFrameClock;
 
     QString m_patchId;
     quint32 m_seed = 1;

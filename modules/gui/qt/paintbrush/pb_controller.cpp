@@ -218,6 +218,26 @@ PaintbrushController::PaintbrushController(qt_intf_t *intf, QObject *parent)
     m_companion.setAssistantService(&m_assistant);
     m_assistant.setToolDefinitions(assistantToolsJson());
 
+    /* Deterministic Buddy/Kids nudge: coalesce editor changes and compute
+     * only after the child pauses, so the suggestion never follows every
+     * stroke and never blocks painting. */
+    m_companionSuggestionTimer.setSingleShot(true);
+    m_companionSuggestionTimer.setInterval(350);
+    connect(&m_companionSuggestionTimer, &QTimer::timeout,
+            this, &PaintbrushController::refreshCompanionSuggestion);
+    connect(this, &PaintbrushController::documentChanged,
+            this, &PaintbrushController::scheduleCompanionSuggestion);
+    connect(this, &PaintbrushController::objectSelectionChanged,
+            this, &PaintbrushController::scheduleCompanionSuggestion);
+    connect(this, &PaintbrushController::toolCapabilitiesChanged,
+            this, &PaintbrushController::scheduleCompanionSuggestion);
+    connect(this, &PaintbrushController::companionStateChanged,
+            this, &PaintbrushController::scheduleCompanionSuggestion);
+    connect(m_creative, &PaintbrushCreative::historyChanged,
+            this, &PaintbrushController::scheduleCompanionSuggestion);
+    connect(m_creative, &PaintbrushCreative::patchChanged,
+            this, &PaintbrushController::scheduleCompanionSuggestion);
+
     connect(&m_undoStack, &UndoStack::canUndoChanged,
             this, &PaintbrushController::canUndoChanged);
     connect(&m_undoStack, &UndoStack::canRedoChanged,
@@ -261,10 +281,14 @@ PaintbrushController::PaintbrushController(qt_intf_t *intf, QObject *parent)
     startAutosave();
     checkForRecovery();
 
+#if PAINTBRUSH_HAS_TEST_HOOK
     /* Test-only loopback control channel for real-process acceptance runs.
-     * Never created in a normal launch (PB_TEST_HOOK is unset). */
+     * The class is compiled in only for dev/test builds (PAINTBRUSH_TEST_HOOK
+     * and !NDEBUG); within such a build it is created only when PB_TEST_HOOK
+     * is set. A release build has no hook to enable. */
     if (qEnvironmentVariableIsSet("PB_TEST_HOOK"))
         m_testHook = new PaintbrushTestHook(this, this);
+#endif
 
     /* welcome screen on a fresh start: show it whenever nothing is loaded
      * and no crash recovery is pending, so the entry points (draw / open
@@ -278,8 +302,10 @@ PaintbrushController::PaintbrushController(qt_intf_t *intf, QObject *parent)
 
 PaintbrushController::~PaintbrushController()
 {
+#if PAINTBRUSH_HAS_TEST_HOOK
     delete m_testHook;
     m_testHook = nullptr;
+#endif
     m_mediaTimer.stop();
     m_autosaveTimer.stop();
     m_thumbnails.cancel();
@@ -5676,13 +5702,21 @@ void PaintbrushController::makeSticker()
 
 QString PaintbrushController::testLamaBackend() const
 {
+#if PAINTBRUSH_HAS_TEST_HOOK
     if (!qEnvironmentVariableIsSet("PB_TEST_HOOK"))
         return QString();
     return m_generation.localInpaintBackend();
+#else
+    return QString();
+#endif
 }
 
 bool PaintbrushController::testApplyObjectMask(const QImage &mask)
 {
+#if !PAINTBRUSH_HAS_TEST_HOOK
+    Q_UNUSED(mask);
+    return false;
+#else
     if (!qEnvironmentVariableIsSet("PB_TEST_HOOK") || mask.isNull())
         return false;
 
@@ -5705,6 +5739,7 @@ bool PaintbrushController::testApplyObjectMask(const QImage &mask)
     emit objectSelectionChanged();
     setStatus(QStringLiteral("Test object mask applied."));
     return true;
+#endif
 }
 
 void PaintbrushController::removeObject(const QString &prompt)
@@ -6293,7 +6328,152 @@ void PaintbrushController::triggerCompanionEvent(const QString &event)
 {
     if (m_companion.mode() == CompanionService::MODE_OFF)
         return;
+    m_companion.setContext(companionContext());
     m_companion.notifyEvent(event, flattenedPreview());
+}
+
+QVariantMap PaintbrushController::companionContext() const
+{
+    QVariantMap context;
+    context[QStringLiteral("hasDocument")] = hasOpenDocument();
+    /* A fresh page is a blank layer and no edits yet. A single loaded/
+     * painted layer is not reported as empty. */
+    context[QStringLiteral("blank")] =
+        m_document.layerCount() <= 1 && !m_document.dirty()
+        && m_projectName.isEmpty();
+    context[QStringLiteral("layerCount")] = m_document.layerCount();
+    context[QStringLiteral("hasSelection")] =
+        m_canvas && m_canvas->hasSelection();
+    context[QStringLiteral("objectSelected")] = m_objectSelected;
+    context[QStringLiteral("tool")] = m_canvas ? m_canvas->tool() : -1;
+
+    /* Read the document directly (not the Play Pad cache) so a look loaded
+     * with a project is detected before the pad has been opened. */
+    const QVariantList history = creativeLookHistory();
+    context[QStringLiteral("lookCount")] = int(history.size());
+    int lastLookIndex = -1;
+    if (!history.isEmpty())
+        lastLookIndex = history.first().toMap()
+                            .value(QStringLiteral("layerIndex"), -1)
+                            .toInt();
+    context[QStringLiteral("lastLookLayerIndex")] = lastLookIndex;
+    context[QStringLiteral("lookOpen")] = m_creative && m_creative->isOpen();
+    return context;
+}
+
+void PaintbrushController::scheduleCompanionSuggestion()
+{
+    const int mode = m_companion.mode();
+    if ((mode != CompanionService::MODE_BUDDY
+         && mode != CompanionService::MODE_KIDS)
+        || m_companion.talkLevel() == 0)
+    {
+        clearCompanionSuggestion();
+        return;
+    }
+    /* Restarting the single-shot timer on every editor change means a child
+     * who is actively drawing never gets interrupted. */
+    m_companionSuggestionTimer.start();
+}
+
+void PaintbrushController::clearCompanionSuggestion()
+{
+    m_companionSuggestionTimer.stop();
+    if (m_companionSuggestion.text.isEmpty()
+        && m_companionSuggestion.kind.isEmpty()
+        && m_companionSuggestion.action.isEmpty()
+        && m_companionSuggestion.actionLabel.isEmpty())
+        return;
+    m_companionSuggestion = {};
+    m_companionSuggestionSignature.clear();
+    emit companionSuggestionChanged();
+}
+
+void PaintbrushController::refreshCompanionSuggestion()
+{
+    const int mode = m_companion.mode();
+    if ((mode != CompanionService::MODE_BUDDY
+         && mode != CompanionService::MODE_KIDS)
+        || m_companion.talkLevel() == 0)
+    {
+        clearCompanionSuggestion();
+        return;
+    }
+
+    /* Accepting a nudge can itself change the state; do not immediately pop
+     * the next nudge. */
+    if (m_companionSuggestionCooldown.isValid()
+        && m_companionSuggestionCooldown.elapsed() < 20000)
+        return;
+
+    const QVariantMap context = companionContext();
+    m_companion.setContext(context);
+    const CompanionService::Suggestion suggestion =
+        CompanionService::suggestionForContext(context, mode);
+    if (suggestion.text.isEmpty())
+    {
+        clearCompanionSuggestion();
+        return;
+    }
+
+    const QString signature = suggestion.kind + QLatin1Char('|')
+                              + suggestion.action + QLatin1Char('|')
+                              + suggestion.text;
+    if (signature == m_companionSuggestionSignature
+        || signature == m_companionSuggestionDismissed)
+        return;
+
+    m_companionSuggestion = suggestion;
+    m_companionSuggestionSignature = signature;
+    emit companionSuggestionChanged();
+}
+
+void PaintbrushController::acceptCompanionSuggestion()
+{
+    if (m_companionSuggestion.text.isEmpty())
+        return;
+
+    const QString signature = m_companionSuggestionSignature;
+    const QString action = m_companionSuggestion.action;
+    m_companionSuggestionDismissed = signature;
+    m_companionSuggestionCooldown.start();
+    clearCompanionSuggestion();
+
+    if (action.startsWith(QLatin1String("tool:")))
+    {
+        bool ok = false;
+        const int tool = action.mid(5).toInt(&ok);
+        if (ok && m_canvas)
+        {
+            m_canvas->setTool(tool);
+            setStatus(QStringLiteral("Buddy grabbed that tool. Swap anytime."));
+        }
+    }
+    else if (action == QLatin1String("new-layer"))
+    {
+        newLayer();
+        setStatus(QStringLiteral("Fresh layer — try something wild on it."));
+    }
+    else if (action == QLatin1String("open-pad"))
+    {
+        openCreativePad(QString());
+    }
+    else if (action.startsWith(QLatin1String("resume-look:")))
+    {
+        bool ok = false;
+        const int layerIndex = action.mid(12).toInt(&ok);
+        if (ok)
+            resumeCreativeLook(layerIndex);
+    }
+    /* "none"/empty: the nudge was read-only; dismissing it is the action. */
+}
+
+void PaintbrushController::dismissCompanionSuggestion()
+{
+    if (m_companionSuggestion.text.isEmpty())
+        return;
+    m_companionSuggestionDismissed = m_companionSuggestionSignature;
+    clearCompanionSuggestion();
 }
 
 void PaintbrushController::companionNotifyEvent(const QString &event)
@@ -6307,37 +6487,58 @@ void PaintbrushController::companionAsk(const QString &question)
     if (q.isEmpty())
         return;
 
+    const QVariantMap context = companionContext();
+    m_companion.setContext(context);
+
     /* No more silent drops: every refusal is a visible message in the chat. */
     if (m_companion.mode() == CompanionService::MODE_OFF)
     {
         appendAssistantMessage(QStringLiteral("system"),
-            QStringLiteral("The companion is off. Choose Quiet, Buddy or Kids "
-                           "in this panel to start chatting."));
+            QStringLiteral("Buddy is napping. Pick Quiet, Buddy or Kids in this "
+                           "panel to wake them up."));
         setStatus(QStringLiteral("Turn the companion on to chat about your drawing."));
         return;
     }
     if (m_companion.mode() == CompanionService::MODE_KIDS
         && !m_companion.networkAllowed())
     {
+        /* Deterministic fallback: the child still gets a warm Buddy answer.
+         * Only the provider-backed picture analysis is off. */
+        appendAssistantMessage(QStringLiteral("user"), q);
+        appendAssistantMessage(QStringLiteral("assistant"),
+            CompanionService::offlineAnswer(context, m_companion.mode()));
         appendAssistantMessage(QStringLiteral("system"),
-            QStringLiteral("Kids mode is offline, so the companion cannot answer "
-                           "yet. A grown-up can enable “Allow network AI in Kids "
-                           "mode” in Settings → Companion."));
+            QStringLiteral("A grown-up can turn on picture magic in Settings → "
+                           "Companion."));
         return;
     }
     if (m_assistantBusy)
     {
-        setStatus(QStringLiteral("The companion is still answering — press Stop "
-                                 "or wait for it to finish."));
+        setStatus(QStringLiteral("Buddy is still thinking — press Stop or wait a "
+                                 "moment."));
         return;
     }
     if (!m_assistant.isConfigured())
     {
-        appendAssistantMessage(QStringLiteral("error"),
-            m_assistant.unavailableReason().isEmpty()
-                ? QStringLiteral("The AI endpoint is not configured. Open "
-                                 "Settings → AI and enter the endpoint, model and key.")
-                : m_assistant.unavailableReason());
+        if (m_companion.mode() == CompanionService::MODE_BUDDY
+            || m_companion.mode() == CompanionService::MODE_KIDS)
+        {
+            appendAssistantMessage(QStringLiteral("user"), q);
+            appendAssistantMessage(QStringLiteral("assistant"),
+                CompanionService::offlineAnswer(context, m_companion.mode()));
+            appendAssistantMessage(QStringLiteral("system"),
+                QStringLiteral("The AI is not connected, so Buddy is sharing "
+                               "offline ideas. A grown-up can connect picture "
+                               "magic in Settings → AI."));
+        }
+        else
+        {
+            appendAssistantMessage(QStringLiteral("error"),
+                m_assistant.unavailableReason().isEmpty()
+                    ? QStringLiteral("The AI endpoint is not configured. Open "
+                                     "Settings → AI and enter the endpoint, model and key.")
+                    : m_assistant.unavailableReason());
+        }
         return;
     }
 
@@ -6497,10 +6698,22 @@ void PaintbrushController::onAssistantStreamError(
     if (conversationId != m_assistantConversationId)
         return;
     /* Keep a partial answer if one arrived, then show the real error instead
-     * of leaving the "hi" bubble unanswered. */
-    if (!m_assistantStreamingText.trimmed().isEmpty())
+     * of leaving the "hi" bubble unanswered. Buddy/Kids also get a
+     * deterministic offline idea so a provider failure is not a dead end. */
+    const bool hadPartial = !m_assistantStreamingText.trimmed().isEmpty();
+    if (hadPartial)
+    {
         appendAssistantMessage(QStringLiteral("assistant"),
                                m_assistantStreamingText);
+    }
+    else if (m_companion.mode() == CompanionService::MODE_BUDDY
+             || m_companion.mode() == CompanionService::MODE_KIDS)
+    {
+        const QVariantMap context = companionContext();
+        m_companion.setContext(context);
+        appendAssistantMessage(QStringLiteral("assistant"),
+            CompanionService::offlineAnswer(context, m_companion.mode()));
+    }
     appendAssistantMessage(QStringLiteral("error"),
                            message.isEmpty()
                                ? QStringLiteral("The AI endpoint did not answer.")
@@ -6561,6 +6774,10 @@ int PaintbrushController::companionTalkLevel() const
 void PaintbrushController::setCompanionTalkLevel(int level)
 {
     m_companion.setTalkLevel(level);
+    /* A deliberate talk-level change is a fresh invitation: let the next
+     * state-driven nudge through. */
+    m_companionSuggestionDismissed.clear();
+    m_companionSuggestionCooldown.invalidate();
     emit companionStateChanged();
 }
 
@@ -6571,9 +6788,9 @@ void PaintbrushController::setKidsNetworkAllowed(bool allowed)
     emit companionStateChanged();
     emit serviceAvailabilityChanged();
     setStatus(allowed
-                  ? QStringLiteral("Kids mode network AI is on.")
-                  : QStringLiteral("Kids mode is offline; a grown-up can turn "
-                                   "network AI on in Settings → Companion."));
+                  ? QStringLiteral("Picture magic is on for Kids mode.")
+                  : QStringLiteral("Kids mode is offline. A grown-up can turn on "
+                                   "picture magic in Settings → Companion."));
 }
 
 void PaintbrushController::setCompanionMode(int mode)
@@ -6581,6 +6798,10 @@ void PaintbrushController::setCompanionMode(int mode)
     m_companion.setMode(mode);
     config_PutInt("paintbrush-companion-mode",
                   qBound(0, mode, int(CompanionService::MODE_KIDS)));
+    /* Switching mode is a fresh invitation: do not carry a dismissal from the
+     * previous persona into the new one. */
+    m_companionSuggestionDismissed.clear();
+    m_companionSuggestionCooldown.invalidate();
     emit companionStateChanged();
     emit serviceAvailabilityChanged();
 }
@@ -6625,12 +6846,35 @@ QString PaintbrushController::assistantSystemPrompt() const
                                   "never volunteer observations.");
         break;
     case CompanionService::MODE_KIDS:
-        modeLine = QStringLiteral("Mode: Kids — gentle, simple and child-safe; "
-                                  "no scary or adult content.");
+        modeLine = QStringLiteral("Mode: Kids — warm, playful and simple; never "
+                                  "score, rank or say the drawing is wrong; no "
+                                  "scary or adult content.");
         break;
     case CompanionService::MODE_BUDDY:
     default:
         modeLine = QStringLiteral("Mode: Buddy — warm, playful and concise.");
+        break;
+    }
+
+    QString voiceLine;
+    switch (m_companion.mode())
+    {
+    case CompanionService::MODE_KIDS:
+        voiceLine = QStringLiteral(
+            "Voice: notice one real thing you can see, then ask one small "
+            "question or offer one tiny next step. Use simple words. No emoji.");
+        break;
+    case CompanionService::MODE_BUDDY:
+        voiceLine = QStringLiteral(
+            "Voice: praise one real thing you can actually see, then offer one "
+            "tiny next step as a question. Never generic praise, never score or "
+            "rank. No emoji.");
+        break;
+    case CompanionService::MODE_QUIET:
+        voiceLine = QStringLiteral("Voice: answer only what is asked; stay "
+                                   "specific and concise.");
+        break;
+    default:
         break;
     }
 
@@ -6651,9 +6895,11 @@ QString PaintbrushController::assistantSystemPrompt() const
     return QStringLiteral(
                "You are the NAI Paintbrush companion, a friendly creative "
                "assistant inside a painting and collage app. You can see the "
-               "current canvas image. Keep answers short, warm and practical, "
+               "current canvas image. Keep answers short, warm and concrete, "
                "in the user's language. ")
         + modeLine + QLatin1Char(' ') + talkLine + QLatin1Char(' ')
+        + (voiceLine.isEmpty() ? QString()
+                               : voiceLine + QLatin1Char(' '))
         + QStringLiteral(
               "When the user asks you to change the editor, call one of the "
               "provided tools instead of only describing what to do. Never "

@@ -368,12 +368,15 @@ bool verifyResult(const Image &source, const std::vector<uint8_t> &mask,
                     && (!requireSplit || result.info.components >= 2);
     std::printf("  %s: %s masked=%zu changed=%.1f%% unmasked=%zu unmaskedBad=%zu "
                 "alphaBad=%zu components=%d roi=%d,%d %dx%d backend=%s "
-                "infer=%.1fms total=%.1fms\n",
+                "load=%.1fms mask=%.1fms preprocess=%.1fms infer=%.1fms "
+                "composite=%.1fms total=%.1fms wall=%.1fms\n",
                 label, ok ? "ok" : "FAIL", masked, changedFraction * 100.0,
                 unmasked, unmaskedBad, alphaBad, result.info.components,
                 result.info.roi_x, result.info.roi_y, result.info.roi_w,
-                result.info.roi_h, result.info.backend, result.info.inference_ms,
-                result.totalMs);
+                result.info.roi_h, result.info.backend, result.info.load_ms,
+                result.info.mask_analysis_ms, result.info.preprocess_ms,
+                result.info.inference_ms, result.info.postprocess_ms,
+                result.info.total_ms, result.totalMs);
     if (!ok)
         ++*failures;
     return ok;

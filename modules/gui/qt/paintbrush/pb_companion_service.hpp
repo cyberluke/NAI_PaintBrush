@@ -19,6 +19,7 @@
 #include <QString>
 #include <QElapsedTimer>
 #include <QStringList>
+#include <QVariantMap>
 
 #include <vlc_common.h>
 
@@ -53,10 +54,30 @@ public:
     };
     Q_ENUM(Mode)
 
+    /* One small, dismissible next step derived from real editor state.
+     * `action` is intentionally a tiny controller command ("tool:5",
+     * "new-layer", "open-pad", "resume-look:3") so the copy layer never owns
+     * editor behaviour and no second AI service is involved. */
+    struct Suggestion
+    {
+        QString kind;
+        QString text;
+        QString action;
+        QString actionLabel;
+    };
+
     explicit CompanionService(QObject *parent = nullptr);
 
     void configure(vlc_object_t *obj);
     void setAssistantService(AssistantService *assistant);
+    /* Compact editor state used by the deterministic (offline) path. */
+    void setContext(const QVariantMap &context);
+    /* Pure, state-driven copy. Safe to call without any network or model. */
+    static Suggestion suggestionForContext(const QVariantMap &context,
+                                           int mode);
+    static QString offlineObservation(const QVariantMap &context, int mode,
+                                      const QString &event);
+    static QString offlineAnswer(const QVariantMap &context, int mode);
     int mode() const { return m_mode; }
     void setMode(int mode);
     int minIntervalMs() const { return m_minIntervalMs; }
@@ -104,8 +125,10 @@ private:
     QElapsedTimer m_lastAnalysis;
     bool m_hasLastAnalysis = false;
 
+    QVariantMap m_context;
     QStringList m_recentEvents;
     QString m_lastObservation;
+    QString m_lastOfflineText;
     QStringList m_conversation;      /* compact context: last few turns */
 };
 

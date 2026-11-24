@@ -22,6 +22,7 @@
 #include <windows.h>
 
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QStringList>
@@ -341,6 +342,9 @@ RunInfo Runtime::backendInfo() const
     if (g_api->get_backend_info(static_cast<PblmSession *>(m_session), &info) != PBLM_OK)
         return out;
     out.inputSize = info.input_size;
+    /* An older DLL leaves the appended fields zeroed; 0 ms is not a plausible
+     * 208 MB load, so report it as unmeasured instead of a fake speed. */
+    out.loadMs = info.load_ms > 0.0 ? info.load_ms : -1.0;
     out.usedGpu = info.used_gpu != 0;
     out.cudaNodes = info.cuda_node_count;
     out.cpuNodes = info.cpu_node_count;
@@ -402,14 +406,25 @@ bool Runtime::inpaint(const QImage &rgb, const QImage &mask, QImage *out,
         return false;
     }
 
+    /* Publication at the MinGW boundary: materialise the DLL's RGBA buffer as
+     * an owned ARGB32 image. Measured separately from the DLL phases. */
+    QElapsedTimer publishTimer;
+    publishTimer.start();
     const QImage view(buffer.data(), rgba.width(), rgba.height(),
                       int(rgba.width()) * 4, QImage::Format_RGBA8888);
     *out = view.copy().convertToFormat(QImage::Format_ARGB32);
+    const double publishMs = double(publishTimer.nsecsElapsed()) / 1e6;
     if (info)
     {
+        /* Same old-DLL guard as backendInfo(): zero means the appended field
+         * was never written, not a zero-cost load. */
+        info->loadMs = rawInfo.load_ms > 0.0 ? rawInfo.load_ms : -1.0;
+        info->maskAnalysisMs = rawInfo.mask_analysis_ms;
         info->preprocessMs = rawInfo.preprocess_ms;
         info->inferenceMs = rawInfo.inference_ms;
+        info->compositeMs = rawInfo.postprocess_ms;
         info->postprocessMs = rawInfo.postprocess_ms;
+        info->publishMs = publishMs;
         info->totalMs = rawInfo.total_ms;
         info->inputSize = rawInfo.input_size;
         info->roiX = rawInfo.roi_x;

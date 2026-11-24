@@ -12,6 +12,7 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
@@ -484,6 +485,12 @@ QString LamaService::statusText() const
     return m_status;
 }
 
+LamaTimings LamaService::lastTimings() const
+{
+    QMutexLocker lock(&m_mutex);
+    return m_lastTimings;
+}
+
 void LamaService::workerLoop()
 {
     for (;;)
@@ -569,13 +576,41 @@ void LamaService::runJob(const Job &job)
     const QString backend = info.backend.isEmpty() ? backendText() : info.backend;
     setStatusMsgid("LaMa inpaint ready — %1 (%2 ms)",
                    { backend, QString::number(info.inferenceMs, 'f', 1) });
+
+    /* Publication: hand the finished image to the consumer. The elapsed time
+     * covers the queued signal delivery setup; the shim already measured the
+     * RGBA -> QImage materialisation and exposed it as info.publishMs. */
+    QElapsedTimer publishTimer;
+    publishTimer.start();
+    emit inpaintReady(job.tag, result);
+    const double publishMs = (info.publishMs > 0.0 ? info.publishMs : 0.0)
+                             + double(publishTimer.nsecsElapsed()) / 1e6;
+
+    LamaTimings timings;
+    timings.valid = true;
+    timings.loadMs = info.loadMs;
+    timings.maskAnalysisMs = info.maskAnalysisMs;
+    timings.preprocessMs = info.preprocessMs;
+    timings.inferenceMs = info.inferenceMs;
+    timings.compositeMs = info.compositeMs;
+    timings.publishMs = publishMs;
+    timings.totalMs = info.totalMs;
+    timings.usedGpu = info.usedGpu;
+    timings.components = info.components;
+    timings.backend = backend;
+    {
+        QMutexLocker lock(&m_mutex);
+        m_lastTimings = timings;
+    }
+
     logInfo("LaMa inpaint ready: backend=%s gpu=%d roi=%d,%d %dx%d components=%d "
-            "infer=%.1fms total=%.1fms",
+            "load=%.1fms mask=%.1fms preprocess=%.1fms infer=%.1fms "
+            "composite=%.1fms publish=%.1fms total=%.1fms",
             backend.toUtf8().constData(), info.usedGpu ? 1 : 0,
             info.roiX, info.roiY, info.roiW, info.roiH, info.components,
-            info.inferenceMs, info.totalMs);
+            info.loadMs, info.maskAnalysisMs, info.preprocessMs, info.inferenceMs,
+            info.compositeMs, publishMs, info.totalMs);
 
-    emit inpaintReady(job.tag, result);
     setBusy(false);
 }
 

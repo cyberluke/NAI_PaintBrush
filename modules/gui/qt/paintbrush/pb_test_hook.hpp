@@ -12,6 +12,8 @@
 #ifndef PB_TEST_HOOK_HPP
 #define PB_TEST_HOOK_HPP
 
+#include "pb_test_hook_gate.h"
+
 #include <QObject>
 #include <QByteArray>
 #include <QHash>
@@ -38,6 +40,7 @@ class PaintbrushController;
  *
  * Nothing here changes product behaviour: the commands below call the same
  * public controller/canvas entry points a QML button would call. */
+#if PAINTBRUSH_HAS_TEST_HOOK
 class PaintbrushTestHook : public QObject
 {
     Q_OBJECT
@@ -67,6 +70,7 @@ private:
     QString m_endpointPath;
     bool m_busy = false;
 };
+#endif /* PAINTBRUSH_HAS_TEST_HOOK */
 
 } // namespace paintbrush
 

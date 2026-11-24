@@ -16,6 +16,7 @@
 #include "pb_creative.hpp"
 #include "pb_creative_art.hpp"
 #include "pb_creative_poses.hpp"
+#include "pb_stage.hpp"
 #include "art/style/mood.hpp"
 #include "art/style/typography_style.hpp"
 #include "art/style/badges.hpp"
@@ -297,12 +298,17 @@ void PaintbrushController::setLayerPuppet(int index, int assetId, double amplitu
     fx.loop = motion::LoopMode::Loop;
     fx.durationMs = quint32(qMax<qint64>(1, asset->motion.durationMs()));
 
-    auto cmd = std::make_unique<SetPuppetCommand>();
+    auto cmd = std::make_unique<SetStageLivingCommand>();
     cmd->layerId = layer->id;
     cmd->beforeAssetId = layer->puppetAssetId;
     cmd->beforeEffect = layer->puppetEffect;
+    cmd->beforeMetadata = layer->metadata;
     cmd->afterAssetId = assetId;
     cmd->afterEffect = fx;
+    cmd->afterMetadata = layer->metadata;
+    cmd->afterMetadata.remove(stagekeys::living());
+    cmd->afterMetadata.remove(stagekeys::motionClip());
+    cmd->afterMetadata.remove(stagekeys::envelope());
     cmd->desc = QStringLiteral("Living pose");
     m_undoStack.pushCommand(std::move(cmd));
     if (m_canvas)
@@ -314,12 +320,19 @@ void PaintbrushController::setLayerPuppet(int index, int assetId, double amplitu
 void PaintbrushController::removeLayerPuppet(int index)
 {
     const CanvasLayer *layer = m_document.layerAt(index);
-    if (!layer || layer->puppetAssetId <= 0)
+    if (!layer || (layer->puppetAssetId <= 0 && !layer->hasDerivedLiving()))
         return;
-    auto cmd = std::make_unique<SetPuppetCommand>();
+    auto cmd = std::make_unique<SetStageLivingCommand>();
     cmd->layerId = layer->id;
     cmd->beforeAssetId = layer->puppetAssetId;
     cmd->beforeEffect = layer->puppetEffect;
+    cmd->beforeMetadata = layer->metadata;
+    cmd->afterAssetId = -1;
+    cmd->afterEffect = motion::PuppetEffect();
+    cmd->afterMetadata = layer->metadata;
+    cmd->afterMetadata.remove(stagekeys::living());
+    cmd->afterMetadata.remove(stagekeys::motionClip());
+    cmd->afterMetadata.remove(stagekeys::envelope());
     cmd->desc = QStringLiteral("Freeze living pose");
     m_undoStack.pushCommand(std::move(cmd));
     if (m_canvas)
@@ -1177,6 +1190,10 @@ QString PaintbrushController::runCreativeSelfTest()
         QStringLiteral("ink-creature"), QStringLiteral("spark-storm"),
         QStringLiteral("kaleido"), QStringLiteral("motion-echo"),
         QStringLiteral("electric-kpop"), QStringLiteral("holo-fashion"),
+        QStringLiteral("holo-liquid"), QStringLiteral("holo-opal"),
+        QStringLiteral("holo-chrome"), QStringLiteral("holo-prism"),
+        QStringLiteral("holo-wrap"), QStringLiteral("holo-chameleon"),
+        QStringLiteral("holo-glitter"), QStringLiteral("holo-livery"),
         QStringLiteral("scene-forge"), QStringLiteral("auto-splatter"),
         QStringLiteral("stage-mode")
     };
@@ -2613,6 +2630,64 @@ bool PaintbrushController::creativeLookInfo(int layerIndex, QVariantMap *info,
     return true;
 }
 
+bool PaintbrushController::creativeLivingSource(int sourceLayerId, int harvestId,
+                                                motion::PuppetMotionClip *clip,
+                                                int *assetId,
+                                                float *defaultAmplitude) const
+{
+    const auto assignAsset = [&](const motion::PuppetAsset *asset) {
+        if (!asset || clip == nullptr)
+            return false;
+        *clip = asset->motion;
+        if (assetId)
+            *assetId = asset->id;
+        if (defaultAmplitude)
+            *defaultAmplitude = asset->defaultAmplitude;
+        return clip->keys.size() >= 2;
+    };
+
+    if (sourceLayerId > 0)
+    {
+        const CanvasLayer *layer = m_document.layerById(sourceLayerId);
+        if (layer)
+        {
+            if (layer->puppetAssetId > 0
+                && assignAsset(m_document.puppets()->byId(layer->puppetAssetId)))
+            {
+                if (defaultAmplitude && layer->puppetEffect.amplitude > 0.01f)
+                    *defaultAmplitude = layer->puppetEffect.amplitude;
+                return true;
+            }
+            if (layer->hasDerivedLiving())
+            {
+                const motion::PuppetMotionClip stored =
+                    StageRuntime::storedClip(*layer);
+                if (stored.keys.size() >= 2)
+                {
+                    if (clip)
+                        *clip = stored;
+                    if (assetId)
+                        *assetId = -1;
+                    if (defaultAmplitude)
+                        *defaultAmplitude =
+                            layer->puppetEffect.amplitude > 0.01f
+                                ? layer->puppetEffect.amplitude
+                                : 0.65f;
+                    return true;
+                }
+            }
+            if (layer->harvestId > 0
+                && assignAsset(m_document.puppets()->assetByHarvest(
+                    layer->harvestId)))
+                return true;
+        }
+    }
+    if (harvestId > 0
+        && assignAsset(m_document.puppets()->assetByHarvest(harvestId)))
+        return true;
+    return false;
+}
+
 QString PaintbrushController::commitCreativeLayers(const QList<CanvasLayer> &layers,
                                                    int hideLayerId,
                                                    const QString &desc,
@@ -2710,6 +2785,17 @@ void PaintbrushController::openCreativePad(const QString &patchId)
     m_creative->openForSelection();
     if (!patchId.isEmpty())
         m_creative->selectPatch(patchId);
+}
+
+QString PaintbrushController::makeRiggedStage()
+{
+    if (!m_creative)
+        return QStringLiteral("The Creative Pad is not available.");
+    if (!m_creative->hasSubject())
+        m_creative->openForSelection();
+    if (!m_creative->hasSubject())
+        return QStringLiteral("Pick a cutout first — or Keep a moment.");
+    return m_creative->makeRiggedStage();
 }
 
 QString PaintbrushController::applyCreativePatch(const QString &patchId)

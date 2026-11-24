@@ -46,11 +46,23 @@ struct SessionConfig
     int maskGrowPx = -1;           /* -1 auto, 0 none (parity diagnostics)   */
 };
 
+/* Phase timing in milliseconds. All values are measured with steady_clock
+ * inside the native runtime except publishMs, which is the MinGW-side result
+ * handoff (RGBA buffer -> QImage copy/format conversion). totalMs is the DLL
+ * side of the call and does not include publishMs. loadMs is the persistent
+ * session load and is the same for every run of that session.
+ *
+ * compositeMs and postprocessMs are the same measurement; compositeMs is the
+ * explicit phase name and postprocessMs is kept for API compatibility. */
 struct RunInfo
 {
+    double loadMs = -1.0;
+    double maskAnalysisMs = -1.0;
     double preprocessMs = -1.0;
     double inferenceMs = -1.0;
-    double postprocessMs = -1.0;
+    double compositeMs = -1.0;
+    double postprocessMs = -1.0;   /* alias of compositeMs */
+    double publishMs = -1.0;
     double totalMs = -1.0;
     int inputSize = 0;
     int roiX = 0;

@@ -19,6 +19,7 @@ import VLC.Paintbrush
  * - collapsed to a sparkle pill; expands in place without taking canvas width
  * - header: identity, live status, clear conversation, collapse
  * - compact Off/Quiet/Buddy/Kids + talk-level controls (no wall of buttons)
+ * - a small state-driven Buddy nudge card (no AI request, fully dismissible)
  * - message bubbles (user right, companion left, system/error cards)
  * - live streaming answer with a blinking caret and typing dots
  * - collapsible reasoning ("Thinking…") that streams in its own card
@@ -46,11 +47,63 @@ Item {
         (parent ? parent.height : 640) - VLCStyle.margin_normal * 2)
     readonly property bool busy: PaintbrushCtx.assistantBusy
     readonly property bool canChat: PaintbrushCtx.companionMode !== 0
+    readonly property bool kidsMode: PaintbrushCtx.companionMode === 3
+    readonly property bool buddyMode: PaintbrushCtx.companionMode === 2
+    readonly property bool buddyish: root.kidsMode || root.buddyMode
+    readonly property bool offlineKids: root.kidsMode
+                                        && (!PaintbrushCtx.kidsNetworkAllowed
+                                            || !PaintbrushCtx.assistantConfigured)
+    readonly property bool offlineBuddy: root.buddyMode
+                                          && !PaintbrushCtx.assistantConfigured
 
     width: root.expanded ? root.panelWidth : root.pillSize
     height: root.expanded ? root.panelHeight : root.pillSize
     Behavior on width { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
     Behavior on height { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+
+    function greetingText() {
+        if (PaintbrushCtx.companionMode === 0)
+            return qsTr("Buddy is napping.")
+        if (root.kidsMode)
+            return qsTr("Hi! I’m Buddy. Ask me about your picture.")
+        return qsTr("Hey — I’m here. Ask about the picture, or tell me what to change.")
+    }
+
+    function exampleText() {
+        if (root.kidsMode)
+            return qsTr("Try “add some glitter” or “what should I draw next?”")
+        return qsTr("Try “make the colors warmer” or “what should I add?”")
+    }
+
+    function offlineNoteText() {
+        if (root.offlineKids)
+            return qsTr("I can’t use picture magic right now, but I can still share ideas.")
+        if (root.offlineBuddy)
+            return qsTr("The AI is not connected, so I’ll stick to offline ideas.")
+        return ""
+    }
+
+    function modeHelpText() {
+        switch (PaintbrushCtx.companionMode) {
+        case 0:
+            return qsTr("Off — Buddy is napping.")
+        case 1:
+            return qsTr("Quiet — Buddy answers when you talk, and stays calm otherwise.")
+        case 2:
+            return qsTr("Buddy — cheers you on and drops one small idea now and then.")
+        case 3:
+            return qsTr("Kids — gentle, playful and safe. A grown-up can turn on picture magic.")
+        default:
+            return ""
+        }
+    }
+
+    function inputHintText() {
+        if (!root.canChat)
+            return qsTr("Companion is off")
+        return root.kidsMode ? qsTr("Ask Buddy anything…")
+                             : qsTr("Ask about your drawing…")
+    }
 
     function sendQuestion() {
         const text = chatInput.text.trim()
@@ -109,6 +162,23 @@ Item {
             anchors.bottom: parent.bottom
         }
 
+        /* A tiny idea dot, never a popup: the child opens the dock only when
+         * they want company. */
+        Rectangle {
+            width: 9
+            height: 9
+            radius: 4.5
+            color: theme.accent
+            border.width: 2
+            border.color: theme.bg.primary
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.leftMargin: 2
+            anchors.topMargin: 2
+            visible: root.buddyish && PaintbrushCtx.companionSuggestionVisible
+                     && !root.busy
+        }
+
         MouseArea {
             id: pillMouse
             anchors.fill: parent
@@ -119,7 +189,9 @@ Item {
                 Qt.callLater(chatInput.forceActiveFocus)
             }
             ToolTip.visible: containsMouse
-            ToolTip.text: qsTr("Creative companion — ask about your drawing")
+            ToolTip.text: root.buddyish
+                          ? qsTr("Buddy — tap for an idea or a chat")
+                          : qsTr("Creative companion — ask about your drawing")
             ToolTip.delay: 600
         }
     }
@@ -178,7 +250,7 @@ Item {
                         }
                         Widgets.LabelExt {
                             text: root.busy ? qsTr("Thinking…")
-                                            : (root.canChat ? qsTr("Ready")
+                                            : (root.canChat ? qsTr("Here")
                                                             : qsTr("Off"))
                             color: root.busy ? theme.accent : theme.fg.secondary
                             font.pixelSize: VLCStyle.fontSize_small
@@ -236,20 +308,7 @@ Item {
              * Quiet is answer-only, and Talk is ignored there. */
             Widgets.LabelExt {
                 Layout.fillWidth: true
-                text: {
-                    switch (PaintbrushCtx.companionMode) {
-                    case 0:
-                        return qsTr("Off — the companion is hidden and never reacts.")
-                    case 1:
-                        return qsTr("Quiet — answers when you talk; never reacts on its own. Talk is ignored.")
-                    case 2:
-                        return qsTr("Buddy — reacts to your drawing according to Talk. Only when I ask means chat only; Talk less means major moments; Talk means frequent reactions.")
-                    case 3:
-                        return qsTr("Kids — gentle, child-safe. Network AI needs the parental switch in Settings → Companion.")
-                    default:
-                        return ""
-                    }
-                }
+                text: root.modeHelpText()
                 color: theme.fg.secondary
                 font.pixelSize: VLCStyle.fontSize_small
                 wrapMode: Text.WordWrap
@@ -259,6 +318,76 @@ Item {
                 Layout.fillWidth: true
                 implicitHeight: 1
                 color: theme.border
+            }
+
+            /* Buddy nudge: one small, dismissible next step derived from the
+             * real editor state. It never blocks the canvas and never starts
+             * an AI request. */
+            Rectangle {
+                id: nudgeCard
+
+                Layout.fillWidth: true
+                visible: root.buddyish && PaintbrushCtx.companionSuggestionVisible
+                         && !root.busy
+                implicitHeight: nudgeColumn.implicitHeight
+                                + 2 * VLCStyle.margin_small
+                radius: VLCStyle.margin_xsmall
+                color: Qt.rgba(theme.accent.r, theme.accent.g,
+                               theme.accent.b, 0.08)
+                border.width: 1
+                border.color: Qt.rgba(theme.accent.r, theme.accent.g,
+                                      theme.accent.b, 0.35)
+
+                ColumnLayout {
+                    id: nudgeColumn
+                    anchors.fill: parent
+                    anchors.margins: VLCStyle.margin_small
+                    spacing: VLCStyle.margin_xsmall
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: VLCStyle.margin_xsmall
+
+                        Widgets.IconLabel {
+                            text: VLCIcons.topbar_discover
+                            color: theme.accent
+                            font.pixelSize: VLCStyle.fontSize_small
+                        }
+                        Widgets.LabelExt {
+                            text: qsTr("Buddy has an idea")
+                            color: theme.accent
+                            font.pixelSize: VLCStyle.fontSize_small
+                        }
+                        Item { Layout.fillWidth: true }
+                    }
+
+                    Widgets.LabelExt {
+                        Layout.fillWidth: true
+                        text: PaintbrushCtx.companionSuggestionText
+                        color: theme.fg.primary
+                        font.pixelSize: VLCStyle.fontSize_normal
+                        wrapMode: Text.WordWrap
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: VLCStyle.margin_xsmall
+
+                        Widgets.ButtonExt {
+                            visible: PaintbrushCtx.companionSuggestionActionLabel.length > 0
+                                     && PaintbrushCtx.companionSuggestionAction !== "none"
+                            text: PaintbrushCtx.companionSuggestionActionLabel
+                            onClicked: PaintbrushCtx.acceptCompanionSuggestion()
+                            Accessible.name: text
+                        }
+                        Widgets.ButtonExt {
+                            text: qsTr("Not now")
+                            onClicked: PaintbrushCtx.dismissCompanionSuggestion()
+                            Accessible.name: qsTr("Dismiss Buddy's idea")
+                        }
+                        Item { Layout.fillWidth: true }
+                    }
+                }
             }
 
             /* conversation */
@@ -323,16 +452,26 @@ Item {
 
                                 Widgets.LabelExt {
                                     Layout.fillWidth: true
-                                    text: qsTr("Hi — I can see your canvas.")
+                                    text: root.greetingText()
                                     color: theme.fg.primary
                                     font.pixelSize: VLCStyle.fontSize_normal
                                 }
                                 Widgets.LabelExt {
                                     Layout.fillWidth: true
-                                    text: qsTr("Ask about the picture, or tell me what to change: “make the glitter pinker”, “switch to the brush”, “undo”.")
+                                    visible: PaintbrushCtx.companionMode !== 0
+                                    text: root.exampleText()
                                     color: theme.fg.secondary
                                     font.pixelSize: VLCStyle.fontSize_small
                                     wrapMode: Text.WordWrap
+                                }
+                                Widgets.LabelExt {
+                                    Layout.fillWidth: true
+                                    visible: root.offlineKids || root.offlineBuddy
+                                    text: root.offlineNoteText()
+                                    color: theme.fg.secondary
+                                    font.pixelSize: VLCStyle.fontSize_small
+                                    wrapMode: Text.WordWrap
+                                    font.italic: true
                                 }
                             }
                         }
@@ -588,9 +727,7 @@ Item {
                     Text {
                         anchors.fill: parent
                         anchors.margins: VLCStyle.margin_small + 4
-                        text: root.canChat
-                              ? qsTr("Ask about your drawing…")
-                              : qsTr("Companion is off")
+                        text: root.inputHintText()
                         color: theme.fg.secondary
                         font.pixelSize: VLCStyle.fontSize_normal
                         wrapMode: Text.WordWrap
@@ -644,7 +781,7 @@ Item {
 
             Widgets.LabelExt {
                 Layout.fillWidth: true
-                text: qsTr("Enter sends · Shift+Enter makes a new line")
+                text: qsTr("Press Enter to send.")
                 color: theme.fg.secondary
                 font.pixelSize: VLCStyle.fontSize_small
             }

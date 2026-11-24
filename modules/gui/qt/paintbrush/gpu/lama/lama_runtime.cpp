@@ -407,9 +407,26 @@ void fill_run_info(PblmRunInfo *info, const PblmSessionImpl &session)
     info->cpu_node_count = session.cpuNodes;
     info->device_index = session.deviceIndex;
     info->input_size = session.size;
+    info->load_ms = session.loadMs;
     std::snprintf(info->backend, sizeof(info->backend), "%s", session.backend.c_str());
     std::snprintf(info->model_sha256, sizeof(info->model_sha256), "%s",
                   session.modelSha.c_str());
+}
+
+/* Append-only struct compatibility: never write past the caller's struct_size.
+ * An older caller (smaller struct) receives the fields it knows and a truncated
+ * struct_size; a newer caller against an older DLL simply keeps its zeroed
+ * fields. This is the only place a PblmRunInfo is published to the caller. */
+void copy_run_info(PblmRunInfo *dst, const PblmRunInfo &src)
+{
+    if (!dst)
+        return;
+    const uint32_t requested = dst->struct_size;
+    size_t bytes = sizeof(PblmRunInfo);
+    if (requested != 0)
+        bytes = std::min<size_t>(size_t(requested), sizeof(PblmRunInfo));
+    std::memcpy(dst, &src, bytes);
+    dst->struct_size = uint32_t(bytes);
 }
 
 void count_provider_assignment(PblmSessionImpl &session)
@@ -1385,10 +1402,13 @@ void pblm_destroy_session(PblmSession *session)
 
 int32_t pblm_get_backend_info(PblmSession *session, PblmRunInfo *out)
 {
-    if (!session || !out || out->struct_size != sizeof(PblmRunInfo))
+    if (!session || !out || out->struct_size < sizeof(uint32_t))
         return PBLM_ERR_ARGUMENT;
     auto *impl = reinterpret_cast<PblmSessionImpl *>(session);
-    fill_run_info(out, *impl);
+    PblmRunInfo local{};
+    local.struct_size = sizeof(PblmRunInfo);
+    fill_run_info(&local, *impl);
+    copy_run_info(out, local);
     return PBLM_OK;
 }
 
@@ -1450,6 +1470,8 @@ int32_t pblm_inpaint(PblmSession *session, const PblmImage *rgb, const PblmMask 
     PblmRunInfo local{};
     local.struct_size = sizeof(PblmRunInfo);
     fill_run_info(&local, *impl);
+    local.load_ms = impl->loadMs;
+    local.mask_analysis_ms = -1.0;
 
     /* Start from an exact source copy so every unmasked pixel is preserved
      * byte-for-byte, including alpha and pixels outside all ROI passes. */
@@ -1563,6 +1585,10 @@ int32_t pblm_inpaint(PblmSession *session, const PblmImage *rgb, const PblmMask 
     featherRadius = std::max(1, std::min(8, featherRadius));
 
     local.components = labeled ? int(analysis.components.size()) : 0;
+    /* Setup cost: source copy, mask scan, connected components and the
+     * combined/split pass decision. The per-pass ROI crop/dilate/resample is
+     * measured separately as preprocess_ms inside process_pass(). */
+    local.mask_analysis_ms = ms_since(totalStart);
 
     for (const PassSpec &pass : passes)
     {
@@ -1579,12 +1605,7 @@ int32_t pblm_inpaint(PblmSession *session, const PblmImage *rgb, const PblmMask 
 
     local.total_ms = ms_since(totalStart);
     local.used_gpu = impl->useGpu ? 1 : 0;
-    if (info)
-    {
-        const uint32_t structSize = info->struct_size;
-        *info = local;
-        info->struct_size = structSize ? structSize : sizeof(PblmRunInfo);
-    }
+    copy_run_info(info, local);
     return PBLM_OK;
 }
 

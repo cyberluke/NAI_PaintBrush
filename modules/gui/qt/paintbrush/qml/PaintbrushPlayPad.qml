@@ -54,6 +54,41 @@ Item {
         return ({})
     }
 
+    /* Warm lead-in for the existing patch suggestion. The concrete next step
+     * still comes from the real patch definition; this only changes tone. */
+    function buddyLookLine(kind) {
+        if (PaintbrushCtx.companionMode === 3) {
+            switch (kind) {
+            case "sparkle":
+                return qsTr("So shiny! Want one more sparkle?")
+            case "halo":
+                return qsTr("It already glows. Want to make it glow more?")
+            case "calligraphy":
+                return qsTr("Want to trace its outline?")
+            case "splat":
+                return qsTr("Want to make it a little wild?")
+            case "ribbon":
+                return qsTr("It looks like it wants to fly. Want to add a swoosh?")
+            default:
+                return qsTr("This is yours. Want to push it one tiny step further?")
+            }
+        }
+        switch (kind) {
+        case "sparkle":
+            return qsTr("You caught the light. One sparkle would make it sing.")
+        case "halo":
+            return qsTr("The shape is already a poster. A halo would make it glow.")
+        case "calligraphy":
+            return qsTr("The outline is doing the talking. One ink line would trace it.")
+        case "splat":
+            return qsTr("This has main-character energy. A splat would make it messy in the best way.")
+        case "ribbon":
+            return qsTr("That cutout wants to move. One swoosh and it’s alive.")
+        default:
+            return qsTr("This is yours. Want to push it one tiny step further?")
+        }
+    }
+
     /* Tactile pad control: the VLC flat ButtonExt is right for toolbars, but
      * a performance surface needs a visible hit area and a primary CTA. */
     component PadButton: Rectangle {
@@ -759,6 +794,15 @@ Item {
                 enabledAction: root.creative.canCommit
                 onClicked: root.creative.commit()
             }
+
+            PadButton {
+                Layout.fillWidth: true
+                text: qsTr("Stage")
+                enabledAction: root.creative.hasSubject
+                               && !root.creative.busy
+                               && !root.creative.committed
+                onClicked: root.creative.makeRiggedStage()
+            }
         }
 
         /* ------------------------------------------------------ suggestion */
@@ -777,12 +821,27 @@ Item {
                 anchors.margins: VLCStyle.margin_small
                 spacing: VLCStyle.margin_small
 
-                Widgets.LabelExt {
+                ColumnLayout {
                     Layout.fillWidth: true
-                    text: root.creative.suggestionText
-                    color: "#FFFFFF"
-                    font.pixelSize: VLCStyle.fontSize_small
-                    wrapMode: Text.WordWrap
+                    spacing: 2
+
+                    Widgets.LabelExt {
+                        Layout.fillWidth: true
+                        visible: PaintbrushCtx.companionMode === 2
+                                 || PaintbrushCtx.companionMode === 3
+                        text: root.buddyLookLine(root.creative.suggestionKind)
+                        color: root.accent
+                        font.pixelSize: VLCStyle.fontSize_small
+                        font.weight: Font.DemiBold
+                        wrapMode: Text.WordWrap
+                    }
+                    Widgets.LabelExt {
+                        Layout.fillWidth: true
+                        text: root.creative.suggestionText
+                        color: "#FFFFFF"
+                        font.pixelSize: VLCStyle.fontSize_small
+                        wrapMode: Text.WordWrap
+                    }
                 }
                 PadButton {
                     text: qsTr("Add")
