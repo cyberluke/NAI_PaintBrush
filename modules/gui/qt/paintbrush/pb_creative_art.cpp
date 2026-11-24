@@ -396,6 +396,18 @@ float oklabLightness(const QColor &color)
     return toLab(color.red(), color.green(), color.blue()).L;
 }
 
+OklabColor oklabColor(const QColor &color)
+{
+    OklabColor out;
+    if (!color.isValid())
+        return out;
+    const Lab l = toLab(color.red(), color.green(), color.blue());
+    out.L = l.L;
+    out.a = l.a;
+    out.b = l.b;
+    return out;
+}
+
 QImage maskFromAlpha(const QImage &raster)
 {
     const QImage src = argb(raster);
@@ -744,18 +756,19 @@ HoloMaterial holoMaterialPreset(HoloMaterialId id)
         break;
     case HoloMaterialId::ChromaticChrome:
         m.name = QStringLiteral("Chromatic chrome");
-        m.metallic = 0.95f;
-        m.roughness = 0.06f;
+        m.metallic = 0.98f;
+        m.roughness = 0.04f;
         m.filmThickness = 180.0f;
         m.filmVariation = 24.0f;
         m.grating = 0.15f;
         m.dispersion = 0.20f;
-        m.sheen = 0.15f;
+        m.sheen = 0.10f;
         m.sparkle = 0.18f;
         m.saturation = 0.20f;
         m.normalStrength = 0.85f;
-        m.palette = { QColor(232, 246, 255), QColor(143, 168, 255),
-                      QColor(192, 198, 208), QColor(255, 255, 255) };
+        m.clearcoat = 1.0f;
+        m.palette = { QColor(235, 248, 255), QColor(110, 140, 190),
+                      QColor(200, 205, 215), QColor(255, 255, 255) };
         break;
     case HoloMaterialId::PrismaticFantasy:
         m.name = QStringLiteral("Prismatic fantasy");
@@ -771,6 +784,82 @@ HoloMaterial holoMaterialPreset(HoloMaterialId id)
         m.normalStrength = 0.95f;
         m.palette = { QColor(255, 47, 185), QColor(0, 229, 255),
                       QColor(182, 255, 0), QColor(255, 224, 102) };
+        break;
+    case HoloMaterialId::HolographicWrap:
+        m.name = QStringLiteral("Holographic wrap");
+        m.metallic = 0.50f;
+        m.roughness = 0.10f;
+        m.filmThickness = 340.0f;
+        m.filmVariation = 220.0f;
+        m.grating = 1.20f;
+        m.dispersion = 1.0f;
+        m.sheen = 0.75f;
+        m.sparkle = 0.22f;
+        m.saturation = 1.0f;
+        m.normalStrength = 0.70f;
+        m.clearcoat = 0.90f;
+        m.colorShift = 0.30f;
+        m.flakeDensity = 0.05f;
+        m.flakeSize = 1.2f;
+        m.palette = { QColor(0, 80, 90), QColor(0, 140, 255),
+                      QColor(110, 60, 200), QColor(220, 255, 250) };
+        break;
+    case HoloMaterialId::ChameleonPaint:
+        m.name = QStringLiteral("Chameleon paint");
+        m.metallic = 0.55f;
+        m.roughness = 0.12f;
+        m.filmThickness = 220.0f;
+        m.filmVariation = 40.0f;
+        m.grating = 0.10f;
+        m.dispersion = 0.25f;
+        m.sheen = 0.20f;
+        m.sparkle = 0.05f;
+        m.saturation = 0.95f;
+        m.normalStrength = 0.80f;
+        m.clearcoat = 1.0f;
+        m.colorShift = 1.0f;
+        m.flakeDensity = 0.10f;
+        m.flakeSize = 0.6f;
+        m.palette = { QColor(0, 90, 55), QColor(0, 190, 130),
+                      QColor(80, 30, 150), QColor(200, 90, 40) };
+        break;
+    case HoloMaterialId::GlitterMetallic:
+        m.name = QStringLiteral("Glitter metallic");
+        m.metallic = 0.85f;
+        m.roughness = 0.12f;
+        m.filmThickness = 160.0f;
+        m.filmVariation = 30.0f;
+        m.grating = 0.30f;
+        m.dispersion = 0.35f;
+        m.sheen = 0.25f;
+        m.sparkle = 0.95f;
+        m.saturation = 0.70f;
+        m.normalStrength = 0.75f;
+        m.clearcoat = 0.80f;
+        m.colorShift = 0.05f;
+        m.flakeDensity = 0.85f;
+        m.flakeSize = 0.8f;
+        m.palette = { QColor(232, 246, 255), QColor(255, 224, 130),
+                      QColor(255, 120, 190), QColor(120, 180, 255) };
+        break;
+    case HoloMaterialId::ElectricLivery:
+        m.name = QStringLiteral("Electric livery");
+        m.metallic = 0.50f;
+        m.roughness = 0.14f;
+        m.filmThickness = 260.0f;
+        m.filmVariation = 200.0f;
+        m.grating = 2.80f;
+        m.dispersion = 1.0f;
+        m.sheen = 0.50f;
+        m.sparkle = 0.40f;
+        m.saturation = 1.0f;
+        m.normalStrength = 0.80f;
+        m.clearcoat = 0.50f;
+        m.colorShift = 0.20f;
+        m.flakeDensity = 0.15f;
+        m.flakeSize = 0.9f;
+        m.palette = { QColor(8, 8, 18), QColor(0, 234, 255),
+                      QColor(255, 0, 180), QColor(183, 255, 24) };
         break;
     case HoloMaterialId::LiquidHologram:
     default:
@@ -797,14 +886,52 @@ QString holoMaterialName(HoloMaterialId id)
     return holoMaterialPreset(id).name;
 }
 
+int composeCoverage(int sourceAlpha, int regionMask, CoverageMode mode)
+{
+    const int a = qBound(0, sourceAlpha, 255);
+    const int b = qBound(0, regionMask, 255);
+    switch (mode)
+    {
+    case CoverageMode::IndependentProbability:
+        /* two independent probabilities: P(A and B) = P(A) * P(B) */
+        return (a * b + 127) / 255;
+    case CoverageMode::UserConstraint:
+        /* a hard cap chosen by the artist or assistant */
+        return qMin(a, b);
+    case CoverageMode::InheritedCoverage:
+    default:
+        /* the region already carries the final alpha (a cutout mask) */
+        return qMin(a, b);
+    }
+}
+
 QImage estimateNormals(const QImage &source, const QImage &mask, float strength)
 {
+    return estimateNormals(source, mask, strength, nullptr);
+}
+
+QImage estimateNormals(const QImage &source, const QImage &mask, float strength,
+                       QImage *confidenceOut)
+{
+    if (confidenceOut)
+        *confidenceOut = QImage();
     const QImage src = argb(source);
     if (src.isNull())
         return {};
     const QImage lum = luminanceImage(src);
-    const QImage coarse = softBlur(lum, 18);
-    const QImage fine = softBlur(lum, 5);
+    const int minSide = qMin(src.width(), src.height());
+    /* Blur and sampling radii scale with the source so the estimated slope is
+     * the same object-space slope at preview and export resolutions. */
+    const int coarseStep = qMax(2, minSide / 28);
+    const int fineStep = qMax(1, minSide / 90);
+    const int coarseOff = qMax(1, minSide / 80);
+    const int fineOff = qMax(1, minSide / 200);
+    const QImage coarse = softBlur(lum, coarseStep);
+    const QImage fine = softBlur(lum, fineStep);
+    /* A much wider blur removes printed stripes and logos. Comparing the
+     * fine gradient with this wide gradient separates a coherent fold from
+     * alternating texture. */
+    const QImage confCoarse = softBlur(lum, qMax(4, minSide / 12));
     const float k = qBound(0.0f, strength, 3.0f) / 64.0f;
 
     QImage m = grayscale(mask);
@@ -819,21 +946,46 @@ QImage estimateNormals(const QImage &source, const QImage &mask, float strength)
     };
 
     QImage out(src.size(), QImage::Format_ARGB32);
+    QImage conf(src.size(), QImage::Format_Grayscale8);
     for (int y = 0; y < src.height(); ++y)
     {
         QRgb *dst = reinterpret_cast<QRgb *>(out.scanLine(y));
+        uchar *cf = conf.scanLine(y);
+        const uchar *lm = lum.constScanLine(y);
+        const uchar *fn = fine.constScanLine(y);
         for (int x = 0; x < src.width(); ++x)
         {
             const float gx =
-                0.5f * float(sampleAt(coarse, x + 2, y)
-                             - sampleAt(coarse, x - 2, y))
-                + 0.5f * float(sampleAt(fine, x + 1, y)
-                               - sampleAt(fine, x - 1, y));
+                0.5f * float(sampleAt(coarse, x + coarseOff, y)
+                             - sampleAt(coarse, x - coarseOff, y))
+                + 0.5f * float(sampleAt(fine, x + fineOff, y)
+                               - sampleAt(fine, x - fineOff, y));
             const float gy =
-                0.5f * float(sampleAt(coarse, x, y + 2)
-                             - sampleAt(coarse, x, y - 2))
-                + 0.5f * float(sampleAt(fine, x, y + 1)
-                               - sampleAt(fine, x, y - 1));
+                0.5f * float(sampleAt(coarse, x, y + coarseOff)
+                             - sampleAt(coarse, x, y - coarseOff))
+                + 0.5f * float(sampleAt(fine, x, y + fineOff)
+                               - sampleAt(fine, x, y - fineOff));
+            const float cx =
+                float(sampleAt(confCoarse, x + coarseOff, y)
+                      - sampleAt(confCoarse, x - coarseOff, y));
+            const float cy =
+                float(sampleAt(confCoarse, x, y + coarseOff)
+                      - sampleAt(confCoarse, x, y - coarseOff));
+            const float fx =
+                float(sampleAt(fine, x + fineOff, y)
+                      - sampleAt(fine, x - fineOff, y));
+            const float fy =
+                float(sampleAt(fine, x, y + fineOff)
+                      - sampleAt(fine, x, y - fineOff));
+            const float cLen = std::hypot(cx, cy);
+            const float fLen = std::hypot(fx, fy);
+            const float align =
+                (cLen > 1e-3f && fLen > 1e-3f)
+                    ? (cx * fx + cy * fy) / (cLen * fLen)
+                    : 0.0f;
+            const float ratio = cLen / (fLen + 1.0f);
+            const float c = clamp01(align) * clamp01(ratio * 1.5f);
+
             float nx = -gx * k;
             float ny = -gy * k;
             float nz = 1.0f;
@@ -848,15 +1000,18 @@ QImage estimateNormals(const QImage &source, const QImage &mask, float strength)
             dst[x] = qRgba(int((nx * 0.5f + 0.5f) * 255.0f + 0.5f),
                            int((ny * 0.5f + 0.5f) * 255.0f + 0.5f),
                            int((nz * 0.5f + 0.5f) * 255.0f + 0.5f), a);
+            cf[x] = uchar(int(clamp01(c) * 255.0f + 0.5f));
         }
     }
+    if (confidenceOut)
+        *confidenceOut = conf;
     return out;
 }
 
-HoloMaterialResult holographicMaterial(const QImage &source, const QImage &mask,
-                                       const QImage &normals,
-                                       const HoloMaterial &material,
-                                       float strength, quint32 seed)
+HoloMaterialResult holographicMaterial(
+    const QImage &source, const QImage &mask, const QImage &normals,
+    const HoloMaterial &material, float strength, quint32 seed,
+    CoverageMode coverageMode, const QImage &confidence)
 {
     HoloMaterialResult result;
     const QImage src = argb(source);
@@ -874,6 +1029,11 @@ HoloMaterialResult holographicMaterial(const QImage &source, const QImage &mask,
     if (!nrm.isNull() && nrm.size() != src.size())
         nrm = nrm.scaled(src.size(), Qt::IgnoreAspectRatio,
                          Qt::SmoothTransformation);
+
+    QImage conf = grayscale(confidence);
+    if (!conf.isNull() && conf.size() != src.size())
+        conf = conf.scaled(src.size(), Qt::IgnoreAspectRatio,
+                           Qt::SmoothTransformation);
 
     const float power = clamp01(strength);
     const float metallic = clamp01(material.metallic);
@@ -904,14 +1064,21 @@ HoloMaterialResult holographicMaterial(const QImage &source, const QImage &mask,
         const QRgb *nline =
             nrm.isNull() ? nullptr
                          : reinterpret_cast<const QRgb *>(nrm.constScanLine(y));
+        const uchar *cf = conf.isNull() ? nullptr : conf.constScanLine(y);
         QRgb *albedo = reinterpret_cast<QRgb *>(result.albedo.scanLine(y));
         QRgb *sheen = reinterpret_cast<QRgb *>(result.sheen.scanLine(y));
         for (int x = 0; x < src.width(); ++x)
         {
             const int alpha = qAlpha(line[x]);
-            const int coverage = qMin(alpha, int(mk[x]));
+            const int coverage =
+                composeCoverage(alpha, int(mk[x]), coverageMode);
             if (coverage <= 2)
+            {
+                /* keep the exact coverage even on the softest edge pixels */
+                albedo[x] = qRgba(qRed(line[x]), qGreen(line[x]),
+                                  qBlue(line[x]), coverage);
                 continue;
+            }
 
             const float l = (54.0f * float(qRed(line[x]))
                              + 183.0f * float(qGreen(line[x]))
@@ -922,7 +1089,13 @@ HoloMaterialResult holographicMaterial(const QImage &source, const QImage &mask,
             {
                 nx = (float(qRed(nline[x])) - 128.0f) / 127.0f;
                 ny = (float(qGreen(nline[x])) - 128.0f) / 127.0f;
-                nz = qMax(0.15f, (float(qBlue(nline[x])) - 128.0f) / 127.0f);
+                /* printed texture scores low confidence and must not become
+                 * fake geometry; a real fold keeps most of its slope */
+                const float confv = cf ? float(cf[x]) / 255.0f : 1.0f;
+                const float nScale = 0.10f + 0.90f * confv;
+                nx *= nScale;
+                ny *= nScale;
+                nz = 1.0f;
                 const float len = std::sqrt(nx * nx + ny * ny + nz * nz);
                 nx /= len;
                 ny /= len;
@@ -936,14 +1109,19 @@ HoloMaterialResult holographicMaterial(const QImage &source, const QImage &mask,
             const float spec = std::pow(ndh, shininess)
                                * (0.20f + 0.80f * fresnel);
 
+            /* object-space coordinates: the grating and the thickness noise
+             * keep the same spatial frequency when the source is rendered at
+             * a different resolution (preview vs native export) */
+            const float u = (float(x) + 0.5f) / float(src.width());
+            const float v = (float(y) + 0.5f) / float(src.height());
+
             /* thin-film interference: two-beam reflectance at three
              * representative wavelengths; thickness follows shading and the
              * estimated orientation so the bands bend with the fabric */
             float d = material.filmThickness
                       + (l - 0.5f) * material.filmVariation
                       + (nx * 0.6f + ny * 0.4f) * material.filmVariation
-                      + valueNoise(seed + 91, float(x) / 46.0f,
-                                   float(y) / 46.0f)
+                      + valueNoise(seed + 91, u * 8.0f, v * 8.0f)
                             * material.filmVariation * 0.85f;
             d = qBound(40.0f, d, 1400.0f);
             const float cosT = std::sqrt(
@@ -955,7 +1133,7 @@ HoloMaterialResult holographicMaterial(const QImage &source, const QImage &mask,
 
             const float gPhase =
                 material.grating
-                    * (float(x) * gratingCos + float(y) * gratingSin) * 0.035f
+                    * (u * gratingCos + v * gratingSin) * 6.2831853f * 4.0f
                 + phaseSeed;
             fr = lerp(fr, 0.5f + 0.5f * std::sin(gPhase),
                       material.dispersion * 0.55f);
@@ -967,18 +1145,22 @@ HoloMaterialResult holographicMaterial(const QImage &source, const QImage &mask,
             const QColor pal = sampleColor(
                 material.palette,
                 clamp01(0.5f + 0.5f * nx * 0.8f
-                        + 0.20f * std::sin(gPhase * 0.7f)));
+                        + 0.20f * std::sin(gPhase * 0.7f)
+                        + material.colorShift * (1.0f - ndv) * 0.7f));
             const float sat = clamp01(material.saturation);
             float sr = lerp(0.5f, fr, sat);
             float sg = lerp(0.5f, fg, sat);
             float sb = lerp(0.5f, fb, sat);
-            sr = lerp(sr, float(pal.redF()), 0.35f);
-            sg = lerp(sg, float(pal.greenF()), 0.35f);
-            sb = lerp(sb, float(pal.blueF()), 0.35f);
+            const float palR = srgbToLinear(float(pal.redF()));
+            const float palG = srgbToLinear(float(pal.greenF()));
+            const float palB = srgbToLinear(float(pal.blueF()));
+            sr = lerp(sr, palR, 0.35f);
+            sg = lerp(sg, palG, 0.35f);
+            sb = lerp(sb, palB, 0.35f);
 
-            const float srcR = float(qRed(line[x])) / 255.0f;
-            const float srcG = float(qGreen(line[x])) / 255.0f;
-            const float srcB = float(qBlue(line[x])) / 255.0f;
+            const float srcR = srgbToLinear(float(qRed(line[x])) / 255.0f);
+            const float srcG = srgbToLinear(float(qGreen(line[x])) / 255.0f);
+            const float srcB = srgbToLinear(float(qBlue(line[x])) / 255.0f);
             float r = srcR;
             float g = srcG;
             float b = srcB;
@@ -990,9 +1172,9 @@ HoloMaterialResult holographicMaterial(const QImage &source, const QImage &mask,
 
             const QColor env = sampleColor(material.palette,
                                            clamp01(0.5f + 0.5f * nx));
-            r += float(env.redF()) * 0.16f * metallic;
-            g += float(env.greenF()) * 0.16f * metallic;
-            b += float(env.blueF()) * 0.16f * metallic;
+            r += srgbToLinear(float(env.redF())) * 0.16f * metallic;
+            g += srgbToLinear(float(env.greenF())) * 0.16f * metallic;
+            b += srgbToLinear(float(env.blueF())) * 0.16f * metallic;
 
             const float spectral =
                 (0.16f + 0.48f * clamp01(material.sheen) * fresnel)
@@ -1009,8 +1191,27 @@ HoloMaterialResult holographicMaterial(const QImage &source, const QImage &mask,
             g += specG * specAmt;
             b += specB * specAmt;
 
+            const float clear = std::pow(ndh, 90.0f)
+                                * clamp01(material.clearcoat)
+                                * (0.25f + 0.75f * fresnel);
+            r += clear;
+            g += clear;
+            b += clear;
+
+            const bool flake =
+                hash01(seed + 31, int(u * 512.0f), int(v * 512.0f))
+                < clamp01(material.flakeDensity) * 0.06f;
+            if (flake)
+            {
+                const float fa = 0.35f + 0.30f * clamp01(material.flakeSize);
+                r = lerp(r, 0.95f, fa);
+                g = lerp(g, 0.95f, fa);
+                b = lerp(b, 0.95f, fa);
+            }
+
             const bool glint =
-                hash01(seed + 7, x, y) < clamp01(material.sparkle) * 0.012f
+                hash01(seed + 7, int(u * 512.0f), int(v * 512.0f))
+                    < clamp01(material.sparkle) * 0.012f
                 && ndh > 0.20f;
             if (glint)
             {
@@ -1020,23 +1221,31 @@ HoloMaterialResult holographicMaterial(const QImage &source, const QImage &mask,
             }
 
             const int outR = qBound(
-                0, int(clamp01(lerp(srcR, r, power)) * 255.0f + 0.5f), 255);
+                0, int(linearToSrgb(clamp01(lerp(srcR, r, power)))
+                           * 255.0f + 0.5f), 255);
             const int outG = qBound(
-                0, int(clamp01(lerp(srcG, g, power)) * 255.0f + 0.5f), 255);
+                0, int(linearToSrgb(clamp01(lerp(srcG, g, power)))
+                           * 255.0f + 0.5f), 255);
             const int outB = qBound(
-                0, int(clamp01(lerp(srcB, b, power)) * 255.0f + 0.5f), 255);
+                0, int(linearToSrgb(clamp01(lerp(srcB, b, power)))
+                           * 255.0f + 0.5f), 255);
             albedo[x] = qRgba(outR, outG, outB, coverage);
 
             const float sheenAlpha =
                 clamp01(clamp01(material.sheen) * (0.12f + 0.88f * fresnel)
-                        + spec * 0.55f + (glint ? 0.55f : 0.0f))
+                        + spec * 0.55f + clear * 0.5f
+                        + (flake ? 0.25f : 0.0f)
+                        + (glint ? 0.55f : 0.0f))
                 * (float(coverage) / 255.0f);
             if (sheenAlpha > 0.01f)
             {
                 sheen[x] = qRgba(
-                    qBound(0, int((sr * 0.7f + 0.3f) * 255.0f), 255),
-                    qBound(0, int((sg * 0.7f + 0.3f) * 255.0f), 255),
-                    qBound(0, int((sb * 0.7f + 0.3f) * 255.0f), 255),
+                    qBound(0, int(linearToSrgb(clamp01(sr * 0.7f + 0.3f))
+                                      * 255.0f), 255),
+                    qBound(0, int(linearToSrgb(clamp01(sg * 0.7f + 0.3f))
+                                      * 255.0f), 255),
+                    qBound(0, int(linearToSrgb(clamp01(sb * 0.7f + 0.3f))
+                                      * 255.0f), 255),
                     int(clamp01(sheenAlpha * power) * 235.0f + 0.5f));
             }
         }

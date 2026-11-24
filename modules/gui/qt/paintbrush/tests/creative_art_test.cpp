@@ -27,8 +27,10 @@
 #include <QString>
 #include <QStringList>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <vector>
 
 using namespace paintbrush;
 
@@ -434,6 +436,81 @@ void testSceneHelpers()
     check("reflection.size", reflected.size() == subjectImage().size());
 }
 
+QImage screenComposite(const QImage &base, const QImage &light)
+{
+    QImage out = base.convertToFormat(QImage::Format_ARGB32);
+    QPainter p(&out);
+    p.setCompositionMode(QPainter::CompositionMode_Screen);
+    p.drawImage(0, 0, light);
+    p.end();
+    return out;
+}
+
+double meanConfidence(const QImage &conf, const QImage &mask)
+{
+    if (conf.isNull() || mask.isNull() || conf.size() != mask.size())
+        return 0.0;
+    double sum = 0.0;
+    int n = 0;
+    for (int y = 0; y < conf.height(); ++y)
+    {
+        const uchar *cf = conf.constScanLine(y);
+        const uchar *mk = mask.constScanLine(y);
+        for (int x = 0; x < conf.width(); ++x)
+        {
+            if (mk[x] <= 8)
+                continue;
+            sum += cf[x];
+            ++n;
+        }
+    }
+    return n > 0 ? sum / (double(n) * 255.0) : 0.0;
+}
+
+struct LightnessReport
+{
+    double mean = 0.0;
+    double p95 = 0.0;
+    double clipped = 0.0;
+    int n = 0;
+};
+
+LightnessReport lightnessReport(const QImage &src, const QImage &out,
+                                const QImage &mask)
+{
+    LightnessReport report;
+    std::vector<float> errors;
+    int clipped = 0;
+    for (int y = 0; y < src.height(); ++y)
+    {
+        const uchar *mk = mask.constScanLine(y);
+        for (int x = 0; x < src.width(); ++x)
+        {
+            if (mk[x] <= 8)
+                continue;
+            const QRgb a = src.pixel(x, y);
+            const QRgb b = out.pixel(x, y);
+            const float la = creative::oklabLightness(QColor::fromRgba(a));
+            const float lb = creative::oklabLightness(QColor::fromRgba(b));
+            errors.push_back(std::fabs(la - lb));
+            if (qRed(b) >= 254 || qGreen(b) >= 254 || qBlue(b) >= 254
+                || qRed(b) <= 1 || qGreen(b) <= 1 || qBlue(b) <= 1)
+                ++clipped;
+        }
+    }
+    if (errors.empty())
+        return report;
+    double sum = 0.0;
+    for (float e : errors)
+        sum += e;
+    std::sort(errors.begin(), errors.end());
+    report.n = int(errors.size());
+    report.mean = sum / double(errors.size());
+    report.p95 = errors[size_t(double(errors.size()) * 0.95)];
+    report.clipped = double(clipped) / double(errors.size());
+    return report;
+}
+
 void testHoloMaterials()
 {
     const QImage subject = subjectImage();
@@ -451,10 +528,14 @@ void testHoloMaterials()
           qBlue(flatNormals.pixel(32, 32)) >= 253
               && qAbs(qRed(flatNormals.pixel(32, 32)) - 128) <= 2);
 
-    const char *labels[4] = { "liquid", "opal", "chrome", "prism" };
+    const char *labels[8] = { "liquid", "opal",   "chrome", "prism",
+                              "wrap",   "chameleon", "glitter", "livery" };
     QSet<quint64> fingerprints;
     QSet<QString> names;
-    for (int i = 0; i < 4; ++i)
+    QVector<QImage> composites;
+    double meanR[8] = { 0 }, meanG[8] = { 0 }, meanB[8] = { 0 };
+    double meanL[8] = { 0 }, meanA[8] = { 0 }, meanOklabB[8] = { 0 };
+    for (int i = 0; i < 8; ++i)
     {
         const auto id = static_cast<creative::HoloMaterialId>(i);
         const creative::HoloMaterial material =
@@ -474,16 +555,140 @@ void testHoloMaterials()
         check((tag + ".deterministic").constData(),
               hashImage(a.albedo) == hashImage(b.albedo)
                   && hashImage(a.sheen) == hashImage(b.sheen));
-        check((tag + ".outside").constData(),
-              qAlpha(a.albedo.pixel(0, 0)) == 0
-                  && qAlpha(a.sheen.pixel(0, 0)) == 0);
-        check((tag + ".inside").constData(),
-              qAlpha(a.albedo.pixel(110, 150)) == 255);
+
+        /* alpha over the WHOLE image, not two sample points */
+        int alphaMismatch = 0;
+        int sheenOutside = 0;
+        double sumR = 0.0, sumG = 0.0, sumB = 0.0;
+        double sumL = 0.0, sumA = 0.0, sumB2 = 0.0;
+        int meanN = 0;
+        const QImage composite = screenComposite(a.albedo, a.sheen);
+        composites.append(composite);
+        for (int y = 0; y < subject.height(); ++y)
+        {
+            const uchar *mk = mask.constScanLine(y);
+            for (int x = 0; x < subject.width(); ++x)
+            {
+                const int expected =
+                    qMin(qAlpha(subject.pixel(x, y)), int(mk[x]));
+                if (qAlpha(a.albedo.pixel(x, y)) != expected)
+                    ++alphaMismatch;
+                if (mk[x] == 0 && qAlpha(a.sheen.pixel(x, y)) > 0)
+                    ++sheenOutside;
+                if (mk[x] > 8)
+                {
+                    const QRgb p = composite.pixel(x, y);
+                    sumR += qRed(p);
+                    sumG += qGreen(p);
+                    sumB += qBlue(p);
+                    const creative::OklabColor oc =
+                        creative::oklabColor(QColor::fromRgba(p));
+                    sumL += oc.L;
+                    sumA += oc.a;
+                    sumB2 += oc.b;
+                    ++meanN;
+                }
+            }
+        }
+        check((tag + ".alpha-full").constData(), alphaMismatch == 0);
+        check((tag + ".sheen-boundary").constData(), sheenOutside == 0);
+        if (meanN > 0)
+        {
+            meanR[i] = sumR / (double(meanN) * 255.0);
+            meanG[i] = sumG / (double(meanN) * 255.0);
+            meanB[i] = sumB / (double(meanN) * 255.0);
+            meanL[i] = sumL / double(meanN);
+            meanA[i] = sumA / double(meanN);
+            meanOklabB[i] = sumB2 / double(meanN);
+        }
+
+        const LightnessReport lr =
+            lightnessReport(subject, a.albedo, mask);
+        std::printf("METRIC.holo.%s.albedo|mean=%.4f|p95=%.4f|clip=%.4f|"
+                    "pixels=%d\n",
+                    labels[i], lr.mean, lr.p95, lr.clipped, lr.n);
+        check((tag + ".albedo-lightness-mean").constData(), lr.mean < 0.15);
+        check((tag + ".albedo-lightness-p95").constData(), lr.p95 < 0.35);
+        check((tag + ".albedo-clipping").constData(), lr.clipped < 0.25);
+
+        const LightnessReport lc =
+            lightnessReport(subject, composite, mask);
+        std::printf("METRIC.holo.%s.composite|mean=%.4f|p95=%.4f|clip=%.4f\n",
+                    labels[i], lc.mean, lc.p95, lc.clipped);
+        check((tag + ".composite-lightness-mean").constData(),
+              lc.mean < 0.18);
+        check((tag + ".composite-clipping").constData(), lc.clipped < 0.30);
         check((tag + ".sheen").constData(), hasAlpha(a.sheen));
         fingerprints.insert(hashImage(a.albedo) ^ (hashImage(a.sheen) << 1));
     }
-    check("holo.four-unique", fingerprints.size() == 4);
-    check("holo.names-unique", names.size() == 4);
+    check("holo.recipes-unique", fingerprints.size() == 8);
+    check("holo.names-unique", names.size() == 8);
+
+    double minPair = 1.0e9;
+    double minMean = 1.0e9;
+    double minRms = 1.0e9;
+    int minRmsI = 0, minRmsJ = 0;
+    for (int i = 0; i < 8; ++i)
+    {
+        for (int j = i + 1; j < 8; ++j)
+        {
+            const double dr = meanR[i] - meanR[j];
+            const double dg = meanG[i] - meanG[j];
+            const double db = meanB[i] - meanB[j];
+            const double rgb =
+                std::sqrt(dr * dr + dg * dg + db * db);
+            if (rgb < minPair)
+                minPair = rgb;
+            const double dl = meanL[i] - meanL[j];
+            const double da = meanA[i] - meanA[j];
+            const double dbb = meanOklabB[i] - meanOklabB[j];
+            const double delta = std::sqrt(dl * dl + da * da + dbb * dbb);
+            if (delta < minMean)
+                minMean = delta;
+
+            /* spatial perceptual difference, not only the mean colour */
+            if (composites.size() == 8)
+            {
+                double sum = 0.0;
+                int n = 0;
+                for (int y = 0; y < subject.height(); ++y)
+                {
+                    const uchar *mk = mask.constScanLine(y);
+                    for (int x = 0; x < subject.width(); ++x)
+                    {
+                        if (mk[x] <= 8)
+                            continue;
+                        const creative::OklabColor a = creative::oklabColor(
+                            QColor::fromRgba(composites[i].pixel(x, y)));
+                        const creative::OklabColor b = creative::oklabColor(
+                            QColor::fromRgba(composites[j].pixel(x, y)));
+                        const double dL = a.L - b.L;
+                        const double dA = a.a - b.a;
+                        const double dB = a.b - b.b;
+                        sum += dL * dL + dA * dA + dB * dB;
+                        ++n;
+                    }
+                }
+                const double rms = n > 0 ? std::sqrt(sum / double(n)) : 0.0;
+                if (rms < minRms)
+                {
+                    minRms = rms;
+                    minRmsI = i;
+                    minRmsJ = j;
+                }
+            }
+        }
+    }
+    std::printf("METRIC.holo.pairwise|rms-oklab=%.4f|mean-oklab=%.4f|"
+                "mean-rgb=%.4f|%s|%s\n",
+                minRms, minMean, minPair, labels[minRmsI], labels[minRmsJ]);
+    check("holo.pairwise-perceptual", minRms > 0.02);
+    check("holo.pairwise-mean-rgb", minPair > 0.015);
+    check("holo.automotive-names",
+          names.contains(QStringLiteral("Holographic wrap"))
+              && names.contains(QStringLiteral("Chameleon paint"))
+              && names.contains(QStringLiteral("Glitter metallic"))
+              && names.contains(QStringLiteral("Electric livery")));
 
     const QImage styled =
         creative::holographicMaterial(
@@ -515,7 +720,102 @@ void testHoloMaterials()
     const double denom = std::sqrt((n * sxx - sx * sx) * (n * syy - sy * sy));
     const double corr = denom > 0 ? (n * sxy - sx * sy) / denom : 0.0;
     std::printf("METRIC.holo.luminance-correlation|%.4f\n", corr);
-    check("holo.luminance-correlation", corr > 0.35);
+    check("holo.luminance-correlation", corr > 0.60);
+
+    check("coverage.inherited",
+          creative::composeCoverage(
+              128, 128, creative::CoverageMode::InheritedCoverage) == 128);
+    check("coverage.independent",
+          creative::composeCoverage(
+              128, 128, creative::CoverageMode::IndependentProbability) == 64);
+    check("coverage.user",
+          creative::composeCoverage(
+              255, 128, creative::CoverageMode::UserConstraint) == 128);
+
+    /* the same material at 2x must downscale back to the 1x look */
+    const QSize bigSize = subject.size() * 2;
+    const QImage big = subject.scaled(bigSize, Qt::IgnoreAspectRatio,
+                                      Qt::SmoothTransformation);
+    const QImage bigMask = mask.scaled(bigSize, Qt::IgnoreAspectRatio,
+                                       Qt::SmoothTransformation);
+    QImage bigConf;
+    const QImage bigNormals =
+        creative::estimateNormals(big, bigMask, 0.8f, &bigConf);
+    QImage oneConf;
+    const QImage oneNormals =
+        creative::estimateNormals(subject, mask, 0.8f, &oneConf);
+    creative::HoloMaterial resMaterial = creative::holoMaterialPreset(
+        creative::HoloMaterialId::LiquidHologram);
+    resMaterial.sparkle = 0.0f; /* glints are deliberately resolution-specific */
+    const creative::HoloMaterialResult one = creative::holographicMaterial(
+        subject, mask, oneNormals, resMaterial, 1.0f, 4242,
+        creative::CoverageMode::InheritedCoverage, oneConf);
+    const creative::HoloMaterialResult two = creative::holographicMaterial(
+        big, bigMask, bigNormals, resMaterial, 1.0f, 4242,
+        creative::CoverageMode::InheritedCoverage, bigConf);
+    const QImage twoSmall = two.albedo.scaled(
+        subject.size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    double sx2 = 0, sy2 = 0, sxx2 = 0, syy2 = 0, sxy2 = 0;
+    int n2 = 0;
+    for (int y = 40; y < subject.height() - 20; y += 3)
+    {
+        for (int x = 40; x < subject.width() - 20; x += 3)
+        {
+            if (mask.constScanLine(y)[x] < 200)
+                continue;
+            const double a =
+                creative::oklabLightness(QColor::fromRgba(one.albedo.pixel(x, y)));
+            const double b = creative::oklabLightness(
+                QColor::fromRgba(twoSmall.pixel(x, y)));
+            sx2 += a;
+            sy2 += b;
+            sxx2 += a * a;
+            syy2 += b * b;
+            sxy2 += a * b;
+            ++n2;
+        }
+    }
+    const double denom2 =
+        std::sqrt((n2 * sxx2 - sx2 * sx2) * (n2 * syy2 - sy2 * sy2));
+    const double resCorr =
+        denom2 > 0 ? (n2 * sxy2 - sx2 * sy2) / denom2 : 0.0;
+    std::printf("METRIC.holo.resolution-correlation|%.4f|samples=%d\n",
+                resCorr, n2);
+    check("holo.resolution-independent", resCorr > 0.85);
+
+    /* a smooth fold must score higher confidence than printed stripes */
+    QImage smooth(220, 300, QImage::Format_ARGB32);
+    for (int y = 0; y < smooth.height(); ++y)
+    {
+        QRgb *row = reinterpret_cast<QRgb *>(smooth.scanLine(y));
+        for (int x = 0; x < smooth.width(); ++x)
+        {
+            const int v = 60 + (x * 100) / smooth.width();
+            row[x] = qRgba(v, v, v, 255);
+        }
+    }
+    const QImage smoothMask = fullMask(smooth.size());
+    QImage smoothConf;
+    creative::estimateNormals(smooth, smoothMask, 0.8f, &smoothConf);
+    QImage stripes = smooth;
+    for (int y = 0; y < stripes.height(); ++y)
+    {
+        QRgb *row = reinterpret_cast<QRgb *>(stripes.scanLine(y));
+        for (int x = 0; x < stripes.width(); ++x)
+        {
+            if (((x / 6) % 2) != 0)
+                continue;
+            row[x] = qRgba(40, 40, 40, 255);
+        }
+    }
+    QImage stripeConf;
+    creative::estimateNormals(stripes, smoothMask, 0.8f, &stripeConf);
+    const double foldConf = meanConfidence(smoothConf, smoothMask);
+    const double stripeConfMean = meanConfidence(stripeConf, smoothMask);
+    std::printf("METRIC.normals.confidence|fold=%.4f|stripes=%.4f\n",
+                foldConf, stripeConfMean);
+    check("normals.confidence-separates-texture",
+          foldConf > stripeConfMean + 0.08);
 }
 
 } // namespace

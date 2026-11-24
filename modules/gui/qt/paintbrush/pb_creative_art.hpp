@@ -82,6 +82,16 @@ QImage softBlur(const QImage &image, int downscale = 0);
 /* Perceptual lightness of a colour in Oklab (0 black .. 1 white). */
 float oklabLightness(const QColor &color);
 
+/* Full perceptual coordinates, for material and quality analysis. */
+struct OklabColor
+{
+    float L = 0.0f;
+    float a = 0.0f;
+    float b = 0.0f;
+};
+
+OklabColor oklabColor(const QColor &color);
+
 /* A simple, deterministic grade. `brightness` multiplies the channels,
  * `contrast` pushes them away from mid-grey, `saturation` blends towards
  * luminance. `tint` colours the shadows, `lightTint` the highlights. */
@@ -130,15 +140,20 @@ QImage spectralSheen(const QImage &source, const QImage &mask,
 
 /* --- holographic materials --------------------------------------------- */
 
-/* One material engine, four recipes. The recipes differ only in their optical
- * parameters (film thickness, diffraction scale, metallic response, sheen,
- * sparkle); the shader and the layer contract are identical. */
+/* One engine, surface-specific recipes. The recipes differ only in their
+ * optical parameters (film thickness, diffraction, metallic response,
+ * clearcoat, flakes, color shift); the shader and the layer contract are
+ * identical. Existing fashion ids 0..3 keep their numeric values. */
 enum class HoloMaterialId
 {
     LiquidHologram = 0,
     OpalDream = 1,
     ChromaticChrome = 2,
     PrismaticFantasy = 3,
+    HolographicWrap = 4,
+    ChameleonPaint = 5,
+    GlitterMetallic = 6,
+    ElectricLivery = 7,
 };
 
 struct HoloMaterial
@@ -154,8 +169,25 @@ struct HoloMaterial
     float sparkle = 0.15f;        /* discrete glints 0..1                  */
     float saturation = 0.9f;      /* palette chroma 0..1                   */
     float normalStrength = 0.6f;  /* how much the source normals matter    */
+    float clearcoat = 0.0f;       /* second, broad white lobe 0..1         */
+    float colorShift = 0.0f;      /* view-angle palette shift 0..1         */
+    float flakeDensity = 0.0f;    /* metallic-flake coverage 0..1          */
+    float flakeSize = 1.0f;       /* flake radius in material units        */
     QVector<QColor> palette;
 };
+
+/* How two coverages combine depends on what they MEAN. Do not apply a
+ * universal min()/multiply to both a finished subject alpha and an
+ * independent semantic probability. */
+enum class CoverageMode
+{
+    InheritedCoverage = 0, /* region already carries final coverage  -> min */
+    IndependentProbability = 1, /* independent probabilities       -> product */
+    UserConstraint = 2,    /* hard user constraint               -> min */
+};
+
+int composeCoverage(int sourceAlpha, int regionMask,
+                    CoverageMode mode = CoverageMode::InheritedCoverage);
 
 HoloMaterial holoMaterialPreset(HoloMaterialId id);
 QString holoMaterialName(HoloMaterialId id);
@@ -164,8 +196,15 @@ QString holoMaterialName(HoloMaterialId id);
  * ARGB32 image whose RGB channels encode a unit normal
  * (x right, y down, z toward the viewer). This is an approximation, not 3D
  * reconstruction; it gives the material directional highlights that follow
- * folds instead of a flat rainbow overlay. */
+ * folds instead of a flat rainbow overlay.
+ *
+ * The optional `confidenceOut` is a Grayscale8 reliability map: low-frequency
+ * shading (a fold) scores high, high-frequency printed texture (a stripe or
+ * logo) scores low. The material attenuates the normal where confidence is
+ * low, so a printed pattern does not become fake geometry. */
 QImage estimateNormals(const QImage &source, const QImage &mask, float strength);
+QImage estimateNormals(const QImage &source, const QImage &mask, float strength,
+                       QImage *confidenceOut);
 
 /* Albedo (replaces the subject inside the mask) and a transparent sheen layer
  * (screen-blended above it). Both are pure functions of the inputs and seed. */
@@ -175,11 +214,11 @@ struct HoloMaterialResult
     QImage sheen;
 };
 
-HoloMaterialResult holographicMaterial(const QImage &source,
-                                       const QImage &mask,
-                                       const QImage &normals,
-                                       const HoloMaterial &material,
-                                       float strength, quint32 seed);
+HoloMaterialResult holographicMaterial(
+    const QImage &source, const QImage &mask, const QImage &normals,
+    const HoloMaterial &material, float strength, quint32 seed,
+    CoverageMode coverageMode = CoverageMode::InheritedCoverage,
+    const QImage &confidence = QImage());
 
 /* --- light -------------------------------------------------------------- */
 
