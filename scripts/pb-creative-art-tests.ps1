@@ -53,6 +53,7 @@ $args += "-lQt6Gui"
 $args += "-lQt6Core"
 
 $env:PATH = "$(Join-Path $QtRoot 'bin');$env:PATH"
+$env:QT_PLUGIN_PATH = Join-Path $QtRoot "share\qt6\plugins"
 
 Write-Output "--- compiling creative_art_test ---"
 & $gxx @args 2>&1 | ForEach-Object { Write-Output $_ }

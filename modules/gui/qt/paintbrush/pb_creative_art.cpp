@@ -766,6 +766,7 @@ HoloMaterial holoMaterialPreset(HoloMaterialId id)
         m.sparkle = 0.18f;
         m.saturation = 0.20f;
         m.normalStrength = 0.85f;
+        m.baseReplace = 0.60f;
         m.clearcoat = 1.0f;
         m.palette = { QColor(235, 248, 255), QColor(110, 140, 190),
                       QColor(200, 205, 215), QColor(255, 255, 255) };
@@ -782,6 +783,7 @@ HoloMaterial holoMaterialPreset(HoloMaterialId id)
         m.sparkle = 0.80f;
         m.saturation = 1.0f;
         m.normalStrength = 0.95f;
+        m.baseReplace = 0.18f;
         m.palette = { QColor(255, 47, 185), QColor(0, 229, 255),
                       QColor(182, 255, 0), QColor(255, 224, 102) };
         break;
@@ -799,6 +801,7 @@ HoloMaterial holoMaterialPreset(HoloMaterialId id)
         m.normalStrength = 0.70f;
         m.clearcoat = 0.90f;
         m.colorShift = 0.30f;
+        m.baseReplace = 0.55f;
         m.flakeDensity = 0.05f;
         m.flakeSize = 1.2f;
         m.palette = { QColor(0, 80, 90), QColor(0, 140, 255),
@@ -818,10 +821,11 @@ HoloMaterial holoMaterialPreset(HoloMaterialId id)
         m.normalStrength = 0.80f;
         m.clearcoat = 1.0f;
         m.colorShift = 1.0f;
+        m.baseReplace = 0.70f;
         m.flakeDensity = 0.10f;
         m.flakeSize = 0.6f;
-        m.palette = { QColor(0, 90, 55), QColor(0, 190, 130),
-                      QColor(80, 30, 150), QColor(200, 90, 40) };
+        m.palette = { QColor(0, 80, 45), QColor(0, 195, 135),
+                      QColor(0, 175, 160), QColor(120, 40, 185) };
         break;
     case HoloMaterialId::GlitterMetallic:
         m.name = QStringLiteral("Glitter metallic");
@@ -837,6 +841,7 @@ HoloMaterial holoMaterialPreset(HoloMaterialId id)
         m.normalStrength = 0.75f;
         m.clearcoat = 0.80f;
         m.colorShift = 0.05f;
+        m.baseReplace = 0.60f;
         m.flakeDensity = 0.85f;
         m.flakeSize = 0.8f;
         m.palette = { QColor(232, 246, 255), QColor(255, 224, 130),
@@ -856,6 +861,7 @@ HoloMaterial holoMaterialPreset(HoloMaterialId id)
         m.normalStrength = 0.80f;
         m.clearcoat = 0.50f;
         m.colorShift = 0.20f;
+        m.baseReplace = 0.75f;
         m.flakeDensity = 0.15f;
         m.flakeSize = 0.9f;
         m.palette = { QColor(8, 8, 18), QColor(0, 234, 255),
@@ -1011,7 +1017,8 @@ QImage estimateNormals(const QImage &source, const QImage &mask, float strength,
 HoloMaterialResult holographicMaterial(
     const QImage &source, const QImage &mask, const QImage &normals,
     const HoloMaterial &material, float strength, quint32 seed,
-    CoverageMode coverageMode, const QImage &confidence)
+    CoverageMode coverageMode, const QImage &confidence,
+    const QImage &protection)
 {
     HoloMaterialResult result;
     const QImage src = argb(source);
@@ -1033,6 +1040,10 @@ HoloMaterialResult holographicMaterial(
     QImage conf = grayscale(confidence);
     if (!conf.isNull() && conf.size() != src.size())
         conf = conf.scaled(src.size(), Qt::IgnoreAspectRatio,
+                           Qt::SmoothTransformation);
+    QImage prot = grayscale(protection);
+    if (!prot.isNull() && prot.size() != src.size())
+        prot = prot.scaled(src.size(), Qt::IgnoreAspectRatio,
                            Qt::SmoothTransformation);
 
     const float power = clamp01(strength);
@@ -1065,6 +1076,7 @@ HoloMaterialResult holographicMaterial(
             nrm.isNull() ? nullptr
                          : reinterpret_cast<const QRgb *>(nrm.constScanLine(y));
         const uchar *cf = conf.isNull() ? nullptr : conf.constScanLine(y);
+        const uchar *pr = prot.isNull() ? nullptr : prot.constScanLine(y);
         QRgb *albedo = reinterpret_cast<QRgb *>(result.albedo.scanLine(y));
         QRgb *sheen = reinterpret_cast<QRgb *>(result.sheen.scanLine(y));
         for (int x = 0; x < src.width(); ++x)
@@ -1161,14 +1173,24 @@ HoloMaterialResult holographicMaterial(
             const float srcR = srgbToLinear(float(qRed(line[x])) / 255.0f);
             const float srcG = srgbToLinear(float(qGreen(line[x])) / 255.0f);
             const float srcB = srgbToLinear(float(qBlue(line[x])) / 255.0f);
-            float r = srcR;
-            float g = srcG;
-            float b = srcB;
             const float diffuse = (0.55f + 0.45f * ndl)
                                   * (1.0f - 0.35f * metallic);
-            r *= diffuse;
-            g *= diffuse;
-            b *= diffuse;
+            const float baseR = srcR * diffuse;
+            const float baseG = srcG * diffuse;
+            const float baseB = srcB * diffuse;
+
+            /* Automotive paint: the recipe palette owns the hue while the
+             * source lightness keeps texture and panel shading. Fashion
+             * recipes keep a low replace value and behave as a film. */
+            const float replace = clamp01(material.baseReplace);
+            const float paintShade = (0.35f + 0.90f * l)
+                                     * (0.55f + 0.45f * ndl);
+            const float paintR = palR * paintShade;
+            const float paintG = palG * paintShade;
+            const float paintB = palB * paintShade;
+            float r = lerp(baseR, paintR, replace);
+            float g = lerp(baseG, paintG, replace);
+            float b = lerp(baseB, paintB, replace);
 
             const QColor env = sampleColor(material.palette,
                                            clamp01(0.5f + 0.5f * nx));
@@ -1220,6 +1242,14 @@ HoloMaterialResult holographicMaterial(
                 b = lerp(b, 0.92f, 0.85f);
             }
 
+            const float protect = pr ? float(pr[x]) / 255.0f : 0.0f;
+            if (protect > 0.001f)
+            {
+                r = lerp(r, srcR, protect);
+                g = lerp(g, srcG, protect);
+                b = lerp(b, srcB, protect);
+            }
+
             const int outR = qBound(
                 0, int(linearToSrgb(clamp01(lerp(srcR, r, power)))
                            * 255.0f + 0.5f), 255);
@@ -1236,7 +1266,7 @@ HoloMaterialResult holographicMaterial(
                         + spec * 0.55f + clear * 0.5f
                         + (flake ? 0.25f : 0.0f)
                         + (glint ? 0.55f : 0.0f))
-                * (float(coverage) / 255.0f);
+                * (float(coverage) / 255.0f) * (1.0f - protect);
             if (sheenAlpha > 0.01f)
             {
                 sheen[x] = qRgba(

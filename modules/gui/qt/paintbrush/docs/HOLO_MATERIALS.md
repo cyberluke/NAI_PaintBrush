@@ -97,11 +97,14 @@ fashion/automotive reference comparisons remain in §5.
 - Isolated build: full ninja build **EXIT=0**; QML contracts **345 members
   PASS**; the isolated launcher is `scripts/launch-pb-noskip-holo.ps1`.
 
-**App-level self-test caveat:** the worktree run is blocked by the shared
-`%APPDATA%` recovery file and the live main app instance; the library harness,
-full build and QML probe pass, but the eight rendered previews and
-save/reopen/timings inside the isolated app were **not captured** in this
-environment. Do not present the library harness as app acceptance.
+**App-level self-test caveat:** the self-test flag now enables
+`QStandardPaths` test mode before the controller, so a test run uses a
+separate `qttest` project store and cannot touch the user's recovery. The
+isolated build still fails to register the Paintbrush options at startup
+(`--paintbrush` unknown) when launched against its separate plugin directory,
+so the eight app previews and save/reopen/timings were **not captured** here.
+The library harness, the full build and the QML contract pass. Do not present
+the library harness as app acceptance.
 
 ## 3. FASHN Human Parser
 
@@ -147,14 +150,32 @@ input contract, exporter versions and parity.
 **Still pending:** the native ONNX Runtime service and the garment/hair/skin/
 accessory routing. The model is provisioned; it is not yet used by the app.
 
-## 4. Automotive regression reference
+## 4. Automotive regression reference (supplied Lamborghini)
 
-The supplied Lamborghini image was **not attached to this session** and is not
-in the repository or the creative asset folders. The automotive recipes are
-therefore verified as materials on the synthetic subject only. Real
-automotive panel/headlight/window/badge preservation needs the reference image
-plus a car-part mask; the engine intentionally applies to the selected
-subject silhouette.
+Source: `C:\Users\lukes.COREI9\Downloads\lamborghini.jpeg` (632×316).
+
+`scripts/pb-auto-reference-prep.py` uses **Mask R-CNN (COCO car)** to segment
+the complete car. The first orange-hull attempt clipped the front bumper and
+the rear wheel; the Mask R-CNN instance includes both wheels, the bumper, roof
+and wing. A detail-protection mask (dark glass/tyres/grille and
+low-saturation highlights) covers **40.2%** of the car: windows, lights,
+plate, wheels and dark trim keep the original pixels; the paint shader
+receives the rest.
+
+Artifacts (derived from the user's image; not committed):
+- `D:\_SATIN_AI\models\holo-reference\lamborghini-cutout.png`
+- `...\lamborghini-protection.png`
+- `...\auto-wrap.png`, `auto-chameleon.png`, `auto-glitter.png`,
+  `auto-livery.png` — the four material composites on the real car
+
+The paint recipes use `baseReplace` (0.55–0.75) so the palette owns the hue
+while the source lightness keeps panel shading and texture; fashion recipes
+stay film-like (~0.10–0.18). The four car previews are visually distinct:
+pastel pink/lavender iridescent wrap, mint-green chameleon, peach/gold
+metallic glitter and pink/cyan striped electric livery.
+
+Part-level preservation (precise panel seams, badge outlines) still relies on
+the heuristic mask; a car-part parser or manual masks would replace it.
 
 ## 5. Remaining gaps (do not overclaim)
 

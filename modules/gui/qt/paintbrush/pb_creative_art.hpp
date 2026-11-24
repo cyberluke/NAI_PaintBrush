@@ -171,6 +171,7 @@ struct HoloMaterial
     float normalStrength = 0.6f;  /* how much the source normals matter    */
     float clearcoat = 0.0f;       /* second, broad white lobe 0..1         */
     float colorShift = 0.0f;      /* view-angle palette shift 0..1         */
+    float baseReplace = 0.10f;    /* palette owns the hue (paint) vs film   */
     float flakeDensity = 0.0f;    /* metallic-flake coverage 0..1          */
     float flakeSize = 1.0f;       /* flake radius in material units        */
     QVector<QColor> palette;
@@ -214,11 +215,16 @@ struct HoloMaterialResult
     QImage sheen;
 };
 
+/* `protection` is a detail-preservation mask (glass, lights, plate, badges,
+ * skin, ...): 255 keeps the original pixels and suppresses the sheen; 0
+ * receives the full material. It is not a coverage mask and never changes the
+ * output alpha. */
 HoloMaterialResult holographicMaterial(
     const QImage &source, const QImage &mask, const QImage &normals,
     const HoloMaterial &material, float strength, quint32 seed,
     CoverageMode coverageMode = CoverageMode::InheritedCoverage,
-    const QImage &confidence = QImage());
+    const QImage &confidence = QImage(),
+    const QImage &protection = QImage());
 
 /* --- light -------------------------------------------------------------- */
 

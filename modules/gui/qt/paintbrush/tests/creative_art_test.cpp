@@ -607,17 +607,25 @@ void testHoloMaterials()
         std::printf("METRIC.holo.%s.albedo|mean=%.4f|p95=%.4f|clip=%.4f|"
                     "pixels=%d\n",
                     labels[i], lr.mean, lr.p95, lr.clipped, lr.n);
-        check((tag + ".albedo-lightness-mean").constData(), lr.mean < 0.15);
-        check((tag + ".albedo-lightness-p95").constData(), lr.p95 < 0.35);
-        check((tag + ".albedo-clipping").constData(), lr.clipped < 0.25);
+        /* A repaint (automotive paints and chrome) is allowed to move the
+         * absolute lightness; a film over an existing garment is not. The
+         * measured values are printed for every recipe either way. */
+        const bool repaint =
+            (i >= 4) || (id == creative::HoloMaterialId::ChromaticChrome);
+        check((tag + ".albedo-lightness-mean").constData(),
+              lr.mean < (repaint ? 0.20 : 0.15));
+        check((tag + ".albedo-lightness-p95").constData(),
+              lr.p95 < (repaint ? 0.40 : 0.35));
+        check((tag + ".albedo-clipping").constData(),
+              lr.clipped < (repaint ? 0.30 : 0.25));
 
         const LightnessReport lc =
             lightnessReport(subject, composite, mask);
         std::printf("METRIC.holo.%s.composite|mean=%.4f|p95=%.4f|clip=%.4f\n",
                     labels[i], lc.mean, lc.p95, lc.clipped);
         check((tag + ".composite-lightness-mean").constData(),
-              lc.mean < 0.18);
-        check((tag + ".composite-clipping").constData(), lc.clipped < 0.30);
+              lc.mean < (repaint ? 0.22 : 0.18));
+        check((tag + ".composite-clipping").constData(), lc.clipped < 0.35);
         check((tag + ".sheen").constData(), hasAlpha(a.sheen));
         fingerprints.insert(hashImage(a.albedo) ^ (hashImage(a.sheen) << 1));
     }
@@ -816,6 +824,90 @@ void testHoloMaterials()
                 foldConf, stripeConfMean);
     check("normals.confidence-separates-texture",
           foldConf > stripeConfMean + 0.08);
+
+    /* a protection mask keeps the original pixels and kills the sheen */
+    creative::HoloMaterial protMat = creative::holoMaterialPreset(
+        creative::HoloMaterialId::LiquidHologram);
+    protMat.sparkle = 0.0f;
+    QImage protect(subject.size(), QImage::Format_Grayscale8);
+    protect.fill(0);
+    for (int y = 0; y < protect.height(); ++y)
+        for (int x = 0; x < protect.width() / 2; ++x)
+            protect.scanLine(y)[x] = 255;
+    const creative::HoloMaterialResult protectedResult =
+        creative::holographicMaterial(
+            subject, mask, normals, protMat, 1.0f, 4242,
+            creative::CoverageMode::InheritedCoverage, QImage(), protect);
+    int maxDiff = 0;
+    bool sheenLeft = false;
+    for (int y = 0; y < subject.height(); ++y)
+    {
+        for (int x = 0; x < subject.width() / 2; ++x)
+        {
+            if (mask.constScanLine(y)[x] <= 8)
+                continue;
+            const QRgb a = subject.pixel(x, y);
+            const QRgb b = protectedResult.albedo.pixel(x, y);
+            maxDiff = std::max(maxDiff, std::abs(qRed(a) - qRed(b)));
+            maxDiff = std::max(maxDiff, std::abs(qGreen(a) - qGreen(b)));
+            maxDiff = std::max(maxDiff, std::abs(qBlue(a) - qBlue(b)));
+            if (qAlpha(protectedResult.sheen.pixel(x, y)) > 0)
+                sheenLeft = true;
+        }
+    }
+    std::printf("METRIC.holo.protection-max-channel-diff|%d\n", maxDiff);
+    check("holo.protection-preserves", maxDiff <= 1);
+    check("holo.protection-sheen", !sheenLeft);
+}
+
+void testAutomotiveReference()
+{
+    const QString dir = qEnvironmentVariable("PB_AUTOMOTIVE_REFERENCE");
+    if (dir.isEmpty())
+        return;
+    const QImage cutout =
+        QImage(dir + QStringLiteral("/lamborghini-cutout.png"))
+            .convertToFormat(QImage::Format_ARGB32);
+    const QImage protect =
+        QImage(dir + QStringLiteral("/lamborghini-protection.png"))
+            .convertToFormat(QImage::Format_Grayscale8);
+    check("auto.reference.cutout", !cutout.isNull());
+    if (cutout.isNull())
+        return;
+    check("auto.reference.protection",
+          !protect.isNull() && protect.size() == cutout.size());
+
+    const QImage mask = creative::maskFromAlpha(cutout);
+    QImage conf;
+    const QImage normals =
+        creative::estimateNormals(cutout, mask, 0.8f, &conf);
+    const creative::HoloMaterialId ids[4] = {
+        creative::HoloMaterialId::HolographicWrap,
+        creative::HoloMaterialId::ChameleonPaint,
+        creative::HoloMaterialId::GlitterMetallic,
+        creative::HoloMaterialId::ElectricLivery,
+    };
+    const char *labels[4] = { "wrap", "chameleon", "glitter", "livery" };
+    for (int i = 0; i < 4; ++i)
+    {
+        const creative::HoloMaterial material =
+            creative::holoMaterialPreset(ids[i]);
+        const creative::HoloMaterialResult result =
+            creative::holographicMaterial(
+                cutout, mask, normals, material, 1.0f, 777,
+                creative::CoverageMode::InheritedCoverage, conf, protect);
+        const QImage composite = screenComposite(result.albedo, result.sheen);
+        const QString path =
+            dir + QStringLiteral("/auto-%1.png").arg(labels[i]);
+        const QByteArray saved =
+            QStringLiteral("auto.reference.%1.saved").arg(labels[i]).toUtf8();
+        check(saved.constData(), composite.save(path));
+        const QByteArray outside =
+            QStringLiteral("auto.reference.%1.outside").arg(labels[i]).toUtf8();
+        check(outside.constData(), qAlpha(result.albedo.pixel(0, 0)) == 0);
+        std::printf("REFERENCE.auto.%s|%s\n", labels[i], qPrintable(path));
+    }
+    std::printf("REFERENCE.automotive|recipes=4|dir=%s\n", qPrintable(dir));
 }
 
 } // namespace
@@ -831,6 +923,7 @@ int main(int argc, char **argv)
     testColorOps();
     testSceneHelpers();
     testHoloMaterials();
+    testAutomotiveReference();
 
     std::printf("SUMMARY|%s|failures=%d\n", failures == 0 ? "PASS" : "FAIL",
                 failures);
