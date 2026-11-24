@@ -271,6 +271,7 @@ PaintbrushController::~PaintbrushController()
     m_thumbnails.cancel();
     m_segmentation.shutdown();
     m_matting.shutdown();
+    m_humanParser.shutdown();
     m_tracking.shutdown();
     m_editSource.shutdown();
     m_selectionSource.shutdown();
@@ -284,6 +285,7 @@ void PaintbrushController::configureServices()
 {
     m_segmentation.configure(VLC_OBJECT(m_intf));
     m_matting.configure(VLC_OBJECT(m_intf));
+    m_humanParser.configure(VLC_OBJECT(m_intf));
     /* Powder renderer default is CPU (measured faster); "gpu" is the explicit
      * experimental opt-in. */
     const QString powder = pbConfigString(VLC_OBJECT(m_intf),

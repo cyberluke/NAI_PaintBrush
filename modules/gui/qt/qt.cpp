@@ -493,6 +493,17 @@ vlc_module_begin ()
                             N_( "Matte colour decontamination (0-100)" ), nullptr )
     add_integer_with_range( "paintbrush-matting-temporal", 50, 0, 100,
                             N_( "Matte temporal stability (0-100)" ), nullptr )
+    add_string( "paintbrush-human-parser-model-dir", NULL,
+                N_( "Human parser model directory" ),
+                N_( "Directory containing fashn-human-parser.onnx and "
+                    "manifest.json; empty uses the packaged "
+                    "human-parser/models directory." ) )
+    add_string( "paintbrush-human-parser-device", "auto",
+                N_( "Human parser device" ),
+                N_( "auto, gpu or cpu; auto uses CUDA when available." ) )
+            change_string_list( psz_sam_devices, psz_sam_devices_text )
+    add_integer_with_range( "paintbrush-human-parser-class-probabilities", 0, 0, 1,
+                            N_( "Export human parser class probabilities" ), nullptr )
     add_bool( "paintbrush-matte-selftest", false, PB_MATTE_SELFTEST_TEXT,
               PB_MATTE_SELFTEST_LONGTEXT )
     add_bool( "paintbrush-creative-selftest", false,

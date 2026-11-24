@@ -21,6 +21,8 @@
 #ifndef PB_COMMON_HPP
 #define PB_COMMON_HPP
 
+#include "pb_blend.hpp"
+
 #include <QImage>
 #include <QString>
 #include <QPointF>
@@ -115,29 +117,6 @@ enum LayerType {
     LAYER_STICKER,      /* extracted/collage sticker asset      */
     LAYER_VECTOR        /* native editable vector path layer    */
 };
-
-enum BlendMode {
-    BLEND_NORMAL = 0,
-    BLEND_MULTIPLY,
-    BLEND_SCREEN,
-    BLEND_OVERLAY,
-    BLEND_DARKEN,
-    BLEND_LIGHTEN
-};
-
-/* Convert a paintbrush blend mode to a QPainter composition mode. */
-inline QPainter::CompositionMode toCompositionMode(int blendMode)
-{
-    switch (blendMode) {
-    case BLEND_MULTIPLY: return QPainter::CompositionMode_Multiply;
-    case BLEND_SCREEN:   return QPainter::CompositionMode_Screen;
-    case BLEND_OVERLAY:  return QPainter::CompositionMode_Overlay;
-    case BLEND_DARKEN:   return QPainter::CompositionMode_Darken;
-    case BLEND_LIGHTEN:  return QPainter::CompositionMode_Lighten;
-    case BLEND_NORMAL:
-    default:             return QPainter::CompositionMode_SourceOver;
-    }
-}
 
 /* Format an image for a specific file format using Qt's image writers. */
 QStringList supportedImageFormats();

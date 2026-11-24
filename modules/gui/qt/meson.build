@@ -16,7 +16,7 @@ qt6_dep = dependency('qt6',
      version: '>=6.2',
      modules: [
          'Core', 'Gui', 'Widgets', 'Qml',
-         'Quick', 'QuickControls2', 'Network'
+         'Quick', 'QuickControls2', 'Network', 'Concurrent'
          ],
      private_headers: true,
      required: get_option('qt'))
@@ -178,6 +178,7 @@ moc_headers = files(
     'paintbrush/pb_frame_capture.hpp',
     'paintbrush/pb_segmentation_service.hpp',
     'paintbrush/pb_matting_service.hpp',
+    'paintbrush/pb_human_parser_service.hpp',
     'paintbrush/pb_tracking_service.hpp',
     'paintbrush/pb_vision_service.hpp',
     'paintbrush/pb_generation_service.hpp',
@@ -567,6 +568,11 @@ qt_plugin_sources = files(
     'paintbrush/pb_matting_service.cpp',
     'paintbrush/pb_matting_service.hpp',
     'paintbrush/gpu/pb_matting_cuda_shim.cpp',
+    'paintbrush/pb_human_parser_service.cpp',
+    'paintbrush/pb_human_parser_service.hpp',
+    'paintbrush/gpu/pb_human_parser_shim.cpp',
+    'paintbrush/gpu/pb_human_parser.h',
+    'paintbrush/gpu/human_parser_cuda_api.h',
     'paintbrush/art/gpu/pb_powder_scene_node.cpp',
     'paintbrush/art/gpu/pb_powder_pack.cpp',
     'paintbrush/art/gpu/pb_powder_pack.hpp',

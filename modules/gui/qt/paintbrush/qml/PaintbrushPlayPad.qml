@@ -623,6 +623,33 @@ Item {
             }
         }
 
+        /* -------------------------------------------- fashion-aware finish */
+        RowLayout {
+            Layout.fillWidth: true
+            visible: root.creative.hasSubject
+                     && root.active.family === "Material"
+            spacing: VLCStyle.margin_xsmall
+
+            PadButton {
+                Layout.preferredWidth: VLCStyle.dp(152)
+                text: root.creative.fashionProtection
+                          ? qsTr("Style the fit only")
+                          : qsTr("Style everything")
+                selected: root.creative.fashionProtection
+                enabledAction: root.creative.hasSubject
+                onClicked: root.creative.fashionProtection =
+                           !root.creative.fashionProtection
+            }
+
+            Widgets.LabelExt {
+                Layout.fillWidth: true
+                text: root.creative.humanParseStatus
+                color: theme.fg.secondary
+                font.pixelSize: VLCStyle.fontSize_small
+                elide: Text.ElideRight
+            }
+        }
+
         /* ------------------------------------------------------ suggestion */
         Rectangle {
             Layout.fillWidth: true
