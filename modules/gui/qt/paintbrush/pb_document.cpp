@@ -24,10 +24,12 @@ namespace paintbrush {
 PaintbrushDocument::PaintbrushDocument(QObject *parent)
     : QObject(parent)
 {
-    /* A fresh document is crafted paper, not a white rectangle (spec §8): the
-     * default mood supplies paper, light and seed before any layer exists. */
+    /* A fresh document is crafted paper, not a white rectangle (spec §8):
+     * the default mood supplies light and seed before any layer exists.
+     * The product default sheet is dark charcoal with paper formation and
+     * dark-grey dust — mood presets still bring their own paper when applied. */
     const art::Mood &m = art::mood::defaultMood();
-    m_paperStockId = m.paperId;
+    m_paperStockId = art::paper::matteBlack().id;
     m_lightRig = m.light;
     m_moodId = m.id;
     m_artSeed = QRandomGenerator::global()->generate() | 1u;
@@ -133,7 +135,8 @@ void PaintbrushDocument::resetDocument(const QSize &size)
     m_harvest.clear();
     {
         const art::Mood &m = art::mood::defaultMood();
-        m_paperStockId = m.paperId;
+        /* same dark-paper default as a freshly constructed document */
+        m_paperStockId = art::paper::matteBlack().id;
         m_lightRig = m.light;
         m_moodId = m.id;
         m_artSeed = QRandomGenerator::global()->generate() | 1u;

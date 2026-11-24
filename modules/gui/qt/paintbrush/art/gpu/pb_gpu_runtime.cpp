@@ -553,7 +553,7 @@ QImage GpuRuntime::renderPaper(const QSize &outSize, const PaperStock &stock,
     const QColor base = stock.surfaceColor(rig);
 
     /* ubuf layout (std140): mat4(64) vec2(8) vec2(8) float(4) float(4)
-     * pad(8) vec4(16) vec4(16) vec4(16) uint+pad(16) = 160B */
+     * pad(8) vec4(16) vec4(16) vec4(16) uint + 3 float = 160B */
     struct PaperUb
     {
         float matrix[16];                          /* 0 */
@@ -564,9 +564,9 @@ QImage GpuRuntime::renderPaper(const QSize &outSize, const PaperStock &stock,
         float pad0[2];                             /* 88 */
         float baseR, baseG, baseB, pad1;           /* 96 vec4 */
         float microHeight, tooth, fiberStrength, fiberScale; /* 112 */
-        float specular, roughness, ambient, pad2;  /* 128 */
+        float specular, roughness, ambient, dustStrength;    /* 128 vec4 */
         quint32 seed;                              /* 144 */
-        float pad3[3];                             /* 148 */
+        float dustScale, formation, formationScale;/* 148 */
     };                                             /* 160 */
     PaperUb ub;
     memset(&ub, 0, sizeof(ub));
@@ -588,7 +588,11 @@ QImage GpuRuntime::renderPaper(const QSize &outSize, const PaperStock &stock,
     ub.specular = stock.specular;
     ub.roughness = stock.roughness;
     ub.ambient = rig.ambient;
+    ub.dustStrength = stock.dustStrength;
     ub.seed = stock.seed;
+    ub.dustScale = stock.dustScale > 1e-4f ? stock.dustScale : 0.02f;
+    ub.formation = stock.formation;
+    ub.formationScale = stock.formationScale > 1e-4f ? stock.formationScale : 0.30f;
 
     QRhiResourceUpdateBatch *u = m_rhi->nextResourceUpdateBatch();
     u->updateDynamicBuffer(m_pipelines->paperUb, 0, sizeof(ub), &ub);

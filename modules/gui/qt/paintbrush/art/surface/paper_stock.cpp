@@ -23,7 +23,9 @@ PaperStock base(const QString &id, const QString &name,
                 const QColor &color, std::uint32_t seed,
                 float fiberStrength, float tooth, float roughness,
                 float absorption, float microHeight, float specular,
-                float warmth, float fiberScale)
+                float warmth, float fiberScale,
+                float formation = 0.0f, float formationScale = 0.30f,
+                float dustStrength = 0.0f, float dustScale = 0.02f)
 {
     PaperStock p;
     p.id = id;
@@ -38,6 +40,10 @@ PaperStock base(const QString &id, const QString &name,
     p.specular = specular;
     p.warmth = warmth;
     p.fiberScale = fiberScale;
+    p.formation = formation;
+    p.formationScale = formationScale;
+    p.dustStrength = dustStrength;
+    p.dustScale = dustScale;
     return p;
 }
 
@@ -69,8 +75,10 @@ const PaperStock *findById(const QString &id)
              QColor(0xF3, 0xEB, 0xDA), 0xE55u, 0.45f, 0.42f, 0.60f,
              0.55f, 0.09f, 0.20f, +0.15f, 0.048f),
         base(QStringLiteral("matte.black"), QStringLiteral("Matte Black"),
-             QColor(0x24, 0x24, 0x28), 0xF66u, 0.85f, 0.65f, 0.82f,
-             0.60f, 0.22f, 0.30f, +0.02f, 0.050f),
+             QColor(0x24, 0x24, 0x28), 0xF66u, 0.88f, 0.72f, 0.86f,
+             0.60f, 0.26f, 0.30f, -0.04f, 0.048f,
+             /* formation */ 0.72f, /* formationScale */ 24.0f,
+             /* dust */ 0.65f, /* dustScale */ 3.2f),
     };
     static const int count = int(sizeof(s) / sizeof(s[0]));
     for (int i = 0; i < count; ++i)

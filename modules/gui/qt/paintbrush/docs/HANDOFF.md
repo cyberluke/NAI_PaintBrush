@@ -240,6 +240,7 @@ Render/interaction contract for that future preview:
 | Compact colour group: FG/BG chips, 8 recently used colours, palette popover over all 27 persisted palettes | `PaintbrushStrip.qml`, `b971b9f847`, `7a38f8dd63` |
 | Semantic capabilities: `toolUsesColor`, `toolHasPrimaryAction`, `toolIsBusy` (+ `toolCapabilitiesChanged`) | `pb_controller.{hpp,cpp}`, `43a8edc285` |
 | Recent-colour semantics: `recentUsedColors` — recorded on committed strokes/fills, never on selection; palette swatches show the active colour with an accent ring | `pb_controller.{hpp,cpp}`, `PaintbrushStrip.qml` |
+| Default sheet: dark Matte Black paper with low-frequency formation (24 world units) and deterministic dark-grey dust flecks (3.2 units). New/reset documents use it; applying a mood still brings that mood's paper. GPU `paper.frag` mirrors the CPU renderer | `paper_stock.{hpp,cpp}`, `paper_renderer.cpp`, `paper.frag`, `pb_gpu_runtime.cpp`, `pb_document.cpp` |
 | Keyboard-operable swatches (Button, Accessible.name/role, StrongFocus, focus ring) | `67cac3e041` |
 | Palette store: 27 locked built-ins incl. Art Studio paper/stocks/18 directions, user palettes as JSON, import/export | `pb_palette_store.{hpp,cpp}`, `pb_controller_palettes.cpp`, `palettes/builtin-palettes.json`, `probes/sync-builtin-palettes.ps1` |
 | Subject model: `SubjectAsset` / `SubjectInstance` / `DerivedArtwork`, JSON persistence, cut-out PNG | `pb_subject_store.{hpp,cpp}` |

@@ -49,6 +49,17 @@ struct PaperStock
     float microHeight = 0.12f;
     /* Specular response strength (coated paper glints). */
     float specular = 0.08f;
+    /* Formation: low-frequency pulp cloudiness (0 = flat milled stock). This
+     * is the "structure" you see in handmade/charcoal paper, separate from the
+     * fine grain and fibre. formationScale is the cloud cell in world units. */
+    float formation = 0.0f;
+    float formationScale = 0.30f;
+    /* Dust: sparse dark-grey flecks resting on the sheet, not a bitmap tile.
+     * dustStrength 0 = clean stock; dustScale is the fleck cell in world units.
+     * The flecks are a neutral grey lift of the lit surface colour, world-space
+     * and deterministic like every other paper property. */
+    float dustStrength = 0.0f;
+    float dustScale = 0.02f;
     /* Warmth shift applied to the base color under neutral light. */
     float warmth = 0.0f;        /* -1 cool .. +1 warm */
     /* Deterministic seed (spec §37): the same paper reproduces identically. */

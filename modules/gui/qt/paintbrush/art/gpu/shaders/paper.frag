@@ -13,8 +13,11 @@ layout(std140, binding = 0) uniform ubuf {
     float uOpaque;
     vec4 uBase;
     vec4 uGrain;
-    vec4 uSurface;
+    vec4 uSurface;   // specular, roughness, ambient, dustStrength
     uint uSeed;
+    float uDustScale;
+    float uFormation;
+    float uFormationScale;
 };
 
 layout(location = 0) out vec4 fragColor;
@@ -110,6 +113,16 @@ void main()
 
     float lum = 1.0 + grainVar + fibre;
 
+    // formation: low-frequency pulp cloudiness, an absolute tonal lift so the
+    // structure survives on very dark stock (port of paper_renderer.cpp)
+    float lift = 0.0;
+    if (uFormation > 0.0)
+    {
+        float cloud = artFbm(uSeed ^ 0xF0A7u, wx, wy, 3, 1.0 / uFormationScale,
+                             2.0, 0.55);
+        lift = (cloud - 0.5) * 2.0 * uFormation * 0.03;
+    }
+
     if (uSurface.x > 0.0 && uSurface.y < 0.6)
     {
         float glintNoise = artCellUnitf(uSeed ^ 0xBEAFu,
@@ -120,6 +133,20 @@ void main()
 
     lum = clamp(lum, 0.55, 1.45);
 
-    vec3 col = clamp(vec3(baseR, baseG, baseB) * lum, 0.0, 1.0);
+    vec3 col = clamp(vec3(baseR * lum + lift,
+                          baseG * lum + lift,
+                          baseB * lum + lift), 0.0, 1.0);
+
+    // dust: sparse dark-grey flecks of the lit surface (uSurface.w)
+    if (uSurface.w > 0.0)
+    {
+        float dn = artFbm(uSeed ^ 0xD057u, wx, wy, 2, 1.0 / uDustScale, 2.0, 0.5);
+        float f = smoothstep(0.64, 0.86, dn) * uSurface.w;
+        vec3 dust = clamp(vec3(baseR + 0.09 + lift,
+                               baseG + 0.09 + lift,
+                               baseB + 0.09 + lift), 0.0, 1.0);
+        col = mix(col, dust, f);
+    }
+
     fragColor = vec4(col, uOpaque);
 }

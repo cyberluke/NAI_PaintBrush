@@ -39,6 +39,13 @@ static inline float grainWorldFrequency(const PaperStock &stock)
     return 1.0f / cell;
 }
 
+/* Same cubic as GLSL smoothstep, so paper.frag stays an exact port. */
+static inline float smoothstepf(float edge0, float edge1, float x)
+{
+    const float t = qBound(0.0f, (x - edge0) / (edge1 - edge0), 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
+
 QRgb PaperRenderer::sample(const State &state, float wx, float wy) const
 {
     if (!state.stock || !state.rig)
@@ -70,6 +77,18 @@ QRgb PaperRenderer::sample(const State &state, float wx, float wy) const
 
     float lum = 1.0f + grainVar + fibre;
 
+    /* Formation: low-frequency pulp cloudiness, applied as an absolute tonal
+     * lift. On very dark stock a purely multiplicative wobble disappears, so
+     * the structure is expressed in [0,1] colour units instead. */
+    float lift = 0.0f;
+    if (stock.formation > 0.0f)
+    {
+        const float cell = stock.formationScale > 1e-4f ? stock.formationScale : 0.30f;
+        const float cloud = artFbm(seed ^ 0xF0A7u, wx, wy, 3, 1.0f / cell,
+                                   2.0f, 0.55f);
+        lift = (cloud - 0.5f) * 2.0f * stock.formation * 0.03f;
+    }
+
     /* soft specular glint on coated/rough papers */
     if (stock.specular > 0.0f && stock.roughness < 0.6f)
     {
@@ -81,9 +100,33 @@ QRgb PaperRenderer::sample(const State &state, float wx, float wy) const
 
     lum = qBound(0.55f, lum, 1.45f);
 
-    return qRgba(qBound(0, int(base.redF() * 255.0f * lum), 255),
-                 qBound(0, int(base.greenF() * 255.0f * lum), 255),
-                 qBound(0, int(base.blueF() * 255.0f * lum), 255),
+    float cr = qBound(0.0f, base.redF() * lum + lift, 1.0f);
+    float cg = qBound(0.0f, base.greenF() * lum + lift, 1.0f);
+    float cb = qBound(0.0f, base.blueF() * lum + lift, 1.0f);
+
+    /* Dust: sparse dark-grey flecks resting on the sheet. They are a neutral
+     * grey lift of the lit surface, so they read as dust rather than sparkle,
+     * and they are sampled in world space like every other paper property. */
+    if (stock.dustStrength > 0.0f)
+    {
+        const float cell = stock.dustScale > 1e-4f ? stock.dustScale : 0.02f;
+        const float dn = artFbm(seed ^ 0xD057u, wx, wy, 2, 1.0f / cell,
+                                2.0f, 0.5f);
+        const float f = smoothstepf(0.64f, 0.86f, dn) * stock.dustStrength;
+        if (f > 0.0f)
+        {
+            const float dustR = qBound(0.0f, base.redF() + 0.09f + lift, 1.0f);
+            const float dustG = qBound(0.0f, base.greenF() + 0.09f + lift, 1.0f);
+            const float dustB = qBound(0.0f, base.blueF() + 0.09f + lift, 1.0f);
+            cr += (dustR - cr) * f;
+            cg += (dustG - cg) * f;
+            cb += (dustB - cb) * f;
+        }
+    }
+
+    return qRgba(qBound(0, int(cr * 255.0f), 255),
+                 qBound(0, int(cg * 255.0f), 255),
+                 qBound(0, int(cb * 255.0f), 255),
                  255);
 }
 
