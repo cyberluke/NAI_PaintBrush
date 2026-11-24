@@ -1276,10 +1276,26 @@ QString PaintbrushController::runCreativeSelfTest()
             note(QStringLiteral("FAIL: committed subject layer missing"));
         else
         {
+            QPoint srcOffset;
+            const QImage srcCut = creative::trimTransparent(
+                creative::maskToCutout(source->raster,
+                                       creative::layerMask(*source)),
+                &srcOffset);
             const QRectF srcRect =
-                source->transform().mapRect(source->raster.rect());
+                srcCut.isNull()
+                    ? QRectF()
+                    : source->transform().mapRect(
+                          QRectF(srcOffset, srcCut.size()));
             const QRectF outRect =
                 subject->transform().mapRect(subject->raster.rect());
+            note(QStringLiteral("source content %1x%2 raster %3x%4 scale %5")
+                     .arg(srcRect.width()).arg(srcRect.height())
+                     .arg(source->raster.width()).arg(source->raster.height())
+                     .arg(source->scale));
+            note(QStringLiteral("subject content %1x%2 raster %3x%4 scale %5")
+                     .arg(outRect.width()).arg(outRect.height())
+                     .arg(subject->raster.width()).arg(subject->raster.height())
+                     .arg(subject->scale));
             const qreal ratio = outRect.width() / qMax(1.0, srcRect.width());
             if (std::fabs(ratio - 1.0) > 0.03)
                 note(QStringLiteral(
