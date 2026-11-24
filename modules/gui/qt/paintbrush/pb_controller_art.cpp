@@ -1185,6 +1185,7 @@ QString PaintbrushController::runCreativeSelfTest()
     {
         m_creative->selectPatch(id);
         m_creative->movePad(0.68, 0.62, 0.35, false);
+        m_creative->renderPreviewStill();
         const QImage preview = m_creative->previewImage();
         if (preview.isNull())
         {
@@ -1448,6 +1449,7 @@ QString PaintbrushController::runCreativeSelfTest()
                          .arg(m_creative->waitForHumanParse(120000)));
                 m_creative->selectPatch(QStringLiteral("holo-liquid"));
                 m_creative->movePad(0.62, 0.58, 0.35, false);
+                m_creative->renderPreviewStill();
                 const QImage fashionPreview = m_creative->previewImage();
                 if (fashionPreview.isNull())
                 {
@@ -1468,6 +1470,7 @@ QString PaintbrushController::runCreativeSelfTest()
         }
     }
 
+    m_creative->renderPreviewStill();
     const QImage finalPreview = m_creative->previewImage();
     if (!finalPreview.isNull())
         finalPreview.save(QStringLiteral("%1/selftest-final.png").arg(dir));

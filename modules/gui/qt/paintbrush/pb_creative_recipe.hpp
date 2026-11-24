@@ -24,6 +24,7 @@
 #include "pb_blend.hpp"
 #include "pb_creative_art.hpp"
 #include "pb_creative_types.hpp"
+#include "pb_creative_vector.hpp"
 
 #include <QColor>
 #include <QImage>
@@ -166,15 +167,45 @@ inline HoloMaterialId holoMaterialIdForPatch(const QString &patchId)
 
 /* ----------------------------------------------------------- stage policy */
 
-/* Bounded preview panel size for a canvas: same 560x680 fit the Play Pad has
- * always used, so the live preview stays cheap regardless of canvas size. */
+/* Interactive composition size. The Play Pad recomposes on every pad move and
+ * on its 20 Hz idle tick; at a 4K preview a full composite costs ~75 ms, which
+ * cannot keep up. Motion frames therefore compose at a <=1 MP interactive
+ * target, and the pad settles back to the full `previewStage` still after the
+ * gesture ends. The pieces themselves are still built at full preview
+ * resolution, so this is a display cost, not a generation downgrade. */
+inline QSize interactivePreviewStage(const QSize &preview)
+{
+    if (!preview.isValid() || preview.isEmpty())
+        return {};
+    constexpr qint64 kMaxInteractivePixels = qint64(1280) * 720;
+    const qint64 pixels =
+        qint64(preview.width()) * qint64(preview.height());
+    const qreal fit = pixels > kMaxInteractivePixels
+                          ? std::sqrt(double(kMaxInteractivePixels)
+                                      / double(pixels))
+                          : 1.0;
+    return QSize(qMax(1, int(std::lround(preview.width() * fit))),
+                 qMax(1, int(std::lround(preview.height() * fit))));
+}
+
+/* Preview stage size for a canvas: native up to a 4K frame budget
+ * (3840x2160 = 8.3 MP), uniformly scaled only when the canvas exceeds it.
+ *
+ * This is deliberately not the old 560x680 thumbnail fit. The Play Pad shows
+ * the stage at panel size, but the pixels behind it are now real preview
+ * detail, so the vector fields and materials stay legible while the user
+ * drags. Commits still render at the full native canvas resolution. */
 inline QSize previewStage(const QSize &canvas)
 {
     if (!canvas.isValid() || canvas.isEmpty())
         return {};
-    const qreal fit = qMin(560.0 / canvas.width(), 680.0 / canvas.height());
-    return QSize(qMax(160, int(std::lround(canvas.width() * fit))),
-                 qMax(160, int(std::lround(canvas.height() * fit))));
+    constexpr qint64 kMaxPreviewPixels = qint64(3840) * 2160;
+    const qint64 pixels = qint64(canvas.width()) * qint64(canvas.height());
+    const qreal fit = pixels > kMaxPreviewPixels
+                          ? std::sqrt(double(kMaxPreviewPixels) / double(pixels))
+                          : 1.0;
+    return QSize(qMax(1, int(std::lround(canvas.width() * fit))),
+                 qMax(1, int(std::lround(canvas.height() * fit))));
 }
 
 /* Rough upper bound used only for progress reporting; the recipes themselves
@@ -251,6 +282,16 @@ inline QVector<CreativePiece> build(
     const QRectF subjectRect = input.subjectRect;
     const QSize stage = input.stage;
     const quint32 seed = input.seed;
+
+    /* One evaluation of the N-dimensional modulation graph per build. The
+     * recipes below read named destinations from `vec`; no recipe invents its
+     * own pad mapping and every mode shares the same engine. */
+    const creative::vector::State vec = creative::vector::evaluateForPatch(
+        patchId,
+        creative::vector::Sources{ input.frame.x, input.frame.y,
+                                   input.frame.energy,
+                                   input.frame.hold ? 1.0f : 0.0f,
+                                   input.frame.time });
 
     bool cancelled = false;
     auto pieceAdded = [&]() -> bool {
@@ -471,19 +512,51 @@ inline QVector<CreativePiece> build(
         if (cancelled)
             return pieces;
 
+        /* persona projection: a real displaced silhouette whose offset and
+         * opacity are vector destinations. It sits behind the recoloured
+         * subject, so the persona reads as a second presence instead of a
+         * fixed drop shadow. */
+        {
+            const qreal shadowDx =
+                (vec[creative::vector::Dest::ShadowX] - 0.5f) * W * 0.075;
+            const qreal shadowDy =
+                (vec[creative::vector::Dest::ShadowY] - 0.5f) * H * 0.065;
+            QImage projectionStage = detail::stageCanvas(stage);
+            const QImage silhouette =
+                detail::tintPreserveAlpha(s, QColor(5, 0, 12));
+            drawAt(projectionStage, silhouette,
+                   subjectRect.translated(shadowDx, shadowDy)
+                       .adjusted(-W * 0.004, -H * 0.003, W * 0.004,
+                                 H * 0.003));
+            CreativeMotion projectionM;
+            projectionM.opacityX = 0.30f;
+            projectionM.opacityY = 0.26f;
+            add(QStringLiteral("Voltage projection"),
+                QStringLiteral("echo"), projectionStage, full, BLEND_NORMAL,
+                clamp01(0.16f
+                        + 0.60f
+                              * vec[creative::vector::Dest::ShadowOpacity]),
+                projectionM);
+        }
+
         /* subject: luminance-preserving recolour, so the fabric keeps its
-         * folds instead of turning into a flat gradient */
+         * folds instead of turning into a flat gradient. Strength, hue drift
+         * and texture retention are vector destinations, not constants. */
         creative::RecolorParams recolor;
         recolor.palette = { cyan, rose, magenta, lime };
-        recolor.strength = 0.88f;
-        recolor.textureKeep = 0.18f;
+        recolor.strength =
+            clamp01(0.52f + 0.48f * vec[creative::vector::Dest::Recolor]);
+        recolor.textureKeep =
+            clamp01(0.08f + 0.24f * vec[creative::vector::Dest::Sheen]);
         recolor.skinGuard = 0.45f;
-        recolor.hueDrift = 0.0f;
+        recolor.hueDrift =
+            (vec[creative::vector::Dest::HueShift] - 0.5f) * 0.65f;
         recolor.seed = seed;
         QImage voltageSubject =
             creative::recolorMasked(s, subjMask, recolor);
         CreativeMotion recolorM;
-        recolorM.opacityX = 0.10f;
+        recolorM.opacityX =
+            0.06f + 0.22f * vec[creative::vector::Dest::ParticleBrightness];
         subjectFull(voltageSubject, QStringLiteral("Voltage idol"), 1.0f,
                     recolorM);
         if (cancelled)
@@ -491,26 +564,37 @@ inline QVector<CreativePiece> build(
 
         /* light that moves across the highlights */
         QImage sheen = creative::spectralSheen(
-            s, subjMask, { cyan, rose, lime, white }, 0.95f, 62.0f,
-            float(seed % 628) / 100.0f);
+            s, subjMask, { cyan, rose, lime, white }, 0.95f,
+            62.0f + (vec[creative::vector::Dest::Sheen] - 0.5f) * 150.0f,
+            float(seed % 628) / 100.0f
+                + vec[creative::vector::Dest::HueShift] * 0.8f);
         QImage sheenFull = detail::stageCanvas(stage);
         drawAt(sheenFull, sheen, subjectRect);
         CreativeMotion sheenM;
-        sheenM.opacityY = 0.22f;
-        sheenM.opacityHold = 0.16f;
+        sheenM.opacityY =
+            0.12f + 0.26f * vec[creative::vector::Dest::Sheen];
+        sheenM.opacityHold =
+            0.10f + 0.20f * vec[creative::vector::Dest::Bloom];
         add(QStringLiteral("Voltage sheen"), QStringLiteral("finish"),
-            sheenFull, full, BLEND_SCREEN, 0.85f, sheenM);
+            sheenFull, full, BLEND_SCREEN,
+            0.65f + 0.30f * vec[creative::vector::Dest::Sheen], sheenM);
 
         CreativeMotion rimIceM;
-        rimIceM.opacityX = -0.24f;
+        rimIceM.opacityX =
+            -0.18f - 0.24f * vec[creative::vector::Dest::RimLeft];
         rimIceM.opacityY = 0.14f;
         band(0.009, cyan, QStringLiteral("Voltage rim ice"),
-             QStringLiteral("rim"), 0.90f, BLEND_SCREEN, rimIceM);
+             QStringLiteral("rim"),
+             0.70f + 0.28f * vec[creative::vector::Dest::Glow],
+             BLEND_SCREEN, rimIceM);
         CreativeMotion rimRoseM;
-        rimRoseM.opacityX = 0.24f;
+        rimRoseM.opacityX =
+            0.18f + 0.24f * vec[creative::vector::Dest::RimRight];
         rimRoseM.opacityY = 0.14f;
         band(0.016, rose, QStringLiteral("Voltage rim rose"),
-             QStringLiteral("rim"), 0.80f, BLEND_SCREEN, rimRoseM);
+             QStringLiteral("rim"),
+             0.62f + 0.30f * vec[creative::vector::Dest::RimRight],
+             BLEND_SCREEN, rimRoseM);
         /* directional light: each rim owns one side of the silhouette */
         if (pieces.size() >= 2)
         {
@@ -551,38 +635,86 @@ inline QVector<CreativePiece> build(
                                   subjectRect.y()
                                       + subjectRect.height() * 0.56);
 
-        /* two real bolts, seeded so replay and commit match */
+        /* The bolt field is generated from the vector graph: count, jitter,
+         * glow and endpoints all move with the pad, and every arc is seeded
+         * so preview, replay and commit match. */
         creative::ArcParams arc;
-        arc.halo = cyan;
         arc.core = white;
-        arc.glowWidth = qMax(5.0f, float(H) * 0.016f);
+        arc.glowWidth =
+            qMax(5.0f, float(H)
+                          * (0.008f
+                             + 0.012f
+                                   * vec[creative::vector::Dest::Glow]));
         arc.coreWidth = qMax(1.2f, float(H) * 0.0026f);
-        arc.sparkCount = 72;
+        arc.displacement =
+            0.10f + 0.24f * vec[creative::vector::Dest::ArcJitter];
+        arc.sparkCount =
+            48 + int(120.0f * vec[creative::vector::Dest::ParticleCount]);
 
+        const int boltCount = qBound(
+            2,
+            2 + int(std::lround(4.0f
+                                    * vec[creative::vector::Dest::ArcCount]
+                                + 3.0f * input.frame.energy)),
+            5);
+        const QPointF bend(
+            (vec[creative::vector::Dest::ArcBendX] - 0.5f) * W * 0.05,
+            (vec[creative::vector::Dest::ArcBendY] - 0.5f) * H * 0.05);
         CreativeMotion arcM;
         arcM.opacityHold = 0.15f;
         arcM.opacityY = 0.12f;
-        add(QStringLiteral("Voltage arc ice"), QStringLiteral("accent"),
-            creative::electricArc(stage, QPointF(-W * 0.02, H * 0.12),
-                                  targetL, seed + 31, arc),
-            full, BLEND_SCREEN, 0.96f, arcM);
-        arc.halo = rose;
-        arc.core = QColor(255, 240, 250);
-        add(QStringLiteral("Voltage arc rose"), QStringLiteral("accent"),
-            creative::electricArc(stage, QPointF(W * 1.02, H * 0.20),
-                                  targetR, seed + 47, arc),
-            full, BLEND_SCREEN, 0.92f, arcM);
+        for (int i = 0; i < boltCount; ++i)
+        {
+            const bool fromLeft = (i % 2) == 0;
+            const QPointF from =
+                fromLeft ? QPointF(-W * 0.02, H * (0.06 + 0.11 * i))
+                         : QPointF(W * 1.02, H * (0.12 + 0.10 * i));
+            const QPointF target =
+                (fromLeft ? targetL : targetR)
+                + bend * (0.5 + 0.15 * i);
+            arc.halo = (i % 3 == 1) ? rose
+                                    : ((i % 3 == 2) ? magenta : cyan);
+            arc.core = (i % 3 == 0) ? white : QColor(255, 240, 250);
+            add(QStringLiteral("Voltage bolt %1").arg(i + 1),
+                QStringLiteral("accent"),
+                creative::electricArc(stage, from, target,
+                                      seed + 31
+                                          + static_cast<quint32>(i) * 17,
+                                      arc),
+                full, BLEND_SCREEN,
+                0.78f + 0.16f * vec[creative::vector::Dest::Glow], arcM);
+        }
         if (cancelled)
             return pieces;
 
-        /* sparks leave the real silhouette, not a random circle */
+        /* sparks leave the real silhouette in the vector's wind direction */
         CreativeMotion sparkM;
         sparkM.opacityEnergy = 0.35f;
         sparkM.opacityHold = 0.20f;
+        const QPointF sparkWind(
+            (vec[creative::vector::Dest::ArcBendX] - 0.5f) * 2.2,
+            (vec[creative::vector::Dest::ArcBendY] - 0.5f) * 2.2);
+        const int sparkCount = qBound(
+            40,
+            int(60.0f + 260.0f * vec[creative::vector::Dest::ParticleCount]
+                + 160.0f * input.frame.energy),
+            480);
         add(QStringLiteral("Voltage sparks"), QStringLiteral("accent"),
-            creative::sparkField(stageMask, stage, seed + 77,
-                                 { cyan, rose, lime, white }, 90, 0.85f),
-            full, BLEND_SCREEN, 0.85f, sparkM);
+            creative::sparkField(
+                stageMask, stage, seed + 77, { cyan, rose, lime, white },
+                sparkCount,
+                0.45f
+                    + 0.55f
+                          * vec[creative::vector::Dest::ParticleBrightness],
+                sparkWind,
+                0.15f
+                    + 0.75f
+                          * vec[creative::vector::Dest::ParticleSpread],
+                0.55f
+                    + 1.10f
+                          * vec[creative::vector::Dest::ParticleLength]),
+            full, BLEND_SCREEN,
+            0.75f + 0.20f * vec[creative::vector::Dest::Glow], sparkM);
 
         CreativeMotion starM;
         starM.opacityHold = 0.30f;
@@ -1281,6 +1413,68 @@ inline QVector<CreativePiece> build(
                                     0.4),
             full);
         subjectFull(s, QStringLiteral("Figure"), 1.0f, CreativeMotion());
+    }
+
+    /* ---------------------------------------------------- vector decorator */
+    /* Every mode gets the same vector-driven particle field. The profile
+     * decides whether it is present (`OverlayAmount`) and supplies wind,
+     * count, brightness, spread and trail length; the recipe only owns the
+     * placement and the catalog palette. Voltage Idol already generates its
+     * richer field above, so it is not duplicated here. */
+    if (!cancelled && patchId != QLatin1String("electric-kpop")
+        && vec[creative::vector::Dest::OverlayAmount] > 0.01f)
+    {
+        auto hueShifted = [](const QColor &src, float amount) {
+            float h = 0.0f, s = 0.0f, v = 0.0f, a = 0.0f;
+            src.getHsvF(&h, &s, &v, &a);
+            if (h < 0.0f)
+                h = 0.0f;
+            QColor out = QColor::fromHsvF(
+                std::fmod(h + amount + 1.0f, 1.0f), s, v);
+            out.setAlpha(src.alpha());
+            return out;
+        };
+
+        QImage subjectOnStage = detail::stageCanvas(stage);
+        drawAt(subjectOnStage, s, subjectRect);
+        const QImage stageMask = creative::maskFromAlpha(subjectOnStage);
+        const float hue =
+            (vec[creative::vector::Dest::HueShift] - 0.5f) * 0.5f;
+        const QVector<QColor> palette{
+            hueShifted(input.accent, hue),
+            hueShifted(input.accentAlt, hue),
+            QColor(244, 252, 255),
+        };
+        const QPointF wind(
+            (vec[creative::vector::Dest::ArcBendX] - 0.5f) * 2.0,
+            (vec[creative::vector::Dest::ArcBendY] - 0.5f) * 2.0);
+        const int count = qBound(
+            18,
+            int(24.0f + 220.0f * vec[creative::vector::Dest::ParticleCount]
+                + 140.0f * input.frame.energy),
+            420);
+        const QImage particles = creative::sparkField(
+            stageMask, stage, seed ^ 0x9E3779B9u, palette, count,
+            0.35f + 0.65f * vec[creative::vector::Dest::ParticleBrightness],
+            wind,
+            0.15f + 0.75f * vec[creative::vector::Dest::ParticleSpread],
+            0.50f + 1.20f * vec[creative::vector::Dest::ParticleLength]);
+        if (!particles.isNull())
+        {
+            CreativeMotion vectorM;
+            vectorM.opacityX = 0.18f;
+            vectorM.opacityY = 0.18f;
+            vectorM.opacityEnergy = 0.28f;
+            vectorM.opacityHold = 0.18f;
+            vectorM.dxX = 0.008f;
+            vectorM.dyY = 0.008f;
+            add(QStringLiteral("Vector discharge"),
+                QStringLiteral("accent"), particles, full, BLEND_SCREEN,
+                clamp01(0.30f
+                        + 0.55f
+                              * vec[creative::vector::Dest::OverlayAmount]),
+                vectorM);
+        }
     }
 
     return pieces;

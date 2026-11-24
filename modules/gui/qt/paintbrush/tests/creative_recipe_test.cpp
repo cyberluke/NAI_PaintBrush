@@ -137,17 +137,109 @@ bool samePieces(const QVector<CreativePiece> &a,
     return true;
 }
 
-void testPreviewCap()
+void testPreviewResolution()
 {
     const QSize small = creative::recipe::previewStage(QSize(1440, 1800));
     const QSize large = creative::recipe::previewStage(QSize(3840, 2160));
-    check("preview.valid", small.isValid() && large.isValid());
-    check("preview.bounded",
-          large.width() <= 561 && large.height() <= 681);
+    const QSize huge = creative::recipe::previewStage(QSize(12000, 12000));
+    const QSize motion =
+        creative::recipe::interactivePreviewStage(QSize(3840, 2160));
+    check("preview.valid", small.isValid() && large.isValid() && huge.isValid());
+    /* The old 560x680 thumbnail is gone: a normal canvas previews at its
+     * native size and a UHD canvas stays 3840x2160. */
+    check("preview.native", small == QSize(1440, 1800)
+                                 && large == QSize(3840, 2160));
+    check("preview.4k-budget",
+          qint64(huge.width()) * huge.height()
+              <= qint64(3840) * 2160 * 101 / 100);
+    check("preview.motion-budget",
+          qint64(motion.width()) * motion.height()
+              <= qint64(1280) * 720 * 101 / 100);
+    check("preview.motion-aspect",
+          std::abs(double(motion.width()) / motion.height()
+                       - 3840.0 / 2160.0)
+              < 0.02);
     check("preview.aspect",
           std::abs(double(large.width()) / large.height()
                        - 3840.0 / 2160.0)
               < 0.02);
+}
+
+void testVectorModulation()
+{
+    const QSize stage(640, 800);
+    const QImage subject = subjectImage();
+
+    auto pieceNamed = [](const QVector<CreativePiece> &pieces,
+                         const char *name) -> const CreativePiece * {
+        for (const CreativePiece &p : pieces)
+            if (p.name == QLatin1String(name))
+                return &p;
+        return nullptr;
+    };
+
+    CreativeBuildInput low = makeInput("neon-idol", stage, subject);
+    low.frame.x = 0.12f;
+    low.frame.y = 0.18f;
+    low.frame.energy = 0.0f;
+    low.frame.hold = false;
+    CreativeBuildInput high = low;
+    high.frame.x = 0.92f;
+    high.frame.y = 0.86f;
+    high.frame.energy = 0.85f;
+    high.frame.hold = true;
+
+    const QVector<CreativePiece> lowPieces = creative::recipe::build(low);
+    const QVector<CreativePiece> highPieces = creative::recipe::build(high);
+    const CreativePiece *lowField =
+        pieceNamed(lowPieces, "Vector discharge");
+    const CreativePiece *highField =
+        pieceNamed(highPieces, "Vector discharge");
+    check("vector.field-present", lowField && highField);
+    check("vector.field-full-stage",
+          lowField && highField && lowField->image.size() == stage
+              && highField->image.size() == stage);
+    check("vector.field-react",
+          lowField && highField
+              && hashImage(lowField->image) != hashImage(highField->image));
+
+    /* Voltage Idol's bolt count and projection come from the vector graph,
+     * including the sequential charge -> discharge dependency. */
+    CreativeBuildInput boltLow = makeInput("electric-kpop", stage, subject);
+    boltLow.frame.x = 0.12f;
+    boltLow.frame.y = 0.18f;
+    boltLow.frame.energy = 0.0f;
+    boltLow.frame.hold = false;
+    CreativeBuildInput boltHigh = boltLow;
+    boltHigh.frame.x = 0.92f;
+    boltHigh.frame.y = 0.86f;
+    boltHigh.frame.energy = 0.85f;
+    boltHigh.frame.hold = true;
+
+    auto boltCount = [](const QVector<CreativePiece> &pieces) {
+        int count = 0;
+        for (const CreativePiece &p : pieces)
+            if (p.name.startsWith(QLatin1String("Voltage bolt")))
+                ++count;
+        return count;
+    };
+    const QVector<CreativePiece> lowVoltage =
+        creative::recipe::build(boltLow);
+    const QVector<CreativePiece> highVoltage =
+        creative::recipe::build(boltHigh);
+    const int lowBolts = boltCount(lowVoltage);
+    const int highBolts = boltCount(highVoltage);
+    std::printf("INFO.vector|bolts=%d/%d\n", lowBolts, highBolts);
+    check("vector.voltage-bolts-react", lowBolts < highBolts);
+
+    const CreativePiece *lowProjection =
+        pieceNamed(lowVoltage, "Voltage projection");
+    const CreativePiece *highProjection =
+        pieceNamed(highVoltage, "Voltage projection");
+    check("vector.projection-react",
+          lowProjection && highProjection
+              && hashImage(lowProjection->image)
+                     != hashImage(highProjection->image));
 }
 
 void testBudget()
@@ -168,9 +260,8 @@ void testFullResolutionDeterminism()
     const QSize stage(2048, 2560); /* both sides > the legacy 1600 cap */
     const QImage subject = subjectImage();
     const CreativeBuildInput input = makeInput("neon-idol", stage, subject);
-    check("fullres.preview-capped",
-          input.previewSize.width() <= 561
-              && input.previewSize.height() <= 681);
+    /* 2048x2560 is under the 4K preview budget, so the preview is native. */
+    check("fullres.preview-native", input.previewSize == stage);
 
     QElapsedTimer clock;
     clock.start();
@@ -219,6 +310,32 @@ void testFullResolutionDeterminism()
     check("compose.preview-size",
           composedPreview.size() == input.previewSize);
     check("compose.preview-not-empty", hashImage(composedPreview) != 0);
+
+    /* Interactive recomposition budget: the Play Pad calls compose() on the
+     * idle tick and on every pad move, so this is the metric that decides
+     * whether a 4K preview needs a lower-resolution interactive path. */
+    clock.restart();
+    for (int i = 0; i < 5; ++i)
+        creative::recipe::compose(bakedA, stage, input.previewSize,
+                                  QColor(12, 12, 18), frame);
+    const qint64 composeMs = clock.elapsed() / 5;
+    std::printf("INFO.compose.preview|ms=%lld size=%dx%d\n",
+                static_cast<long long>(composeMs), input.previewSize.width(),
+                input.previewSize.height());
+
+    const QSize interactive =
+        creative::recipe::interactivePreviewStage(input.previewSize);
+    clock.restart();
+    for (int i = 0; i < 5; ++i)
+        creative::recipe::compose(bakedA, stage, interactive,
+                                  QColor(12, 12, 18), frame);
+    const qint64 interactiveMs = clock.elapsed() / 5;
+    std::printf("INFO.compose.interactive|ms=%lld size=%dx%d\n",
+                static_cast<long long>(interactiveMs), interactive.width(),
+                interactive.height());
+    check("compose.interactive-smaller",
+          interactive.width() < input.previewSize.width()
+              && interactive.height() < input.previewSize.height());
 }
 
 void testCancellation()
@@ -288,7 +405,8 @@ int main(int argc, char **argv)
 
     try
     {
-        testPreviewCap();
+        testPreviewResolution();
+        testVectorModulation();
         testBudget();
         testFullResolutionDeterminism();
         testCancellation();

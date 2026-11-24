@@ -372,6 +372,14 @@ PaintbrushCreative::PaintbrushCreative(PaintbrushController *controller,
     connect(&m_idleTimer, &QTimer::timeout, this, &PaintbrushCreative::onIdleTick);
     m_replayTimer.setInterval(33);
     connect(&m_replayTimer, &QTimer::timeout, this, &PaintbrushCreative::onReplayTick);
+    /* Motion composes at an interactive resolution; once the gesture (or the
+     * decaying idle energy) is done, render the full preview once. */
+    m_previewSettleTimer.setSingleShot(true);
+    m_previewSettleTimer.setInterval(220);
+    connect(&m_previewSettleTimer, &QTimer::timeout, this, [this]() {
+        m_composeInteractive = false;
+        recompose();
+    });
     /* One build at a time: a full-resolution render is heavy, and a monotonic
      * revision makes a replacement a cancel rather than a second concurrent
      * build. */
@@ -673,8 +681,10 @@ void PaintbrushCreative::rebuildPreview()
     if (!canvas.isValid() || canvas.isEmpty())
         return;
 
-    /* The live preview is bounded (560x680 fit) no matter how large the
-     * canvas is: full resolution is reserved for commits/exports. */
+    /* The live preview renders at a 4K-class resolution (native up to a
+     * 3840x2160 frame budget). The stage panel scales the image down for
+     * display, but the pixels the user sees are real preview detail, not a
+     * 560x680 thumbnail. */
     const QSize previewSize = creative::recipe::previewStage(canvas);
     if (previewSize.isEmpty())
         return;
@@ -694,6 +704,11 @@ void PaintbrushCreative::rebuildPreview()
     CreativeBuildInput input;
     input.patchId = m_patchId;
     input.patchName = m_patchId;
+    if (const PatchDef *d = patchDef(m_patchId))
+    {
+        input.accent = d->accent;
+        input.accentAlt = d->secondary;
+    }
     input.subject = m_subject;
     input.subjectRect = previewRect;
     input.stage = previewSize;
@@ -709,6 +724,10 @@ void PaintbrushCreative::rebuildPreview()
         input.protection = protection;
     }
     m_pieces = creative::recipe::build(input);
+    /* A patch change is a new still: render it at the full preview size, not
+     * at the interactive motion size. */
+    m_composeInteractive = false;
+    m_previewSettleTimer.stop();
     recompose();
 }
 
@@ -718,15 +737,25 @@ void PaintbrushCreative::recompose()
      * previews must not be overwritten by 20 Hz idle recompositions. */
     if (m_busy || m_previewSize.isEmpty())
         return;
-    QImage frame = creative::recipe::compose(m_pieces, m_previewSize,
-                                             m_previewSize, QColor(12, 12, 18),
-                                             m_frame);
+    const QSize target =
+        m_composeInteractive
+            ? creative::recipe::interactivePreviewStage(m_previewSize)
+            : m_previewSize;
+    QImage frame = creative::recipe::compose(m_pieces, m_previewSize, target,
+                                             QColor(12, 12, 18), m_frame);
     {
         QMutexLocker locker(&m_previewMutex);
         m_preview = frame;
     }
     ++m_previewRevision;
     emit previewChanged();
+}
+
+void PaintbrushCreative::renderPreviewStill()
+{
+    m_composeInteractive = false;
+    m_previewSettleTimer.stop();
+    recompose();
 }
 
 /* ------------------------------------------------------- human parser ---- */
@@ -1061,7 +1090,15 @@ void PaintbrushCreative::onIdleTick()
     m_frame.energy *= 0.965f;
     if (m_frame.energy < 0.002f)
         m_frame.energy = 0.0f;
-    recompose();
+    if (m_frame.energy > 0.0f)
+    {
+        /* still moving: keep the 20 Hz tick at the interactive size */
+        m_composeInteractive = true;
+        m_previewSettleTimer.start();
+        recompose();
+    }
+    /* At rest the settle timer renders one full preview still and the idle
+     * tick stops overwriting it; time keeps advancing for the next gesture. */
     if (!m_recording && !m_replayTimer.isActive())
         emit padChanged();
 }
@@ -1071,6 +1108,8 @@ void PaintbrushCreative::beginPad()
     if (!hasSubject())
         return;
     setStatus(QStringLiteral("Play."));
+    m_composeInteractive = true;
+    m_previewSettleTimer.start();
 }
 
 void PaintbrushCreative::movePad(double x, double y, double energy, bool hold)
@@ -1098,6 +1137,8 @@ void PaintbrushCreative::movePad(double x, double y, double energy, bool hold)
         s.tMs = m_recordClock.elapsed();
         m_samples.append(s);
     }
+    m_composeInteractive = true;
+    m_previewSettleTimer.start();
     recompose();
     emit padChanged();
 }
@@ -1124,6 +1165,8 @@ void PaintbrushCreative::setHold(bool hold)
         s.tMs = m_recordClock.elapsed();
         m_samples.append(s);
     }
+    m_composeInteractive = true;
+    m_previewSettleTimer.start();
     recompose();
     emit padChanged();
 }
@@ -1207,6 +1250,8 @@ void PaintbrushCreative::onReplayTick()
     m_frame.y = a.y + (b.y - a.y) * f;
     m_frame.energy = a.energy + (b.energy - a.energy) * f;
     m_frame.hold = f < 0.5f ? a.hold : b.hold;
+    m_composeInteractive = true;
+    m_previewSettleTimer.start();
     recompose();
     emit padChanged();
     emit stateChanged(); /* progress + elapsed */
@@ -1336,6 +1381,8 @@ bool PaintbrushCreative::beginCommit(QString *error)
     CreativeBuildInput input;
     input.patchId = m_patchId;
     input.patchName = def->name;
+    input.accent = def->accent;
+    input.accentAlt = def->secondary;
     input.subject = m_subjectNative;
     input.subjectRect = m_subjectCanvasRect;
     input.stage = canvas; /* native canvas resolution, not a 1600 px cap */

@@ -266,9 +266,14 @@ QImage electricArc(const QSize &size, const QPointF &from, const QPointF &to,
                    quint32 seed, const ArcParams &params);
 
 /* Boundary-emitted particles: sparks that hug the silhouette and streak
- * outward along the local normal. */
+ * outward. `wind` is a stage-normalized vector added to the local outward
+ * normal; `spread` widens the tangential jitter (0..1); `streak` scales the
+ * trail length. A zero wind reproduces the original silhouette-hugging look,
+ * so the vector engine is an additive parameter, not a second algorithm. */
 QImage sparkField(const QImage &mask, const QSize &size, quint32 seed,
-                  const QVector<QColor> &palette, int count, float energy);
+                  const QVector<QColor> &palette, int count, float energy,
+                  const QPointF &wind = {}, float spread = 0.35f,
+                  float streak = 1.0f);
 
 /* --- scene dressing ----------------------------------------------------- */
 

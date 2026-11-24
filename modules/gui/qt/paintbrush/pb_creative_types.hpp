@@ -19,6 +19,7 @@
 
 #include "pb_blend.hpp"
 
+#include <QColor>
 #include <QImage>
 #include <QPointF>
 #include <QRectF>
@@ -74,13 +75,18 @@ struct CreativeFrame
 };
 
 /* Immutable snapshot of everything one creative build needs. `stage` is the
- * build resolution: the native canvas for a commit, the capped panel for the
- * live preview. `previewSize` is the bounded target for progressive and final
- * preview images (never the render resolution). */
+ * build resolution: the native canvas for a commit, the 4K-class preview panel
+ * for the live preview. `previewSize` is the target for the progressive/final
+ * preview composite, which is a scaled view of the pieces, never a second
+ * recipe render. */
 struct CreativeBuildInput
 {
     QString patchId;
     QString patchName;
+    /* Catalog accents, so the generic vector overlay belongs to the selected
+     * look instead of painting one global cyber palette over every mode. */
+    QColor accent{ 0, 234, 255 };
+    QColor accentAlt{ 253, 48, 199 };
     QImage subject;      /* cutout; QImage is implicitly shared + read-only */
     /* Grayscale detail-preservation mask in the same pixel space as
      * `subject`: 255 keeps the original pixels (skin, hair, accessories),
@@ -90,7 +96,7 @@ struct CreativeBuildInput
     QImage protection;
     QRectF subjectRect;  /* stage coordinates */
     QSize stage;         /* build stage (native canvas for commits) */
-    QSize previewSize;   /* bounded preview target */
+    QSize previewSize;   /* 4K-class preview target */
     quint32 seed = 1;
     CreativeFrame frame; /* exact pad state captured at request time */
 };

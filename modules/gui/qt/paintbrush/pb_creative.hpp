@@ -211,6 +211,10 @@ public:
     /* Frame for the image provider. Safe from any thread. */
     QImage previewImage() const;
 
+    /* Test/capture helper: force the full preview still immediately instead of
+     * waiting for the interactive settle timer. */
+    void renderPreviewStill();
+
     Q_INVOKABLE void selectPatch(const QString &id);
     Q_INVOKABLE void openFromHarvest(int harvestId);
     Q_INVOKABLE void openForSelection();
@@ -381,6 +385,8 @@ private:
 
     QTimer m_idleTimer;
     QTimer m_replayTimer;
+    QTimer m_previewSettleTimer;
+    bool m_composeInteractive = false;
     QElapsedTimer m_replayClock;
     QElapsedTimer m_recordClock;
 

@@ -592,6 +592,7 @@ qt_plugin_sources = files(
     'paintbrush/pb_creative.cpp',
     'paintbrush/pb_creative_art.cpp',
     'paintbrush/pb_creative_art.hpp',
+    'paintbrush/pb_creative_vector.hpp',
     'paintbrush/pb_frame_capture.cpp',
     'paintbrush/pb_segmentation_service.cpp',
     'paintbrush/pb_tracking_service.cpp',

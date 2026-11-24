@@ -89,8 +89,30 @@ A reusable procedural kit, shared by preview and commit:
   grain, scanlines, butterflies, spiral glitter, ink splatter.
 - composites: reflection, wedge kaleidoscope, gloss overlay, diamond star.
 
-The same functions produce the live preview at panel resolution and the final
-layers at canvas resolution, with geometry expressed in stage-relative units.
+The same functions produce the live preview at a 4K-class resolution (native up
+to a 3840x2160 frame budget) and the final layers at canvas resolution, with
+geometry expressed in stage-relative units. Motion frames compose at a <=1 MP
+interactive target and settle back to the full still after the gesture, so the
+Play Pad stays responsive without giving up preview detail.
+
+### 2.2a N-dimensional vector modulation (`pb_creative_vector.hpp`)
+
+Every recipe evaluates one graph per build. Pad X/Y, energy, hold and time feed
+routes into named destinations: particle count/speed/spread/brightness, arc
+count/bend/jitter, glow, bloom, shadow, hue, rims and the overlay amount.
+
+- `VectorNode` is a composite: a leaf of routes, a `Sequential` chain (the
+  charge -> discharge dependency) or `Parallel` branches whose deltas are summed
+  once, not per child.
+- `Curve` is the strategy (linear, smooth, exponential, sine, square);
+  `profileFor(patchId)` is the factory/registry.
+- Voltage Idol owns a richer profile. Every other mode shares the default
+  profile and receives the same vector-driven decorator (`Vector discharge`),
+  coloured from its own catalog accent/secondary, so the modulation belongs to
+  the selected look instead of one global cyber palette.
+- Voltage Idol's bolt count, arc bend, projection offset and spark wind all come
+  from the graph, not from a fixed pad transform. The recipe harness proves the
+  bolt count moves 4 -> 5 and the projection image changes when the pad moves.
 
 ### 2.3 Linked duplication
 
@@ -114,12 +136,12 @@ assistant can suggest a patch by name without inventing one.
 `scripts/launch-pb-noskip.ps1 -CreativeSelfTest`) builds a synthetic transparent
 idol fixture, then:
 
-1. opens the pad and renders every patch at preview scale;
+1. opens the pad and renders every patch at 1440x1800-class preview resolution;
 2. records a two-point gesture and verifies the loop starts;
-3. commits Neon Idol (+11 layers), adds the suggestion (+1), undoes twice and
+3. commits Neon Idol (+12 layers), adds the suggestion (+1), undoes twice and
    verifies the exact layer count returns;
-4. commits Sticker Forge (+11), Voltage Idol (+10), Prism Muse (+9), each with
-   one-undo verification;
+4. commits Sticker Forge (+12), Voltage Idol (+14) and Prism Muse (+10), each
+   with one-undo verification;
 5. builds a linked lineup (+5) and verifies one-undo;
 6. writes previews + a text report and leaves the pad open on Neon Idol.
 
@@ -129,7 +151,12 @@ Latest report: `paintbrush/docs/creative-synthesis-assets/selftest-report.txt`
 `selftest-pastel-stage.png`, `selftest-nocturne.png`,
 `selftest-ink-creature.png`, `selftest-spark-storm.png`,
 `selftest-kaleido.png`, `selftest-motion-echo.png`,
-`selftest-electric-kpop.png`, `selftest-holo-fashion.png`.
+`selftest-electric-kpop.png`, `selftest-holo-fashion.png`,
+`selftest-holo-liquid.png`, `selftest-holo-opal.png`,
+`selftest-holo-chrome.png`, `selftest-holo-prism.png`,
+`selftest-holo-wrap.png`, `selftest-holo-chameleon.png`,
+`selftest-holo-glitter.png`, `selftest-holo-livery.png`,
+`selftest-fashion-real.png`.
 
 GUI verification:
 - Opened the pad from the real workspace, committed with UI Automation
@@ -153,7 +180,7 @@ GUI verification:
 
 | Spec area | Status | Notes |
 |---|---|---|
-| 12.1 live stage, real pixels, one composition | **Done** | Preview is the commit's pieces at preview scale, not a mock. |
+| 12.1 live stage, real pixels, one composition | **Done** | Preview is the commit's pieces at full preview resolution, not a mock. |
 | 12.1 large stage / pan / layers / Before-After | **Not done** | Pad preview is fitted to the canvas; no pan/zoom/compare yet. |
 | 12.2 graphic systems (recolor, rim, halftone, arcs, sheen, silhouettes, typography) | **Partial** | Recolor, rim, halftone, arcs, sheen, bokeh, halftone, ink, butterflies, kaleidoscope exist. No typography or independent silhouette library. |
 | 12.3 Neon Idol reference | **Done (first pass)** | Electric blue/pink stage, oversized echo, halftone, bokeh, rim split, scanlines. |
@@ -195,10 +222,11 @@ These are the things a reviewer should not assume are finished:
 4. **The suggestion is deterministic, not model-generated.** It is a real
    editable vector sparkle, but the text/action is authored per patch; no LLM
    tool call decides the next embellishment yet.
-5. **No real-time performance measurement.** The preview is recomposed
-   synchronously in C++ at preview resolution; no p95 frame-time capture on the
-   target machine yet. The 50 ms idle tick is a deliberate rest animation, not
-   a measured 60 fps claim.
+5. **Performance is measured at the preview boundary, not a full trace.** The
+   recipe harness measures a 2048x2560 preview compose at ~35 ms and the
+   859x1073 interactive compose at ~20 ms on this workstation. Motion frames use
+   the interactive target at the 20 Hz pad cadence; the full 4K still is a single
+   post-gesture cost. No p95 frame-time trace or 4K GPU capture is claimed yet.
 6. **No save/reopen/export end-to-end test.** The layers are ordinary persisted
    layers, and the existing export path sees them, but this document does not
    claim a tested round trip for this specific flow.
