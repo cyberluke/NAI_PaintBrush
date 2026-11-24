@@ -57,6 +57,7 @@ namespace paintbrush {
 
 class PaintbrushCanvasItem;
 class PaintbrushCreative;
+class PaintbrushTestHook;
 
 /* The presentation mode of the central canvas area.
  *
@@ -610,6 +611,11 @@ public:
                                                   int outline,
                                                   const QString &outlineColor,
                                                   bool shadow, double scale) const;
+    /* TEST-ONLY (PB_TEST_HOOK): apply a real SAM3 mask through the same
+     * authoritative object-selection state the production segmentation path
+     * uses. Inert unless the PB_TEST_HOOK environment variable is set. */
+    Q_INVOKABLE bool testApplyObjectMask(const QImage &mask);
+    Q_INVOKABLE QString testLamaBackend() const;
     Q_INVOKABLE void removeObject(const QString &prompt);
     Q_INVOKABLE void generativeFill(const QString &prompt);
     Q_INVOKABLE void replaceBackground(const QString &prompt);
@@ -1334,6 +1340,7 @@ private:
     PaintbrushLayerModel *m_layerModel = nullptr;
     UndoStack m_undoStack;
     PaintbrushCanvasItem *m_canvas = nullptr;
+    PaintbrushTestHook *m_testHook = nullptr;
 
     SegmentationService m_segmentation;
     MattingService m_matting;

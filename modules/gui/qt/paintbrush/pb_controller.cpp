@@ -6,6 +6,7 @@
 
 #include "pb_controller.hpp"
 #include "pb_canvas_item.hpp"
+#include "pb_test_hook.hpp"
 #include "pb_taskbar.hpp"
 #include "pb_subject_store.hpp"
 #include "pb_frame_capture.hpp"
@@ -260,6 +261,11 @@ PaintbrushController::PaintbrushController(qt_intf_t *intf, QObject *parent)
     startAutosave();
     checkForRecovery();
 
+    /* Test-only loopback control channel for real-process acceptance runs.
+     * Never created in a normal launch (PB_TEST_HOOK is unset). */
+    if (qEnvironmentVariableIsSet("PB_TEST_HOOK"))
+        m_testHook = new PaintbrushTestHook(this, this);
+
     /* welcome screen on a fresh start: show it whenever nothing is loaded
      * and no crash recovery is pending, so the entry points (draw / open
      * picture / play with a video) stay discoverable */
@@ -272,6 +278,8 @@ PaintbrushController::PaintbrushController(qt_intf_t *intf, QObject *parent)
 
 PaintbrushController::~PaintbrushController()
 {
+    delete m_testHook;
+    m_testHook = nullptr;
     m_mediaTimer.stop();
     m_autosaveTimer.stop();
     m_thumbnails.cancel();
@@ -5666,6 +5674,39 @@ void PaintbrushController::makeSticker()
     triggerCompanionEvent(QStringLiteral("sticker-made"));
 }
 
+QString PaintbrushController::testLamaBackend() const
+{
+    if (!qEnvironmentVariableIsSet("PB_TEST_HOOK"))
+        return QString();
+    return m_generation.localInpaintBackend();
+}
+
+bool PaintbrushController::testApplyObjectMask(const QImage &mask)
+{
+    if (!qEnvironmentVariableIsSet("PB_TEST_HOOK") || mask.isNull())
+        return false;
+
+    m_objectMask = mask.convertToFormat(QImage::Format_Grayscale8);
+    m_objectMaskScore = 1.0;
+    m_objectMaskSoftEdge = false;
+    m_objectSelectBusy = false;
+    m_objectSelected = true;
+    m_selection.mask = m_objectMask;
+    m_selection.contentRect =
+        QRectF(0, 0, m_objectMask.width(), m_objectMask.height());
+    ++m_selectionRevision;
+
+    if (m_canvas)
+    {
+        m_canvas->setObjectMask(m_objectMask, 1.0);
+        m_canvas->markCanvasDirty();
+    }
+    updateObjectSelection();
+    emit objectSelectionChanged();
+    setStatus(QStringLiteral("Test object mask applied."));
+    return true;
+}
+
 void PaintbrushController::removeObject(const QString &prompt)
 {
     if (!m_generation.isConfigured())
@@ -5757,6 +5798,7 @@ void PaintbrushController::replaceBackground(const QString &prompt)
 void PaintbrushController::cancelGeneration()
 {
     m_generation.cancelAll();
+    setStatus(QStringLiteral("Generation cancelled."));
 }
 
 void PaintbrushController::autoCollage(int preset)
