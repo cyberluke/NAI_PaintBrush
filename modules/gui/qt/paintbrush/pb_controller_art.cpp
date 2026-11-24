@@ -1407,6 +1407,67 @@ QString PaintbrushController::runCreativeSelfTest()
     m_creative->selectPatch(QStringLiteral("neon-idol"));
     m_creative->movePad(0.74, 0.58, 0.42, false);
     m_creative->setHold(false);
+
+    /* Real-fashion semantic pass. The synthetic idol has no garment, so the
+     * parser correctly falls back; this fixture (a real fashion model parsed
+     * by the same FASHN runtime) proves the garment protection end to end. */
+    const QString fashionCutoutPath = QStringLiteral(
+        "D:/_SATIN_AI/models/holo-reference/fashion-cutout.png");
+    if (!QFileInfo::exists(fashionCutoutPath))
+    {
+        note(QStringLiteral("fashion fixture: skipped (not found)"));
+    }
+    else
+    {
+        const QImage fashionCutout(fashionCutoutPath);
+        if (fashionCutout.isNull())
+        {
+            note(QStringLiteral("FAIL: fashion fixture is unreadable"));
+        }
+        else
+        {
+            newBlankCanvas(1440, 1800);
+            addImageLayer(fashionCutout, QPointF(260, 220),
+                          QStringLiteral("Fashion parser cutout"),
+                          LAYER_STICKER);
+            if (!m_document.layers().isEmpty())
+                m_document.layersRef().last().scale = 0.55f;
+            m_document.setCurrentLayerIndex(m_document.layers().size() - 1);
+            emit documentChanged();
+
+            m_creative->openForSelection();
+            if (!m_creative->hasSubject())
+            {
+                note(QStringLiteral("FAIL: real fashion cutout has no subject"));
+            }
+            else
+            {
+                note(QStringLiteral("fashion subject: %1")
+                         .arg(m_creative->subjectLabel()));
+                note(QStringLiteral("fashion parser: %1")
+                         .arg(m_creative->waitForHumanParse(120000)));
+                m_creative->selectPatch(QStringLiteral("holo-liquid"));
+                m_creative->movePad(0.62, 0.58, 0.35, false);
+                const QImage fashionPreview = m_creative->previewImage();
+                if (fashionPreview.isNull())
+                {
+                    note(QStringLiteral("FAIL: real fashion preview is empty"));
+                }
+                else
+                {
+                    const QString path = QStringLiteral(
+                        "%1/selftest-fashion-real.png").arg(dir);
+                    if (!fashionPreview.save(path))
+                        note(QStringLiteral("FAIL: cannot save %1").arg(path));
+                    else
+                        note(QStringLiteral("preview fashion-real %1x%2")
+                                 .arg(fashionPreview.width())
+                                 .arg(fashionPreview.height()));
+                }
+            }
+        }
+    }
+
     const QImage finalPreview = m_creative->previewImage();
     if (!finalPreview.isNull())
         finalPreview.save(QStringLiteral("%1/selftest-final.png").arg(dir));
