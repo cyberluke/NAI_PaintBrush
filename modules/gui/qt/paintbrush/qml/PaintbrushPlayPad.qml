@@ -37,7 +37,7 @@ Item {
     z: 30
 
     width: Math.min(VLCStyle.dp(430), parent ? parent.width - VLCStyle.margin_normal * 4 : 430)
-    height: Math.min(VLCStyle.dp(790), parent ? parent.height - VLCStyle.margin_normal * 4 : 790)
+    height: Math.min(VLCStyle.dp(820), parent ? parent.height - VLCStyle.margin_normal * 4 : 820)
 
     ColorContext {
         palette: VLCStyle.palette
