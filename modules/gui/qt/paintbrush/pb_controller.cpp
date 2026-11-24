@@ -6423,10 +6423,15 @@ QString PaintbrushController::assistantSystemPrompt() const
               "a new pose, new clothing or new anatomy; it only restyles the "
               "pixels that are already there. "
               "(5) draw_creative_stroke adds one native editable vector "
-              "stroke accent (ribbon/halo/splat/ink) around the selected "
-              "cutout; use it when the user asks you to draw with them or to "
-              "add a decorative line. "
-              "(6) If no tool covers the request, say so and give the manual "
+              "stroke accent (ribbon/halo/splat/ink/calligraphy) around the "
+              "selected cutout; calligraphy traces the real silhouette. Use it "
+              "when the user asks you to draw with them or to add a decorative "
+              "line. "
+              "(6) expand_canvas (OpenFill Expand) grows the canvas and shifts "
+              "the artwork in one undo; rename_creative_look and "
+              "delete_creative_look operate on the committed look groups in "
+              "creative_history. "
+              "(7) If no tool covers the request, say so and give the manual "
               "step.");
 }
 
@@ -6661,20 +6666,56 @@ QByteArray PaintbrushController::assistantToolsJson() const
         required(QStringLiteral("patch"))));
 
     QJsonArray strokeEnum;
-    for (const char *kind : { "ribbon", "halo", "splat", "ink" })
+    for (const char *kind : { "ribbon", "halo", "splat", "ink", "calligraphy" })
         strokeEnum.append(QString::fromLatin1(kind));
     tools.append(make(
         QStringLiteral("draw_creative_stroke"),
         QStringLiteral(
             "Add ONE editable vector stroke accent around the selected "
-            "cutout: a flowing ribbon, a halo ring, an ink burst or an ink "
-            "line. This is the offline co-drawing action: deterministic, "
-            "native vector geometry, committed as a single layer in one undo. "
-            "It never draws over the face unless the geometry would, and it "
-            "does not need a network model."),
+            "cutout: a flowing ribbon, a halo ring, an ink burst, an ink "
+            "line or a true contour calligraphy trace. This is the offline "
+            "co-drawing action: deterministic, native vector geometry, "
+            "committed as a single layer in one undo. It never draws over the "
+            "face unless the geometry would, and it does not need a network "
+            "model."),
         QJsonObject{ { QStringLiteral("kind"),
                        stringProp(QStringLiteral("Stroke kind."), strokeEnum) } },
         required(QStringLiteral("kind"))));
+
+    tools.append(make(
+        QStringLiteral("expand_canvas"),
+        QStringLiteral(
+            "OpenFill Expand: grow the canvas by a percentage on every side. "
+            "The paper surface fills the margin, every layer shifts, and the "
+            "whole operation is one undo. This is a real local canvas edit, "
+            "not a generated image."),
+        QJsonObject{ { QStringLiteral("percent"),
+                       numberProp(QStringLiteral("Percent per side."), 2, 100) } },
+        required(QStringLiteral("percent"))));
+
+    QJsonArray renameRequired;
+    renameRequired.append(QStringLiteral("group"));
+    renameRequired.append(QStringLiteral("name"));
+    tools.append(make(
+        QStringLiteral("rename_creative_look"),
+        QStringLiteral(
+            "Rename a committed creative look group. Read creative_history "
+            "from get_canvas_state for the group id and current label."),
+        QJsonObject{
+            { QStringLiteral("group"),
+              stringProp(QStringLiteral("Look group id.")) },
+            { QStringLiteral("name"),
+              stringProp(QStringLiteral("New label.")) } },
+        renameRequired));
+    tools.append(make(
+        QStringLiteral("delete_creative_look"),
+        QStringLiteral(
+            "Delete a committed creative look group in one undo. The original "
+            "source cutout is made visible again. Read creative_history from "
+            "get_canvas_state for the group id."),
+        QJsonObject{ { QStringLiteral("group"),
+                       stringProp(QStringLiteral("Look group id.")) } },
+        required(QStringLiteral("group"))));
 
     return QJsonDocument(tools).toJson(QJsonDocument::Compact);
 }
@@ -6855,8 +6896,13 @@ QVariantMap PaintbrushController::executeAssistantTool(const QString &name,
             QStringLiteral("%1 x %2").arg(m_document.canvasWidth())
                 .arg(m_document.canvasHeight());
         if (m_creative)
+        {
             state[QStringLiteral("creative_patches")] =
                 QJsonArray::fromVariantList(m_creative->patchList());
+            m_creative->refreshHistory();
+            state[QStringLiteral("creative_history")] =
+                QJsonArray::fromVariantList(m_creative->history());
+        }
         return ok(QStringLiteral("Canvas state read."),
                   QString::fromUtf8(QJsonDocument(state).toJson(
                       QJsonDocument::Compact)));
@@ -7128,6 +7174,34 @@ QVariantMap PaintbrushController::executeAssistantTool(const QString &name,
         return ok(QStringLiteral("Added an editable %1 stroke.").arg(kind),
                   QStringLiteral("It is a native vector layer; one undo "
                                  "removes it."));
+    }
+    if (name == QStringLiteral("expand_canvas"))
+    {
+        const int percent = int(args.value(QStringLiteral("percent")).toDouble());
+        const QString error = expandCanvas(percent);
+        if (!error.isEmpty())
+            return fail(error);
+        return ok(QStringLiteral("Expanded the canvas by %1% per side.")
+                      .arg(percent),
+                  QStringLiteral("One undo restores the original canvas."));
+    }
+    if (name == QStringLiteral("rename_creative_look"))
+    {
+        const QString error = renameCreativeGroup(
+            args.value(QStringLiteral("group")).toString(),
+            args.value(QStringLiteral("name")).toString());
+        if (!error.isEmpty())
+            return fail(error);
+        return ok(QStringLiteral("Look renamed."));
+    }
+    if (name == QStringLiteral("delete_creative_look"))
+    {
+        const QString error = deleteCreativeGroup(
+            args.value(QStringLiteral("group")).toString());
+        if (!error.isEmpty())
+            return fail(error);
+        return ok(QStringLiteral("Look deleted."),
+                  QStringLiteral("One undo brings the look back."));
     }
     return fail(QStringLiteral("Unknown tool '%1'.").arg(name));
 }

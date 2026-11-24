@@ -1,6 +1,6 @@
 # Creative Synthesis — audit and delivery log
 
-Status: **Slice A and B delivered; C/D material and look slices partly delivered; H not started.** This document is the
+Status: **Slice A/B and the named C/D creative slices delivered; E/F/H remain; native OpenFill Expand and recent-look rename/delete shipped.** This document is the
 honest map of what exists, what was added for the Creative Synthesis work, what
 was verified, and what is deliberately not finished yet.
 
@@ -141,22 +141,26 @@ idol fixture, then:
 4. resumes the committed look from metadata, replaces it in one composite
    (+14 layers), verifies one undo restores the previous look, then verifies
    the original commit undo returns to the base document;
-5. applies the current look to the selected cutout (+12) and verifies one undo;
-6. commits Sticker Forge (+12), Voltage Idol (+11), Prism Muse (+10), each with
+5. renames the committed look (label verified through `creative_history`),
+   deletes it (-12 layers) and verifies one undo restores the exact layer set;
+6. expands the canvas 1440x1800 -> 1800x2160 and undoes; adds a true contour
+   calligraphy vector layer (+1) and undoes it;
+7. applies the current look to the selected cutout (+12) and verifies one undo;
+8. commits Sticker Forge (+12), Voltage Idol (+11), Prism Muse (+10), each with
    one-undo verification;
-7. builds a linked lineup (+5), Pastel Lineup (+8, still-source fallback in this
+9. builds a linked lineup (+5), Pastel Lineup (+8, still-source fallback in this
    fixture), Motion Echo (+8) and the three duplicate presets (+2/+4/+3), each
    with one-undo verification;
-8. adds a direct agent ribbon (+1) and the assistant `draw_creative_stroke`
-   tool (+1), each with one undo;
-9. opens the post-Keep chooser from a kept cutout, selects a patch, writes the
-   report and leaves the pad open.
+10. adds a direct agent ribbon (+1) and the assistant `draw_creative_stroke`
+    tool (+1), each with one undo;
+11. opens the post-Keep chooser from a kept cutout, selects a patch, writes the
+    report and leaves the pad open.
 
 Latest report: `paintbrush/docs/creative-synthesis-assets/selftest-report.txt`
-(**RESULT: PASS**, 13-patch run: preview p95 **5.98 ms**, Neon commit
-**830.8 ms**, reload and export **14 layers / 10,143 KB**. Pad-reaction pixel
-deltas per sampled channel: Neon Idol **19.31/255**, Voltage Idol **8.90/255**,
-Sticker Forge **5.83/255**, Pastel Stage **3.80/255** — all four visibly answer
+(**RESULT: PASS**, 13-patch run: preview p95 **7.53 ms**, Neon commit
+**833.1 ms**, reload and export **14 layers / 10,143 KB**. Pad-reaction pixel
+deltas per sampled channel: Neon Idol **17.19/255**, Voltage Idol **8.88/255**,
+Sticker Forge **5.96/255**, Pastel Stage **3.86/255** — all four visibly answer
 the pad.). Generated previews:
 `selftest-neon-idol.png`, `selftest-sticker-forge.png`,
 `selftest-pastel-stage.png`, `selftest-nocturne.png`,
@@ -209,20 +213,20 @@ GUI verification:
 | 12.4 pad mapping / hold / pressure | **Done** | Position, energy, hold; pressure on pen/touch, speed on mouse. |
 | 12.5 gesture recording / loop / surprise / reseed | **Done** | Duration is displayed while recording; loops; no delete/rename of a recording yet. |
 | 12.6 smart duplication, lineup, linked effects | **Done** | Lineup + Duo/Grid/Overlap presets, group-wide finish propagation, reuse on another cutout. |
-| 12.7 Scene Forge, Ink Creature family, Motion Calligraphy | **Partial** | Scene Forge, Auto Splatter, Ink Creature, Motion Echo and editable agent strokes shipped. True contour calligraphy and the full scene-layer family still pending. |
+| 12.7 Scene Forge, Ink Creature family, Motion Calligraphy | **Done** | Scene Forge, Auto Splatter, Ink Creature, Motion Echo, true contour calligraphy (`addCreativeCalligraphy`, editable native vector layer) and editable agent strokes shipped. The broader rigged scene-layer family is still pending. |
 | 12.9 performance must become real layers, one undo | **Done** | Verified. |
 | 12.10 save / reopen / continue editing the performance | **Done** | Metadata includes group/source; Resume restores patch/seed/pad and replaces the old group in one undo. Save→reload→export verified in the self-test. |
-| 12.11 UX at rest / live / after creation | **Partial** | Idle shimmer, live stage, Before/After, suggestion, metrics, recent-look rail. No rename/delete of looks or large-stage pan. |
+| 12.11 UX at rest / live / after creation | **Partial** | Idle shimmer, live stage, Before/After, suggestion, metrics, recent-look rail with inline rename and one-undo delete. No large-stage pan. |
 | Slice A end-to-end | **Done** | Keep → chooser → Neon/Sticker → pad → record → Make it real → suggestion → undo. Verified with the synthetic fixture and a real GUI commit. |
 | Slice B (Pastel Stage, Lineup, generic smart duplicate) | **Done** | Pastel Stage + Pastel Lineup + linked presets. |
 | Slice C (Nocturne, floral/butterfly/scene layer family) | **Partial** | Nocturne shipped; broader scene family pending. |
-| Slice D (Scene Forge / Motion Calligraphy / ink family) | **Partial** | Scene Forge + Auto Splatter added; Ink Creature, Motion Echo (real poses when tracked) and editable agent strokes. True contour calligraphy pending. |
+| Slice D (Scene Forge / Motion Calligraphy / ink family) | **Done** | Scene Forge + Auto Splatter added; Ink Creature, Motion Echo (real poses when tracked), editable agent strokes and true contour calligraphy. |
 | Slice E (generative patch language, authoring, savable looks) | **Not done** | Patch catalog is compiled in; no authoring/catalog UI. |
 | Slice F (beat/audio energy) | **Not done** | — |
 | Slice G (subject awareness / multi-subject) | **Partial** | Subject picking understands layers/roles; no automatic face/garment graph. |
 | Slice H (Photo Regime H / dark stage / Auto Splatter / Stage mode) | **Partial** | Auto Splatter and Stage Door are real recipes; Photo Regime H and the rigged Stage mode are not wired. |
-| Slice I (compact workflow) | **Partial** | Keep → pad → commit → resume/reuse with a recent-look rail. No multi-look rename/delete or full pan. |
-| OpenFill Remove/Fill/Expand | **Partial** | Remove object, generative fill and replace background already exist behind the image provider; Expand canvas is not implemented. No provider was configured in this test. |
+| Slice I (compact workflow) | **Partial** | Keep → pad → commit → resume/reuse with a recent-look rail, inline rename and one-undo delete. No full performance browser or stage pan. |
+| OpenFill Remove/Fill/Expand | **Partial** | Remove object, generative fill and replace background already exist behind the image provider. Expand is now native: `expandCanvas(percent)` grows the canvas on every side, the paper surface fills the margin, layers shift and one undo restores the original canvas. No generative outpainting provider was configured in this test. |
 
 ---
 
@@ -235,19 +239,23 @@ These are the things a reviewer should not assume are finished:
    and the still fallback is verified; the self-test fixture has no track, so
    the real-pose path still needs a tracked-video acceptance run.
 2. **Scene Forge, Auto Splatter and Stage Door are shipped, but Photo Regime H,
-   true contour calligraphy and the rigged Stage mode are still missing.**
+   the rigged Stage mode and the broader scene-layer family are still missing.**
 3. **Agent strokes are deterministic/offline, not model-planned.** The assistant
-   can call `draw_creative_stroke` (ribbon/halo/splat/ink) and it commits a real
-   editable vector layer, but no LLM authoring path chooses multi-stroke plans.
-4. **The preview is CPU-composed and fixed-scale.** Measured p95 is 3.20 ms and
-   a Neon commit is 597.3 ms at 544x680 preview / 1440x1800 canvas; there is no
-   4K/HDR 60 fps claim, no GPU effect pass, and no large-stage pan/zoom or
-   full layer panel.
-5. **The recent-look rail is read/resume only.** It lists committed groups and
-   resumes one; rename/delete and a full performance browser are not built.
-6. **OpenFill is provider-gated and partial.** Remove object, generative fill
-   and replace background already exist behind the image provider; Expand
-   canvas is not implemented, and no provider was configured in this test.
+   can call `draw_creative_stroke` (ribbon/halo/splat/ink/calligraphy) and it
+   commits a real editable vector layer; calligraphy traces the actual cutout
+   silhouette. No LLM authoring path chooses multi-stroke plans.
+4. **The preview is CPU-composed and fixed-scale.** The current run measured a
+   preview p95 of 7.53 ms and an 833.1 ms Neon commit at 544x680 preview /
+   1440x1800 canvas; there is no 4K/HDR 60 fps claim, no GPU effect pass, and no
+   large-stage pan/zoom or full layer panel.
+5. **The recent-look rail is read/resume/rename/delete.** It lists committed
+   groups, resumes one, renames its label inline and deletes it with one undo.
+   There is no full performance browser.
+6. **OpenFill is native for Expand and provider-gated for Remove/Fill.** Remove
+   object, generative fill and replace background already exist behind the image
+   provider. `expandCanvas(percent)` grows the canvas and the paper surface fills
+   the margin in one undo; it is not generative outpainting, and no provider was
+   configured in this test.
 7. **Typography is limited to the lineup title.** There is no full expressive
    type system, sticker library or independent silhouette asset library.
 8. **The art previews use a synthetic fixture.** The recipes are real, but the
@@ -316,11 +324,10 @@ value next work is, in order:
 
 1. **Tracked-video acceptance** for Pastel Lineup and Motion Echo: open a real
    tracked clip, verify pose diversity, PTS order and the one-undo replacement.
-2. **Photo Regime H, true contour calligraphy and the rigged Stage mode**, plus
-   the remaining scene-layer family, now that Scene Forge / Auto Splatter /
-   Stage Door are real recipes.
-3. **Full-stage pan/zoom**, recent-look rename/delete and a layer-level
-   Before/After.
-4. **OpenFill Expand** on top of the existing provider-gated Remove/Fill/
-   Replace Background, with an explicit provider-status surface.
+2. **Photo Regime H, the rigged Stage mode and the remaining scene-layer
+   family**, now that Scene Forge / Auto Splatter / Stage Door are real recipes.
+3. **Full-stage pan/zoom**, a layer-level Before/After and a full performance
+   browser; rename/delete of the recent-look rail are already shipped.
+4. **OpenFill generative Remove/Fill/Replace Background** behind an explicit
+   provider-status surface; native Expand is already shipped.
 5. **Real-idol art review** and a small expressive type/sticker library.

@@ -458,6 +458,16 @@ Item {
                             onClicked: PaintbrushCtx.addCreativeStrokeAccent("splat")
                         }
                         InspectorAction {
+                            label: qsTr("Motion calligraphy")
+                            iconText: VLCIcons.effect_filter
+                            onClicked: PaintbrushCtx.addCreativeCalligraphy("ink")
+                        }
+                        InspectorAction {
+                            label: qsTr("Expand canvas +12%")
+                            iconText: VLCIcons.add
+                            onClicked: PaintbrushCtx.expandCanvas(12)
+                        }
+                        InspectorAction {
                             label: qsTr("Reuse this look on the cutout")
                             iconText: VLCIcons.effect_filter
                             onClicked: PaintbrushCtx.applyCreativeLookToSelection()

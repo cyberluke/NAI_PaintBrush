@@ -115,8 +115,9 @@ QString suggestionKindFor(const QString &patchId)
         || patchId == QLatin1String("kaleido")
         || patchId == QLatin1String("stage-mode"))
         return QStringLiteral("halo");
-    if (patchId == QLatin1String("ink-creature")
-        || patchId == QLatin1String("auto-splatter"))
+    if (patchId == QLatin1String("ink-creature"))
+        return QStringLiteral("calligraphy");
+    if (patchId == QLatin1String("auto-splatter"))
         return QStringLiteral("splat");
     return QStringLiteral("ribbon");
 }
@@ -1049,7 +1050,13 @@ void PaintbrushCreative::acceptSuggestion()
     const PatchDef *def = patchDef(m_patchId);
     const QColor accent = def ? def->accent : QColor(255, 226, 120);
     QString done;
-    if (m_suggestionKind == QLatin1String("ribbon")
+    if (m_suggestionKind == QLatin1String("calligraphy"))
+    {
+        m_controller->addCreativeCalligraphy(QStringLiteral("ink"));
+        done = QStringLiteral("Calligraphy contour added — it is an editable "
+                              "vector layer.");
+    }
+    else if (m_suggestionKind == QLatin1String("ribbon")
         || m_suggestionKind == QLatin1String("halo")
         || m_suggestionKind == QLatin1String("splat"))
     {

@@ -232,6 +232,10 @@ public:
     std::unique_ptr<UndoCommand> makeRotate90Command(bool clockwise);
     /* Crop the canvas to `rect` (canvas coordinates). Same contract. */
     std::unique_ptr<UndoCommand> makeCropCommand(const QRect &rect);
+    /* Expand the canvas by `padPixels` on every side, shifting every content
+     * layer. The paper surface fills the new margin; rasters are never
+     * resampled. */
+    std::unique_ptr<UndoCommand> makeExpandCanvasCommand(int padPixels);
 
     /* -- selection ------------------------------------------------------ */
     const QPainterPath &selectionPath() const { return m_selection; }

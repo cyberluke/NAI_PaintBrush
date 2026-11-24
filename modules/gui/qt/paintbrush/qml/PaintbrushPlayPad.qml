@@ -32,6 +32,7 @@ Item {
     readonly property color accent: active.accent ? active.accent : "#7BE7FF"
     readonly property color secondary: active.secondary ? active.secondary : "#FF7AA8"
     readonly property bool open: creative.open
+    property string pendingGroup
 
     visible: open
     z: 30
@@ -702,7 +703,7 @@ Item {
                 delegate: Rectangle {
                     required property var modelData
                     width: Math.max(VLCStyle.dp(92), historyLabel.implicitWidth
-                                    + VLCStyle.margin_normal)
+                                    + VLCStyle.margin_normal + VLCStyle.dp(24))
                     height: VLCStyle.dp(24)
                     radius: VLCStyle.dp(7)
                     color: "#12141F"
@@ -712,22 +713,62 @@ Item {
 
                     Widgets.LabelExt {
                         id: historyLabel
-                        anchors.centerIn: parent
-                        text: modelData.patchName
+                        anchors.left: parent.left
+                        anchors.leftMargin: VLCStyle.dp(8)
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: modelData.label ? modelData.label
+                                              : modelData.patchName
                         color: "#E7E9F2"
                         font.pixelSize: VLCStyle.fontSize_small
+                        elide: Text.ElideRight
+                        width: parent.width - VLCStyle.dp(26)
+                    }
+
+                    Rectangle {
+                        width: VLCStyle.dp(18)
+                        height: width
+                        radius: width / 2
+                        anchors.right: parent.right
+                        anchors.rightMargin: VLCStyle.dp(4)
+                        anchors.verticalCenter: parent.verticalCenter
+                        color: deleteHover.hovered ? "#3A2030" : "transparent"
+                        Widgets.LabelExt {
+                            anchors.centerIn: parent
+                            text: "×"
+                            color: "#A9ADBE"
+                            font.pixelSize: VLCStyle.dp(11)
+                        }
+                        HoverHandler { id: deleteHover }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: PaintbrushCtx.deleteCreativeGroup(
+                                           modelData.group)
+                        }
                     }
 
                     MouseArea {
                         anchors.fill: parent
+                        anchors.rightMargin: VLCStyle.dp(24)
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: PaintbrushCtx.resumeCreativeLook(
-                                       modelData.layerIndex)
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        onClicked: (mouse) => {
+                            if (mouse.button === Qt.RightButton) {
+                                root.pendingGroup = modelData.group
+                                renameField.text = modelData.label
+                                                   ? modelData.label
+                                                   : modelData.patchName
+                                renamePopup.open()
+                            } else {
+                                PaintbrushCtx.resumeCreativeLook(
+                                            modelData.layerIndex)
+                            }
+                        }
                     }
                     HoverHandler { id: historyHover }
                     ToolTip.visible: historyHover.hovered
                     ToolTip.delay: 400
-                    ToolTip.text: qsTr("Resume this look")
+                    ToolTip.text: qsTr("Click to resume · right-click to rename")
                 }
             }
         }
@@ -789,6 +830,71 @@ Item {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
                     onClicked: root.creative.selectPatch(chip.modelData.id)
+                }
+            }
+        }
+    }
+
+    /* Rename a committed look (right-click a recent-look chip). */
+    Popup {
+        id: renamePopup
+        parent: root
+        modal: true
+        width: Math.min(root.width - VLCStyle.margin_normal * 2,
+                        VLCStyle.dp(300))
+        height: VLCStyle.dp(150)
+        x: (root.width - width) / 2
+        y: (root.height - height) / 2
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+        background: Rectangle {
+            color: "#11131E"
+            radius: VLCStyle.dp(12)
+            border.width: 1
+            border.color: Qt.rgba(root.accent.r, root.accent.g,
+                                  root.accent.b, 0.45)
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: VLCStyle.margin_normal
+            spacing: VLCStyle.margin_small
+
+            Widgets.LabelExt {
+                Layout.fillWidth: true
+                text: qsTr("Name this look")
+                color: "#FFFFFF"
+                font.pixelSize: VLCStyle.fontSize_large
+            }
+
+            TextField {
+                id: renameField
+                Layout.fillWidth: true
+                placeholderText: qsTr("Look name")
+                color: "#F2F3F9"
+                selectByMouse: true
+                onAccepted: {
+                    PaintbrushCtx.renameCreativeGroup(root.pendingGroup,
+                                                      text)
+                    renamePopup.close()
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                PadButton {
+                    text: qsTr("Cancel")
+                    onClicked: renamePopup.close()
+                }
+                PadButton {
+                    text: qsTr("Save")
+                    primary: true
+                    onClicked: {
+                        PaintbrushCtx.renameCreativeGroup(root.pendingGroup,
+                                                          renameField.text)
+                        renamePopup.close()
+                    }
                 }
             }
         }

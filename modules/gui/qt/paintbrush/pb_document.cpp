@@ -404,6 +404,39 @@ std::unique_ptr<UndoCommand> PaintbrushDocument::makeCropCommand(const QRect &re
     return composite;
 }
 
+std::unique_ptr<UndoCommand> PaintbrushDocument::makeExpandCanvasCommand(int padPixels)
+{
+    auto composite = std::make_unique<CompositeCommand>();
+    composite->desc = QStringLiteral("Expand canvas");
+    const int pad = qMax(1, padPixels);
+    const QSize oldSize = m_canvasSize;
+    const QSize newSize(oldSize.width() + pad * 2,
+                        oldSize.height() + pad * 2);
+    composite->children.push_back(std::make_unique<CanvasResizeCommand>(
+        CanvasResizeCommand{oldSize, newSize, composite->desc}));
+
+    QTransform shift;
+    shift.translate(pad, pad);
+    for (int i = 0; i < m_layers.size(); ++i)
+    {
+        CanvasLayer &layer = m_layers[i];
+        if (layer.raster.isNull() && layer.vectorPath.isEmpty())
+            continue;
+        const QTransform before = layer.transform();
+        layer.setTransform(shift * before);
+        const QTransform after = layer.transform();
+        composite->children.push_back(std::make_unique<SetTransformCommand>(
+            SetTransformCommand{layer.id, i, before, after, composite->desc}));
+    }
+
+    m_canvasSize = newSize;
+    m_dirty = true;
+    emit canvasSizeChanged();
+    emit layersChanged();
+    emit dirtyChanged(true);
+    return composite;
+}
+
 /* ------------------------------------------------------- canonical render */
 
 /* One layer through the canonical transform. `region` is the canvas region

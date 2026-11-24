@@ -1285,6 +1285,41 @@ QString PaintbrushController::runCreativeSelfTest()
                    .arg(lookHistory.first().toMap()
                             .value(QStringLiteral("patchName")).toString()));
 
+    /* Rename/delete a committed look; delete is one undo. */
+    if (!lookHistory.isEmpty())
+    {
+        const QString group =
+            lookHistory.first().toMap().value(QStringLiteral("group")).toString();
+        const QString renameError =
+            renameCreativeGroup(group, QStringLiteral("Test Look"));
+        note(renameError.isEmpty()
+                 ? QStringLiteral("look rename: OK")
+                 : QStringLiteral("FAIL: look rename: %1").arg(renameError));
+        m_creative->refreshHistory();
+        const QString renamedLabel =
+            m_creative->history().isEmpty()
+                ? QString()
+                : m_creative->history().first().toMap()
+                      .value(QStringLiteral("label")).toString();
+        if (renamedLabel != QLatin1String("Test Look"))
+            note(QStringLiteral("FAIL: look rename label '%1'")
+                     .arg(renamedLabel));
+        const int beforeDelete = m_document.layers().size();
+        const QString deleteError = deleteCreativeGroup(group);
+        if (!deleteError.isEmpty())
+            note(QStringLiteral("FAIL: look delete: %1").arg(deleteError));
+        else
+            note(QStringLiteral("look delete: -%1 layers")
+                     .arg(beforeDelete - m_document.layers().size()));
+        undo();
+        if (m_document.layers().size() != beforeDelete)
+            note(QStringLiteral("FAIL: look delete undo (%1 != %2)")
+                     .arg(m_document.layers().size()).arg(beforeDelete));
+        else
+            note(QStringLiteral("look delete undo: OK"));
+        m_creative->refreshHistory();
+    }
+
     /* Save -> load -> export round trip over the committed layers. */
     {
         const QString projectPath =
@@ -1390,6 +1425,50 @@ QString PaintbrushController::runCreativeSelfTest()
                  .arg(m_document.layers().size()).arg(baseLayers));
     else
         note(QStringLiteral("one-undo contract: OK"));
+
+    /* OpenFill Expand and true contour calligraphy. */
+    {
+        const QSize before = m_document.canvasSize();
+        const QString expandError = expandCanvas(10);
+        const QSize after = m_document.canvasSize();
+        if (!expandError.isEmpty())
+            note(QStringLiteral("FAIL: expand canvas: %1").arg(expandError));
+        else if (after.width() <= before.width()
+                 || after.height() <= before.height())
+            note(QStringLiteral("FAIL: expand canvas did not grow"));
+        else
+            note(QStringLiteral("expand canvas: %1x%2 -> %3x%4")
+                     .arg(before.width()).arg(before.height())
+                     .arg(after.width()).arg(after.height()));
+        undo();
+        if (m_document.canvasSize() != before)
+            note(QStringLiteral("FAIL: expand canvas undo"));
+        else
+            note(QStringLiteral("expand canvas undo: OK"));
+    }
+    {
+        for (int i = 0; i < m_document.layers().size(); ++i)
+        {
+            const CanvasLayer *l = m_document.layerAt(i);
+            if (l && l->name == QLatin1String("Self-test cutout"))
+            {
+                m_document.setCurrentLayerIndex(i);
+                emit documentChanged();
+                break;
+            }
+        }
+        const int before = m_document.layers().size();
+        addCreativeCalligraphy(QStringLiteral("ink"));
+        const int added = m_document.layers().size() - before;
+        note(QStringLiteral("contour calligraphy: +%1 layer").arg(added));
+        if (added != 1)
+            note(QStringLiteral("FAIL: calligraphy added %1").arg(added));
+        undo();
+        if (m_document.layers().size() != baseLayers)
+            note(QStringLiteral("FAIL: calligraphy undo"));
+        else
+            note(QStringLiteral("contour calligraphy undo: OK"));
+    }
 
     /* Reuse the current look on the selected cutout (one undo). */
     {
@@ -1760,6 +1839,27 @@ QSize PaintbrushController::creativePadCanvasSize() const
     if (size.isValid() && !size.isEmpty())
         return size;
     return QSize(1440, 1800);
+}
+
+QString PaintbrushController::expandCanvas(int percent)
+{
+    percent = qBound(2, percent, 200);
+    const QSize oldSize = m_document.canvasSize();
+    if (!oldSize.isValid() || oldSize.isEmpty())
+        return QStringLiteral("Open a canvas first.");
+    const int pad = qMax(8, int(std::lround(
+        qMax(oldSize.width(), oldSize.height()) * percent / 100.0)));
+    const QSize newSize(oldSize.width() + pad * 2, oldSize.height() + pad * 2);
+    if (newSize.width() > 16000 || newSize.height() > 16000)
+        return QStringLiteral("That expansion is too large.");
+    m_undoStack.pushCommand(m_document.makeExpandCanvasCommand(pad));
+    if (m_canvas)
+        m_canvas->markCanvasDirty();
+    emit documentChanged();
+    setStatus(QStringLiteral("Canvas expanded by %1 px on every side — one undo.")
+                  .arg(pad));
+    triggerCompanionEvent(QStringLiteral("expand-canvas"));
+    return {};
 }
 
 QImage PaintbrushController::creativeSubjectFromLayer(const CanvasLayer &layer,
@@ -2261,11 +2361,106 @@ void PaintbrushController::addCreativeStrokeAccent(const QString &kind)
         if (accent.isValid())
             color = accent;
     }
+    if (kind == QLatin1String("calligraphy"))
+    {
+        addCreativeCalligraphy(QStringLiteral("ink"));
+        return;
+    }
     const bool splat = kind == QLatin1String("splat");
     const int variant = kind == QLatin1String("halo") ? 1 : 0;
     if (kind == QLatin1String("ink"))
         color = QColor(20, 18, 16);
     addCreativeRibbon(color, rect, variant, splat);
+}
+
+void PaintbrushController::addCreativeCalligraphy(const QString &mode)
+{
+    int sourceLayerId = -1;
+    QRectF rect;
+    QString label;
+    const QImage cutout = creativePadSubject(&sourceLayerId, &rect, &label);
+    if (cutout.isNull() || rect.isEmpty())
+    {
+        setStatus(QStringLiteral("Select a cutout first — calligraphy needs a pose."));
+        return;
+    }
+    const QImage alpha = cutout.convertToFormat(QImage::Format_ARGB32);
+    const int w = alpha.width();
+    const int h = alpha.height();
+    if (w < 8 || h < 8)
+        return;
+    QVector<QPointF> left;
+    QVector<QPointF> right;
+    const int step = qMax(1, h / 160);
+    for (int y = 0; y < h; y += step)
+    {
+        const QRgb *line = reinterpret_cast<const QRgb *>(alpha.constScanLine(y));
+        int first = -1;
+        int last = -1;
+        for (int x = 0; x < w; ++x)
+        {
+            if (qAlpha(line[x]) <= 40)
+                continue;
+            if (first < 0)
+                first = x;
+            last = x;
+        }
+        if (first < 0 || last <= first)
+            continue;
+        const qreal sx = rect.width() / double(w);
+        const qreal sy = rect.height() / double(h);
+        left.append(QPointF(rect.x() + first * sx, rect.y() + y * sy));
+        right.append(QPointF(rect.x() + last * sx, rect.y() + y * sy));
+    }
+    if (left.size() < 3)
+    {
+        setStatus(QStringLiteral("That cutout is too thin to trace."));
+        return;
+    }
+    QPainterPath path;
+    auto appendSmooth = [&](const QVector<QPointF> &points) {
+        if (points.size() < 2)
+            return;
+        path.moveTo(points.first());
+        for (int i = 1; i + 1 < points.size(); ++i)
+            path.quadTo(points.at(i),
+                        (points.at(i) + points.at(i + 1)) * 0.5);
+        path.lineTo(points.last());
+    };
+    appendSmooth(left);
+    appendSmooth(right);
+
+    QColor color(20, 18, 16);
+    if (mode != QLatin1String("ink") && m_creative)
+    {
+        const QColor accent(
+            m_creative->activePatch().value(QStringLiteral("accent")).toString());
+        if (accent.isValid())
+            color = accent;
+    }
+    const qreal width = qMax<qreal>(1.5, rect.height() * 0.006);
+    const QSize canvas = creativePadCanvasSize();
+    QImage preview(canvas, QImage::Format_ARGB32);
+    preview.fill(Qt::transparent);
+    {
+        QPainter p(&preview);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        QPen pen(color);
+        pen.setWidthF(width);
+        pen.setCapStyle(Qt::RoundCap);
+        pen.setJoinStyle(Qt::RoundJoin);
+        p.setPen(pen);
+        p.setBrush(Qt::NoBrush);
+        p.drawPath(path);
+    }
+    insertVectorLayer(path, QPointF(0, 0), preview, color, width,
+                      QStringLiteral("Calligraphy"));
+    if (m_canvas)
+        m_canvas->markCanvasDirty();
+    emit documentChanged();
+    setStatus(QStringLiteral("Calligraphy contour added — edit or undo it like "
+                             "any vector layer."));
+    triggerCompanionEvent(QStringLiteral("creative-calligraphy"));
 }
 
 void PaintbrushController::resumeCreativeLook(int layerIndex)
@@ -2314,6 +2509,11 @@ QVariantList PaintbrushController::creativeLookHistory() const
             entry[QStringLiteral("group")] = group;
             entry[QStringLiteral("patchName")] =
                 l.metadata.value(QStringLiteral("creative.patchName")).toString();
+            const QString custom =
+                l.metadata.value(QStringLiteral("creative.label")).toString();
+            entry[QStringLiteral("label")] =
+                custom.isEmpty() ? entry.value(QStringLiteral("patchName"))
+                                 : custom;
             entry[QStringLiteral("layerIndex")] = i;
             const qint64 stamp = group.section(QLatin1Char('-'), -1).toLongLong();
             entry[QStringLiteral("ageMs")] =
@@ -2334,6 +2534,100 @@ QVariantList PaintbrushController::creativeLookHistory() const
                          < b.toMap().value(QStringLiteral("ageMs")).toLongLong();
               });
     return history;
+}
+
+QString PaintbrushController::renameCreativeGroup(const QString &group,
+                                                  const QString &name)
+{
+    if (group.isEmpty())
+        return QStringLiteral("No look selected.");
+    const QString label = name.trimmed();
+    if (label.isEmpty())
+        return QStringLiteral("A look needs a name.");
+    QList<CanvasLayer> layers = m_document.layers();
+    int changed = 0;
+    for (CanvasLayer &l : layers)
+    {
+        if (l.metadata.value(QStringLiteral("creative.group")).toString() != group)
+            continue;
+        l.metadata[QStringLiteral("creative.label")] = label;
+        ++changed;
+    }
+    if (changed == 0)
+        return QStringLiteral("That look is no longer in the document.");
+    m_document.setLayers(layers);
+    m_document.setDirty(true);
+    emit documentChanged();
+    if (m_creative)
+        m_creative->refreshHistory();
+    setStatus(QStringLiteral("Look renamed to \"%1\".").arg(label));
+    return {};
+}
+
+QString PaintbrushController::deleteCreativeGroup(const QString &group)
+{
+    if (group.isEmpty())
+        return QStringLiteral("No look selected.");
+    auto composite = std::make_unique<CompositeCommand>();
+    composite->desc = QStringLiteral("Delete look");
+    int sourceLayerId = -1;
+    int removed = 0;
+    for (int i = m_document.layers().size() - 1; i >= 0; --i)
+    {
+        const CanvasLayer *l = m_document.layerAt(i);
+        if (!l
+            || l->metadata.value(QStringLiteral("creative.group")).toString()
+                   != group)
+            continue;
+        if (sourceLayerId < 0)
+            sourceLayerId =
+                l->metadata.value(QStringLiteral("creative.sourceLayerId")).toInt();
+        DeleteLayerCommand del;
+        del.index = i;
+        del.layer = *l;
+        del.prevCurrentIndex = m_document.currentLayerIndex();
+        del.desc = composite->desc;
+        del.apply(m_document);
+        composite->children.push_back(
+            std::make_unique<DeleteLayerCommand>(del));
+        ++removed;
+    }
+    if (removed == 0)
+        return QStringLiteral("That look is no longer in the document.");
+
+    if (sourceLayerId > 0)
+    {
+        const int sourceIndex = m_document.indexOfLayerId(sourceLayerId);
+        if (sourceIndex >= 0)
+        {
+            CanvasLayer *source = m_document.layerAt(sourceIndex);
+            if (source && !source->visible)
+            {
+                SetVisibilityCommand vis;
+                vis.layerIndex = sourceIndex;
+                vis.before = false;
+                vis.after = true;
+                vis.desc = composite->desc;
+                source->visible = true;
+                composite->children.push_back(
+                    std::make_unique<SetVisibilityCommand>(vis));
+            }
+        }
+    }
+    if (m_document.layers().isEmpty())
+        m_document.setCurrentLayerIndex(-1);
+    else
+        m_document.setCurrentLayerIndex(
+            qBound(0, m_document.currentLayerIndex(),
+                   m_document.layers().size() - 1));
+    m_undoStack.pushCommand(std::move(composite));
+    if (m_canvas)
+        m_canvas->markCanvasDirty();
+    emit documentChanged();
+    if (m_creative)
+        m_creative->refreshHistory();
+    setStatus(QStringLiteral("Look deleted — one undo brings it back."));
+    return {};
 }
 
 void PaintbrushController::applyCreativeLookToSelection()

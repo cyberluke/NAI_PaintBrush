@@ -277,8 +277,19 @@ public:
      * lineup of the current cutout (never invented anatomy). */
     Q_INVOKABLE QString createPastelLineup();
     Q_INVOKABLE QString createMotionEcho();
+    /* OpenFill Expand: grow the canvas by `percent` on every side; the paper
+     * surface fills the margin and every content layer shifts as one undo. */
+    Q_INVOKABLE QString expandCanvas(int percent);
     /* One editable vector stroke suggestion: ribbon, halo or splat. */
     Q_INVOKABLE void addCreativeStrokeAccent(const QString &kind);
+    /* True contour calligraphy: trace the selected cutout and insert the
+     * left/right silhouette contours as one editable vector layer. */
+    Q_INVOKABLE void addCreativeCalligraphy(const QString &mode);
+    /* Rename/delete a committed look group. Delete is one undo and restores
+     * the source layer visibility. */
+    Q_INVOKABLE QString renameCreativeGroup(const QString &group,
+                                            const QString &name);
+    Q_INVOKABLE QString deleteCreativeGroup(const QString &group);
     Q_INVOKABLE void addCreativeSparkle(const QColor &color,
                                         const QPointF &canvasPos, double sizePx);
     void addCreativeRibbon(const QColor &color, const QRectF &subjectRect,
