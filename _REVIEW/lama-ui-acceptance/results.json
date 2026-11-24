@@ -1,0 +1,338 @@
+{
+  "schema": 1,
+  "workspace": "D:/_SATIN_AI/NAI-OS/vlc",
+  "branch": "master",
+  "head": "13ac2c245347902739371e018aff351c85d16ba3",
+  "accepted_gate_head": "cd34efb9bcc56f99f05ff21ce2a7ab7a05c063c9",
+  "provenance": {
+    "lama_provider_commit": "cd34efb9bcc56f99f05ff21ce2a7ab7a05c063c9",
+    "test_hook_and_status_fix_commit": "13ac2c245347902739371e018aff351c85d16ba3",
+    "gate_run_head": "cd34efb9bcc56f99f05ff21ce2a7ab7a05c063c9",
+    "note": "The matrix ran on the provider commit with the acceptance hook as uncommitted work. Commit 13ac2c2453 captured the hook and the cancelGeneration status fix; it is the current HEAD. The post-gate bookkeeping (phase timing, compile-time hook gate, report/results, known-issue note) is uncommitted."
+  },
+  "build": {
+    "command": "pwsh -NoProfile -File scripts/pb-build-plugin.ps1",
+    "ninja_exit": 0,
+    "plugins_dat": "2026-11-24T20:11:56",
+    "later_build_not_used": "2026-11-24T20:23:01",
+    "note": "Accepted gate build: rebuilt after the env-gated test hook and the cancelGeneration status fix (commit 13ac2c2453). A later plugins.dat (20:23:01) exists from unrelated concurrent work and is not the accepted LaMa gate artifact. The phase-timing and compile-time hook-gate changes are not in either artifact; the coordinator build will produce the next timestamp."
+  },
+  "automation": {
+    "channel": "in-app loopback JSON test hook (QTcpServer on 127.0.0.1, ephemeral port, per-process token)",
+    "enabled_by": "PB_TEST_HOOK=1 and PB_TEST_HOOK_FILE (only inside a hook-enabled build)",
+    "compile_gate": {
+      "meson_option": "paintbrush_test_hook",
+      "default": "auto: debug/debugoptimized only; refused for release/minsize",
+      "define": "PAINTBRUSH_TEST_HOOK with an NDEBUG veto (pb_test_hook_gate.h)",
+      "env_alone_in_release": false,
+      "note": "In a release build the class, TCP server and controller hook-up are not compiled, so PB_TEST_HOOK cannot enable anything."
+    },
+    "disabled_in_normal_launch": true,
+    "desktop_input_used": false,
+    "cursor_or_foreground_apis_used": false,
+    "real_objects": ["PaintbrushController", "PaintbrushCanvasItem", "LamaService", "PaintbrushDocument"],
+    "why": "Windows UI Automation cannot reach the Qt Quick canvas or call Q_INVOKABLE methods; the hook calls the same controller/canvas entry points a QML button would call."
+  },
+  "runs": {
+    "gpu_main": {
+      "pid": 48548,
+      "window_hwnd": 3412748,
+      "window_capture_size": "3810x1830",
+      "endpoint": "_REVIEW/lama-ui-acceptance/hook-gpu.json",
+      "log": "_REVIEW/lama-ui-acceptance/gate-gpu.log",
+      "lama_backend": "CUDAExecutionProvider (NVIDIA GeForce RTX 4090)",
+      "image": "_REVIEW/harness/pb_live_harness/build/live-tracked/live_frame_B.png",
+      "mask": "_REVIEW/harness/pb_live_harness/build/live-tracked/live_mask_B.png",
+      "canvas": "960x540"
+    },
+    "gpu_cancel": {
+      "pid": 2208,
+      "endpoint": "_REVIEW/lama-ui-acceptance/hook-gpu3.json",
+      "log": "_REVIEW/lama-ui-acceptance/gate-gpu3.log",
+      "lama_backend": "CUDAExecutionProvider (NVIDIA GeForce RTX 4090)"
+    },
+    "cpu": {
+      "pid": 33556,
+      "endpoint": "_REVIEW/lama-ui-acceptance/hook-cpu.json",
+      "log": "_REVIEW/lama-ui-acceptance/gate-cpu.log",
+      "lama_backend": "CPUExecutionProvider",
+      "env": "PB_LAMA_DEVICE=cpu"
+    }
+  },
+  "matrix": [
+    {
+      "id": 1,
+      "name": "Launch real app, wait for image, capture BEFORE, record pid/window",
+      "status": "PASS_WITH_NOTE",
+      "pid": 48548,
+      "window_hwnd": 3412748,
+      "captures": [
+        "_REVIEW/lama-ui-acceptance/gate-before-remove.png",
+        "_REVIEW/lama-ui-acceptance/gate-before-remove-canvas.png"
+      ],
+      "note": "launch-pb-noskip.ps1 -Media <png> starts a VLC playback attempt (status 'Playing live_frame_B.png', blank 1280x720 canvas) instead of opening the PNG as an image layer. The image was then opened through the real controller openImageFile via the hook: 960x540, layers [Layer 1, live_frame_B]. PrintWindow captures the app chrome but not the GPU/video canvas surface; exact canvas pixels come from the real controller's flattenedPreview export."
+    },
+    {
+      "id": 2,
+      "name": "Remove object with the real SAM3 mask; capture/timing/undo/redo",
+      "status": "PASS",
+      "mask_applied": true,
+      "object_mask_bounds": "960x529",
+      "layers_before": 2,
+      "layers_after": 3,
+      "wait_ms": 7923,
+      "status_after": "AI result added as a new layer",
+      "hashes": {
+        "before_canvas": "11DB0C47A97E70C5213FACDDCBBB79C728E02C2FE87C261F964495C5EC887494",
+        "after_canvas": "0A0E597598826D660E7EFA0C528516825FFDAAEE2263EE73156A18EF33C4C87F",
+        "undo_canvas": "11DB0C47A97E70C5213FACDDCBBB79C728E02C2FE87C261F964495C5EC887494",
+        "redo_canvas": "0A0E597598826D660E7EFA0C528516825FFDAAEE2263EE73156A18EF33C4C87F",
+        "generated_layer": "0A0E597598826D660E7EFA0C528516825FFDAAEE2263EE73156A18EF33C4C87F"
+      },
+      "diff": {
+        "mask_covered": 246137,
+        "changed": 246132,
+        "changed_inside": 246132,
+        "changed_outside": 0,
+        "max_delta_outside": 0,
+        "mean_delta_outside": 0.0,
+        "max_delta_inside": 231,
+        "mean_delta_inside": 40.756,
+        "bbox": "0,0,960,529"
+      },
+      "evidence": [
+        "_REVIEW/lama-ui-acceptance/gate-mask-applied.png",
+        "_REVIEW/lama-ui-acceptance/gate-after-remove.png",
+        "_REVIEW/lama-ui-acceptance/gate-after-remove-canvas.png",
+        "_REVIEW/lama-ui-acceptance/gate-remove-layer.png",
+        "_REVIEW/lama-ui-acceptance/gate-remove-diff.png",
+        "_REVIEW/lama-ui-acceptance/gate-remove-crop-before.png",
+        "_REVIEW/lama-ui-acceptance/gate-remove-crop-after.png",
+        "_REVIEW/lama-ui-acceptance/gate-remove-boundary-before.png",
+        "_REVIEW/lama-ui-acceptance/gate-remove-boundary-after.png",
+        "_REVIEW/lama-ui-acceptance/gate-remove-undo-canvas.png",
+        "_REVIEW/lama-ui-acceptance/gate-remove-redo-canvas.png"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Empty-prompt Fill on a real rectangular canvas selection; undo/redo",
+      "status": "PASS",
+      "rect": "620,40,260,100",
+      "layers_before": 3,
+      "layers_after": 4,
+      "hashes": {
+        "before_canvas": "0A0E597598826D660E7EFA0C528516825FFDAAEE2263EE73156A18EF33C4C87F",
+        "after_canvas": "0F5053A1FBA4E8CFFCC9D02B3F680B35DBD5303ED5E70EA04CFA7161B9297452",
+        "undo_canvas": "0A0E597598826D660E7EFA0C528516825FFDAAEE2263EE73156A18EF33C4C87F",
+        "redo_canvas": "0F5053A1FBA4E8CFFCC9D02B3F680B35DBD5303ED5E70EA04CFA7161B9297452"
+      },
+      "diff": {
+        "mask_covered": 26000,
+        "changed": 25634,
+        "changed_inside": 25634,
+        "changed_outside": 0,
+        "max_delta_outside": 0,
+        "mean_delta_outside": 0.0,
+        "max_delta_inside": 124,
+        "mean_delta_inside": 10.0568,
+        "bbox": "621,41,259,99"
+      },
+      "evidence": [
+        "_REVIEW/lama-ui-acceptance/gate-before-fill.png",
+        "_REVIEW/lama-ui-acceptance/gate-before-fill-canvas.png",
+        "_REVIEW/lama-ui-acceptance/gate-after-fill.png",
+        "_REVIEW/lama-ui-acceptance/gate-after-fill-canvas.png",
+        "_REVIEW/lama-ui-acceptance/gate-fill-diff.png",
+        "_REVIEW/lama-ui-acceptance/gate-fill-crop-before.png",
+        "_REVIEW/lama-ui-acceptance/gate-fill-crop-after.png",
+        "_REVIEW/lama-ui-acceptance/gate-fill-undo-canvas.png",
+        "_REVIEW/lama-ui-acceptance/gate-fill-redo-canvas.png"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Cancellation and stale isolation",
+      "status": "PASS_WITH_NOTE",
+      "pid": 2208,
+      "selection": "160,80,640,380",
+      "cancel_after_ms": 104,
+      "cancelled_while_busy": true,
+      "layers_after_cancel": 5,
+      "layers_after_cancel_grace_1500ms": 5,
+      "second_fill_elapsed_ms": 5164,
+      "layers_after_second_fill": 6,
+      "layers_after_grace_5000ms": 6,
+      "status_after_cancel": "Generating fill…",
+      "status_after_cancel_after_fix": "Generation cancelled.",
+      "status_fix_commit": "13ac2c245347902739371e018aff351c85d16ba3",
+      "status_after_second_fill": "AI result added as a new layer",
+      "status_after_grace": "AI result added as a new layer",
+      "canvas_after_hash": "A7785688B94D04B0542806C7A4D75A9C3A5F172AF42BC662E1FC1702FD5070EB",
+      "note": "No late commit and only the second fill published. At gate time the status text still read 'Generating fill…' after cancellation (busy was already false); that stale text was fixed post-gate in 13ac2c2453, where cancelGeneration() sets 'Generation cancelled.' without any document mutation. The PASS data above is the observed run and is unchanged.",
+      "evidence": [
+        "_REVIEW/lama-ui-acceptance/gate-after-stale-isolation.png",
+        "_REVIEW/lama-ui-acceptance/gate-after-stale-isolation-canvas.png"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "CPU fallback fill",
+      "status": "PASS",
+      "pid": 33556,
+      "backend": "CPUExecutionProvider",
+      "rect": "600,60,160,100",
+      "elapsed_ms": 9310,
+      "layers_before": 2,
+      "layers_after": 3,
+      "status_after": "AI result added as a new layer",
+      "hashes": {
+        "before_canvas": "11DB0C47A97E70C5213FACDDCBBB79C728E02C2FE87C261F964495C5EC887494",
+        "after_canvas": "4901BBADFAA82D50F27A6D1FBC7D7A6BA0446EF7D86BE2926962C05AAA7E621C"
+      },
+      "diff": {
+        "mask_covered": 16000,
+        "changed": 15741,
+        "changed_inside": 15741,
+        "changed_outside": 0,
+        "max_delta_outside": 0,
+        "mean_delta_outside": 0.0,
+        "max_delta_inside": 116,
+        "mean_delta_inside": 8.4843,
+        "bbox": "601,61,159,99"
+      },
+      "evidence": [
+        "_REVIEW/lama-ui-acceptance/gate-cpu-before-fill.png",
+        "_REVIEW/lama-ui-acceptance/gate-cpu-before-fill-canvas.png",
+        "_REVIEW/lama-ui-acceptance/gate-cpu-after-fill.png",
+        "_REVIEW/lama-ui-acceptance/gate-cpu-after-fill-canvas.png",
+        "_REVIEW/lama-ui-acceptance/gate-cpu-fill-diff.png",
+        "_REVIEW/lama-ui-acceptance/gate-cpu-fill-crop-before.png",
+        "_REVIEW/lama-ui-acceptance/gate-cpu-fill-crop-after.png"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "Project persistence",
+      "status": "PASS",
+      "project": "_REVIEW/lama-ui-acceptance/gate-project.npb",
+      "project_bytes": 2825561,
+      "project_sha256": "FC2BD84C16B627E162C81AC4F2CCE359C381C24B7103128FE4F48CC095F76625",
+      "layers": 5,
+      "layer_types": ["raster", "image", "generated", "generated", "generated"],
+      "canvas_sha256_saved": "65ED8AFA0CD5D7C6B38402C0DABCB9B0C0F88915A33995188C8932B26C3813B6",
+      "canvas_sha256_reopened_same_process": "65ED8AFA0CD5D7C6B38402C0DABCB9B0C0F88915A33995188C8932B26C3813B6",
+      "canvas_sha256_reopened_new_process": "65ED8AFA0CD5D7C6B38402C0DABCB9B0C0F88915A33995188C8932B26C3813B6",
+      "evidence": [
+        "_REVIEW/lama-ui-acceptance/gate-project.npb",
+        "_REVIEW/lama-ui-acceptance/gate-project-saved-canvas.png",
+        "_REVIEW/lama-ui-acceptance/gate-project-reopened-canvas.png",
+        "_REVIEW/lama-ui-acceptance/gate-project-reopened-process2.png"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "Quality inspection",
+      "status": "PASS_WITH_LIMITATIONS",
+      "observations": [
+        "The supplied live_mask_B.png selects 246,137 of 518,400 pixels (47.5% of the frame), mainly the upper wall/background region; the dancers are outside the mask and remain byte-identical.",
+        "Remove-object reconstruction is smooth but loses wall detail: ghosted/smeared structures where fixtures used to be, and low-frequency banding. No hard color seam; the boundary is exact because unmasked pixels are preserved (max delta 0 outside).",
+        "The 512x512 LaMa context ROI cannot preserve high-frequency detail across a 960x529 hole; this is the expected large-region limit, not a byte-preservation failure.",
+        "Both empty-prompt fills are plausible wall reconstructions with no visible hard seams; the GPU rectangle removed a light strip cleanly, and the CPU rectangle shows a faint low-frequency band. Differences are consistent with the 512 crop and CPU/GPU inference, not with masked-region leakage.",
+        "No generative invention beyond the LaMa model was observed."
+      ],
+      "evidence": [
+        "_REVIEW/lama-ui-acceptance/gate-remove-crop-before.png",
+        "_REVIEW/lama-ui-acceptance/gate-remove-crop-after.png",
+        "_REVIEW/lama-ui-acceptance/gate-remove-boundary-before.png",
+        "_REVIEW/lama-ui-acceptance/gate-remove-boundary-after.png",
+        "_REVIEW/lama-ui-acceptance/gate-fill-crop-before.png",
+        "_REVIEW/lama-ui-acceptance/gate-fill-crop-after.png",
+        "_REVIEW/lama-ui-acceptance/gate-cpu-fill-crop-before.png",
+        "_REVIEW/lama-ui-acceptance/gate-cpu-fill-crop-after.png"
+      ]
+    }
+  ],
+  "phase_timing": {
+    "native_runtime": {
+      "dll": "pb_lama_cuda.dll (MSVC, rebuilt 2026-11-24T20:32:42)",
+      "dll_sha256": "F62893D0E3FB1B1DFEE92A87EE268C36DDE1CAD5ACEE0B0F0F0BBAC55D92F94A",
+      "packaged_acceptance_dll_sha256": "e0325cf2bc3ee8a245c0cdec89438a9e1d07d0da5875c972241ffa9b8d36fdd5",
+      "packaged_dll_untouched": true,
+      "harness": "lama_smoke (WIC, no GUI, no desktop input)",
+      "model_sha256": "1faef5301d78db7dda502fe59966957ec4b79dd64e16f03ed96913c7a4eb68d6"
+    },
+    "keys": ["load", "mask", "preprocess", "infer", "composite", "publish", "total"],
+    "units": "milliseconds (std::chrono::steady_clock)",
+    "notes": {
+      "load": "persistent session/model graph load; identical for every run of the session",
+      "mask": "source setup copy + mask scan + connected components/pass planning",
+      "preprocess": "ROI crop + mask dilation + 512x512 tensor resampling (summed over passes)",
+      "infer": "Ort::Session::Run (summed over passes)",
+      "composite": "output decode + feather alpha + feathered write-back (C ABI postprocess_ms)",
+      "publish": "RGBA buffer -> owned QImage in the shim plus the queued inpaintReady handoff; unmeasured in this gate because it needs the MinGW plugin build",
+      "total": "DLL-side total, excludes publish"
+    },
+    "gpu": {
+      "backend": "CUDAExecutionProvider (NVIDIA GeForce RTX 4090)",
+      "ort": "1.30.0",
+      "session_load_ms": 8807.6,
+      "result": "PASS (5 checks)",
+      "log": "_REVIEW/lama-ui-acceptance/phase-timing-gpu.log",
+      "cases": [
+        {"case": "centre 640x480", "mask": 0.8, "preprocess": 6.1, "infer": 668.9, "composite": 1.3, "total": 677.1},
+        {"case": "boundary 480x360", "mask": 0.1, "preprocess": 3.5, "infer": 90.3, "composite": 0.9, "total": 94.9},
+        {"case": "disconnected 800x420", "mask": 0.5, "preprocess": 10.5, "infer": 181.2, "composite": 1.3, "total": 193.6},
+        {"case": "tiny 320x240", "mask": 0.0, "preprocess": 5.8, "infer": 97.5, "composite": 0.7, "total": 104.1},
+        {"case": "large 720x540", "mask": 1.6, "preprocess": 5.3, "infer": 75.6, "composite": 4.5, "total": 87.0}
+      ]
+    },
+    "cpu": {
+      "backend": "CPUExecutionProvider",
+      "session_load_ms": 9258.4,
+      "result": "PASS (5 checks)",
+      "log": "_REVIEW/lama-ui-acceptance/phase-timing-cpu.log",
+      "cases": [
+        {"case": "centre 640x480", "mask": 0.5, "preprocess": 6.2, "infer": 1569.7, "composite": 1.3, "total": 1577.6},
+        {"case": "boundary 480x360", "mask": 0.1, "preprocess": 4.0, "infer": 1716.7, "composite": 0.9, "total": 1721.7},
+        {"case": "disconnected 800x420", "mask": 0.4, "preprocess": 7.6, "infer": 3060.4, "composite": 2.0, "total": 3070.4},
+        {"case": "tiny 320x240", "mask": 0.0, "preprocess": 3.4, "infer": 1714.8, "composite": 0.4, "total": 1718.7},
+        {"case": "large 720x540", "mask": 2.2, "preprocess": 8.5, "infer": 1733.8, "composite": 7.8, "total": 1752.3}
+      ]
+    },
+    "publish": "unmeasured (instrumented; requires the coordinator's MinGW plugin build)"
+  },
+  "known_issues": [
+    {
+      "file": "_REVIEW/lama-ui-acceptance/KNOWN-ISSUE-paintbrush-open-png.md",
+      "id": "paintbrush-open-png-media-player",
+      "status": "open",
+      "summary": "Launching with --paintbrush-open=<png> routes the path through openVideoFile(), sets status 'Playing <file>' and leaves a blank 1280x720 canvas instead of opening the image layer. Workaround: Open picture / openImageFile(). Not a LaMa defect; not fixed in this scope."
+    }
+  ],
+  "recovery": {
+    "backup_dir": "C:/Users/lukes.COREI9/AppData/Local/Temp/kilo/pb-recovery-backup",
+    "expected": {
+      "C:/Users/lukes.COREI9/AppData/Roaming/nai-paintbrush/paintbrush/recovery.npb": {
+        "bytes": 6048,
+        "sha256": "715313169C28D85C2798E86F7E3C1885BE3538BA3280E66422D6297A078A91AB"
+      },
+      "C:/Users/lukes.COREI9/AppData/Roaming/paintbrush/paintbrush/recovery.npb": {
+        "bytes": 6057,
+        "sha256": "856E9E49A315AAB5BCCF5C51027A9C7CE8C883439AF91AB6449B9ED005D3809D"
+      }
+    },
+    "final_status": "both files present with the expected hashes; no .bak-test remains",
+    "restored_after_every_run": true
+  },
+  "cleanup": {
+    "app_processes_running": 0,
+    "committed": false,
+    "staged": false,
+    "pushed": false,
+    "head": "13ac2c245347902739371e018aff351c85d16ba3",
+    "bookkeeping_uncommitted": true,
+    "unrelated_concurrent_work_present": true,
+    "head_unchanged_since_gate_commit": true
+  }
+}
