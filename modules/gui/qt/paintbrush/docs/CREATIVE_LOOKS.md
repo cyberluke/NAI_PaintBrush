@@ -20,8 +20,8 @@ four named holo materials, cancellable async rendering, and full-resolution
 effect synthesis above the 1600 px build cap. Those are the next
 material-intelligence phase, not part of this milestone.
 
-`master` is 115 commits ahead of `origin/master` and nothing was pushed, so
-`11e2cb1b47` exists locally but is not visible on GitHub yet.
+`master` is more than 100 commits ahead of `origin/master` and nothing was
+pushed, so `11e2cb1b47` exists locally but is not visible on GitHub yet.
 
 ## Where it lives
 

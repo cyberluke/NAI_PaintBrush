@@ -10,7 +10,7 @@
 ## 0. Latest (2026-11-24) — creative looks / Play Pad
 
 **State:** the Creative Play Pad and the two subject-aware looks are
-implemented and locally committed. `master` is **115 commits ahead of
+implemented and locally committed. `master` is **more than 100 commits ahead of
 `origin/master` and nothing was pushed**. That is why the GitHub remote cannot
 fetch `11e2cb1b47` yet — the commit exists locally; it is a push-state gap,
 not a missing implementation.
@@ -28,9 +28,9 @@ not a missing implementation.
 
 **Verified build (post-relink, 2026-11-24 06:09):**
 `ninja -C win64-meson modules/libqt_plugin.dll` → `EXIT=0`.
-`PB_BUILD_SHA=21d296b45f0f4d0d72936839f525092dde748f05` (matches HEAD), compiled
-Nov 24 2026 06:09, `plugins.dat` regenerated 06:09:54. The docs commit after
-the link does not change the plugin.
+`PB_BUILD_SHA=21d296b45f0f4d0d72936839f525092dde748f05` (matches the code
+commit `21d296b45f`), compiled Nov 24 2026 06:09, `plugins.dat` regenerated
+06:09:54. The docs commit after the link does not change the plugin.
 
 **Verified behaviour:**
 - `scripts/pb-creative-art-tests.ps1` → 68/68 PASS; worst Oklab ΔL 0.0132.
