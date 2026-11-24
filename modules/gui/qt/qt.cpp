@@ -54,6 +54,7 @@ extern "C" char **environ;
 #include <QApplication>
 #include <QDate>
 #include <QMutex>
+#include <QStandardPaths>
 #include <QtQuickControls2/QQuickStyle>
 #include <QLoggingCategory>
 #include <QQmlError>
@@ -1182,6 +1183,12 @@ static void *Thread( void *obj )
     // at the moment, the vout is created in another thread than the rendering thread
     QApplication::setAttribute( Qt::AA_DontCheckOpenGLContextThreadAffinity );
     QQuickWindow::setDefaultAlphaBuffer(true);
+
+    /* The creative self-test must never share the live document's recovery or
+     * config paths. Qt's test mode redirects the QStandardPaths AppData/config
+     * roots before QApplication and the settings users are created. */
+    if( var_InheritBool( p_intf, "paintbrush-creative-selftest" ) )
+        QStandardPaths::setTestModeEnabled( true );
 
     /* Start the QApplication here */
 #ifdef _WIN32

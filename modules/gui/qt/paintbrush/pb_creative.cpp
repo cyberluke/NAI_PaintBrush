@@ -737,6 +737,7 @@ void PaintbrushCreative::rebuildPreview()
     CreativeBuildInput input;
     input.patchId = m_patchId;
     input.patchName = m_patchId;
+    input.preview = true;
     if (const PatchDef *d = patchDef(m_patchId))
     {
         input.accent = d->accent;

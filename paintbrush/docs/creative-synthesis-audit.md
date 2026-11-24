@@ -107,12 +107,18 @@ count/bend/jitter, glow, bloom, shadow, hue, rims and the overlay amount.
 - `Curve` is the strategy (linear, smooth, exponential, sine, square);
   `profileFor(patchId)` is the factory/registry.
 - Voltage Idol owns a richer profile. Every other mode shares the default
-  profile and receives the same vector-driven decorator (`Vector discharge`),
-  coloured from its own catalog accent/secondary, so the modulation belongs to
-  the selected look instead of one global cyber palette.
+  profile and receives the same vector-driven decorator, coloured from its own
+  catalog accent/secondary, so the modulation belongs to the selected look
+  instead of one global cyber palette.
 - Voltage Idol's bolt count, arc bend, projection offset and spark wind all come
   from the graph, not from a fixed pad transform. The recipe harness proves the
   bolt count moves 4 -> 5 and the projection image changes when the pad moves.
+- Preview builds carry a `Vector live` piece instead of the baked field.
+  `compose()` evaluates the profile at the current frame and redraws the spark
+  field and Voltage bolts at the compose target; commits keep the baked fields.
+  The harness measures 30 ms for the live field at 859x1073 (static compose
+  ~18 ms), and the preview dumps show the particles/arcs changing with the
+  pad's frame.
 
 ### 2.3 Linked duplication
 

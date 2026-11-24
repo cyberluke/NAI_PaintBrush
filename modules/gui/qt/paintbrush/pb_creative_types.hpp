@@ -26,6 +26,7 @@
 #include <QSize>
 #include <QString>
 #include <QVariantMap>
+#include <QVector>
 #include <QtGlobal>
 
 namespace paintbrush {
@@ -49,8 +50,22 @@ struct CreativeMotion
     float rotationHold = 0.0f;
 };
 
-/* One editable output piece. The same vector drives both the live preview
- * and the committed document layers. */
+/* A preview-only vector field. The palette, mask and profile travel with the
+ * piece so compose() can evaluate the graph at the current pad frame without a
+ * rebuild. Commits never contain this piece; they use the baked field. */
+struct CreativeVectorOverlay
+{
+    QString profileId;
+    int style = 0; /* 0 = sparks, 1 = Voltage bolts + sparks */
+    QImage mask;   /* subject-on-stage grayscale */
+    QVector<QColor> palette;
+    QRectF subjectRect;
+    QSize stage;
+    quint32 seed = 0;
+};
+
+/* One editable output piece. Baked pieces drive commits; preview builds may
+ * also carry one dynamic vector overlay evaluated at compose time. */
 struct CreativePiece
 {
     QString name;
@@ -62,6 +77,8 @@ struct CreativePiece
     float opacity = 1.0f;
     CreativeMotion motion;
     QVariantMap metadata;
+    bool dynamicVector = false;
+    CreativeVectorOverlay vectorOverlay;
 };
 
 /* Live pad state captured for one build. */
@@ -99,6 +116,9 @@ struct CreativeBuildInput
     QSize previewSize;   /* 4K-class preview target */
     quint32 seed = 1;
     CreativeFrame frame; /* exact pad state captured at request time */
+    /* Preview builds request a live vector overlay; commits request the baked
+     * fields so the document layers stay deterministic and one-undo. */
+    bool preview = false;
 };
 
 } /* namespace paintbrush */

@@ -307,6 +307,10 @@ inline QVector<CreativePiece> build(
                                    input.frame.hold ? 1.0f : 0.0f,
                                    input.frame.time });
 
+    /* Preview builds reserve one dynamic piece for the live graph evaluation;
+     * commits bake the same field at the final frame instead. */
+    const bool preview = input.preview;
+
     bool cancelled = false;
     auto pieceAdded = [&]() -> bool {
         if (cancelled)
@@ -649,6 +653,8 @@ inline QVector<CreativePiece> build(
                                   subjectRect.y()
                                       + subjectRect.height() * 0.56);
 
+        if (!preview)
+        {
         /* The bolt field is generated from the vector graph: count, jitter,
          * glow and endpoints all move with the pad, and every arc is seeded
          * so preview, replay and commit match. */
@@ -738,6 +744,27 @@ inline QVector<CreativePiece> build(
                     * particleSpeed),
             full, BLEND_SCREEN,
             0.75f + 0.20f * vec[creative::vector::Dest::Glow], sparkM);
+        }
+        else
+        {
+            /* Preview-only dynamic field: bolts and sparks re-evaluate the
+             * graph on every compose instead of staying baked. */
+            CreativePiece live;
+            live.name = QStringLiteral("Vector live");
+            live.role = QStringLiteral("accent");
+            live.dynamicVector = true;
+            live.blendMode = BLEND_SCREEN;
+            live.opacity = 0.95f;
+            live.vectorOverlay.profileId = patchId;
+            live.vectorOverlay.style = 1;
+            live.vectorOverlay.mask = stageMask;
+            live.vectorOverlay.palette = { cyan, rose, magenta, lime, white };
+            live.vectorOverlay.subjectRect = subjectRect;
+            live.vectorOverlay.stage = stage;
+            live.vectorOverlay.seed = seed + 77;
+            if (!stageMask.isNull())
+                pieces.append(live);
+        }
 
         CreativeMotion starM;
         starM.opacityHold = 0.30f;
@@ -1453,27 +1480,39 @@ inline QVector<CreativePiece> build(
     if (!cancelled && patchId != QLatin1String("electric-kpop")
         && vec[creative::vector::Dest::OverlayAmount] > 0.01f)
     {
-        auto hueShifted = [](const QColor &src, float amount) {
-            float h = 0.0f, s = 0.0f, v = 0.0f, a = 0.0f;
-            src.getHsvF(&h, &s, &v, &a);
-            if (h < 0.0f)
-                h = 0.0f;
-            QColor out = QColor::fromHsvF(
-                std::fmod(h + amount + 1.0f, 1.0f), s, v);
-            out.setAlpha(src.alpha());
-            return out;
-        };
-
         QImage subjectOnStage = detail::stageCanvas(stage);
         drawAt(subjectOnStage, s, subjectRect);
         const QImage stageMask = creative::maskFromAlpha(subjectOnStage);
+        const QVector<QColor> basePalette{ input.accent, input.accentAlt,
+                                           QColor(244, 252, 255) };
+
+        if (preview && !stageMask.isNull())
+        {
+            /* Preview: one dynamic piece; compose() evaluates the graph and
+             * redraws the field at the current pad frame. */
+            CreativePiece live;
+            live.name = QStringLiteral("Vector live");
+            live.role = QStringLiteral("accent");
+            live.dynamicVector = true;
+            live.blendMode = BLEND_SCREEN;
+            live.opacity = clamp01(
+                0.30f + 0.55f * vec[creative::vector::Dest::OverlayAmount]);
+            live.vectorOverlay.profileId = patchId;
+            live.vectorOverlay.style = 0;
+            live.vectorOverlay.mask = stageMask;
+            live.vectorOverlay.palette = basePalette;
+            live.vectorOverlay.subjectRect = subjectRect;
+            live.vectorOverlay.stage = stage;
+            live.vectorOverlay.seed = seed ^ 0x9E3779B9u;
+            pieces.append(live);
+        }
+        else
+        {
         const float hue =
             (vec[creative::vector::Dest::HueShift] - 0.5f) * 0.5f;
-        const QVector<QColor> palette{
-            hueShifted(input.accent, hue),
-            hueShifted(input.accentAlt, hue),
-            QColor(244, 252, 255),
-        };
+        QVector<QColor> palette;
+        for (const QColor &c : basePalette)
+            palette.append(detail::hueShifted(c, hue));
         const QPointF wind(
             (vec[creative::vector::Dest::ArcBendX] - 0.5f) * 2.0,
             (vec[creative::vector::Dest::ArcBendY] - 0.5f) * 2.0);
@@ -1506,6 +1545,7 @@ inline QVector<CreativePiece> build(
                         + 0.55f
                               * vec[creative::vector::Dest::OverlayAmount]),
                 vectorM);
+        }
         }
     }
 
@@ -1579,6 +1619,134 @@ inline QVector<CreativePiece> bake(QVector<CreativePiece> pieces,
     return pieces;
 }
 
+namespace detail {
+
+/* Evaluate the vector graph at the current frame and draw a preview-only
+ * particle/bolt field. The mask is the subject-on-stage plane; the target is
+ * the compose target, so this is a cheap interactive render, not a second
+ * full-resolution recipe. */
+inline QImage liveVectorOverlay(const CreativeVectorOverlay &spec,
+                                const CreativeFrame &frame,
+                                const QSize &target)
+{
+    if (spec.mask.isNull() || !target.isValid() || target.isEmpty())
+        return {};
+    const QSize source = spec.stage.isValid() && !spec.stage.isEmpty()
+                             ? spec.stage
+                             : spec.mask.size();
+    const QImage mask = spec.mask.scaled(target, Qt::IgnoreAspectRatio,
+                                         Qt::SmoothTransformation);
+    const creative::vector::State state = creative::vector::evaluateForPatch(
+        spec.profileId,
+        creative::vector::Sources{ frame.x, frame.y, frame.energy,
+                                   frame.hold ? 1.0f : 0.0f, frame.time });
+    const float hue =
+        spec.style == 1
+            ? state[creative::vector::Dest::ParticleHue] * 0.35f
+            : (state[creative::vector::Dest::HueShift] - 0.5f) * 0.5f;
+    QVector<QColor> palette;
+    for (const QColor &c : spec.palette)
+        palette.append(hueShifted(c, hue));
+    if (palette.isEmpty())
+        palette.append(QColor(244, 252, 255));
+
+    QImage out(target, QImage::Format_ARGB32_Premultiplied);
+    out.fill(Qt::transparent);
+    QPainter p(&out);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setCompositionMode(QPainter::CompositionMode_Plus);
+
+    const float windScale = spec.style == 1 ? 2.2f : 2.0f;
+    const QPointF wind(
+        (state[creative::vector::Dest::ArcBendX] - 0.5f) * windScale,
+        (state[creative::vector::Dest::ArcBendY] - 0.5f) * windScale);
+    const float speed =
+        0.55f + 0.90f * state[creative::vector::Dest::ParticleSpeed];
+    const int count = qBound(
+        spec.style == 1 ? 40 : 18,
+        int((spec.style == 1 ? 60.0f : 24.0f)
+            + (spec.style == 1 ? 260.0f : 220.0f)
+                  * state[creative::vector::Dest::ParticleCount]
+            + (spec.style == 1 ? 160.0f : 140.0f) * frame.energy),
+        spec.style == 1 ? 480 : 420);
+    p.drawImage(
+        0, 0,
+        creative::sparkField(
+            mask, target, spec.seed, palette, count,
+            (spec.style == 1 ? 0.45f : 0.35f)
+                + (spec.style == 1 ? 0.55f : 0.65f)
+                      * state[creative::vector::Dest::ParticleBrightness],
+            wind, 0.15f + 0.75f * state[creative::vector::Dest::ParticleSpread],
+            ((spec.style == 1 ? 0.55f : 0.50f)
+             + (spec.style == 1 ? 1.10f : 1.20f)
+                   * state[creative::vector::Dest::ParticleLength])
+                * speed));
+
+    if (spec.style == 1 && !spec.subjectRect.isEmpty() && source.width() > 0
+        && source.height() > 0)
+    {
+        const qreal sx = double(target.width()) / source.width();
+        const qreal sy = double(target.height()) / source.height();
+        const QRectF sr(spec.subjectRect.x() * sx, spec.subjectRect.y() * sy,
+                        spec.subjectRect.width() * sx,
+                        spec.subjectRect.height() * sy);
+        const QPointF targetL(sr.left() + sr.width() * 0.10,
+                              sr.top() + sr.height() * 0.40);
+        const QPointF targetR(sr.right() - sr.width() * 0.10,
+                              sr.top() + sr.height() * 0.56);
+        const int boltCount = qBound(
+            2,
+            2 + int(std::lround(
+                        4.0f * state[creative::vector::Dest::ArcCount]
+                        + 3.0f * frame.energy)),
+            5);
+        creative::ArcParams arc;
+        arc.core = QColor(255, 240, 250);
+        arc.glowWidth =
+            qMax(5.0f, float(target.height())
+                          * (0.008f
+                             + 0.012f
+                                   * state[creative::vector::Dest::Glow]));
+        arc.coreWidth = qMax(1.2f, float(target.height()) * 0.0026f);
+        arc.displacement =
+            0.10f + 0.24f * state[creative::vector::Dest::ArcJitter];
+        arc.sparkCount =
+            48 + int(120.0f
+                     * state[creative::vector::Dest::ParticleCount]);
+        for (int i = 0; i < boltCount; ++i)
+        {
+            const bool fromLeft = (i % 2) == 0;
+            const QPointF from =
+                fromLeft ? QPointF(-target.width() * 0.02,
+                                   target.height() * (0.06 + 0.11 * i))
+                         : QPointF(target.width() * 1.02,
+                                   target.height() * (0.12 + 0.10 * i));
+            const QPointF targetPoint =
+                (fromLeft ? targetL : targetR)
+                + QPointF((state[creative::vector::Dest::ArcBendX] - 0.5f)
+                              * target.width() * 0.05 * (0.5 + 0.15 * i),
+                          (state[creative::vector::Dest::ArcBendY] - 0.5f)
+                              * target.height() * 0.05 * (0.5 + 0.15 * i));
+            arc.halo = hueShifted(
+                (i % 3 == 1)
+                    ? QColor(253, 48, 199)
+                    : ((i % 3 == 2) ? QColor(255, 0, 170)
+                                    : QColor(0, 234, 255)),
+                hue);
+            p.drawImage(0, 0,
+                        creative::electricArc(
+                            target, from, targetPoint,
+                            spec.seed + 31
+                                + static_cast<quint32>(i) * 17,
+                            arc));
+        }
+    }
+    p.end();
+    return out;
+}
+
+} // namespace detail
+
 /* Compose pieces into a stage (or a bounded preview of a larger stage). The
  * pieces keep their global stage coordinates; a preview is a scaled render,
  * never a re-seeded/re-tiled recipe. */
@@ -1600,7 +1768,7 @@ inline QImage compose(const QVector<CreativePiece> &pieces,
     for (int i = 0; i < count; ++i)
     {
         const CreativePiece &piece = pieces.at(i);
-        if (piece.image.isNull())
+        if (piece.image.isNull() && !piece.dynamicVector)
             continue;
         const CreativeMotion &m = piece.motion;
         float op = piece.opacity
@@ -1614,6 +1782,24 @@ inline QImage compose(const QVector<CreativePiece> &pieces,
         op = clamp01(op);
         if (op <= 0.002f)
             continue;
+
+        if (piece.dynamicVector)
+        {
+            /* The painter is scaled to the preview target; the live field is
+             * generated at the target and composited in target pixels. */
+            const QImage overlay = detail::liveVectorOverlay(
+                piece.vectorOverlay, frame, target);
+            if (!overlay.isNull())
+            {
+                p.save();
+                p.resetTransform();
+                p.setOpacity(op);
+                p.setCompositionMode(toCompositionMode(piece.blendMode));
+                p.drawImage(0, 0, overlay);
+                p.restore();
+            }
+            continue;
+        }
 
         const qreal dx = (m.dxX * (frame.x - 0.5f)
                           + m.dxEnergy * frame.energy) * stage.width();

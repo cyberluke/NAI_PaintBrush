@@ -17,6 +17,7 @@
  *   - the same snapshot + seed produces byte-identical pieces and composite,
  *   - cancellation stops the build early,
  *   - preview composition follows the 4K budget and stays deterministic,
+ *   - a preview build carries a dynamic vector field that reacts to the pad,
  *   - the direct-renderer memory bound refuses oversized canvases,
  *   - every existing fashion/automotive patch id still maps to the same
  *     material recipe. */
@@ -25,6 +26,7 @@
 
 #include <QColor>
 #include <QCoreApplication>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QImage>
 #include <QPainter>
@@ -241,6 +243,115 @@ void testVectorModulation()
           lowProjection && highProjection
               && hashImage(lowProjection->image)
                      != hashImage(highProjection->image));
+}
+
+void testDynamicPreview()
+{
+    const QSize stage(640, 800);
+    CreativeBuildInput input = makeInput("neon-idol", stage, subjectImage());
+    input.preview = true;
+    const QVector<CreativePiece> pieces = creative::recipe::build(input);
+    const CreativePiece *live = nullptr;
+    for (const CreativePiece &p : pieces)
+        if (p.dynamicVector)
+        {
+            live = &p;
+            break;
+        }
+    check("vector.preview-dynamic-piece", live != nullptr);
+    if (!live)
+        return;
+
+    CreativeFrame low = input.frame;
+    low.x = 0.15f;
+    low.y = 0.20f;
+    low.energy = 0.10f;
+    low.hold = false;
+    low.time = 1.0f;
+    CreativeFrame high = low;
+    high.x = 0.90f;
+    high.y = 0.85f;
+    high.energy = 0.90f;
+    high.hold = true;
+    high.time = 3.0f;
+
+    const QSize target(320, 400);
+    const QImage lowOverlay = creative::recipe::detail::liveVectorOverlay(
+        live->vectorOverlay, low, target);
+    const QImage highOverlay = creative::recipe::detail::liveVectorOverlay(
+        live->vectorOverlay, high, target);
+    check("vector.preview-overlay-size",
+          lowOverlay.size() == target && highOverlay.size() == target);
+    check("vector.preview-overlay-react",
+          hashImage(lowOverlay) != hashImage(highOverlay));
+
+    if (qEnvironmentVariableIsSet("PB_TEST_DUMP"))
+    {
+        const auto dumpOverlay = [&](const CreativeVectorOverlay &spec,
+                                     const CreativeFrame &frame,
+                                     const QString &name) {
+            const QImage overlay =
+                creative::recipe::detail::liveVectorOverlay(spec, frame,
+                                                            stage);
+            QImage canvas(stage, QImage::Format_ARGB32_Premultiplied);
+            canvas.fill(QColor(12, 12, 18));
+            QPainter painter(&canvas);
+            painter.drawImage(0, 0, overlay);
+            painter.end();
+            canvas.save(QDir::tempPath() + "/" + name);
+        };
+        dumpOverlay(live->vectorOverlay, low, "pb-live-vector-low.png");
+        dumpOverlay(live->vectorOverlay, high, "pb-live-vector-high.png");
+    }
+
+    CreativeBuildInput volt = makeInput("electric-kpop", stage, subjectImage());
+    volt.preview = true;
+    const QVector<CreativePiece> voltPieces = creative::recipe::build(volt);
+    bool voltLive = false;
+    for (const CreativePiece &p : voltPieces)
+        if (p.dynamicVector && p.vectorOverlay.style == 1)
+            voltLive = true;
+    check("vector.preview-voltage-live", voltLive);
+
+    if (qEnvironmentVariableIsSet("PB_TEST_DUMP"))
+    {
+        for (const CreativePiece &p : voltPieces)
+        {
+            if (!p.dynamicVector)
+                continue;
+            const QImage overlay = creative::recipe::detail::liveVectorOverlay(
+                p.vectorOverlay, high, stage);
+            QImage canvas(stage, QImage::Format_ARGB32_Premultiplied);
+            canvas.fill(QColor(12, 12, 18));
+            QPainter painter(&canvas);
+            painter.drawImage(0, 0, overlay);
+            painter.end();
+            canvas.save(QDir::tempPath() + "/pb-live-vector-voltage.png");
+        }
+    }
+
+    /* Interactive cost with the live overlay at the real preview build
+     * resolution and the 1 MP compose target. */
+    const QSize previewStage(1440, 1800);
+    const QSize previewTarget =
+        creative::recipe::interactivePreviewStage(previewStage);
+    CreativeBuildInput liveInput =
+        makeInput("neon-idol", previewStage, subjectImage());
+    liveInput.preview = true;
+    const QVector<CreativePiece> livePieces =
+        creative::recipe::build(liveInput);
+    QElapsedTimer liveClock;
+    liveClock.start();
+    QImage liveFrame;
+    for (int i = 0; i < 3; ++i)
+        liveFrame = creative::recipe::compose(
+            livePieces, previewStage, previewTarget, QColor(12, 12, 18),
+            liveInput.frame);
+    const qint64 liveMs = liveClock.elapsed() / 3;
+    std::printf("INFO.live-vector|target=%dx%d ms=%lld\n",
+                previewTarget.width(), previewTarget.height(),
+                static_cast<long long>(liveMs));
+    check("vector.live-frame-size", liveFrame.size() == previewTarget);
 }
 
 void testProtectionScaling()
@@ -480,6 +591,7 @@ int main(int argc, char **argv)
     {
         testPreviewResolution();
         testVectorModulation();
+        testDynamicPreview();
         testProtectionScaling();
         testBudget();
         testFullResolutionDeterminism();
