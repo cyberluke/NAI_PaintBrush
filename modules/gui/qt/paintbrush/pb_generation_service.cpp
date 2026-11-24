@@ -32,6 +32,37 @@ namespace paintbrush {
 GenerationService::GenerationService(QObject *parent)
     : QObject(parent)
 {
+    /* The native LaMa worker emits from its own thread; these connections are
+     * queued back to the generation service's GUI thread. */
+    connect(&m_lama, &LamaService::inpaintReady, this,
+            [this](const QString &tag, const QImage &result) {
+        if (tag != m_lamaRequestId)
+            return;
+        m_lamaRequestId.clear();
+        setBusy(false);
+        if (result.isNull())
+            emit errorOccurred(tag, QStringLiteral("Local LaMa inpaint produced no result."));
+        else
+            emit resultReady(tag, result);
+    });
+    connect(&m_lama, &LamaService::inpaintFailed, this,
+            [this](const QString &tag, const QString &message) {
+        if (tag != m_lamaRequestId)
+            return;
+        m_lamaRequestId.clear();
+        setBusy(false);
+        emit errorOccurred(tag, message);
+    });
+    connect(&m_lama, &LamaService::busyChanged, this, [this](bool busy) {
+        if (busy)
+            setBusy(true);
+        else if (m_lamaRequestId.isEmpty())
+            setBusy(false);
+    });
+    connect(&m_lama, &LamaService::availabilityChanged, this, [this]() {
+        const CapabilityReport report = capability(ACTION_GENERATIVE_FILL);
+        emit availabilityChanged(report.isUsable(), report.reason);
+    });
 }
 
 GenerationService::~GenerationService()
@@ -42,6 +73,7 @@ GenerationService::~GenerationService()
 void GenerationService::configure(vlc_object_t *obj)
 {
     m_obj = obj;
+    m_lama.configure(obj);
     m_baseUrl = pbConfigString(obj, "paintbrush-image-base-url").trimmed();
     m_model = pbConfigString(obj, "paintbrush-image-model").trimmed();
     m_apiKey = pbApiKey(obj, "PAINTBRUSH_IMAGE_API_KEY", "paintbrush-image-api-key");
@@ -53,13 +85,19 @@ void GenerationService::configure(vlc_object_t *obj)
 
     if (m_baseUrl.isEmpty())
     {
-        /* No external image provider: the local CPU fallbacks (onion-peel
-         * inpaint / box blur) keep the actions usable, but they are NOT
-         * generative — capability() reports local-heal / local-blur and the
-         * UI must present them as such (A3/A4). */
-        m_unavailableReason =
-            pbTr("No image provider configured — the local heal / blur "
-                           "fallback is active (pixel operations, not generative).");
+        /* No external image provider. If the local LaMa model is installed,
+         * Remove object / empty-prompt fill still use a real neural model;
+         * otherwise the local CPU fallbacks (onion-peel inpaint / box blur)
+         * keep the actions usable. Neither is remote generation and the
+         * capability report names exactly which one is active (A3/A4). */
+        if (m_lama.available())
+            m_unavailableReason =
+                pbTr("Local LaMa inpaint is ready — prompt-guided fill still "
+                     "needs an image provider.");
+        else
+            m_unavailableReason =
+                pbTr("No image provider configured — the local heal / blur "
+                     "fallback is active (pixel operations, not generative).");
         emit availabilityChanged(true, m_unavailableReason);
         return;
     }
@@ -111,14 +149,25 @@ QJsonObject GenerationService::firstDataObject(const QByteArray &json)
 
 CapabilityReport GenerationService::capability(Action action) const
 {
-    /* A3: remote-generation is claimed ONLY when a provider is configured.
-     * Without a provider the report names the actual local fallback — never
-     * "generative fill" (A4). */
-    if (!m_baseUrl.isEmpty())
-        return remoteGenerationReport(m_baseUrl, m_model);
+    /* A3/A4: report only what this action will actually use. A configured
+     * external provider is still named for prompt-guided generation and for
+     * Finish; Remove object prefers the local LaMa model when it is installed,
+     * so it is reported as local-inpaint rather than remote-generation. */
+    if (action == ACTION_REPLACE_BACKGROUND)
+    {
+        if (!m_baseUrl.isEmpty())
+            return remoteGenerationReport(m_baseUrl, m_model);
+        return localGenerationReport(
+            CapabilityReport::LocalBlur,
+            pbTr("No image provider configured — local box-blur "
+                 "background replace is active. This is a pixel filter, not "
+                 "a generative model."));
+    }
 
     if (action == ACTION_FINISH_PAINTING)
     {
+        if (!m_baseUrl.isEmpty())
+            return remoteGenerationReport(m_baseUrl, m_model);
         CapabilityReport report;
         report.mode = CapabilityReport::Unavailable;
         report.reason =
@@ -128,19 +177,40 @@ CapabilityReport GenerationService::capability(Action action) const
         return report;
     }
 
-    if (action == ACTION_REPLACE_BACKGROUND)
+    const QString localModelReason =
+        m_lama.available()
+            ? QStringLiteral("Local neural inpainting with LaMa (%1), fixed 512 "
+                             "context-ROI. Unmasked pixels are preserved; this is "
+                             "not native-resolution synthesis.")
+                  .arg(m_lama.backendText())
+            : QString();
+
+    if (action == ACTION_REMOVE_OBJECT)
     {
+        if (m_lama.available())
+            return localInpaintReport(QStringLiteral("LaMa 512 (local ONNX)"),
+                                      localModelReason);
+        if (!m_baseUrl.isEmpty())
+            return remoteGenerationReport(m_baseUrl, m_model);
         return localGenerationReport(
-            CapabilityReport::LocalBlur,
-            pbTr("No image provider configured — local box-blur "
-                           "background replace is active. This is a pixel "
-                           "filter, not a generative model."));
+            CapabilityReport::LocalHeal,
+            pbTr("No image provider and no local LaMa model — local onion-peel "
+                 "inpaint heal is active. This is pixel propagation, not a "
+                 "generative model."));
     }
+
+    /* ACTION_GENERATIVE_FILL: a prompt always goes to the configured provider;
+     * an empty prompt is a pure heal and prefers the local LaMa model. */
+    if (!m_baseUrl.isEmpty())
+        return remoteGenerationReport(m_baseUrl, m_model);
+    if (m_lama.available())
+        return localInpaintReport(QStringLiteral("LaMa 512 (local ONNX)"),
+                                  localModelReason);
     return localGenerationReport(
         CapabilityReport::LocalHeal,
-        pbTr("No image provider configured — local onion-peel "
-                       "inpaint heal is active. This is pixel propagation, "
-                       "not a generative model."));
+        pbTr("No image provider and no local LaMa model — local onion-peel "
+             "inpaint heal is active. This is pixel propagation, not a "
+             "generative model."));
 }
 
 /* ------------------------------------------------------------------ local */
@@ -334,6 +404,52 @@ void GenerationService::generate(Action action, const QImage &image,
                            QStringLiteral("Finishing a painting needs an image "
                                           "provider. Open Settings → AI and add "
                                           "the image endpoint, model and key."));
+        return;
+    }
+
+    /* LaMa reconstructs surrounding pixels; it cannot follow a prompt. Do not
+     * silently run it (or the onion-peel fallback) for a prompt-guided fill
+     * when no image provider is configured. */
+    if (action == ACTION_GENERATIVE_FILL
+        && !prompt.trimmed().isEmpty()
+        && m_baseUrl.isEmpty()
+        && m_lama.available())
+    {
+        emit errorOccurred(
+            requestId,
+            QStringLiteral("Prompt-guided fill needs an image provider. "
+                           "Local LaMa can only heal the selected area without "
+                           "a prompt."));
+        return;
+    }
+
+    /* Native LaMa is the preferred engine for Remove object and for a pure
+     * heal (empty prompt). A prompt-guided fill keeps the provider path.
+     * When LaMa is unavailable this falls through to the existing provider /
+     * local-heal behavior; when LaMa IS available but fails, the error is
+     * surfaced and the request is never silently sent to a cloud provider. */
+    const bool lamaEligible =
+        action == ACTION_REMOVE_OBJECT
+        || (action == ACTION_GENERATIVE_FILL && prompt.trimmed().isEmpty());
+    if (lamaEligible && m_lama.available())
+    {
+        if (mask.isNull() || mask.size() != image.size())
+        {
+            emit errorOccurred(requestId,
+                               QStringLiteral("Local LaMa inpaint needs a mask "
+                                              "with the same size as the image."));
+            return;
+        }
+        m_lamaRequestId = requestId;
+        setBusy(true);
+        if (m_lama.request(image, mask, requestId) == 0)
+        {
+            m_lamaRequestId.clear();
+            setBusy(false);
+            emit errorOccurred(requestId,
+                               QStringLiteral("Local LaMa inpaint could not be "
+                                              "queued."));
+        }
         return;
     }
 
@@ -616,6 +732,8 @@ void GenerationService::setBusy(bool busy)
 void GenerationService::cancelAll()
 {
     ++m_cancelEpoch; /* invalidate in-flight local workers */
+    m_lama.cancelAll();
+    m_lamaRequestId.clear();
     for (QNetworkReply *reply : m_replies)
         reply->abort();
     m_replies.clear();

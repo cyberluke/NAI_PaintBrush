@@ -515,7 +515,7 @@ Dialog {
                     }
                     Widgets.LabelExt {
                         Layout.fillWidth: true
-                        text: qsTr("Used by Finish the painting, Remove object, Generative fill and Replace background. Without a real image model those actions fall back to local pixel operations; Finish the painting needs a provider.")
+                        text: qsTr("Used by Finish the painting, Remove object, Generative fill and Replace background. Remove object and an empty-prompt fill use the local LaMa neural model when it is installed; a prompt-guided fill and Finish need a real image endpoint. Without either, those actions fall back to local pixel operations.")
                         color: theme.fg.secondary
                         font.pixelSize: VLCStyle.fontSize_small
                         wrapMode: Text.WordWrap
@@ -528,7 +528,7 @@ Dialog {
 
                     SettingsInfoRow {
                         label: qsTr("Image generation")
-                        value: qsTr("Local heal — pixel propagation, not generative")
+                        value: PaintbrushCtx.generationStatusText
                     }
                     SettingsInfoRow {
                         label: qsTr("Object tracking")

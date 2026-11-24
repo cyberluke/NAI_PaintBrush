@@ -10,17 +10,21 @@ namespace paintbrush {
 
 bool CapabilityReport::isUsable() const
 {
-    return mode == LocalHeal || mode == LocalBlur || mode == RemoteGeneration;
+    return mode == LocalHeal || mode == LocalBlur || mode == LocalInpaint
+           || mode == RemoteGeneration;
 }
 
 bool CapabilityReport::isGenerative() const
 {
+    /* Prompt-guided generation is a remote-provider capability. LaMa is a
+     * real local neural inpainter, but it reconstructs surrounding pixels and
+     * does not understand a prompt; never call it generative. */
     return mode == RemoteGeneration;
 }
 
 bool CapabilityReport::isLocal() const
 {
-    return mode == LocalHeal || mode == LocalBlur;
+    return mode == LocalHeal || mode == LocalBlur || mode == LocalInpaint;
 }
 
 QString CapabilityReport::modeName() const
@@ -31,6 +35,8 @@ QString CapabilityReport::modeName() const
         return QStringLiteral("local-heal");
     case LocalBlur:
         return QStringLiteral("local-blur");
+    case LocalInpaint:
+        return QStringLiteral("local-inpaint");
     case RemoteGeneration:
         return QStringLiteral("remote-generation");
     case Unavailable:
@@ -47,6 +53,19 @@ CapabilityReport localGenerationReport(CapabilityReport::Mode localMode,
                       ? CapabilityReport::LocalBlur
                       : CapabilityReport::LocalHeal;
     report.reason = reason;
+    return report;
+}
+
+CapabilityReport localInpaintReport(const QString &modelName,
+                                    const QString &reason)
+{
+    CapabilityReport report;
+    report.mode = CapabilityReport::LocalInpaint;
+    report.modelName = modelName;
+    report.reason = reason.isEmpty()
+        ? QStringLiteral("Local neural inpainting with the native LaMa model "
+                         "(ONNX Runtime, fixed 512 context-ROI).")
+        : reason;
     return report;
 }
 

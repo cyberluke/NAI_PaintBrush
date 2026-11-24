@@ -14,6 +14,7 @@
 
 #include "pb_common.hpp"
 #include "pb_capability.hpp"
+#include "pb_lama_service.hpp"
 
 #include <QObject>
 #include <QImage>
@@ -33,7 +34,10 @@ namespace paintbrush {
  * Generative fill, Background replace and the optional cartoon treatment
  * of Make sticker.
  *
- * When no provider is configured the local CPU fallbacks keep the actions
+ * A local native LaMa inpaint model is the preferred engine for Remove object
+ * and for a fill with an empty prompt when it is available; prompt-guided
+ * fill and the other actions keep the external-provider path. When neither a
+ * provider nor LaMa is available the local CPU fallbacks keep the actions
  * usable, but they are pixel operations, NOT generative: capability()
  * reports local-heal / local-blur (never remote-generation) and the UI must
  * present them as such (A3/A4). */
@@ -59,10 +63,13 @@ public:
 
     void configure(vlc_object_t *obj);
     /* Truthful usability: true only when a real capability exists (local
-     * heal/blur fallback or a configured provider). This never claims
-     * remote generation — use capability() to know which mode is active. */
+     * model, local heal/blur fallback or a configured provider). This never
+     * claims remote generation — use capability() to know which mode is
+     * active. */
     bool isConfigured() const { return capability().isUsable(); }
     bool hasProvider() const { return !m_baseUrl.isEmpty(); }
+    bool localInpaintAvailable() const { return m_lama.available(); }
+    QString localInpaintBackend() const { return m_lama.backendText(); }
     bool isBusy() const { return m_busy; }
     QString baseUrl() const { return m_baseUrl; }
     QString model() const { return m_model; }
@@ -120,6 +127,9 @@ private:
     /* bumped by cancelAll(); in-flight local workers drop their result when
      * their captured epoch no longer matches */
     quint64 m_cancelEpoch = 0;
+    /* Native LaMa inpaint (Remove object / empty-prompt fill). */
+    LamaService m_lama;
+    QString m_lamaRequestId;
 
     QNetworkAccessManager m_network;
     QList<QNetworkReply *> m_replies;

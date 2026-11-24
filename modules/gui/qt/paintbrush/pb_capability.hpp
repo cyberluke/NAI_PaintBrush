@@ -25,6 +25,10 @@ namespace paintbrush {
  *                       NOT generative — pixel propagation, no model.
  *  - LocalBlur        : local CPU box-blur background replace. NOT
  *                       generative — a pixel filter, no model.
+ *  - LocalInpaint     : local native neural inpainting model (LaMa, ONNX
+ *                       Runtime on the GPU/CPU). A real model, but LOCAL and
+ *                       fixed 512 context-ROI — never presented as a remote
+ *                       provider or as native-resolution synthesis.
  *  - RemoteGeneration : a real external image model is configured; the
  *                       model name and provider URL are part of the report.
  *  - Unavailable      : nothing usable; `reason` explains why.
@@ -39,23 +43,25 @@ struct CapabilityReport
         Unavailable = 0,
         LocalHeal,          /* onion-peel inpaint fallback, not generative  */
         LocalBlur,          /* box-blur background replace, not generative  */
+        LocalInpaint,       /* local native neural inpaint model (LaMa)     */
         RemoteGeneration    /* real external image model                    */
     };
 
     Mode mode = Unavailable;
     QString reason;         /* human-readable explanation, always set        */
-    QString modelName;      /* provider model, RemoteGeneration only         */
+    QString modelName;      /* provider/local model name                     */
     QString providerUrl;    /* provider base URL, RemoteGeneration only      */
 
-    /* Usable: some real capability exists (local fallback or remote model). */
+    /* Usable: some real capability exists (local fallback, local model or
+     * remote model). */
     bool isUsable() const;
-    /* Generative: backed by an actual external image model. Never true
-     * without a configured provider. */
+    /* Generative: backed by an external prompt-guided image model. LaMa is
+     * LocalInpaint, a neural reconstructor, not prompt generation. */
     bool isGenerative() const;
-    /* Local: CPU fallback only (heal or blur), no model involved. */
+    /* Local: runs in-process with no network (heal, blur or local model). */
     bool isLocal() const;
     /* Canonical mode string: "unavailable" | "local-heal" | "local-blur" |
-     * "remote-generation". */
+     * "local-inpaint" | "remote-generation". */
     QString modeName() const;
 };
 
@@ -63,6 +69,8 @@ struct CapabilityReport
  * directly testable. `localMode` must be LocalHeal or LocalBlur. */
 CapabilityReport localGenerationReport(CapabilityReport::Mode localMode,
                                        const QString &reason);
+CapabilityReport localInpaintReport(const QString &modelName,
+                                    const QString &reason);
 CapabilityReport remoteGenerationReport(const QString &providerUrl,
                                         const QString &modelName);
 

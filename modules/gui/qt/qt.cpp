@@ -516,6 +516,15 @@ vlc_module_begin ()
     add_bool( "paintbrush-image-insecure", false,
               N_( "Allow insecure image-model connections" ),
               N_( "Skip TLS validation for the image gateway (A7). Intended only for trusted local development endpoints." ) )
+    /* Local native LaMa inpainting (ONNX Runtime + CUDA DLL). The model is a
+     * fixed 512 context-ROI export, not native-resolution synthesis. */
+    add_string( "paintbrush-lama-model", NULL,
+                N_( "Local LaMa inpaint model" ),
+                N_( "Path to the pinned LaMa ONNX graph (Carve/LaMa-ONNX lama_fp32.onnx). Empty uses <app>/lama/models/lama_fp32.onnx; PB_LAMA_DIR overrides the runtime directory." ) )
+    add_string( "paintbrush-lama-device", "auto",
+                N_( "Local LaMa device" ),
+                N_( "auto = CUDA when available with an explicit CPU fallback, gpu = CUDA required (never a silent CPU run), cpu = CPU only." ) )
+            change_string_list( psz_sam_devices, psz_sam_devices_text )
     add_string( "paintbrush-stt-base-url", NULL, PB_STT_BASE_TEXT, nullptr )
     add_string( "paintbrush-stt-model", NULL, PB_STT_MODEL_TEXT, nullptr )
     add_string( "paintbrush-tts-base-url", NULL, PB_TTS_BASE_TEXT, nullptr )

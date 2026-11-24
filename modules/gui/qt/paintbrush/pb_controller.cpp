@@ -2456,6 +2456,10 @@ QString PaintbrushController::generationStatusText() const
         return pbTr("Local heal — pixel propagation, not generative");
     case CapabilityReport::LocalBlur:
         return pbTr("Local blur — pixel filter, not generative");
+    case CapabilityReport::LocalInpaint:
+        return pbTr("Local inpaint — %1 neural model")
+            .arg(report.modelName.isEmpty() ? pbTr("LaMa 512")
+                                            : report.modelName);
     case CapabilityReport::Unavailable:
         break;
     }
