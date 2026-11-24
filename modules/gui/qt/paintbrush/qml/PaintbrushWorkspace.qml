@@ -275,6 +275,15 @@ Item {
             /* the guide is a first-class workspace surface: a labelled CTA,
              * not a hidden icon, with F1 as the shortcut */
             Widgets.ButtonExt {
+                text: qsTr("Play Pad")
+                Accessible.name: qsTr("Open the Creative Play Pad")
+                ToolTip.visible: hovered
+                ToolTip.delay: 600
+                ToolTip.text: qsTr("Perform a look on the selected cutout")
+                onClicked: PaintbrushCtx.openCreativePad("")
+            }
+
+            Widgets.ButtonExt {
                 text: qsTr("Help")
                 Accessible.name: qsTr("Open the guide (F1)")
                 ToolTip.visible: hovered
@@ -448,6 +457,16 @@ Item {
                 canvas: paintbrushCanvas
             }
 
+            /* Creative Play Pad: a floating performance surface over the
+             * canvas — never a second document. Opens from the top bar, the
+             * Inspector, or the exact moment a Keep completes. */
+            PaintbrushPlayPad {
+                id: playPad
+                anchors.centerIn: parent
+                canvas: paintbrushCanvas
+                z: 30
+            }
+
             /* No floating product verbs over the canvas: Keep, Mood, Boost,
              * Undo Boost and Cancel live in the bottom strip, which is the
              * single contextual surface. The canvas stays fully visible and
@@ -502,6 +521,15 @@ Item {
         width: inspectorDock.expanded ? inspectorDock.drawerWidth : 0
         clip: true
         canvas: paintbrushCanvas
+    }
+
+    /* Creative Play Pad lives inside canvasHost above; the post-Keep Create
+     * sheet opens on the exact kept moment. */
+    Connections {
+        target: PaintbrushCtx
+        function onHarvestKept(harvestId) {
+            PaintbrushCtx.creative.openFromHarvest(harvestId)
+        }
     }
 
     /* companion pill: a small avatar, collapsed by default (A41); the chat

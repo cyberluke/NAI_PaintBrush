@@ -33,6 +33,7 @@
 #include "pb_sequential_source.hpp"
 #include "pb_harvest.hpp"
 #include "pb_boost.hpp"
+#include "pb_creative.hpp"
 
 #include <QObject>
 #include <QImage>
@@ -55,6 +56,7 @@ class QQuickItem;
 namespace paintbrush {
 
 class PaintbrushCanvasItem;
+class PaintbrushCreative;
 
 /* The presentation mode of the central canvas area.
  *
@@ -87,6 +89,9 @@ class PaintbrushController : public QObject
 
     Q_PROPERTY(PaintbrushDocument *document READ document CONSTANT FINAL)
     Q_PROPERTY(PaintbrushLayerModel *layerModel READ layerModel CONSTANT FINAL)
+    /* Creative Play Pad: patch catalog, live stage, gesture loop and the
+     * commit-to-layers bridge. Exposed as PaintbrushCtx.creative. */
+    Q_PROPERTY(PaintbrushCreative *creative READ creative CONSTANT FINAL)
     /* Capability-honest status strings (S5/A3/A4): derived from the
      * services' CapabilityReport / configured state — never a hardcoded
      * "ready". Used by the diagnostics surface in the UI. */
@@ -244,6 +249,31 @@ public:
     Q_INVOKABLE void toggleHarvestFavorite(int harvestId);
     /* Seek the player to the moment this harvest came from. */
     Q_INVOKABLE void seekToHarvest(int harvestId);
+
+    /* -- creative Play Pad (creative synthesis) -------------------------- */
+    PaintbrushCreative *creative() const { return m_creative; }
+    /* Open the pad: "" keeps the last patch, otherwise selects it. */
+    Q_INVOKABLE void openCreativePad(const QString &patchId);
+    /* One-shot art direction: build the named pad patch on the current
+     * selection and commit it as editable layers in one undo. Empty return
+     * means success; otherwise the string says exactly why nothing happened. */
+    Q_INVOKABLE QString applyCreativePatch(const QString &patchId);
+    /* Duplicate the current layer into a linked stage lineup: every copy
+     * shares the same style group, so a finish edit on one propagates to
+     * all copies while each pose keeps its own transform. */
+    Q_INVOKABLE void duplicateIntoLineup();
+    Q_INVOKABLE void addCreativeSparkle(const QColor &color,
+                                        const QPointF &canvasPos, double sizePx);
+    /* -- creative bridge (used by PaintbrushCreative; not QML surface) ---- */
+    QImage creativePadSubject(int *sourceLayerId, QRectF *canvasRect,
+                              QString *label) const;
+    QImage creativePadHarvest(int harvestId, QRectF *canvasRect,
+                              QString *label) const;
+    QSize creativePadCanvasSize() const;
+    /* Append the committed creative pieces as ONE undoable composite and
+     * hide the source layer (by id) so the derivative never doubles it. */
+    QString commitCreativeLayers(const QList<CanvasLayer> &layers,
+                                 int hideLayerId, const QString &desc);
 
     /* -- living harvest (stage 3) ---------------------------------------- */
     /* Rig a tray item into a PuppetAsset (rig once, auto source-motion
@@ -706,6 +736,10 @@ public:
     /* End-to-end acceptance: decode current frame -> SAM -> deterministic
      * matte -> ViTMatte -> composite over a checkerboard, with a report. */
     Q_INVOKABLE QString runMatteSelfTest();
+    /* Creative Play Pad acceptance: render every patch, commit two of them,
+     * verify one-undo layer counts and write previews for review. Runs only
+     * behind --paintbrush-creative-selftest. */
+    Q_INVOKABLE QString runCreativeSelfTest();
     QString selfTestReport() const { return m_selfTestReport; }
     /* The full decoder+SAM self-test report. The decoder phase completes
      * synchronously inside runDecoderSamSelfTest(); the SAM phase is async and
@@ -996,6 +1030,8 @@ signals:
     /* A frame was successfully inserted into the composition (Add Frame to
      * canvas completed). The workspace pins the Inspector open on this. */
     void frameAddedToCanvas(int ptsMs);
+    /* A moment was Kept: the workspace opens the post-Keep Create sheet. */
+    void harvestKept(int harvestId);
 
 private slots:
     void onCanvasObjectClick(QPointF canvasPos, bool positive, QPointF itemPos);
@@ -1086,6 +1122,10 @@ private:
                            const QPointF &position, const QImage &preview,
                            const QColor &stroke, qreal strokeWidth,
                            const QString &name);
+    /* Apply a finish chain; when the layer belongs to a creative link group
+     * (lineup) the same chain lands on every member as ONE undo step. */
+    void applyLayerEffects(int index, const QVector<art::EffectNode> &after,
+                           const QString &desc);
     /* Real source pixels for a track keyframe (A16): bounded LRU cache
      * first, then ONE verified seek+capture through the existing
      * FrameCaptureService bridge. No UI-thread sleep-polling (A17); the
@@ -1249,6 +1289,7 @@ private:
     GenerationService m_generation;
     AssistantService m_assistant;
     CompanionService m_companion;
+    PaintbrushCreative *m_creative = nullptr;
     ProjectStore m_projectStore;
     ThumbnailService m_thumbnails;
     LookupService m_lookup;

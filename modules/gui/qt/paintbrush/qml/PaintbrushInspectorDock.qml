@@ -385,6 +385,36 @@ Item {
                         visible: PaintbrushCtx.hasOpenDocument
 
                         InspectorAction {
+                            label: qsTr("Play Pad…")
+                            iconText: VLCIcons.effect_filter
+                            onClicked: PaintbrushCtx.openCreativePad("")
+                        }
+                        InspectorAction {
+                            label: qsTr("Electric K-pop look")
+                            iconText: VLCIcons.effect_filter
+                            onClicked: PaintbrushCtx.applyCreativePatch("electric-kpop")
+                        }
+                        InspectorAction {
+                            label: qsTr("Holographic fashion look")
+                            iconText: VLCIcons.effect_filter
+                            onClicked: PaintbrushCtx.applyCreativePatch("holo-fashion")
+                        }
+                        InspectorAction {
+                            label: qsTr("Neon Idol on this cutout")
+                            iconText: VLCIcons.effect_filter
+                            onClicked: PaintbrushCtx.openCreativePad("neon-idol")
+                        }
+                        InspectorAction {
+                            label: qsTr("Sticker Forge on this cutout")
+                            iconText: VLCIcons.effect_filter
+                            onClicked: PaintbrushCtx.openCreativePad("sticker-forge")
+                        }
+                        InspectorAction {
+                            label: qsTr("Lineup of 5 (linked style)")
+                            iconText: VLCIcons.list
+                            onClicked: PaintbrushCtx.duplicateIntoLineup()
+                        }
+                        InspectorAction {
                             label: qsTr("Duplicate layer")
                             iconText: VLCIcons.add
                             onClicked: PaintbrushCtx.duplicateLayer()

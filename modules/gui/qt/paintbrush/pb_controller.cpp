@@ -12,6 +12,7 @@
 #include "pb_export.hpp"
 #include "pb_common.hpp"
 #include "pb_i18n.hpp"
+#include "pb_creative.hpp"
 #include "gpu/pb_sam3.h"
 
 #include <QQuickItem>
@@ -41,6 +42,7 @@ extern "C" __declspec(dllimport) HRESULT WINAPI
 #include <QRandomGenerator>
 #include <QUuid>
 #include <QVariantMap>
+#include <QJsonArray>
 #include <QTextStream>
 #include <QTimer>
 #include <cmath>
@@ -79,6 +81,7 @@ PaintbrushController::PaintbrushController(qt_intf_t *intf, QObject *parent)
             this, &PaintbrushController::refreshLivingClock);
 
     configureServices();
+    m_creative = new PaintbrushCreative(this, this);
 
     /* The QML video gate is playerHasVideo() =
      * mediaHasVideoTrack() && videoOutputAttached(). openVideoFile() emits
@@ -340,6 +343,27 @@ void PaintbrushController::configureServices()
         timer->start();
         pbLogInfo(VLC_OBJECT(m_intf), "matting",
                   "matte self-test armed (waiting for a workspace video frame)");
+    }
+
+    /* Creative Play Pad acceptance switch: builds a synthetic cutout, renders
+     * every patch, commits two of them, checks the one-undo contract and
+     * leaves the pad open on Neon Idol for a visual capture. */
+    if (pbConfigBool(VLC_OBJECT(m_intf), "paintbrush-creative-selftest"))
+    {
+        auto *timer = new QTimer(this);
+        timer->setInterval(700);
+        connect(timer, &QTimer::timeout, this, [this, timer]() {
+            timer->stop();
+            timer->deleteLater();
+            QTimer::singleShot(900, this, [this]() {
+                const QString report = runCreativeSelfTest();
+                pbLogInfo(VLC_OBJECT(m_intf), "creative",
+                          "CREATIVE_SELFTEST\n%s", qUtf8Printable(report));
+            });
+        });
+        timer->start();
+        pbLogInfo(VLC_OBJECT(m_intf), "creative",
+                  "creative self-test armed");
     }
     m_tracking.configure(VLC_OBJECT(m_intf));
     m_vision.configure(VLC_OBJECT(m_intf));
@@ -6417,7 +6441,13 @@ QString PaintbrushController::assistantSystemPrompt() const
               "generative_fill, replace_background, find_by_words, "
               "find_product) only START work; say the result will appear, "
               "never that it is already done. "
-              "(4) If no tool covers the request, say so and give the manual "
+              "(4) apply_creative_patch applies a complete procedural look "
+              "(recolour, rim light, electric arcs, particles, backdrop) to "
+              "the selected cutout and commits it immediately as ordinary, "
+              "editable layers in one undo. It never generates a new image, "
+              "a new pose, new clothing or new anatomy; it only restyles the "
+              "pixels that are already there. "
+              "(5) If no tool covers the request, say so and give the manual "
               "step.");
 }
 
@@ -6630,6 +6660,27 @@ QByteArray PaintbrushController::assistantToolsJson() const
                       QStringLiteral("Apply the app's one-click composition boost."),
                       QJsonObject(), QJsonArray()));
 
+    QJsonArray creativePatchEnum;
+    for (const char *id : { "electric-kpop", "holo-fashion", "neon-idol",
+                            "sticker-forge", "pastel-stage", "nocturne",
+                            "ink-creature", "spark-storm", "kaleido",
+                            "motion-echo" })
+        creativePatchEnum.append(QString::fromLatin1(id));
+    tools.append(make(
+        QStringLiteral("apply_creative_patch"),
+        QStringLiteral(
+            "Apply a complete procedural look to the selected cutout: "
+            "subject-aware recolour, holographic sheen, rim light, electric "
+            "arcs, silhouette sparks, butterflies and a scene backdrop. It "
+            "commits ordinary, separately editable layers in ONE undo. This "
+            "is a real edit, not image generation: it never invents a new "
+            "pose, clothing or anatomy. Call list_layers first if you are "
+            "unsure which layer is selected."),
+        QJsonObject{ { QStringLiteral("patch"),
+                       stringProp(QStringLiteral("Look id."),
+                                  creativePatchEnum) } },
+        required(QStringLiteral("patch"))));
+
     return QJsonDocument(tools).toJson(QJsonDocument::Compact);
 }
 
@@ -6808,6 +6859,9 @@ QVariantMap PaintbrushController::executeAssistantTool(const QString &name,
         state[QStringLiteral("canvas")] =
             QStringLiteral("%1 x %2").arg(m_document.canvasWidth())
                 .arg(m_document.canvasHeight());
+        if (m_creative)
+            state[QStringLiteral("creative_patches")] =
+                QJsonArray::fromVariantList(m_creative->patchList());
         return ok(QStringLiteral("Canvas state read."),
                   QString::fromUtf8(QJsonDocument(state).toJson(
                       QJsonDocument::Compact)));
@@ -7052,6 +7106,25 @@ QVariantMap PaintbrushController::executeAssistantTool(const QString &name,
     {
         boost();
         return ok(QStringLiteral("Applied the composition boost."));
+    }
+    if (name == QStringLiteral("apply_creative_patch"))
+    {
+        const QString patch = args.value(QStringLiteral("patch")).toString();
+        const QString error = applyCreativePatch(patch);
+        if (!error.isEmpty())
+            return fail(error);
+        QString title = patch;
+        if (m_creative)
+        {
+            const QString name =
+                m_creative->activePatch().value(QStringLiteral("name"))
+                    .toString();
+            if (!name.isEmpty())
+                title = name;
+        }
+        return ok(QStringLiteral("Applied the '%1' look.").arg(title),
+                  QStringLiteral("Every piece is a separate editable layer. "
+                                 "One undo reverts the whole look."));
     }
     return fail(QStringLiteral("Unknown tool '%1'.").arg(name));
 }
