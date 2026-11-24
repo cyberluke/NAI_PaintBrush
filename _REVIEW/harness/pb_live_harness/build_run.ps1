@@ -54,6 +54,7 @@ $sources = @(
     "$src\pb_common.cpp", "$src\pb_layer.cpp", "$src\pb_document.cpp",
     "$src\pb_history.cpp", "$src\pb_harvest.cpp", "$src\pb_boost.cpp",
     "$src\pb_project_store.cpp",
+    "$src\pb_creative_poses.cpp",
     "$src\motion\pb_puppet.cpp", "$src\motion\pb_living.cpp",
     "$src\art\runtime\material_registry.cpp",
     "$src\art\surface\paper_stock.cpp", "$src\art\surface\paper_renderer.cpp",

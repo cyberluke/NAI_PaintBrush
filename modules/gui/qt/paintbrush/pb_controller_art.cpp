@@ -15,6 +15,7 @@
 #include "pb_export.hpp"
 #include "pb_creative.hpp"
 #include "pb_creative_art.hpp"
+#include "pb_creative_poses.hpp"
 #include "art/style/mood.hpp"
 #include "art/style/typography_style.hpp"
 #include "art/style/badges.hpp"
@@ -2668,43 +2669,19 @@ QVector<QImage> PaintbrushController::collectCreativePoses(int want,
     QVector<QImage> poses;
     if (track)
     {
-        const int n = track->keyframes.size();
-        QVector<int> indices;
-        if (n <= want)
-        {
-            for (int i = 0; i < n; ++i)
-                indices.append(i);
-        }
-        else
-        {
-            for (int k = 0; k < want; ++k)
-            {
-                const int idx = qBound(
-                    0, int(std::lround(double(k) * (n - 1) / double(want - 1))),
-                    n - 1);
-                if (!indices.contains(idx))
-                    indices.append(idx);
-            }
-        }
-        for (int idx : indices)
-        {
-            const TrackKeyframe &kf = track->keyframes.at(idx);
-            const QImage frame = decodeKeyframeFrame(*track, kf);
-            if (frame.isNull())
-                continue;
-            const QImage sticker =
-                renderStickerFrame(frame, kf.mask, 0, QColor(), false, 1.0,
-                                   nullptr);
-            if (sticker.isNull())
-                continue;
-            QPoint offset;
-            const QImage trimmed = creative::trimTransparent(sticker, &offset);
-            if (trimmed.isNull())
-                continue;
-            poses.append(trimmed);
-            if (pts)
-                pts->append(kf.timeMs);
-        }
+        poses = creative::collectTrackedPoses(
+            *track, want, pts,
+            [this](const ObjectTrack &t, const TrackKeyframe &kf) {
+                return decodeKeyframeFrame(t, kf);
+            },
+            [this](const QImage &frame, const QImage &mask) {
+                const QImage sticker = renderStickerFrame(
+                    frame, mask, 0, QColor(), false, 1.0, nullptr);
+                if (sticker.isNull())
+                    return QImage();
+                QPoint offset;
+                return creative::trimTransparent(sticker, &offset);
+            });
     }
 
     if (poses.isEmpty())

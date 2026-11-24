@@ -210,11 +210,14 @@ current puppet and glitter sources and runs on real media. On the NewJeans
 dance clip (`video_input.mkv`, 178,668,000 ms) with SAM3 CPU:
 three real PTS frames (53.6 s, 64.32 s, 96.48 s) are decoded, SAM3 segments a
 person at each (2.7%, 3.7%, 13.1% coverage), the three real Keeps form a
-same-source pose sequence, the sparsest temporal gap is chosen, a real bridge
-frame (80.4 s) is segmented and inserted as a Transition layer, the Boost render
-changes visibly (mean diff 7.36/255), 4K export renders at 4800x2400 and is
-byte-identical on re-render, and Boost is one composite undo that restores the
-raw composition (mean diff < 0.01). **31/31 checks passed.**
+same-source pose sequence, the shared `creative::collectTrackedPoses()` helper
+used by `collectCreativePoses()` returns all three exact PTS poses, its 2-pose
+subsampling picks 53.6 s + 96.48 s, and the two poses are distinct real frames;
+the sparsest temporal gap is chosen, a real bridge frame (80.4 s) is segmented
+and inserted as a Transition layer, the Boost render changes visibly (mean diff
+7.36/255), 4K export renders at 4800x2400 and is byte-identical on re-render,
+and Boost is one composite undo that restores the raw composition (mean diff
+< 0.01). **34/34 checks passed.**
 
 Reproduce with:
 
@@ -227,9 +230,10 @@ pwsh _REVIEW/harness/pb_live_harness/build_run.ps1 `
 
 The full log is archived at
 `paintbrush/docs/creative-synthesis-assets/real-media-acceptance.txt`;
-frames, masks, before/after and the 4K export are in the outdir. This is the
-showroom/harness path, not `collectCreativePoses()`, so it does not close the
-Pastel Lineup/Motion Echo tracked-video gap below.
+frames, masks, before/after and the 4K export are in the outdir. This exercises
+the same shared pose-selection helper used by `collectCreativePoses()`, but the
+track object is built in the harness from real frames rather than by driving
+the app's `TrackingService`; the end-to-end UI track path remains open.
 
 ## 3. Coverage against the spec
 
@@ -266,12 +270,12 @@ Pastel Lineup/Motion Echo tracked-video gap below.
 
 These are the things a reviewer should not assume are finished:
 
-1. **Tracked-pose Lineup/Echo is implemented but not exercised with a real
-   video in this test.** `collectCreativePoses()` decodes real keyframes by PTS
-   and the still fallback is verified; the self-test fixture has no track, so
-   the real-pose path still needs a tracked-video acceptance run. The separate
-   showroom harness now passes 31/31 on real video/SAM3/PTS and 4K export, but
-   it does not call `collectCreativePoses()` or the Lineup/Echo recipes.
+1. **Tracked-pose Lineup/Echo still needs an end-to-end app track.** The shared
+   `creative::collectTrackedPoses()` helper is now verified with three real
+   frames/masks at exact PTS (34/34 harness checks), and the controller uses the
+   same helper; the self-test fixture itself has no track. What remains is
+   driving a live `TrackingService` track through `collectCreativePoses()` and
+   the Lineup/Echo recipes in the app UI.
 2. **Scene Forge, Auto Splatter and Stage Door are shipped, but Photo Regime H,
    the rigged Stage mode and the broader scene-layer family are still missing.**
 3. **Agent strokes are deterministic/offline, not model-planned.** The assistant

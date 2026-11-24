@@ -17,6 +17,7 @@
 #include "pb_harvest.hpp"
 #include "pb_boost.hpp"
 #include "pb_project_store.hpp"
+#include "pb_creative_poses.hpp"
 #include "art/style/mood.hpp"
 
 #include <vlc/vlc.h>
@@ -354,6 +355,69 @@ int main(int argc, char **argv)
     const bool threeKeeps = frames.size() == 3 && masks.size() == 3 &&
                             !masks[0].isNull() && !masks[1].isNull() && !masks[2].isNull();
     CHECK(threeKeeps, "three real Keeps (frame + SAM3 mask) available");
+
+    /* 2b) The creative tracked-pose rule used by collectCreativePoses, exercised
+     * with the three real frames + SAM3 masks above. The track object is built
+     * from those real PTS; no synthetic anatomy is involved. */
+    if (threeKeeps)
+    {
+        ObjectTrack poseTrack;
+        poseTrack.id = 41;
+        poseTrack.sourceMRL = QUrl::fromLocalFile(videoPath).toString();
+        poseTrack.startMs = pts.first();
+        poseTrack.endMs = pts.last();
+        poseTrack.complete = true;
+        for (int i = 0; i < pts.size(); ++i)
+        {
+            TrackKeyframe kf;
+            kf.frameIndex = i;
+            kf.timeMs = pts.at(i);
+            kf.mask = masks.at(i);
+            kf.confidence = 0.9f;
+            poseTrack.keyframes.append(kf);
+        }
+
+        const auto decode = [&frames](const ObjectTrack &,
+                                      const TrackKeyframe &kf) {
+            return kf.frameIndex >= 0 && kf.frameIndex < frames.size()
+                       ? frames.at(kf.frameIndex)
+                       : QImage();
+        };
+        const auto cutout = [](const QImage &frame, const QImage &mask) {
+            if (frame.isNull() || mask.isNull())
+                return QImage();
+            QImage out = frame.convertToFormat(QImage::Format_ARGB32);
+            const QImage alpha = mask.convertToFormat(QImage::Format_Grayscale8);
+            if (alpha.size() != out.size())
+                return QImage();
+            for (int y = 0; y < out.height(); ++y)
+            {
+                QRgb *line = reinterpret_cast<QRgb *>(out.scanLine(y));
+                const uchar *m = alpha.constScanLine(y);
+                for (int x = 0; x < out.width(); ++x)
+                    if (m[x] == 0)
+                        line[x] = qRgba(0, 0, 0, 0);
+            }
+            return out;
+        };
+
+        QVector<qint64> allPts;
+        const QVector<QImage> allPoses = creative::collectTrackedPoses(
+            poseTrack, 3, &allPts, decode, cutout);
+        CHECK(allPoses.size() == 3 && allPts == pts,
+              "creative pose helper decodes the 3 real PTS poses");
+
+        QVector<qint64> twoPts;
+        const QVector<QImage> twoPoses = creative::collectTrackedPoses(
+            poseTrack, 2, &twoPts, decode, cutout);
+        QVector<qint64> expectedTwoPts;
+        expectedTwoPts << pts.at(0) << pts.at(2);
+        CHECK(twoPoses.size() == 2 && twoPts == expectedTwoPts,
+              "creative pose helper subsamples the real PTS");
+        if (twoPoses.size() == 2)
+            CHECK(meanAbsDiff(twoPoses.at(0), twoPoses.at(1)) > 1.0,
+                  "creative pose helper keeps distinct real frames");
+    }
 
     /* 3) Keep A/B/C -> tray + canvas poses (like dragging three poses on) */
     PaintbrushDocument doc;
