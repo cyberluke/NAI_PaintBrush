@@ -13,6 +13,7 @@
 #include "pb_controller.hpp"
 #include "pb_document.hpp"
 #include "pb_creative_art.hpp"
+#include "pb_creative_recipe.hpp"
 #include "pb_stage.hpp"
 #include "art/style/typography_style.hpp"
 
@@ -25,85 +26,37 @@
 #include <QTransform>
 #include <QtMath>
 #include <QDateTime>
+#include <QCoreApplication>
 #include <QDir>
+#include <QEventLoop>
 #include <QFile>
+#include <QFutureWatcher>
+#include <QPromise>
+#include <QRandomGenerator>
 #include <QTextStream>
+#include <QThreadPool>
+#include <QTimer>
+#include <QTransform>
+#include <QtConcurrent/QtConcurrentRun>
+#include <QtMath>
 
 #include <algorithm>
 #include <cmath>
 #include <random>
+#include <memory>
+#include <utility>
 
 namespace paintbrush {
 
 namespace {
 
-constexpr double kTau = 6.283185307179586;
-
-inline float clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
-
-QImage tintPreserveAlpha(const QImage &img, const QColor &color)
-{
-    if (img.isNull())
-        return {};
-    QImage out = img.convertToFormat(QImage::Format_ARGB32);
-    for (int y = 0; y < out.height(); ++y)
-    {
-        QRgb *line = reinterpret_cast<QRgb *>(out.scanLine(y));
-        for (int x = 0; x < out.width(); ++x)
-        {
-            const int a = qAlpha(line[x]);
-            line[x] = qRgba(color.red(), color.green(), color.blue(), a);
-        }
-    }
-    return out;
-}
-
-void fadeHorizontally(QImage &img, bool leftStrong)
-{
-    if (img.isNull())
-        return;
-    QPainter p(&img);
-    p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
-    QLinearGradient g(0, 0, img.width(), 0);
-    if (leftStrong)
-    {
-        g.setColorAt(0.0, QColor(0, 0, 0, 255));
-        g.setColorAt(0.55, QColor(0, 0, 0, 150));
-        g.setColorAt(1.0, QColor(0, 0, 0, 0));
-    }
-    else
-    {
-        g.setColorAt(0.0, QColor(0, 0, 0, 0));
-        g.setColorAt(0.45, QColor(0, 0, 0, 150));
-        g.setColorAt(1.0, QColor(0, 0, 0, 255));
-    }
-    p.fillRect(img.rect(), g);
-}
-
-QRectF scaleRectAbout(const QRectF &r, qreal factor, qreal dx, qreal dy)
-{
-    const QPointF c = r.center();
-    const QSizeF s = r.size() * factor;
-    return QRectF(c.x() - s.width() / 2.0 + dx,
-                  c.y() - s.height() / 2.0 + dy,
-                  s.width(), s.height());
-}
-
-QImage stageCanvas(const QSize &size)
-{
-    QImage img(size, QImage::Format_ARGB32_Premultiplied);
-    img.fill(Qt::transparent);
-    return img;
-}
-
-void drawScaled(QImage &dst, const QImage &src, const QRectF &rect)
-{
-    if (src.isNull() || rect.isEmpty())
-        return;
-    QPainter p(&dst);
-    p.setRenderHint(QPainter::SmoothPixmapTransform, true);
-    p.drawImage(rect, src);
-}
+using creative::recipe::clamp01;
+using creative::recipe::detail::kTau;
+using creative::recipe::detail::stageCanvas;
+using creative::recipe::detail::drawScaled;
+using creative::recipe::detail::tintPreserveAlpha;
+using creative::recipe::detail::scaleRectAbout;
+using creative::recipe::detail::fadeHorizontally;
 
 QString qcolorHex(const QColor &c)
 {
@@ -208,6 +161,187 @@ QColor stageLightColor(const QString &patchId)
     if (patchId == QLatin1String("spark-storm"))
         return QColor(255, 216, 142);
     return QColor(255, 244, 230);
+}
+
+/* Convert built pieces into publication-ready layers. Pure (no controller or
+ * document access), so it runs on the worker. Trimming happens here once; the
+ * same pxScale mapping the synchronous commit used is preserved. */
+QList<CanvasLayer> creativeLayersFromPieces(const QVector<CreativePiece> &pieces,
+                                            const CreativeFrame &frame,
+                                            const QString &patchId,
+                                            const QString &patchName,
+                                            quint32 seed,
+                                            const QString &group,
+                                            int sourceLayerId,
+                                            int sourceHarvestId)
+{
+    QList<CanvasLayer> layers;
+    for (const CreativePiece &p : pieces)
+    {
+        if (p.image.isNull())
+            continue;
+        QPoint offset;
+        QImage trimmed = creative::trimTransparent(p.image, &offset);
+        if (trimmed.isNull())
+            continue;
+        const qreal pxScale = p.rect.width() / qMax(1, p.image.width());
+        const QPointF target =
+            p.rect.topLeft() + QPointF(offset) * pxScale;
+        CanvasLayer layer =
+            CanvasLayer::createImage(trimmed, QPointF(0, 0), p.name);
+        layer.setTransform(QTransform(pxScale, 0.0, 0.0, pxScale, target.x(),
+                                      target.y()));
+        layer.type = LAYER_IMAGE;
+        layer.opacity = p.opacity;
+        layer.blendMode = p.blendMode;
+        layer.metadata[QStringLiteral("creative.patch")] = patchId;
+        layer.metadata[QStringLiteral("creative.patchName")] = patchName;
+        layer.metadata[QStringLiteral("creative.role")] = p.role;
+        layer.metadata[QStringLiteral("creative.seed")] = qint64(seed);
+        layer.metadata[QStringLiteral("creative.group")] = group;
+        layer.metadata[QStringLiteral("creative.sourceLayerId")] = sourceLayerId;
+        layer.metadata[QStringLiteral("creative.sourceHarvestId")] =
+            sourceHarvestId;
+        QVariantMap params;
+        params[QStringLiteral("x")] = double(frame.x);
+        params[QStringLiteral("y")] = double(frame.y);
+        params[QStringLiteral("energy")] = double(frame.energy);
+        params[QStringLiteral("hold")] = frame.hold;
+        layer.metadata[QStringLiteral("creative.params")] = params;
+        /* Scene props remain self-describing after save/reopen. */
+        for (const QString &key : { QStringLiteral("creative.prop"),
+                                    QStringLiteral("creative.depth"),
+                                    QStringLiteral("creative.parallax") })
+            if (p.metadata.contains(key))
+                layer.metadata.insert(key, p.metadata.value(key));
+        if (p.role == QLatin1String("powder"))
+        {
+            layer.materialPreset =
+                p.metadata.value(QStringLiteral("powderPreset")).toString();
+            layer.materialState =
+                p.metadata.value(QStringLiteral("powderState")).toByteArray();
+        }
+        layers.append(layer);
+    }
+    return layers;
+}
+
+/* One cancellable full-resolution build. Runs on the dedicated build pool.
+ * It only reads the immutable snapshot and the atomic cancel token; previews
+ * and the finished layers are streamed through the promise to the GUI thread. */
+void runCreativeCommitJob(const CreativeBuildInput &input,
+                          const std::shared_ptr<CreativeCancelToken> &token,
+                          quint64 revision,
+                          QPromise<CreativeCommitEvent> &promise)
+{
+    const auto cancelled = [&]() {
+        return (token && token->isCancelled()) || promise.isCanceled();
+    };
+
+    CreativeCommitEvent finished;
+    finished.kind = CreativeCommitEvent::Finished;
+    finished.revision = revision;
+
+    const auto finishCancelled = [&]() {
+        finished.result.cancelled = true;
+        promise.setProgressValue(100);
+        promise.addResult(finished);
+    };
+
+    promise.setProgressRange(0, 100);
+    if (cancelled())
+    {
+        finishCancelled();
+        return;
+    }
+
+    QImage subject = input.subject;
+    if (subject.isNull())
+    {
+        finished.result.error = QStringLiteral("The cutout is empty.");
+        promise.addResult(finished);
+        return;
+    }
+    /* Sampling above 1.25x the on-canvas size adds no visible detail at the
+     * target resolution but would multiply memory and time. */
+    const QSize subjectWant(
+        qMax(1, int(std::lround(input.subjectRect.width() * 1.25))),
+        qMax(1, int(std::lround(input.subjectRect.height() * 1.25))));
+    if (subject.width() > subjectWant.width()
+        || subject.height() > subjectWant.height())
+        subject = subject.scaled(subjectWant, Qt::KeepAspectRatio,
+                                 Qt::SmoothTransformation);
+
+    const QColor background(12, 12, 18);
+    const int expected = creative::recipe::expectedPieceCount(input.patchId);
+    QElapsedTimer previewClock;
+    previewClock.start();
+    int previews = 0;
+    int progressPercent = 0;
+
+    /* Progressive preview: compose a bounded preview from the pieces already
+     * built. Bounded to four updates and >=400 ms apart so a full-resolution
+     * build never turns progress reporting into its own workload. */
+    const auto onPiece = [&](const QVector<CreativePiece> &pieces,
+                             int count) -> bool {
+        if (cancelled())
+            return false;
+        progressPercent = qBound(0, (count * 90) / qMax(1, expected), 90);
+        promise.setProgressValue(progressPercent);
+        if (previews < 4 && count < expected && input.previewSize.isValid()
+            && previewClock.elapsed() >= 400)
+        {
+            CreativeCommitEvent progressEvent;
+            progressEvent.kind = CreativeCommitEvent::Progress;
+            progressEvent.revision = revision;
+            progressEvent.percent = progressPercent;
+            progressEvent.preview = creative::recipe::compose(
+                pieces, input.stage, input.previewSize, background, input.frame);
+            if (!progressEvent.preview.isNull())
+            {
+                promise.addResult(progressEvent);
+                ++previews;
+            }
+            previewClock.restart();
+        }
+        return true;
+    };
+
+    QVector<CreativePiece> pieces = creative::recipe::build(
+        input, onPiece);
+    if (cancelled())
+    {
+        finishCancelled();
+        return;
+    }
+
+    promise.setProgressValue(92);
+    pieces = creative::recipe::bake(std::move(pieces), input.frame, input.stage);
+    if (cancelled())
+    {
+        finishCancelled();
+        return;
+    }
+
+    CreativeBuildResult result;
+    result.layers = creativeLayersFromPieces(
+        pieces, input.frame, input.patchId, input.patchName, input.seed,
+        input.group, input.sourceLayerId, input.sourceHarvestId);
+    if (cancelled())
+    {
+        finishCancelled();
+        return;
+    }
+    result.preview = creative::recipe::compose(pieces, input.stage,
+                                               input.previewSize, background,
+                                               input.frame);
+    if (result.layers.isEmpty())
+        result.error = QStringLiteral("The patch produced no layers.");
+
+    finished.result = std::move(result);
+    finished.percent = 100;
+    promise.setProgressValue(100);
+    promise.addResult(finished);
 }
 
 } /* namespace */
@@ -405,12 +539,98 @@ PaintbrushCreative::PaintbrushCreative(PaintbrushController *controller,
     m_recordUiTimer.setInterval(250);
     connect(&m_recordUiTimer, &QTimer::timeout, this,
             &PaintbrushCreative::stateChanged);
+
+    /* Motion composes at an interactive resolution; once the gesture (or the
+     * decaying idle energy) is done, rebuild the pieces at the settled frame
+     * and render the full preview. A vector change (bolt count, sparks, hue)
+     * is generation-time, so recompose() alone cannot show it. */
+    m_previewSettleTimer.setSingleShot(true);
+    m_previewSettleTimer.setInterval(220);
+    connect(&m_previewSettleTimer, &QTimer::timeout, this, [this]() {
+        if (m_committed)
+            return;
+        m_composeInteractive = false;
+        const bool frameChanged =
+            !m_previewBuilt || qAbs(m_builtFrame.x - m_frame.x) > 0.001f
+            || qAbs(m_builtFrame.y - m_frame.y) > 0.001f
+            || qAbs(m_builtFrame.energy - m_frame.energy) > 0.001f
+            || m_builtFrame.hold != m_frame.hold
+            || qAbs(m_builtFrame.time - m_frame.time) > 0.001f
+            || m_builtStage != m_previewSize;
+        if (frameChanged)
+            rebuildPreview();
+        else
+            recompose();
+    });
+    /* Pad moves arrive at pointer-event rate; coalesce them into one compose
+     * per ~30 fps so a drag cannot queue a composite per event. */
+    m_composeCoalesceTimer.setSingleShot(true);
+    m_composeCoalesceTimer.setInterval(33);
+    connect(&m_composeCoalesceTimer, &QTimer::timeout, this,
+            &PaintbrushCreative::recompose);
+    /* One build at a time: a full-resolution render is heavy, and a monotonic
+     * revision makes a replacement a cancel rather than a second concurrent
+     * build. */
+    m_buildPool.setMaxThreadCount(1);
+    m_buildPool.setExpiryTimeout(30000);
+    m_previewPool.setMaxThreadCount(1);
+    m_previewPool.setExpiryTimeout(30000);
+    connect(&m_previewWatcher, &QFutureWatcherBase::finished, this,
+            &PaintbrushCreative::onPreviewBuildFinished);
     m_seed = QRandomGenerator::global()->generate();
     if (m_seed == 0)
         m_seed = 1;
+    /* The controller owns the one persistent FASHN runtime; the pad only
+     * consumes semantic results for its current subject. */
+    if (m_controller)
+    {
+        if (HumanParserService *parser = m_controller->humanParser())
+        {
+            connect(parser, &HumanParserService::parseReady, this,
+                    &PaintbrushCreative::onHumanParseReady);
+            connect(parser, &HumanParserService::parseFailed, this,
+                    &PaintbrushCreative::onHumanParseFailed);
+            connect(parser, &HumanParserService::availabilityChanged, this,
+                    [this]() {
+                        emit fashionParserInstallChanged();
+                        HumanParserService *service =
+                            m_controller ? m_controller->humanParser() : nullptr;
+                        if (service && service->available()
+                            && usesFashionProtection()
+                            && !m_subjectNative.isNull()
+                            && m_semanticProtection.isNull()
+                            && !m_humanParsePending)
+                            requestHumanParse();
+                    });
+            connect(parser, &HumanParserService::installProgressChanged, this,
+                    [this](int, const QString &) {
+                        emit fashionParserInstallChanged();
+                    });
+            connect(parser, &HumanParserService::installFinished, this,
+                    [this](bool ok, const QString &) {
+                        emit fashionParserInstallChanged();
+                        if (ok && !m_subjectNative.isNull())
+                        {
+                            m_semanticProtection = QImage();
+                            m_humanParsePending = false;
+                            m_humanParseRequest = 0;
+                            requestHumanParse();
+                        }
+                    });
+        }
+    }
 }
 
-PaintbrushCreative::~PaintbrushCreative() = default;
+PaintbrushCreative::~PaintbrushCreative()
+{
+    if (m_commit.token)
+        m_commit.token->cancel();
+    cancelPreviewBuild();
+    /* The worker polls the token at piece boundaries; this bounded wait keeps
+     * shutdown deterministic without blocking on a healthy long build. */
+    m_buildPool.waitForDone(5000);
+    m_previewPool.waitForDone(5000);
+}
 
 QVariantList PaintbrushCreative::patchList() const
 {
@@ -466,6 +686,10 @@ void PaintbrushCreative::setOpen(bool open)
     }
     else
     {
+        /* Closing the pad discards any render that has not published yet. */
+        cancelCommitInternal(false);
+        cancelPreviewBuild();
+        m_composeCoalesceTimer.stop();
         stopIdle();
         if (m_replayTimer.isActive())
         {
@@ -502,7 +726,9 @@ void PaintbrushCreative::setStatus(const QString &text)
 
 bool PaintbrushCreative::canCommit() const
 {
-    return hasSubject() && !m_patchId.isEmpty() && !m_busy && !m_committed;
+    return hasSubject() && !m_patchId.isEmpty() && !m_busy && !m_committed
+           && !(usesFashionProtection() && m_humanParsePending
+                && m_semanticProtection.isNull());
 }
 
 double PaintbrushCreative::recordSeconds() const
@@ -535,6 +761,8 @@ bool PaintbrushCreative::adoptSubject(const QImage &cutout,
                                       int sourceLayerId, const QString &label,
                                       const QString &missingMessage)
 {
+    /* A new subject invalidates any render that is still using the old one. */
+    cancelCommitInternal(false);
     if (cutout.isNull())
     {
         setStatus(missingMessage);
@@ -545,6 +773,13 @@ bool PaintbrushCreative::adoptSubject(const QImage &cutout,
     m_sourceLayerId = sourceLayerId;
     m_sourceHarvestId = -1;
     m_subjectLabel = label;
+    /* A new subject invalidates every semantic plane and any parse still in
+     * flight for the old one. */
+    ++m_subjectRevision;
+    m_semanticProtection = QImage();
+    m_humanParseRequest = 0;
+    m_humanParsePending = false;
+    requestHumanParse();
     m_seed = QRandomGenerator::global()->generate();
     if (m_seed == 0)
         m_seed = 1;
@@ -572,6 +807,20 @@ bool PaintbrushCreative::adoptSubject(const QImage &cutout,
 
 void PaintbrushCreative::clearSubject()
 {
+    cancelCommitInternal(false);
+    cancelPreviewBuild();
+    m_previewBuilt = false;
+    m_composeCoalesceTimer.stop();
+    ++m_subjectRevision;
+    m_semanticProtection = QImage();
+    m_humanParseRequest = 0;
+    m_humanParsePending = false;
+    if (m_controller)
+    {
+        if (HumanParserService *parser = m_controller->humanParser())
+            parser->cancelAll();
+    }
+    setHumanParseStatus(QString());
     m_subjectNative = QImage();
     m_subject = QImage();
     m_subjectStatic = QImage();
@@ -930,11 +1179,13 @@ void PaintbrushCreative::rebuildPreview()
     if (!canvas.isValid() || canvas.isEmpty())
         return;
 
-    /* Fit the preview inside a comfortable panel size, preserving the real
-     * document aspect so the preview is a scaled render of the commit. */
-    const qreal fit = qMin(560.0 / canvas.width(), 680.0 / canvas.height());
-    const QSize previewSize(qMax(160, int(std::lround(canvas.width() * fit))),
-                            qMax(160, int(std::lround(canvas.height() * fit))));
+    /* The live preview renders at a 4K-class resolution (native up to a
+     * 3840x2160 frame budget). The stage panel scales the image down for
+     * display, but the pixels the user sees are real preview detail, not a
+     * 560x680 thumbnail. */
+    const QSize previewSize = creative::recipe::previewStage(canvas);
+    if (previewSize.isEmpty())
+        return;
     m_previewSize = previewSize;
 
     const qreal sx = double(previewSize.width()) / double(canvas.width());
@@ -954,13 +1205,60 @@ void PaintbrushCreative::rebuildPreview()
     if (m_living || m_stageCommit)
         ensureLivingPreview();
 
-    m_pieces = buildPatch(m_patchId, m_subject, previewRect, previewSize, m_seed);
-    recompose();
+    CreativeBuildInput input;
+    input.patchId = m_patchId;
+    input.patchName = m_patchId;
+    input.preview = true;
+    if (const PatchDef *d = patchDef(m_patchId))
+    {
+        input.accent = d->accent;
+        input.accentAlt = d->secondary;
+    }
+    input.subject = m_subject;
+    input.subjectRect = previewRect;
+    input.stage = previewSize;
+    input.previewSize = previewSize;
+    input.seed = m_seed;
+    input.frame = m_frame;
+    if (usesFashionProtection() && !m_semanticProtection.isNull())
+    {
+        QImage protection = m_semanticProtection.scaled(
+            subjSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        if (protection.format() != QImage::Format_Grayscale8)
+            protection = protection.convertToFormat(QImage::Format_Grayscale8);
+        input.protection = protection;
+    }
+
+    /* The build is CPU-heavy (holo materials run normals + per-pixel shading),
+     * so it must never block the GUI thread. The old preview stays visible;
+     * the revision makes a completion from a previous patch harmless. */
+    cancelPreviewBuild();
+    m_previewBuilt = false;
+    const auto token = std::make_shared<std::atomic_bool>(false);
+    m_previewCancel = token;
+    const quint64 revision = ++m_previewBuildRevision;
+    m_composeInteractive = false;
+    m_previewSettleTimer.stop();
+    m_previewWatcher.setFuture(QtConcurrent::run(
+        &m_previewPool, [input, token, revision]() -> PreviewBuildResult {
+            PreviewBuildResult result;
+            result.revision = revision;
+            result.stage = input.stage;
+            result.frame = input.frame;
+            result.pieces = creative::recipe::build(
+                input, [token](const QVector<CreativePiece> &, int) {
+                    return !token->load();
+                });
+            result.cancelled = token->load();
+            return result;
+        }));
 }
 
 void PaintbrushCreative::recompose()
 {
-    if (m_previewSize.isEmpty())
+    /* While a commit or a preview build is running, the current pieces and
+     * m_previewSize are not a matched pair; keep the last complete frame. */
+    if (m_busy || m_previewSize.isEmpty() || m_previewWatcher.isRunning())
         return;
     QElapsedTimer frameClock;
     frameClock.start();
@@ -989,18 +1287,23 @@ void PaintbrushCreative::recompose()
         }
         p.end();
     }
-    else
+    else if (m_living && !m_subjectStatic.isNull())
     {
-        if (m_living && !m_subjectStatic.isNull())
-        {
-            const QImage live = livingSubjectFrame();
-            if (!live.isNull())
-                m_pieces = buildPatch(m_patchId, live, m_previewSubjectRect,
-                                      m_previewSize, m_seed);
-        }
+        const QImage live = livingSubjectFrame();
+        if (!live.isNull())
+            m_pieces = buildPatch(m_patchId, live, m_previewSubjectRect,
+                                  m_previewSize, m_seed);
         frame = composeStage(m_pieces, m_previewSize, QColor(12, 12, 18));
     }
-
+    else
+    {
+        const QSize target =
+            m_composeInteractive
+                ? creative::recipe::interactivePreviewStage(m_previewSize)
+                : m_previewSize;
+        frame = creative::recipe::compose(m_pieces, m_previewSize, target,
+                                          QColor(12, 12, 18), m_frame);
+    }
     {
         QMutexLocker locker(&m_previewMutex);
         m_preview = frame;
@@ -1031,6 +1334,407 @@ void PaintbrushCreative::setCompare(bool compare)
     emit compareChanged();
 }
 
+void PaintbrushCreative::renderPreviewStill()
+{
+    m_composeCoalesceTimer.stop();
+    m_previewSettleTimer.stop();
+    const auto waitForBuild = [this]() {
+        if (!m_previewWatcher.isRunning())
+            return;
+        QEventLoop loop;
+        QTimer timeout;
+        timeout.setSingleShot(true);
+        connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+        connect(&m_previewWatcher, &QFutureWatcherBase::finished, &loop,
+                &QEventLoop::quit);
+        timeout.start(30000);
+        if (!m_previewWatcher.isFinished())
+            loop.exec();
+    };
+    const auto frameDiff = [this]() {
+        return !m_previewBuilt
+               || qAbs(m_builtFrame.x - m_frame.x) > 0.001f
+               || qAbs(m_builtFrame.y - m_frame.y) > 0.001f
+               || qAbs(m_builtFrame.energy - m_frame.energy) > 0.001f
+               || m_builtFrame.hold != m_frame.hold
+               || m_builtStage != m_previewSize;
+    };
+    waitForBuild();
+    /* A patch selection starts a build with the frame captured at that moment;
+     * a test/capture that moved the pad afterwards needs one settled rebuild. */
+    if (frameDiff())
+    {
+        rebuildPreview();
+        waitForBuild();
+    }
+    m_composeInteractive = false;
+    recompose();
+}
+
+void PaintbrushCreative::cancelPreviewBuild()
+{
+    if (m_previewCancel)
+        m_previewCancel->store(true);
+    m_previewCancel.reset();
+    ++m_previewBuildRevision;
+}
+
+void PaintbrushCreative::onPreviewBuildFinished()
+{
+    if (!m_previewWatcher.isFinished())
+        return;
+    const PreviewBuildResult result = m_previewWatcher.result();
+    if (result.cancelled || result.revision != m_previewBuildRevision)
+        return;
+    m_pieces = result.pieces;
+    m_previewSize = result.stage;
+    m_builtStage = result.stage;
+    m_builtFrame = result.frame;
+    m_previewBuilt = true;
+    m_composeInteractive = false;
+    recompose();
+}
+
+void PaintbrushCreative::scheduleRecompose()
+{
+    m_composeInteractive = true;
+    m_previewSettleTimer.start();
+    if (!m_composeCoalesceTimer.isActive())
+        m_composeCoalesceTimer.start();
+}
+
+/* ------------------------------------------------------- human parser ---- */
+
+bool PaintbrushCreative::usesFashionProtection() const
+{
+    if (!m_fashionProtection)
+        return false;
+    /* Only the eight material looks whose recipe consumes the FASHN plane.
+     * holo-fashion (Prism Muse) is a full-subject look, so promising
+     * garment-only protection there would be false. */
+    static const QStringList kProtectedLooks = {
+        QStringLiteral("holo-liquid"), QStringLiteral("holo-opal"),
+        QStringLiteral("holo-chrome"), QStringLiteral("holo-prism"),
+        QStringLiteral("holo-wrap"), QStringLiteral("holo-chameleon"),
+        QStringLiteral("holo-glitter"), QStringLiteral("holo-livery"),
+    };
+    return kProtectedLooks.contains(m_patchId);
+}
+
+bool PaintbrushCreative::fashionParserInstalled() const
+{
+    HumanParserService *parser =
+        m_controller ? m_controller->humanParser() : nullptr;
+    return parser && parser->available();
+}
+
+bool PaintbrushCreative::fashionParserCanInstall() const
+{
+    HumanParserService *parser =
+        m_controller ? m_controller->humanParser() : nullptr;
+    return parser && parser->canInstall();
+}
+
+bool PaintbrushCreative::fashionParserInstalling() const
+{
+    HumanParserService *parser =
+        m_controller ? m_controller->humanParser() : nullptr;
+    return parser && parser->installing();
+}
+
+int PaintbrushCreative::fashionParserInstallProgress() const
+{
+    HumanParserService *parser =
+        m_controller ? m_controller->humanParser() : nullptr;
+    return parser ? parser->installProgress() : 0;
+}
+
+QString PaintbrushCreative::fashionParserInstallStatus() const
+{
+    HumanParserService *parser =
+        m_controller ? m_controller->humanParser() : nullptr;
+    return parser ? parser->installStatus() : QString();
+}
+
+void PaintbrushCreative::installFashionParser()
+{
+    HumanParserService *parser =
+        m_controller ? m_controller->humanParser() : nullptr;
+    if (!parser)
+        return;
+    parser->installHumanParser();
+    emit fashionParserInstallChanged();
+}
+
+void PaintbrushCreative::setHumanParseStatus(const QString &text)
+{
+    if (m_humanParseStatus == text)
+        return;
+    m_humanParseStatus = text;
+    emit humanParseStatusChanged();
+    emit stateChanged(); /* canCommit is gated on a pending parse */
+}
+
+void PaintbrushCreative::clearHumanMasks()
+{
+    m_semanticProtection = QImage();
+    m_humanParsePending = false;
+    m_humanParseRequest = 0;
+}
+
+void PaintbrushCreative::requestHumanParse()
+{
+    if (m_subjectNative.isNull() || m_subjectNative.size().isEmpty())
+    {
+        clearHumanMasks();
+        return;
+    }
+    HumanParserService *parser =
+        m_controller ? m_controller->humanParser() : nullptr;
+    if (!parser)
+    {
+        clearHumanMasks();
+        setHumanParseStatus(
+            QStringLiteral("Fashion parser is not available in this build."));
+        return;
+    }
+    if (!parser->available())
+    {
+        const bool canInstall = parser->canInstall();
+        clearHumanMasks();
+        const QString reason = parser->unavailableReason();
+        if (canInstall)
+        {
+            setHumanParseStatus(QStringLiteral(
+                "Fashion parser is not installed. Tap Get the fashion parser "
+                "to download it; the material will then stay on the outfit."));
+        }
+        else
+        {
+            setHumanParseStatus(
+                reason.isEmpty()
+                    ? QStringLiteral("Fashion parse unavailable — styling the "
+                                     "whole subject.")
+                    : QStringLiteral("Fashion parse unavailable: %1").arg(reason));
+        }
+        return;
+    }
+
+    /* The parser consumes the SAM3-owned cutout alpha; it is not allowed to
+     * invent a new subject. The RGB and alpha snapshots are taken inside the
+     * service before the job is queued. */
+    const QImage rgb =
+        m_subjectNative.convertToFormat(QImage::Format_RGB32);
+    const quint64 requestId =
+        parser->request(rgb, m_subjectNative, m_subjectRevision);
+    if (requestId == 0)
+    {
+        clearHumanMasks();
+        setHumanParseStatus(
+            QStringLiteral("Fashion parser is idle; no parse was scheduled."));
+        return;
+    }
+    m_humanParseRequest = requestId;
+    m_humanParsePending = true;
+    setHumanParseStatus(QStringLiteral("Reading the fit…"));
+}
+
+void PaintbrushCreative::setFashionProtection(bool enabled)
+{
+    if (m_fashionProtection == enabled)
+        return;
+    m_fashionProtection = enabled;
+    if (enabled)
+    {
+        if (!m_subjectNative.isNull() && m_semanticProtection.isNull()
+            && !m_humanParsePending)
+            requestHumanParse();
+        else if (!m_semanticProtection.isNull())
+            setHumanParseStatus(QStringLiteral(
+                "Fashion parse ready — skin, hair and accessories stay "
+                "untouched."));
+    }
+    else
+    {
+        setHumanParseStatus(QStringLiteral("Styling the whole subject."));
+    }
+    if (!m_subjectNative.isNull())
+        rebuildPreview();
+    emit fashionProtectionChanged();
+}
+
+QString PaintbrushCreative::waitForHumanParse(int timeoutMs)
+{
+    if (!m_humanParsePending)
+        return m_humanParseStatus;
+
+    QEventLoop loop;
+    QTimer timeout;
+    timeout.setSingleShot(true);
+    connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+    const QMetaObject::Connection done = connect(
+        this, &PaintbrushCreative::humanParseFinished, &loop,
+        [&loop](bool) { loop.quit(); });
+    if (timeoutMs > 0)
+        timeout.start(timeoutMs);
+    loop.exec();
+    disconnect(done);
+    if (timeout.isActive())
+        timeout.stop();
+
+    if (m_humanParsePending)
+        return QStringLiteral("Fashion parse is still running.");
+    return m_humanParseStatus;
+}
+
+void PaintbrushCreative::onHumanParseReady(
+    const paintbrush::HumanParseResult &result, quint64 revision,
+    quint64 requestId)
+{
+    if (revision != m_subjectRevision || requestId != m_humanParseRequest)
+        return;
+    m_humanParsePending = false;
+    m_humanParseRequest = 0;
+
+    if (m_subjectNative.isNull() || !result.isValid()
+        || result.masks.garment.isNull()
+        || result.subjectAlpha.size() != m_subjectNative.size())
+    {
+        m_semanticProtection = QImage();
+        setHumanParseStatus(
+            QStringLiteral("Fashion parse returned no usable outfit mask — "
+                           "styling the whole subject."));
+        if (usesFashionProtection())
+            rebuildPreview();
+        emit humanParseFinished(false);
+        return;
+    }
+
+    const QImage alpha =
+        result.subjectAlpha.convertToFormat(QImage::Format_Grayscale8);
+    const QImage garment = composeSemanticCoverage(
+        alpha, result.masks.garment, creative::CoverageMode::InheritedCoverage);
+    if (garment.isNull())
+    {
+        m_semanticProtection = QImage();
+        setHumanParseStatus(
+            QStringLiteral("Fashion parse returned no outfit — styling the "
+                           "whole subject."));
+        if (usesFashionProtection())
+            rebuildPreview();
+        emit humanParseFinished(false);
+        return;
+    }
+
+    quint64 subjectPixels = 0;
+    quint64 garmentPixels = 0;
+    for (int y = 0; y < alpha.height(); ++y)
+    {
+        const uchar *a = alpha.constScanLine(y);
+        const uchar *g = garment.constScanLine(y);
+        for (int x = 0; x < alpha.width(); ++x)
+        {
+            if (a[x] < 128)
+                continue;
+            ++subjectPixels;
+            if (g[x] >= 128)
+                ++garmentPixels;
+        }
+    }
+
+    /* A confident garment region is required before protection is enabled.
+     * On an image with no outfit (or a non-human subject) the material keeps
+     * the previous whole-subject behavior instead of silently doing nothing. */
+    if (subjectPixels == 0 || garmentPixels * 200 < subjectPixels)
+    {
+        m_semanticProtection = QImage();
+        setHumanParseStatus(QStringLiteral(
+            "No outfit found — the material covers the whole subject."));
+        if (usesFashionProtection())
+            rebuildPreview();
+        emit humanParseFinished(true);
+        return;
+    }
+
+    const QImage hair =
+        result.masks.hair.size() == alpha.size()
+            ? result.masks.hair.convertToFormat(QImage::Format_Grayscale8)
+            : QImage();
+    const QImage skin =
+        result.masks.skin.size() == alpha.size()
+            ? result.masks.skin.convertToFormat(QImage::Format_Grayscale8)
+            : QImage();
+    const QImage accessory =
+        result.masks.accessory.size() == alpha.size()
+            ? result.masks.accessory.convertToFormat(QImage::Format_Grayscale8)
+            : QImage();
+
+    QImage protection(alpha.size(), QImage::Format_Grayscale8);
+    if (protection.isNull())
+    {
+        m_semanticProtection = QImage();
+        setHumanParseStatus(
+            QStringLiteral("Could not allocate the fashion protection mask."));
+        emit humanParseFinished(false);
+        return;
+    }
+    for (int y = 0; y < alpha.height(); ++y)
+    {
+        const uchar *a = alpha.constScanLine(y);
+        const uchar *g = garment.constScanLine(y);
+        const uchar *h = hair.isNull() ? nullptr : hair.constScanLine(y);
+        const uchar *s = skin.isNull() ? nullptr : skin.constScanLine(y);
+        const uchar *c =
+            accessory.isNull() ? nullptr : accessory.constScanLine(y);
+        uchar *p = protection.scanLine(y);
+        for (int x = 0; x < alpha.width(); ++x)
+        {
+            if (a[x] < 128)
+            {
+                p[x] = 255; /* outside the subject: keep original */
+                continue;
+            }
+            int keep = 255 - int(g[x]);
+            if (h)
+                keep = qMax(keep, int(h[x]));
+            if (s)
+                keep = qMax(keep, int(s[x]));
+            if (c)
+                keep = qMax(keep, int(c[x]));
+            p[x] = uchar(keep);
+        }
+    }
+
+    m_semanticProtection = protection;
+    const int percent =
+        int((garmentPixels * 100 + subjectPixels / 2) / subjectPixels);
+    setHumanParseStatus(
+        QStringLiteral("Fit found — %1% of the subject. Skin, hair and "
+                       "accessories stay untouched.")
+            .arg(percent));
+    if (usesFashionProtection())
+        rebuildPreview();
+    emit humanParseFinished(true);
+}
+
+void PaintbrushCreative::onHumanParseFailed(quint64 requestId,
+                                            const QString &error)
+{
+    if (requestId != m_humanParseRequest)
+        return;
+    m_humanParsePending = false;
+    m_humanParseRequest = 0;
+    m_semanticProtection = QImage();
+    setHumanParseStatus(
+        error.isEmpty()
+            ? QStringLiteral("Fashion parse failed — styling the whole "
+                             "subject.")
+            : QStringLiteral("Fashion parse failed: %1").arg(error));
+    if (usesFashionProtection() && !m_subjectNative.isNull())
+        rebuildPreview();
+    emit humanParseFinished(false);
+}
+
 void PaintbrushCreative::onIdleTick()
 {
     if (!m_open || m_subject.isNull())
@@ -1040,7 +1744,14 @@ void PaintbrushCreative::onIdleTick()
     m_frame.energy *= 0.965f;
     if (m_frame.energy < 0.002f)
         m_frame.energy = 0.0f;
-    recompose();
+    if (m_frame.energy > 0.0f)
+    {
+        /* still moving: keep the 20 Hz tick at the interactive size */
+        if (!m_committed)
+            scheduleRecompose();
+    }
+    /* At rest the settle timer renders one full preview still and the idle
+     * tick stops overwriting it; time keeps advancing for the next gesture. */
     if (!m_recording && !m_replayTimer.isActive())
         emit padChanged();
 }
@@ -1111,6 +1822,8 @@ void PaintbrushCreative::beginPad()
     if (!hasSubject())
         return;
     setStatus(QStringLiteral("Play."));
+    m_composeInteractive = true;
+    m_previewSettleTimer.start();
 }
 
 void PaintbrushCreative::movePad(double x, double y, double energy, bool hold)
@@ -1138,7 +1851,7 @@ void PaintbrushCreative::movePad(double x, double y, double energy, bool hold)
         s.tMs = m_recordClock.elapsed();
         m_samples.append(s);
     }
-    recompose();
+    scheduleRecompose();
     emit padChanged();
 }
 
@@ -1164,7 +1877,7 @@ void PaintbrushCreative::setHold(bool hold)
         s.tMs = m_recordClock.elapsed();
         m_samples.append(s);
     }
-    recompose();
+    scheduleRecompose();
     emit padChanged();
 }
 
@@ -1249,7 +1962,7 @@ void PaintbrushCreative::onReplayTick()
     m_frame.y = a.y + (b.y - a.y) * f;
     m_frame.energy = a.energy + (b.energy - a.energy) * f;
     m_frame.hold = f < 0.5f ? a.hold : b.hold;
-    recompose();
+    scheduleRecompose();
     emit padChanged();
     emit stateChanged(); /* progress + elapsed */
 }
@@ -1262,6 +1975,8 @@ void PaintbrushCreative::selectPatch(const QString &id)
         return;
     if (m_patchId == id && !m_chooserOpen)
         return;
+    /* Switching the look replaces the recipe: discard any in-flight build. */
+    cancelCommitInternal(false);
     m_patchId = id;
     m_chooserOpen = false;
     m_committed = false;
@@ -1281,6 +1996,7 @@ void PaintbrushCreative::selectPatch(const QString &id)
 
 void PaintbrushCreative::reseed()
 {
+    cancelCommitInternal(false);
     m_seed = QRandomGenerator::global()->generate();
     if (m_seed == 0)
         m_seed = 1;
@@ -1299,6 +2015,7 @@ void PaintbrushCreative::surprise()
     QString next = m_patchId;
     while (next == m_patchId && all.size() > 1)
         next = all.at(int(QRandomGenerator::global()->bounded(all.size()))).id;
+    cancelCommitInternal(false);
     m_patchId = next;
     m_chooserOpen = false;
     m_seed = QRandomGenerator::global()->generate();
@@ -1318,289 +2035,399 @@ void PaintbrushCreative::surprise()
 
 QString PaintbrushCreative::commit()
 {
-    const bool stageCommit = m_stageCommit;
-    m_stageCommit = false;
+    /* Stage/Living/Rigged and resume/replace commits keep the master's
+     * synchronous stage path; new looks use the cancellable recipe worker. */
+    if (m_stageCommit || m_living || !m_resumeGroup.isEmpty())
+        return commitLegacy();
+
+    QString error;
+    if (!beginCommit(&error))
+        return error;
+    return QString();
+}
+
+bool PaintbrushCreative::beginCommit(QString *error)
+{
+    const auto reject = [error](const QString &text) {
+        if (error)
+            *error = text;
+        return false;
+    };
     if (!hasSubject() || !m_controller)
-        return QStringLiteral("Pick a cutout first.");
+        return reject(QStringLiteral("Pick a cutout first."));
     if (m_patchId.isEmpty())
-        return QStringLiteral("Choose a patch first.");
+        return reject(QStringLiteral("Choose a patch first."));
     if (m_committed)
-        return QStringLiteral("Already committed. Pick a patch to start a new run.");
+        return reject(QStringLiteral(
+            "Already committed. Pick a patch to start a new run."));
+    if (usesFashionProtection() && m_humanParsePending
+        && m_semanticProtection.isNull())
+        return reject(QStringLiteral(
+            "Reading the fit — try Make it real again in a moment."));
+    cancelPreviewBuild();
     const PatchDef *def = patchDef(m_patchId);
     if (!def)
-        return QStringLiteral("Unknown patch.");
+        return reject(QStringLiteral("Unknown patch."));
+
+    const QSize canvas = m_controller->creativePadCanvasSize();
+    if (!canvas.isValid() || canvas.isEmpty())
+        return reject(QStringLiteral("Open a canvas first."));
+
+    /* Full resolution, but bounded. Never upscale a smaller build and never
+     * silently drop resolution: an over-budget canvas is refused loudly. */
+    const QString budgetError =
+        creative::recipe::fullResolutionBudgetError(canvas);
+    if (!budgetError.isEmpty())
+    {
+        setStatus(budgetError);
+        emit stateChanged();
+        return reject(budgetError);
+    }
 
     if (m_replayTimer.isActive())
         m_replayTimer.stop();
     if (m_recording)
         m_recording = false;
 
-    const QSize canvas = m_controller->creativePadCanvasSize();
-    if (!canvas.isValid() || canvas.isEmpty())
-        return QStringLiteral("Open a canvas first.");
+    /* Replace any in-flight render before taking the new snapshot: cancel its
+     * token and invalidate its revision so a racing result can never publish. */
+    cancelCommitInternal(false);
+
+    QSize previewSize = m_previewSize;
+    if (!previewSize.isValid() || previewSize.isEmpty())
+        previewSize = creative::recipe::previewStage(canvas);
+    m_previewSize = previewSize;
+
+    CreativeBuildInput input;
+    input.patchId = m_patchId;
+    input.patchName = def->name;
+    input.accent = def->accent;
+    input.accentAlt = def->secondary;
+    input.subject = m_subjectNative;
+    input.subjectRect = m_subjectCanvasRect;
+    input.stage = canvas; /* native canvas resolution, not a 1600 px cap */
+    input.previewSize = previewSize;
+    input.seed = m_seed;
+    input.frame = m_frame;
+    input.group = QStringLiteral("look-%1")
+                      .arg(QDateTime::currentMSecsSinceEpoch());
+    input.sourceLayerId = m_sourceLayerId;
+    input.sourceHarvestId = m_sourceHarvestId;
+    if (usesFashionProtection() && !m_semanticProtection.isNull())
+        input.protection = m_semanticProtection;
+
+    m_commit = CommitContext();
+    m_commit.revision = ++m_commitRevision;
+    m_commit.suggestion = def->suggestion;
+    m_commit.desc = QStringLiteral("Create: %1").arg(def->name);
+    m_commit.sourceLayerId = m_sourceLayerId;
+    m_commit.canvasSize = canvas;
+    m_commit.previewSize = previewSize;
+    m_commit.token = std::make_shared<CreativeCancelToken>();
 
     m_busy = true;
+    m_commitPercent = 0;
+    m_consumedResults = 0;
+    m_lastCommitError.clear();
+    m_commitClock.start();
     emit stateChanged();
-    QElapsedTimer commitClock;
-    commitClock.start();
-    const QString group = QStringLiteral("look-%1")
-                              .arg(QDateTime::currentMSecsSinceEpoch());
-    const bool livingCommit = m_living || stageCommit;
-    if (livingCommit)
-        ensureLivingPreview();
-    const QByteArray stageEnvelope =
-        livingCommit ? stageEnvelopeBytes() : QByteArray();
+    emit commitProgressChanged();
+    setStatus(QStringLiteral("Rendering at %1x%2 — full canvas resolution.")
+                  .arg(canvas.width()).arg(canvas.height()));
 
-    /* The build is capped so a 4K/8K canvas cannot stall the UI while the
-     * look is synthesized. Pieces are authored at the capped stage and mapped
-     * onto their real canvas rectangles below; the live preview already runs
-     * on a smaller stage, so its geometry is unchanged. */
-    constexpr int kMaxBuildSide = 1600;
-    const qreal buildScale =
-        qMin(1.0, double(kMaxBuildSide)
-                      / double(qMax(canvas.width(), canvas.height())));
-    const QSize buildStage(
-        qMax(1, int(std::lround(canvas.width() * buildScale))),
-        qMax(1, int(std::lround(canvas.height() * buildScale))));
-    const QRectF buildRect(
-        m_subjectCanvasRect.x() * buildScale,
-        m_subjectCanvasRect.y() * buildScale,
-        m_subjectCanvasRect.width() * buildScale,
-        m_subjectCanvasRect.height() * buildScale);
+    auto *watcher = new QFutureWatcher<CreativeCommitEvent>(this);
+    m_commitWatcher = watcher;
+    connect(watcher, &QFutureWatcherBase::resultReadyAt, this,
+            &PaintbrushCreative::onCommitResultReady);
+    connect(watcher, &QFutureWatcherBase::progressValueChanged, this,
+            &PaintbrushCreative::onCommitProgress);
+    connect(watcher, &QFutureWatcherBase::finished, this,
+            &PaintbrushCreative::onCommitFinished);
+    connect(watcher, &QObject::destroyed, this, [this, watcher]() {
+        if (m_commitWatcher == watcher)
+            m_commitWatcher = nullptr;
+    });
 
-    QImage buildSubject = m_subjectNative;
-    const QSize subjectWant(
-        qMax(1, int(std::lround(buildRect.width() * 1.25))),
-        qMax(1, int(std::lround(buildRect.height() * 1.25))));
-    if (buildSubject.width() > subjectWant.width()
-        || buildSubject.height() > subjectWant.height())
-        buildSubject = buildSubject.scaled(subjectWant, Qt::KeepAspectRatio,
-                                           Qt::SmoothTransformation);
+    const quint64 revision = m_commit.revision;
+    const std::shared_ptr<CreativeCancelToken> token = m_commit.token;
+    watcher->setFuture(QtConcurrent::run(
+        &m_buildPool,
+        [input, token, revision](QPromise<CreativeCommitEvent> &promise) {
+            runCreativeCommitJob(input, token, revision, promise);
+        }));
+    return true;
+}
 
-    QVector<CreativePiece> pieces =
-        buildPatch(m_patchId, buildSubject, buildRect, buildStage, m_seed);
-    /* Motion offsets are proportional to the stage, so bake on the build stage
-     * first and map the baked rectangles onto the real canvas afterwards. */
-    pieces = bakeFrame(pieces, buildStage);
+void PaintbrushCreative::cancelCommit()
+{
+    cancelCommitInternal(true);
+}
 
-    /* Rigged Stage: a real Powder prop from the existing GlitterPowder engine
-     * (materialState persisted, re-rendered at export scale). It is inserted
-     * behind the subject so the living cutout stays clean. */
-    if (stageCommit)
+void PaintbrushCreative::cancelCommitInternal(bool notify)
+{
+    if (m_commitWatcher)
     {
-        QByteArray powderState;
-        const QImage powder = StageRuntime::renderPowderField(
-            buildStage, m_seed | 1u, stageLightColor(def->id), &powderState);
-        if (!powder.isNull())
-        {
-            CreativePiece pw;
-            pw.name = QStringLiteral("Stage powder");
-            pw.role = QStringLiteral("powder");
-            pw.image = powder;
-            pw.rect = QRectF(QPointF(0, 0), QSizeF(buildStage));
-            pw.pivot = pw.rect.center();
-            pw.blendMode = BLEND_SCREEN;
-            pw.opacity = 0.72f;
-            pw.metadata[QStringLiteral("powderPreset")] =
-                QStringLiteral("material.glitter.powder");
-            pw.metadata[QStringLiteral("powderState")] = powderState;
-            int at = 0;
-            while (at < pieces.size()
-                   && pieces.at(at).role != QLatin1String("subject"))
-                ++at;
-            pieces.insert(at, pw);
-        }
+        QFutureWatcher<CreativeCommitEvent> *watcher = m_commitWatcher;
+        m_commitWatcher = nullptr;
+        /* Qt's cancel only flips the cooperative flag; the worker polls both
+         * the promise and our token at piece boundaries. */
+        watcher->future().cancel();
+        disconnect(watcher, nullptr, this, nullptr);
+        watcher->deleteLater();
     }
+    if (m_commit.token)
+        m_commit.token->cancel();
+    m_commit = CommitContext();
+    ++m_commitRevision; /* any already-queued event is now stale */
+    m_consumedResults = 0;
 
-    if (buildScale < 1.0)
-    {
-        for (CreativePiece &p : pieces)
-        {
-            p.rect = QRectF(p.rect.x() / buildScale, p.rect.y() / buildScale,
-                            p.rect.width() / buildScale,
-                            p.rect.height() / buildScale);
-            if (!p.pivot.isNull())
-                p.pivot = QPointF(p.pivot.x() / buildScale,
-                                  p.pivot.y() / buildScale);
-        }
-    }
-    QList<CanvasLayer> layers;
-    bool stageSubjectAdded = false;
-
-    for (const CreativePiece &p : pieces)
-    {
-        /* Stage keeps the ORIGINAL cutout as the subject (non-destructive:
-         * the source layer is hidden by the same transaction). */
-        if (stageCommit && p.role == QLatin1String("subject"))
-        {
-            if (!stageSubjectAdded)
-            {
-                CanvasLayer subject =
-                    makeLivingSubjectLayer(group, def->name);
-                if (!subject.raster.isNull())
-                {
-                    layers.append(subject);
-                    stageSubjectAdded = true;
-                }
-            }
-            continue;
-        }
-        if (p.image.isNull())
-            continue;
-        QPoint offset;
-        QImage trimmed;
-        if (p.role == QLatin1String("powder"))
-        {
-            /* Powder materialState is expressed in the full stage/world
-             * coordinates; trimming the raster would shift it at export. */
-            trimmed = p.image;
-        }
-        else
-        {
-            trimmed = creative::trimTransparent(p.image, &offset);
-        }
-        if (trimmed.isNull())
-            continue;
-        /* The piece image can be authored below the canvas resolution (capped
-         * build stage) or above it (native subject), so map it onto its real
-         * canvas rectangle instead of assuming 1 image px == 1 canvas unit. */
-        const qreal pxScale = p.rect.width() / qMax(1, p.image.width());
-        const QPointF target =
-            p.rect.topLeft() + QPointF(offset) * pxScale;
-        CanvasLayer layer =
-            CanvasLayer::createImage(trimmed, QPointF(0, 0), p.name);
-        layer.setTransform(QTransform(pxScale, 0.0, 0.0, pxScale, target.x(),
-                                      target.y()));
-        layer.type = LAYER_IMAGE;
-        layer.opacity = p.opacity;
-        layer.blendMode = p.blendMode;
-        layer.metadata[QStringLiteral("creative.patch")] = def->id;
-        layer.metadata[QStringLiteral("creative.patchName")] = def->name;
-        layer.metadata[QStringLiteral("creative.role")] = p.role;
-        layer.metadata[QStringLiteral("creative.seed")] = qint64(m_seed);
-        layer.metadata[QStringLiteral("creative.group")] = group;
-        layer.metadata[QStringLiteral("creative.sourceLayerId")] = m_sourceLayerId;
-        layer.metadata[QStringLiteral("creative.sourceHarvestId")] = m_sourceHarvestId;
-        QVariantMap params;
-        params[QStringLiteral("x")] = double(m_frame.x);
-        params[QStringLiteral("y")] = double(m_frame.y);
-        params[QStringLiteral("energy")] = double(m_frame.energy);
-        params[QStringLiteral("hold")] = m_frame.hold;
-        layer.metadata[QStringLiteral("creative.params")] = params;
-        /* Scene props carry their procedural role and depth so the committed
-         * layer stays self-describing after reopen (Paper Theatre, Nocturne). */
-        for (const QString &key : { QStringLiteral("creative.prop"),
-                                    QStringLiteral("creative.depth"),
-                                    QStringLiteral("creative.parallax") })
-            if (p.metadata.contains(key))
-                layer.metadata.insert(key, p.metadata.value(key));
-
-        if (p.role == QLatin1String("powder"))
-        {
-            layer.materialPreset =
-                p.metadata.value(QStringLiteral("powderPreset")).toString();
-            layer.materialState =
-                p.metadata.value(QStringLiteral("powderState")).toByteArray();
-        }
-
-        if (stageCommit)
-        {
-            /* Foreground/background props move at distinct depths on the
-             * canonical 3 s clock; accents pulse with the stage light. */
-            float depth = 0.0f;
-            float parallax = 0.0f;
-            float lightPulse = 0.0f;
-            if (p.role == QLatin1String("backdrop"))
-            {
-                depth = -0.65f;
-                parallax = 0.60f;
-            }
-            else if (p.role == QLatin1String("echo"))
-            {
-                depth = -0.35f;
-                parallax = 0.75f;
-            }
-            else if (p.role == QLatin1String("accent"))
-            {
-                depth = 0.30f;
-                parallax = 0.90f;
-                lightPulse = 0.90f;
-            }
-            else if (p.role == QLatin1String("rim"))
-            {
-                depth = 0.38f;
-                parallax = 1.0f;
-                lightPulse = 0.60f;
-            }
-            else if (p.role == QLatin1String("finish"))
-            {
-                depth = 0.46f;
-                parallax = 0.85f;
-                lightPulse = 0.35f;
-            }
-            else if (p.role == QLatin1String("powder"))
-            {
-                depth = 0.25f;
-                parallax = 0.90f;
-            }
-            StageRuntime::applyStageMetadata(&layer, group, p.role, depth,
-                                             parallax, lightPulse,
-                                             stageEnvelope);
-        }
-        else if (livingCommit && p.role == QLatin1String("subject"))
-        {
-            /* Photo Regime H: the creative look keeps its exact subject
-             * treatment; the derived rig animates that committed cutout. */
-            attachDerivedLiving(&layer, group, false);
-        }
-        layers.append(layer);
-    }
-    if (stageCommit && !stageSubjectAdded)
-    {
-        CanvasLayer subject = makeLivingSubjectLayer(group, def->name);
-        if (!subject.raster.isNull())
-            layers.append(subject);
-    }
-    if (layers.isEmpty())
-    {
-        m_busy = false;
-        setStatus(QStringLiteral("Nothing to commit — try another patch."));
-        return QStringLiteral("The patch produced no layers.");
-    }
-
-    int hideLayerId = -1;
-    if (m_sourceLayerId > 0)
-        hideLayerId = m_sourceLayerId;
-
-    const QString error = m_controller->commitCreativeLayers(
-        layers, hideLayerId,
-        stageCommit ? QStringLiteral("Rigged Stage: %1").arg(def->name)
-                    : QStringLiteral("Create: %1").arg(def->name),
-        m_resumeGroup);
+    if (!m_busy)
+        return;
+    m_lastCommitError.clear();
     m_busy = false;
-    if (!error.isEmpty())
+    m_commitPercent = 0;
+    if (notify)
     {
+        setStatus(QStringLiteral("Rendering cancelled — nothing changed."));
+        emit stateChanged();
+        emit commitProgressChanged();
+        emit commitFinished(QString());
+    }
+}
+
+void PaintbrushCreative::onCommitResultReady(int index)
+{
+    consumeCommitResults(index);
+}
+
+void PaintbrushCreative::consumeCommitResults(int uptoInclusive)
+{
+    if (!m_commitWatcher)
+        return;
+    const QFuture<CreativeCommitEvent> future = m_commitWatcher->future();
+    const int count = future.resultCount();
+    while (m_consumedResults <= uptoInclusive && m_consumedResults < count)
+    {
+        applyCommitEvent(future.resultAt(m_consumedResults));
+        ++m_consumedResults;
+    }
+}
+
+void PaintbrushCreative::applyCommitEvent(const CreativeCommitEvent &event)
+{
+    if (!m_commit.token || m_commit.token->isCancelled())
+        return;
+    if (event.revision != m_commit.revision
+        || event.revision != m_commitRevision)
+        return;
+
+    if (event.kind == CreativeCommitEvent::Progress)
+    {
+        if (!event.preview.isNull())
+            publishCommitPreview(event.preview);
+        if (event.percent != m_commitPercent)
+        {
+            m_commitPercent = qBound(0, event.percent, 100);
+            emit commitProgressChanged();
+        }
+        return;
+    }
+
+    publishCommitResult(event.result);
+}
+
+void PaintbrushCreative::publishCommitPreview(const QImage &preview)
+{
+    if (preview.isNull())
+        return;
+    m_previewSize = preview.size();
+    {
+        QMutexLocker locker(&m_previewMutex);
+        m_preview = preview;
+    }
+    ++m_previewRevision;
+    emit previewChanged();
+}
+
+void PaintbrushCreative::publishCommitResult(const CreativeBuildResult &result)
+{
+    const QString suggestion = m_commit.suggestion;
+    const int sourceLayerId = m_commit.sourceLayerId;
+    const QString desc = m_commit.desc;
+
+    if (result.cancelled)
+    {
+        m_lastCommitError.clear();
+        m_busy = false;
+        m_commitPercent = 0;
+        m_commit = CommitContext();
+        setStatus(QStringLiteral("Rendering cancelled — nothing changed."));
+        emit stateChanged();
+        emit commitProgressChanged();
+        emit commitFinished(QString());
+        return;
+    }
+    if (!result.error.isEmpty() || result.layers.isEmpty())
+    {
+        const QString error = result.error.isEmpty()
+                                  ? QStringLiteral("The patch produced no layers.")
+                                  : result.error;
+        m_lastCommitError = error;
+        m_busy = false;
+        m_commitPercent = 0;
+        m_commit = CommitContext();
         setStatus(error);
         emit stateChanged();
-        return error;
+        emit commitProgressChanged();
+        emit commitFinished(error);
+        return;
     }
 
-    m_lastCommitMs = double(commitClock.nsecsElapsed()) / 1.0e6;
+    /* The worker snapshot is in canvas coordinates. If the document canvas was
+     * resized while it rendered, publishing would place the layers against a
+     * different geometry; discard instead of committing a wrong result. */
+    if (m_controller
+        && m_controller->creativePadCanvasSize() != m_commit.canvasSize)
+    {
+        const QString error = QStringLiteral(
+            "The canvas changed while the look was rendering. Try again.");
+        m_lastCommitError = error;
+        m_busy = false;
+        m_commitPercent = 0;
+        m_commit = CommitContext();
+        setStatus(error);
+        emit stateChanged();
+        emit commitProgressChanged();
+        emit commitFinished(error);
+        return;
+    }
+
+    /* Publish the exact committed look while still busy, so no idle tick can
+     * replace it between the preview and the document publication. */
+    if (!result.preview.isNull())
+        publishCommitPreview(result.preview);
+
+    const QString error =
+        m_controller
+            ? m_controller->commitCreativeLayers(result.layers, sourceLayerId,
+                                                 desc, m_resumeGroup)
+            : QStringLiteral("The canvas is not available.");
+    m_busy = false;
+    m_commitPercent = 100;
+    m_commit = CommitContext();
+    if (!error.isEmpty())
+    {
+        m_lastCommitError = error;
+        setStatus(error);
+        emit stateChanged();
+        emit commitProgressChanged();
+        emit commitFinished(error);
+        return;
+    }
+
+    m_lastCommitMs = double(m_commitClock.nsecsElapsed()) / 1.0e6;
     m_committed = true;
     m_resumeGroup.clear();
-    m_suggestionKind = suggestionKindFor(def->id);
-    m_suggestionText = def->suggestion;
+    m_suggestionKind = suggestionKindFor(m_patchId);
+    m_suggestionText = suggestion;
     m_suggestionVisible = !m_suggestionText.isEmpty();
+    m_lastCommitError.clear();
     refreshHistory();
-    setStatus(stageCommit
-                  ? QStringLiteral("Rigged Stage — one undo returns the static cutout.")
-                  : (livingCommit
-                         ? QStringLiteral("Living look — one undo returns the static cutout.")
-                         : QStringLiteral("Committed. Every piece is an editable layer — one undo.")));
+    setStatus(QStringLiteral("Committed at canvas resolution — every piece is "
+                             "an editable layer, one undo."));
     emit suggestionChanged();
     emit metricsChanged();
     emit stateChanged();
-    return QString();
+    emit commitProgressChanged();
+    emit commitFinished(QString());
+}
+
+void PaintbrushCreative::onCommitProgress(int percent)
+{
+    if (!m_busy || !m_commit.token || m_commit.token->isCancelled())
+        return;
+    const int value = qBound(0, percent, 100);
+    if (value == m_commitPercent)
+        return;
+    m_commitPercent = value;
+    if (value > 0 && value < 100)
+        setStatus(QStringLiteral("Rendering %1% — full canvas resolution.")
+                      .arg(value));
+    emit commitProgressChanged();
+}
+
+void PaintbrushCreative::onCommitFinished()
+{
+    if (!m_commitWatcher)
+        return;
+    const int count = m_commitWatcher->future().resultCount();
+    consumeCommitResults(count - 1);
+
+    if (m_busy)
+    {
+        /* No terminal event was published (early cancellation or a broken
+         * future): close the job so the pad never stays stuck busy. */
+        const bool cancelled =
+            !m_commit.token || m_commit.token->isCancelled();
+        m_lastCommitError =
+            cancelled ? QString()
+                      : QStringLiteral("Rendering stopped before it produced a "
+                                       "result.");
+        m_busy = false;
+        m_commitPercent = 0;
+        m_commit = CommitContext();
+        setStatus(cancelled
+                      ? QStringLiteral("Rendering cancelled — nothing changed.")
+                      : m_lastCommitError);
+        emit stateChanged();
+        emit commitProgressChanged();
+        emit commitFinished(m_lastCommitError);
+    }
+    finishCommitJob();
+}
+
+void PaintbrushCreative::finishCommitJob()
+{
+    QFutureWatcher<CreativeCommitEvent> *watcher = m_commitWatcher;
+    m_commitWatcher = nullptr;
+    if (watcher)
+    {
+        disconnect(watcher, nullptr, this, nullptr);
+        watcher->deleteLater();
+    }
+    m_consumedResults = 0;
+    m_commit.token.reset();
+    m_commit = CommitContext();
+}
+
+QString PaintbrushCreative::waitForCommit(int timeoutMs)
+{
+    if (!m_busy)
+        return m_lastCommitError;
+
+    QEventLoop loop;
+    QTimer guard;
+    guard.setSingleShot(true);
+    const QMetaObject::Connection conn =
+        connect(this, &PaintbrushCreative::commitFinished, &loop,
+                [&loop](const QString &) { loop.quit(); });
+    connect(&guard, &QTimer::timeout, &loop, &QEventLoop::quit);
+    guard.start(qMax(1, timeoutMs));
+    loop.exec();
+    disconnect(conn);
+
+    if (m_busy)
+    {
+        /* Automation must not leave a runaway job behind on timeout. */
+        cancelCommitInternal(false);
+        m_lastCommitError =
+            QStringLiteral("Timed out waiting for the creative render.");
+        setStatus(m_lastCommitError);
+        emit stateChanged();
+        emit commitProgressChanged();
+        emit commitFinished(m_lastCommitError);
+    }
+    return m_lastCommitError;
 }
 
 QString PaintbrushCreative::makeRiggedStage()
@@ -4576,5 +5403,7 @@ QVector<CreativePiece> PaintbrushCreative::buildPatch(const QString &patchId,
 
     return pieces;
 }
+
+#include "pb_creative_legacy_commit.inc"
 
 } /* namespace paintbrush */

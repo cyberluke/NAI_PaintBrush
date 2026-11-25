@@ -3,6 +3,7 @@
 #include <cassert>
 #include <QCoreApplication>
 #include <QDir>
+#include <QStandardPaths>
 
 #include "maininterface/navigationmodel.hpp"
 
@@ -164,6 +165,10 @@ MainUI::MainUI(qt_intf_t *p_intf, MainCtx *mainCtx, QWindow* interfaceWindow,  Q
 #ifdef _WIN32
     preloadQtRuntimeDlls();
 #endif
+
+    /* A self-test run must never share the user's project/recovery store. */
+    if (var_InheritBool(VLC_OBJECT(p_intf), "paintbrush-creative-selftest"))
+        QStandardPaths::setTestModeEnabled(true);
 
     /* NAI Paintbrush workspace controller (created before QML type
      * registration so it can be exposed as a singleton). */

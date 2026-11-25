@@ -1119,6 +1119,15 @@ QString PaintbrushController::runCreativeSelfTest()
                 return true;
         return false;
     };
+    /* Commits are asynchronous now: wait for the full-resolution job to
+     * publish on the GUI thread so the one-undo/layer-count checks stay
+     * exactly the same contract as before. */
+    auto commitNow = [this]() -> QString {
+        const QString startError = m_creative->commit();
+        if (!startError.isEmpty())
+            return startError;
+        return m_creative->waitForCommit(120000);
+    };
 
     /* The test replaces the document. Never do that over real work: a
      * startup flag must not be able to discard a project or the recovery
@@ -1179,6 +1188,11 @@ QString PaintbrushController::runCreativeSelfTest()
         return report.join(QLatin1Char('\n'));
     }
     note(QStringLiteral("subject: %1").arg(m_creative->subjectLabel()));
+    /* The FASHN parse is optional at runtime: report exactly what happened
+     * (ready, no outfit, unavailable) without turning a missing model into a
+     * creative failure. The separate human-parser smoke is the hard gate. */
+    note(QStringLiteral("fashion parser: %1")
+             .arg(m_creative->waitForHumanParse(120000)));
 
     const QString dir =
         QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation))
@@ -1201,6 +1215,7 @@ QString PaintbrushController::runCreativeSelfTest()
     {
         m_creative->selectPatch(id);
         m_creative->movePad(0.68, 0.62, 0.35, false);
+        m_creative->renderPreviewStill();
         const QImage preview = m_creative->previewImage();
         if (preview.isNull())
         {
@@ -1229,9 +1244,11 @@ QString PaintbrushController::runCreativeSelfTest()
         {
             m_creative->selectPatch(id);
             m_creative->movePad(0.22, 0.22, 0.0, false);
+            m_creative->renderPreviewStill();
             const QImage low =
                 m_creative->previewImage().convertToFormat(QImage::Format_ARGB32);
             m_creative->movePad(0.78, 0.78, 0.85, true);
+            m_creative->renderPreviewStill();
             const QImage high =
                 m_creative->previewImage().convertToFormat(QImage::Format_ARGB32);
             if (low.isNull() || high.isNull() || low.size() != high.size())
@@ -1289,7 +1306,7 @@ QString PaintbrushController::runCreativeSelfTest()
     m_creative->selectPatch(QStringLiteral("neon-idol"));
     m_creative->movePad(0.72, 0.60, 0.30, true);
     m_creative->dumpStagePieces(QStringLiteral("%1/pieces-neon").arg(dir));
-    QString error = m_creative->commit();
+    QString error = commitNow();
     const int neonAfter = m_document.layers().size();
     if (!error.isEmpty())
         note(QStringLiteral("FAIL: neon commit: %1").arg(error));
@@ -1507,8 +1524,11 @@ QString PaintbrushController::runCreativeSelfTest()
             }
         }
         const QString applyError = m_creative->applyLookToSelection();
+        const QString applyWait = m_creative->waitForCommit();
         if (!applyError.isEmpty())
             note(QStringLiteral("FAIL: apply look: %1").arg(applyError));
+        else if (!applyWait.isEmpty())
+            note(QStringLiteral("FAIL: apply look wait: %1").arg(applyWait));
         else
         {
             note(QStringLiteral("apply look: +%1 layers")
@@ -1525,7 +1545,7 @@ QString PaintbrushController::runCreativeSelfTest()
     /* Sticker Forge: commit + one undo. */
     m_creative->selectPatch(QStringLiteral("sticker-forge"));
     m_creative->movePad(0.42, 0.70, 0.20, false);
-    error = m_creative->commit();
+    error = commitNow();
     const int stickerAfter = m_document.layers().size();
     if (!error.isEmpty())
         note(QStringLiteral("FAIL: sticker commit: %1").arg(error));
@@ -1545,7 +1565,7 @@ QString PaintbrushController::runCreativeSelfTest()
     m_creative->openForSelection();
     m_creative->selectPatch(QStringLiteral("electric-kpop"));
     m_creative->movePad(0.62, 0.58, 0.42, false);
-    error = m_creative->commit();
+    error = commitNow();
     const int electricAfter = m_document.layers().size();
     if (!error.isEmpty())
         note(QStringLiteral("FAIL: electric commit: %1").arg(error));
@@ -1621,7 +1641,7 @@ QString PaintbrushController::runCreativeSelfTest()
     m_creative->openForSelection();
     m_creative->selectPatch(QStringLiteral("holo-fashion"));
     m_creative->movePad(0.55, 0.66, 0.24, true);
-    error = m_creative->commit();
+    error = commitNow();
     const int holoAfter = m_document.layers().size();
     if (!error.isEmpty())
         note(QStringLiteral("FAIL: holo commit: %1").arg(error));
@@ -1655,6 +1675,8 @@ QString PaintbrushController::runCreativeSelfTest()
     m_creative->selectPatch(QStringLiteral("paper-theatre"));
     m_creative->movePad(0.64, 0.44, 0.22, false);
     error = m_creative->commit();
+    if (error.isEmpty())
+        error = m_creative->waitForCommit();
     const int theatreAfter = m_document.layers().size();
     if (!error.isEmpty())
         note(QStringLiteral("FAIL: paper-theatre commit: %1").arg(error));
@@ -2409,6 +2431,69 @@ QString PaintbrushController::runCreativeSelfTest()
     m_creative->selectPatch(QStringLiteral("neon-idol"));
     m_creative->movePad(0.74, 0.58, 0.42, false);
     m_creative->setHold(false);
+
+    /* Real-fashion semantic pass. The synthetic idol has no garment, so the
+     * parser correctly falls back; this fixture (a real fashion model parsed
+     * by the same FASHN runtime) proves the garment protection end to end. */
+    const QString fashionCutoutPath = QStringLiteral(
+        "D:/_SATIN_AI/models/holo-reference/fashion-cutout.png");
+    if (!QFileInfo::exists(fashionCutoutPath))
+    {
+        note(QStringLiteral("fashion fixture: skipped (not found)"));
+    }
+    else
+    {
+        const QImage fashionCutout(fashionCutoutPath);
+        if (fashionCutout.isNull())
+        {
+            note(QStringLiteral("FAIL: fashion fixture is unreadable"));
+        }
+        else
+        {
+            newBlankCanvas(1440, 1800);
+            addImageLayer(fashionCutout, QPointF(260, 220),
+                          QStringLiteral("Fashion parser cutout"),
+                          LAYER_STICKER);
+            if (!m_document.layers().isEmpty())
+                m_document.layersRef().last().scale = 0.55f;
+            m_document.setCurrentLayerIndex(m_document.layers().size() - 1);
+            emit documentChanged();
+
+            m_creative->openForSelection();
+            if (!m_creative->hasSubject())
+            {
+                note(QStringLiteral("FAIL: real fashion cutout has no subject"));
+            }
+            else
+            {
+                note(QStringLiteral("fashion subject: %1")
+                         .arg(m_creative->subjectLabel()));
+                note(QStringLiteral("fashion parser: %1")
+                         .arg(m_creative->waitForHumanParse(120000)));
+                m_creative->selectPatch(QStringLiteral("holo-liquid"));
+                m_creative->movePad(0.62, 0.58, 0.35, false);
+                m_creative->renderPreviewStill();
+                const QImage fashionPreview = m_creative->previewImage();
+                if (fashionPreview.isNull())
+                {
+                    note(QStringLiteral("FAIL: real fashion preview is empty"));
+                }
+                else
+                {
+                    const QString path = QStringLiteral(
+                        "%1/selftest-fashion-real.png").arg(dir);
+                    if (!fashionPreview.save(path))
+                        note(QStringLiteral("FAIL: cannot save %1").arg(path));
+                    else
+                        note(QStringLiteral("preview fashion-real %1x%2")
+                                 .arg(fashionPreview.width())
+                                 .arg(fashionPreview.height()));
+                }
+            }
+        }
+    }
+
+    m_creative->renderPreviewStill();
     const QImage finalPreview = m_creative->previewImage();
     if (!finalPreview.isNull())
         finalPreview.save(QStringLiteral("%1/selftest-final.png").arg(dir));
@@ -2918,8 +3003,9 @@ QString PaintbrushController::applyCreativePatch(const QString &patchId)
     const QString error = m_creative->commit();
     if (!error.isEmpty())
         return error;
-    setStatus(QStringLiteral(
-        "Look applied — every piece is an editable layer."));
+    /* The render is asynchronous: the pad publishes the layers and the final
+     * status on the GUI thread when the full-resolution build completes. */
+    setStatus(QStringLiteral("Building the look at canvas resolution…"));
     return {};
 }
 

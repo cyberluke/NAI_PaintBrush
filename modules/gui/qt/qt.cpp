@@ -54,6 +54,7 @@ extern "C" char **environ;
 #include <QApplication>
 #include <QDate>
 #include <QMutex>
+#include <QStandardPaths>
 #include <QtQuickControls2/QQuickStyle>
 #include <QLoggingCategory>
 #include <QQmlError>
@@ -493,6 +494,27 @@ vlc_module_begin ()
                             N_( "Matte colour decontamination (0-100)" ), nullptr )
     add_integer_with_range( "paintbrush-matting-temporal", 50, 0, 100,
                             N_( "Matte temporal stability (0-100)" ), nullptr )
+    add_string( "paintbrush-human-parser-model-dir", NULL,
+                N_( "Human parser model directory" ),
+                N_( "Directory containing fashn-human-parser.onnx and "
+                    "manifest.json; empty uses the packaged "
+                    "human-parser/models directory." ) )
+    add_string( "paintbrush-human-parser-device", "auto",
+                N_( "Human parser device" ),
+                N_( "auto, gpu or cpu; auto uses CUDA when available." ) )
+            change_string_list( psz_sam_devices, psz_sam_devices_text )
+    add_integer_with_range( "paintbrush-human-parser-class-probabilities", 0, 0, 1,
+                            N_( "Export human parser class probabilities" ), nullptr )
+    add_string( "paintbrush-human-parser-manifest-url", NULL,
+                N_( "Fashion parser manifest URL" ),
+                N_( "URL of the human-parser asset manifest used by the "
+                    "on-demand installer. Empty disables in-app download; the "
+                    "post-installer can still be used." ) )
+    add_string( "paintbrush-human-parser-manifest-sha256", NULL,
+                N_( "Fashion parser manifest SHA-256" ),
+                N_( "Pinned SHA-256 of the downloaded manifest. Required for "
+                    "on-demand installs so a compromised URL cannot install "
+                    "native parser code." ) )
     add_bool( "paintbrush-matte-selftest", false, PB_MATTE_SELFTEST_TEXT,
               PB_MATTE_SELFTEST_LONGTEXT )
     add_bool( "paintbrush-creative-selftest", false,
@@ -1170,6 +1192,12 @@ static void *Thread( void *obj )
     // at the moment, the vout is created in another thread than the rendering thread
     QApplication::setAttribute( Qt::AA_DontCheckOpenGLContextThreadAffinity );
     QQuickWindow::setDefaultAlphaBuffer(true);
+
+    /* The creative self-test must never share the live document's recovery or
+     * config paths. Qt's test mode redirects the QStandardPaths AppData/config
+     * roots before QApplication and the settings users are created. */
+    if( var_InheritBool( p_intf, "paintbrush-creative-selftest" ) )
+        QStandardPaths::setTestModeEnabled( true );
 
     /* Start the QApplication here */
 #ifdef _WIN32

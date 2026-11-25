@@ -438,6 +438,40 @@ Item {
                             iconText: VLCIcons.effect_filter
                             onClicked: PaintbrushCtx.applyCreativePatch("holo-fashion")
                         }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: VLCStyle.margin_xsmall
+
+                            Widgets.ComboBoxExt {
+                                id: materialCombo
+                                Layout.fillWidth: true
+                                model: {
+                                    var out = [];
+                                    var list = PaintbrushCtx.creative.patchList;
+                                    for (var i = 0; i < list.length; ++i) {
+                                        var p = list[i];
+                                        if (p.family === "Material"
+                                                || p.family === "Automotive")
+                                            out.push({ text: p.name, value: p.id });
+                                    }
+                                    return out;
+                                }
+                                textRole: "text"
+                                valueRole: "value"
+                            }
+                            Widgets.ButtonExt {
+                                text: qsTr("Apply")
+                                onClicked: {
+                                    if (materialCombo.currentValue)
+                                        PaintbrushCtx.applyCreativePatch(materialCombo.currentValue);
+                                }
+                            }
+                        }
+                        Widgets.LabelExt {
+                            Layout.fillWidth: true
+                            text: qsTr("Fashion + automotive materials. Each result is editable layers in one undo.")
+                            wrapMode: Text.WordWrap
+                        }
                         InspectorAction {
                             label: qsTr("Neon Idol on this cutout")
                             iconText: VLCIcons.effect_filter

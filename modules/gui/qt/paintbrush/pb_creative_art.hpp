@@ -82,6 +82,16 @@ QImage softBlur(const QImage &image, int downscale = 0);
 /* Perceptual lightness of a colour in Oklab (0 black .. 1 white). */
 float oklabLightness(const QColor &color);
 
+/* Full perceptual coordinates, for material and quality analysis. */
+struct OklabColor
+{
+    float L = 0.0f;
+    float a = 0.0f;
+    float b = 0.0f;
+};
+
+OklabColor oklabColor(const QColor &color);
+
 /* A simple, deterministic grade. `brightness` multiplies the channels,
  * `contrast` pushes them away from mid-grey, `saturation` blends towards
  * luminance. `tint` colours the shadows, `lightTint` the highlights. */
@@ -162,7 +172,7 @@ struct HoloMaterial
     float normalStrength = 0.6f;  /* how much the source normals matter    */
     float clearcoat = 0.0f;       /* second, broad white lobe 0..1         */
     float colorShift = 0.0f;      /* view-angle palette shift 0..1         */
-    float baseReplace = 0.10f;    /* palette owns the hue (paint) vs film  */
+    float baseReplace = 0.10f;    /* palette owns the hue (paint) vs film   */
     float flakeDensity = 0.0f;    /* metallic-flake coverage 0..1          */
     float flakeSize = 1.0f;       /* flake radius in material units        */
     QVector<QColor> palette;
@@ -257,9 +267,14 @@ QImage electricArc(const QSize &size, const QPointF &from, const QPointF &to,
                    quint32 seed, const ArcParams &params);
 
 /* Boundary-emitted particles: sparks that hug the silhouette and streak
- * outward along the local normal. */
+ * outward. `wind` is a stage-normalized vector added to the local outward
+ * normal; `spread` widens the tangential jitter (0..1); `streak` scales the
+ * trail length. A zero wind reproduces the original silhouette-hugging look,
+ * so the vector engine is an additive parameter, not a second algorithm. */
 QImage sparkField(const QImage &mask, const QSize &size, quint32 seed,
-                  const QVector<QColor> &palette, int count, float energy);
+                  const QVector<QColor> &palette, int count, float energy,
+                  const QPointF &wind = {}, float spread = 0.35f,
+                  float streak = 1.0f);
 
 /* --- scene dressing ----------------------------------------------------- */
 

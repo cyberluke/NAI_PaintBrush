@@ -289,6 +289,11 @@ Item {
                 cache: false
                 asynchronous: false
                 smooth: true
+                /* The engine keeps a 4K-class still for capture/commit; the
+                 * panel only needs a display-bound texture. Without this the
+                 * image provider uploads the full 4K frame on every revision. */
+                sourceSize: Qt.size(Math.ceil(width * 2),
+                                    Math.ceil(height * 2))
                 source: root.creative.hasSubject
                             ? "image://pbcreative/live/" + root.creative.previewRevision
                             : ""
@@ -802,6 +807,63 @@ Item {
                                && !root.creative.busy
                                && !root.creative.committed
                 onClicked: root.creative.makeRiggedStage()
+            }
+        }
+
+        /* -------------------------------------------- fashion-aware finish */
+        RowLayout {
+            Layout.fillWidth: true
+            visible: root.creative.hasSubject
+                     && root.active.family === "Material"
+            spacing: VLCStyle.margin_xsmall
+
+            PadButton {
+                Layout.preferredWidth: VLCStyle.dp(152)
+                text: root.creative.fashionProtection
+                          ? qsTr("Style the fit only")
+                          : qsTr("Style everything")
+                selected: root.creative.fashionProtection
+                enabledAction: root.creative.hasSubject
+                onClicked: root.creative.fashionProtection =
+                           !root.creative.fashionProtection
+            }
+
+            Widgets.LabelExt {
+                Layout.fillWidth: true
+                text: root.creative.humanParseStatus
+                color: theme.fg.secondary
+                font.pixelSize: VLCStyle.fontSize_small
+                elide: Text.ElideRight
+            }
+        }
+
+        /* On-demand post-installer: the app checks the user install at launch;
+         * if the parser is absent, this row downloads it through the bundled
+         * installer. The parser stays optional and the material falls back. */
+        RowLayout {
+            Layout.fillWidth: true
+            visible: root.creative.hasSubject
+                     && root.active.family === "Material"
+                     && !root.creative.fashionParserInstalled
+            spacing: VLCStyle.margin_xsmall
+
+            PadButton {
+                Layout.preferredWidth: VLCStyle.dp(152)
+                text: root.creative.fashionParserInstalling
+                          ? qsTr("Installing…")
+                          : qsTr("Get the fashion parser")
+                selected: false
+                enabledAction: root.creative.fashionParserCanInstall
+                               && !root.creative.fashionParserInstalling
+                onClicked: root.creative.installFashionParser()
+            }
+
+            Widgets.LabelExt {
+                Layout.fillWidth: true
+                text: root.creative.fashionParserInstallStatus
+                color: theme.fg.secondary
+                font.pixelSize: VLCStyle.fontSize_small
+                elide: Text.ElideRight
             }
         }
 

@@ -13,18 +13,25 @@
 #define PB_CREATIVE_HPP
 
 #include "pb_common.hpp"
+#include "pb_human_parser_service.hpp"
 #include "pb_layer.hpp"
+#include "pb_creative_types.hpp"
 
 #include <QByteArray>
 #include <QElapsedTimer>
+#include <QFutureWatcher>
 #include <QImage>
 #include <QMutex>
 #include <QObject>
 #include <QQuickImageProvider>
+#include <QThreadPool>
 #include <QTimer>
 #include <QVariantList>
 #include <QVariantMap>
 #include <QVector>
+
+#include <atomic>
+#include <memory>
 
 namespace paintbrush {
 
@@ -42,50 +49,57 @@ struct CreativeSample
     qint64 tMs = 0;
 };
 
-/* How one synthesized piece reacts to the pad. Offsets are normalized to the
- * stage size; opacity/scale/rotation are additive around the base value. */
-struct CreativeMotion
+/* Cooperative cancellation flag shared by the GUI-side commit handle and the
+ * worker. std::atomic makes the cross-thread observation well-defined; the
+ * job never touches this object's owner, the pad or the document. */
+class CreativeCancelToken
 {
-    float opacityX = 0.0f;
-    float opacityY = 0.0f;
-    float opacityEnergy = 0.0f;
-    float opacityHold = 0.0f;
-    float dxX = 0.0f;
-    float dyY = 0.0f;
-    float dxEnergy = 0.0f;
-    float dyEnergy = 0.0f;
-    float dxHold = 0.0f;
-    float dyHold = 0.0f;
-    float scaleY = 0.0f;
-    float scaleEnergy = 0.0f;
-    float scaleHold = 0.0f;
-    float rotationEnergy = 0.0f;
-    float rotationHold = 0.0f;
+public:
+    void cancel() noexcept
+    {
+        m_cancelled.store(true, std::memory_order_relaxed);
+    }
+    bool isCancelled() const noexcept
+    {
+        return m_cancelled.load(std::memory_order_relaxed);
+    }
+
+private:
+    std::atomic<bool> m_cancelled{ false };
 };
 
-/* One editable output piece. The same vector drives both the live preview
- * and the committed document layers. */
-struct CreativePiece
+/* Result of one asynchronous commit build. Layers are already trimmed and
+ * placed in canvas space, so publication is a single GUI-thread transaction. */
+struct CreativeBuildResult
 {
-    QString name;
-    QString role; /* backdrop / echo / subject / rim / accent / finish */
-    QImage image;
-    QRectF rect; /* stage coordinates */
-    QPointF pivot; /* motion pivot; null = rect center */
-    int blendMode = BLEND_NORMAL;
-    float opacity = 1.0f;
-    CreativeMotion motion;
-    QVariantMap metadata;
+    QList<CanvasLayer> layers;
+    QImage preview; /* bounded preview of the exact committed look */
+    QString error;
+    bool cancelled = false;
 };
 
-/* Live pad state. */
-struct CreativeFrame
+/* One event streamed from the commit job to the GUI thread. QFutureWatcher
+ * delivers these in order on the thread that owns the watcher. */
+struct CreativeCommitEvent
 {
-    float x = 0.5f;
-    float y = 0.5f;
-    float energy = 0.0f;
-    bool hold = false;
-    float time = 0.0f;
+    enum Kind { Progress, Finished };
+    Kind kind = Progress;
+    quint64 revision = 0;
+    int percent = 0;
+    QImage preview;
+    CreativeBuildResult result;
+};
+
+/* A preview build runs on its own pool: it is the same recipe as a commit, but
+ * it never bakes or publishes layers. The revision makes a stale completion
+ * harmless when the user switches patches mid-render. */
+struct PreviewBuildResult
+{
+    QVector<CreativePiece> pieces;
+    QSize stage;
+    CreativeFrame frame;
+    quint64 revision = 0;
+    bool cancelled = false;
 };
 
 /* Image provider for the live stage. QML requests
@@ -131,6 +145,7 @@ class PaintbrushCreative : public QObject
 
     Q_PROPERTY(QString status READ status NOTIFY stateChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY stateChanged)
+    Q_PROPERTY(int commitProgress READ commitProgress NOTIFY commitProgressChanged)
     Q_PROPERTY(bool canCommit READ canCommit NOTIFY stateChanged)
     Q_PROPERTY(bool committed READ committed NOTIFY stateChanged)
 
@@ -150,6 +165,24 @@ class PaintbrushCreative : public QObject
     Q_PROPERTY(double lastCommitMs READ lastCommitMs NOTIFY metricsChanged)
     Q_PROPERTY(bool compareMode READ compareMode WRITE setCompare
                    NOTIFY compareChanged)
+
+    /* Fashion-aware material: when a FASHN parse is available, the material
+     * is applied to the garment while skin, hair and accessories keep their
+     * original pixels. Turning it off styles the whole subject. */
+    Q_PROPERTY(bool fashionProtection READ fashionProtection
+               WRITE setFashionProtection NOTIFY fashionProtectionChanged)
+    Q_PROPERTY(QString humanParseStatus READ humanParseStatus
+               NOTIFY humanParseStatusChanged)
+    Q_PROPERTY(bool fashionParserInstalled READ fashionParserInstalled
+               NOTIFY fashionParserInstallChanged)
+    Q_PROPERTY(bool fashionParserCanInstall READ fashionParserCanInstall
+               NOTIFY fashionParserInstallChanged)
+    Q_PROPERTY(bool fashionParserInstalling READ fashionParserInstalling
+               NOTIFY fashionParserInstallChanged)
+    Q_PROPERTY(int fashionParserInstallProgress READ fashionParserInstallProgress
+               NOTIFY fashionParserInstallChanged)
+    Q_PROPERTY(QString fashionParserInstallStatus READ fashionParserInstallStatus
+               NOTIFY fashionParserInstallChanged)
 
 public:
     explicit PaintbrushCreative(PaintbrushController *controller,
@@ -183,6 +216,7 @@ public:
 
     QString status() const { return m_status; }
     bool busy() const { return m_busy; }
+    int commitProgress() const { return m_commitPercent; }
     bool canCommit() const;
     bool committed() const { return m_committed; }
 
@@ -202,8 +236,24 @@ public:
     void setMotionAmount(double amount);
     Q_INVOKABLE void setLivingMotion(bool enabled);
 
+    bool fashionProtection() const { return m_fashionProtection; }
+    void setFashionProtection(bool enabled);
+    QString humanParseStatus() const { return m_humanParseStatus; }
+    bool fashionParserInstalled() const;
+    bool fashionParserCanInstall() const;
+    bool fashionParserInstalling() const;
+    int fashionParserInstallProgress() const;
+    QString fashionParserInstallStatus() const;
+    /* On-demand download: the controller's parser service runs the bundled
+     * post-installer and reloads the runtime when it finishes. */
+    Q_INVOKABLE void installFashionParser();
+
     /* Frame for the image provider. Safe from any thread. */
     QImage previewImage() const;
+
+    /* Test/capture helper: force the full preview still immediately instead of
+     * waiting for the interactive settle timer. */
+    void renderPreviewStill();
 
     Q_INVOKABLE void selectPatch(const QString &id);
     Q_INVOKABLE void openFromHarvest(int harvestId);
@@ -220,11 +270,27 @@ public:
     Q_INVOKABLE void reseed();
     Q_INVOKABLE void surprise();
 
+    /* Start (or replace) a cancellable full-resolution render. Returns an
+     * empty string when the job was accepted; the result arrives through
+     * commitFinished() on the GUI thread and is published as one undo step.
+     * A non-empty return means the request was rejected before any work. */
     Q_INVOKABLE QString commit();
     /* Rigged Stage: commit the current pad subject as a non-destructive 2D
      * stage scene (living subject + editable props/background/foreground +
      * parallax + light automation + real Powder). One undo. */
     Q_INVOKABLE QString makeRiggedStage();
+
+    /* Cancel the in-flight render and discard its revision. Nothing is
+     * published; the pad returns to the live preview. */
+    Q_INVOKABLE void cancelCommit();
+    /* Automation/self-test helper: run a local event loop until the in-flight
+     * commit publishes. Returns "" on success, otherwise the exact error or a
+     * timeout message. Never used by the product QML. */
+    QString waitForCommit(int timeoutMs = 120000);
+    /* Automation/self-test helper: wait for the current FASHN parse (if one
+     * is in flight). Returns the parse status text; never used by product QML
+     * and never blocks when the parser is unavailable or idle. */
+    QString waitForHumanParse(int timeoutMs = 120000);
     Q_INVOKABLE void acceptSuggestion();
     Q_INVOKABLE void dismissSuggestion();
     /* Resume a committed look from its layer metadata: re-adopts the original
@@ -249,10 +315,28 @@ signals:
     void metricsChanged();
     void compareChanged();
     void livingChanged();
+    /* The async commit reached a terminal state on the GUI thread. `error` is
+     * empty when the layers were published, otherwise it says why nothing
+     * changed. A cancellation is reported as an empty error; `committed()`
+     * stays false and the status text says it was cancelled. */
+    void commitFinished(const QString &error);
+    void commitProgressChanged();
+    void fashionProtectionChanged();
+    void humanParseStatusChanged();
+    void fashionParserInstallChanged();
+    /* Emitted once per accepted parse when it finishes (ready or failed).
+     * Used by the self-test wait helper; not needed by the pad. */
+    void humanParseFinished(bool ok);
 
 private slots:
     void onIdleTick();
     void onReplayTick();
+    void onCommitResultReady(int index);
+    void onCommitProgress(int percent);
+    void onCommitFinished();
+    void onHumanParseReady(const paintbrush::HumanParseResult &result,
+                           quint64 revision, quint64 requestId);
+    void onHumanParseFailed(quint64 requestId, const QString &error);
 
 private:
     struct PatchDef
@@ -277,6 +361,13 @@ private:
                       int sourceLayerId, const QString &label,
                       const QString &missingMessage);
     void clearSubject();
+    /* FASHN semantic parse of the current subject. The parser is optional:
+     * an unavailable runtime is reported in humanParseStatus and the pad
+     * continues to style the whole subject. */
+    void requestHumanParse();
+    void clearHumanMasks();
+    void setHumanParseStatus(const QString &text);
+    bool usesFashionProtection() const;
     void rebuildPreview();
     void recompose();
     void startIdle();
@@ -301,6 +392,28 @@ private:
                         const QSize &stage, const QColor &background) const;
     QVector<CreativePiece> bakeFrame(QVector<CreativePiece> pieces,
                                     const QSize &stage) const;
+
+    /* One commit job's GUI-side context. The worker only receives the
+     * immutable CreativeBuildInput copy plus the cancel token. */
+    struct CommitContext
+    {
+        quint64 revision = 0;
+        QString suggestion;
+        QString desc;
+        int sourceLayerId = -1;
+        QSize canvasSize; /* guards against a document resize mid-render */
+        QSize previewSize;
+        std::shared_ptr<CreativeCancelToken> token;
+    };
+
+    bool beginCommit(QString *error);
+    QString commitLegacy();
+    void cancelCommitInternal(bool notify);
+    void publishCommitPreview(const QImage &preview);
+    void publishCommitResult(const CreativeBuildResult &result);
+    void applyCommitEvent(const CreativeCommitEvent &event);
+    void consumeCommitResults(int uptoInclusive);
+    void finishCommitJob();
 
     PaintbrushController *m_controller = nullptr;
 
@@ -330,6 +443,16 @@ private:
     QImage m_livingFrame;
     QElapsedTimer m_livingFrameClock;
 
+    /* Fashion semantics for the current subject. m_semanticProtection is
+     * source-sized Grayscale8 where 255 keeps the original pixel. It belongs
+     * to m_subjectRevision: a stale parse can never touch a newer subject. */
+    quint64 m_subjectRevision = 0;
+    QImage m_semanticProtection;
+    QString m_humanParseStatus;
+    bool m_fashionProtection = true;
+    bool m_humanParsePending = false;
+    quint64 m_humanParseRequest = 0;
+
     QString m_patchId;
     quint32 m_seed = 1;
     bool m_open = false;
@@ -343,14 +466,43 @@ private:
     double m_previewP95Ms = 0.0;
     double m_lastCommitMs = 0.0;
 
+    /* Async commit job state. Everything below is GUI-thread only. The worker
+     * receives a CreativeBuildInput copy and the cancel token; it never sees
+     * these members, the pad or the document. */
+    QThreadPool m_buildPool;
+    QFutureWatcher<CreativeCommitEvent> *m_commitWatcher = nullptr;
+    quint64 m_commitRevision = 0; /* monotonic; stale events can never publish */
+    int m_commitPercent = 0;
+    int m_consumedResults = 0;
+    CommitContext m_commit;
+    QString m_lastCommitError;
+
+    /* Preview build state. GUI-thread only; the worker gets an input copy and
+     * a cancel token and never touches these members. */
+    QThreadPool m_previewPool;
+    QFutureWatcher<PreviewBuildResult> m_previewWatcher;
+    std::shared_ptr<std::atomic_bool> m_previewCancel;
+    quint64 m_previewBuildRevision = 0;
+    bool m_previewBuilt = false;
+    CreativeFrame m_builtFrame;
+    QSize m_builtStage;
+    QTimer m_composeCoalesceTimer;
+
+    void onPreviewBuildFinished();
+    void cancelPreviewBuild();
+    void scheduleRecompose();
+
     CreativeFrame m_frame;
     QVector<CreativePiece> m_pieces;
 
     QTimer m_idleTimer;
     QTimer m_replayTimer;
     QTimer m_recordUiTimer;
+    QTimer m_previewSettleTimer;
+    bool m_composeInteractive = false;
     QElapsedTimer m_replayClock;
     QElapsedTimer m_recordClock;
+    QElapsedTimer m_commitClock;
 
     bool m_recording = false;
     QVector<CreativeSample> m_samples;

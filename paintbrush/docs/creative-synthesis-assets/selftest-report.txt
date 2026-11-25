@@ -1,26 +1,37 @@
 subject: Self-test cutout
-preview neon-idol 544x680
-preview sticker-forge 544x680
-preview pastel-stage 544x680
-preview nocturne 544x680
-preview ink-creature 544x680
-preview spark-storm 544x680
-preview kaleido 544x680
-preview motion-echo 544x680
-preview electric-kpop 544x680
-preview holo-fashion 544x680
-preview scene-forge 544x680
-preview auto-splatter 544x680
-preview stage-mode 544x680
-pad reaction neon-idol: 17.19/255
-pad reaction electric-kpop: 8.88/255
-pad reaction sticker-forge: 5.96/255
-pad reaction pastel-stage: 3.86/255
+fashion parser: Fashion parse unavailable: human parser runtime is not installed
+preview neon-idol 1440x1800
+preview sticker-forge 1440x1800
+preview pastel-stage 1440x1800
+preview nocturne 1440x1800
+preview ink-creature 1440x1800
+preview spark-storm 1440x1800
+preview kaleido 1440x1800
+preview motion-echo 1440x1800
+preview electric-kpop 1440x1800
+preview holo-fashion 1440x1800
+preview holo-liquid 1440x1800
+preview holo-opal 1440x1800
+preview holo-chrome 1440x1800
+preview holo-prism 1440x1800
+preview holo-wrap 1440x1800
+preview holo-chameleon 1440x1800
+preview holo-glitter 1440x1800
+preview holo-livery 1440x1800
+preview scene-forge 1440x1800
+preview auto-splatter 1440x1800
+preview stage-mode 1440x1800
+preview paper-theatre 1440x1800
+pad reaction neon-idol: 13.64/255
+pad reaction electric-kpop: 5.97/255
+pad reaction sticker-forge: 3.81/255
+pad reaction pastel-stage: 1.19/255
+pad reaction paper-theatre: 31.10/255
 gesture record: OK
 gesture loop: OK
-preview p95: 7.53 ms (13 samples)
+preview p95: 57.06 ms (22 samples)
 commit neon: +12 layers
-commit neon: 833.1 ms
+commit neon: 488.8 ms
 recent look history: 1 (Neon Idol)
 look rename: OK
 look delete: -12 layers
@@ -40,14 +51,18 @@ apply look: +12 layers
 apply look undo: OK
 commit sticker: +12 layers
 sticker undo: OK
-commit electric: +11 layers
+commit electric: +14 layers
 source content 304x864.8 raster 720x1120 scale 0.8
-subject content 307x871 raster 273x774 scale 1.125
+subject content 305x866 raster 305x866 scale 1
 committed subject scale: OK
 repeated apply: original source kept
 electric undo: OK
 commit holo: +10 layers
 holo undo: OK
+commit paper-theatre: +36 layers
+paper-theatre props: 29 layers / 22 kinds
+paper-theatre reload props: 29
+paper-theatre undo: OK
 lineup: +5 linked poses
 lineup undo: OK
 pastel lineup: +8 layers
@@ -62,4 +77,7 @@ agent stroke undo: OK
 assistant stroke tool: OK
 post-keep chooser: OK
 chooser selection: OK
+fashion subject: Fashion parser cutout
+fashion parser: Fashion parse unavailable: human parser runtime is not installed
+preview fashion-real 1440x1800
 RESULT: PASS

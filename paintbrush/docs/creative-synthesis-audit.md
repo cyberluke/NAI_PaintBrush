@@ -1,6 +1,6 @@
 # Creative Synthesis — audit and delivery log
 
-Status: **Slice A/B and the named C/D creative slices delivered; E/F/H remain; native OpenFill Expand and recent-look rename/delete shipped. Paper Theatre and the Nocturne scene-layer extension are implemented in source (syntax-checked; runtime commit pending the coordinator build).** This document is the
+Status: **Slice A/B and the named C/D creative slices delivered; E/F/H remain; native OpenFill Expand and recent-look rename/delete shipped. Scene Forge, Auto Splatter, Stage Door, Paper Theatre, LaMa, living stage/compare, tracking and the integrated vector preview are implemented; the 22-look in-app self-test PASSes. The FASHN parser is optional (pinned on-demand installer).** This document is the
 honest map of what exists, what was added for the Creative Synthesis work, what
 was verified, and what is deliberately not finished yet.
 
@@ -100,8 +100,18 @@ Paper Theatre and the Nocturne scene layers add reusable procedural prop
 geometry on top of that kit: cut planes, trees, castle, curtains, fan, ribbon,
 florals, five-point star garlands, folded-paper butterflies and a proscenium.
 
-The same functions produce the live preview at panel resolution and the final
-layers at canvas resolution, with geometry expressed in stage-relative units.
+The same functions produce the live preview at a 4K-class resolution (native up
+to a 3840x2160 frame budget) with a per-frame vector field, and the final layers
+at canvas resolution. Motion frames compose at a <=1 MP interactive target and
+settle back to the full still after the gesture.
+
+The integrated vector path (`pb_creative_vector.hpp`) re-evaluates pad X/Y,
+energy, hold and time on every preview compose for the spark field and Voltage
+bolts; commits bake the same profile at the final frame. The 22-look in-app
+self-test passes at 1440x1800, including Scene Forge, Auto Splatter, Stage Door,
+Paper Theatre (36 layers / 29 props), Lineup, duplicate presets and the
+assistant/agent strokes. The FASHN parser is optional: the packaged copy works
+without it and the pinned-manifest installer enables the real fashion parse.
 
 ### 2.3 Linked duplication, resume and reuse
 

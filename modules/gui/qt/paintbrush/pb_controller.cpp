@@ -311,6 +311,7 @@ PaintbrushController::~PaintbrushController()
     m_thumbnails.cancel();
     m_segmentation.shutdown();
     m_matting.shutdown();
+    m_humanParser.shutdown();
     m_tracking.shutdown();
     m_editSource.shutdown();
     m_selectionSource.shutdown();
@@ -324,6 +325,7 @@ void PaintbrushController::configureServices()
 {
     m_segmentation.configure(VLC_OBJECT(m_intf));
     m_matting.configure(VLC_OBJECT(m_intf));
+    m_humanParser.configure(VLC_OBJECT(m_intf));
     /* Powder renderer default is CPU (measured faster); "gpu" is the explicit
      * experimental opt-in. */
     const QString powder = pbConfigString(VLC_OBJECT(m_intf),
@@ -7148,11 +7150,14 @@ QByteArray PaintbrushController::assistantToolsJson() const
                       QJsonObject(), QJsonArray()));
 
     QJsonArray creativePatchEnum;
-    for (const char *id : { "electric-kpop", "holo-fashion", "neon-idol",
-                            "sticker-forge", "pastel-stage", "nocturne",
-                            "ink-creature", "spark-storm", "kaleido",
-                            "motion-echo", "scene-forge", "auto-splatter",
-                            "stage-mode", "paper-theatre" })
+    for (const char *id : { "electric-kpop", "holo-fashion",
+                            "holo-liquid", "holo-opal", "holo-chrome",
+                            "holo-prism", "holo-wrap", "holo-chameleon",
+                            "holo-glitter", "holo-livery",
+                            "neon-idol", "sticker-forge", "pastel-stage",
+                            "nocturne", "ink-creature", "spark-storm",
+                            "kaleido", "motion-echo", "scene-forge",
+                            "auto-splatter", "stage-mode", "paper-theatre" })
         creativePatchEnum.append(QString::fromLatin1(id));
     tools.append(make(
         QStringLiteral("apply_creative_patch"),

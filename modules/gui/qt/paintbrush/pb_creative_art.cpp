@@ -396,6 +396,18 @@ float oklabLightness(const QColor &color)
     return toLab(color.red(), color.green(), color.blue()).L;
 }
 
+OklabColor oklabColor(const QColor &color)
+{
+    OklabColor out;
+    if (!color.isValid())
+        return out;
+    const Lab l = toLab(color.red(), color.green(), color.blue());
+    out.L = l.L;
+    out.a = l.a;
+    out.b = l.b;
+    return out;
+}
+
 QImage maskFromAlpha(const QImage &raster)
 {
     const QImage src = argb(raster);
@@ -945,6 +957,8 @@ QImage estimateNormals(const QImage &source, const QImage &mask, float strength,
     {
         QRgb *dst = reinterpret_cast<QRgb *>(out.scanLine(y));
         uchar *cf = conf.scanLine(y);
+        const uchar *lm = lum.constScanLine(y);
+        const uchar *fn = fine.constScanLine(y);
         for (int x = 0; x < src.width(); ++x)
         {
             const float gx =
@@ -1389,7 +1403,8 @@ QImage electricArc(const QSize &size, const QPointF &from, const QPointF &to,
 }
 
 QImage sparkField(const QImage &mask, const QSize &size, quint32 seed,
-                  const QVector<QColor> &palette, int count, float energy)
+                  const QVector<QColor> &palette, int count, float energy,
+                  const QPointF &wind, float spread, float streak)
 {
     const QImage m = grayscale(mask);
     if (m.isNull() || count <= 0)
@@ -1438,10 +1453,15 @@ QImage sparkField(const QImage &mask, const QSize &size, quint32 seed,
 
     Rng rng(seed);
     const float e = clamp01(energy);
+    const float spreadJitter = 0.35f + 0.9f * clamp01(spread);
+    const float trail = qBound(0.25f, streak, 3.0f);
     for (int i = 0; i < count; ++i)
     {
         const Boundary &b = boundary[size_t(rng.pick(int(boundary.size())))];
         const QPointF tangent = perpendicular(b.normal);
+        QPointF dir = normalised(b.normal + wind);
+        if (dir.isNull())
+            dir = b.normal;
         const float sizePx = rng.range(0.7f, 2.6f);
         const QColor c = palette.isEmpty()
                              ? QColor(255, 255, 255)
@@ -1452,10 +1472,12 @@ QImage sparkField(const QImage &mask, const QSize &size, quint32 seed,
         p.setBrush(dot);
         p.drawEllipse(b.point, sizePx, sizePx);
 
-        /* a short streak along the outward normal reads as motion */
-        const float len = rng.range(3.0f, 6.0f + 12.0f * e);
-        const QPointF tip = b.point + b.normal * len
-                            + tangent * rng.range(-5.0f, 5.0f);
+        /* a short streak along the advected direction reads as motion */
+        const float len = rng.range(3.0f, 6.0f + 12.0f * e) * trail;
+        const QPointF tip = b.point + dir * len
+                            + tangent
+                                  * (rng.range(-1.0f, 1.0f) * spreadJitter
+                                     * 7.0f);
         QPen pen(dot);
         pen.setCapStyle(Qt::RoundCap);
         pen.setWidthF(std::max(0.8, double(sizePx * 0.7f)));

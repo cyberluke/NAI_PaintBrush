@@ -22,6 +22,7 @@
 #include "pb_segmentation_service.hpp"
 #include "pb_tracking_service.hpp"
 #include "pb_matte.hpp"
+#include "pb_human_parser_service.hpp"
 #include "pb_matting_service.hpp"
 #include "pb_vision_service.hpp"
 #include "pb_generation_service.hpp"
@@ -265,6 +266,10 @@ public:
 
     /* -- creative Play Pad (creative synthesis) -------------------------- */
     PaintbrushCreative *creative() const { return m_creative; }
+    /* Fashion semantic parser owned by the controller (same lifecycle as the
+     * other GPU services). The Creative Pad consumes it; it is not a QML
+     * surface. */
+    HumanParserService *humanParser() { return &m_humanParser; }
     /* Open the pad: "" keeps the last patch, otherwise selects it. */
     Q_INVOKABLE void openCreativePad(const QString &patchId);
     /* One-shot art direction: build the named pad patch on the current
@@ -1392,6 +1397,7 @@ private:
 
     SegmentationService m_segmentation;
     MattingService m_matting;
+    HumanParserService m_humanParser;
     /* Latest refined matte for the CURRENT semantic selection. Refinement is
      * additive: m_objectMask stays the authoritative SAM3 mask. */
     paintbrush::matte::Result m_matteResult;
