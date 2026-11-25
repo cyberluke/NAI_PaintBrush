@@ -23,6 +23,8 @@ param(
     [string]$Arch = "x64",
     [switch]$IncludeAI,
     [string]$SamModel = "D:\_SATIN_AI\models\sam3-q4_0.ggml",
+    [string]$ParserDir = "",
+    [switch]$SkipParser,
     [switch]$SkipSign,
     [switch]$Install,
     [string]$OutDir = "",
@@ -145,6 +147,33 @@ if ($IncludeAI) {
     $modelDir = Join-Path $stage 'models'
     New-Item -ItemType Directory -Path $modelDir -Force | Out-Null
     Copy-Item -LiteralPath $SamModel -Destination (Join-Path $modelDir 'sam3-q4_0.ggml') -Force
+}
+
+# FASHN human parser: runtime, model and the complete ORT/CUDA closure travel
+# with the app so the first start is already provisioned. The app still checks
+# and repairs this copy on every start; a pinned manifest URL remains available
+# for updates/on-demand repair. The model is distributed under its upstream
+# license; keep the license/notice files beside it in the package.
+if (-not $SkipParser) {
+    if (-not $ParserDir) { $ParserDir = Join-Path $bin 'human-parser' }
+    $parserRuntime = Join-Path $ParserDir 'pb_human_parser_cuda.dll'
+    $parserModel = Join-Path $ParserDir 'models\fashn-human-parser.onnx'
+    if (-not (Test-Path -LiteralPath $parserRuntime) -or
+        -not (Test-Path -LiteralPath $parserModel)) {
+        throw "Human parser assets not staged: $ParserDir`nRun scripts/pb-build-human-parser.ps1 or pass -ParserDir <runtime folder>; use -SkipParser only for an intentionally parser-less build."
+    }
+    Copy-Item -LiteralPath $ParserDir -Destination (Join-Path $stage 'human-parser') -Recurse -Force
+    # The app's first-start provisioner and repair action use this exact script.
+    $stageScripts = Join-Path $stage 'scripts'
+    New-Item -ItemType Directory -Path $stageScripts -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'pb-install-human-parser.ps1') -Destination $stageScripts -Force
+    $assetsManifest = Join-Path $PSScriptRoot 'human-parser-assets.json'
+    if (Test-Path -LiteralPath $assetsManifest) {
+        Copy-Item -LiteralPath $assetsManifest -Destination $stageScripts -Force
+    }
+    Write-Host "    + human-parser (runtime + model + closure)"
+} elseif ($IncludeAI) {
+    Write-Warning "Parser skipped (-SkipParser): this package will need the pinned on-demand installer."
 }
 
 # The Qt interface needs its QML modules and Qt plugins; the packaged app has no

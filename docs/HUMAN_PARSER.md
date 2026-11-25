@@ -395,6 +395,35 @@ that fails that check is ignored and the packaged `<exe>\human-parser` copy is
 used instead. The installer prefers `pwsh` and falls back to Windows PowerShell;
 it refuses a remote manifest without the pinned SHA-256 in the app config.
 
+### Provisioning at install and from now on at every start
+
+The parser is not a manual add-on. The release path provisions it twice:
+
+1. **MSIX packaging.** `scripts/pb-build-msix.ps1` copies the parser tree into
+   `<app>\human-parser` and the installer into `<app>\scripts`. It throws when
+   the parser runtime/model are not staged, so a public package cannot silently
+   ship without the parser. Use `-ParserDir <folder>` to point at a staged tree,
+   or `-SkipParser` only for an intentional parser-less build.
+2. **Every app start.** `HumanParserService::configure()` probes the verified
+   user install, then the packaged copy. If neither is runnable and the release
+   configures `paintbrush-human-parser-manifest-url` plus
+   `paintbrush-human-parser-manifest-sha256`, it starts the pinned installer
+   automatically. The Play Pad shows the install progress; the parser is usable
+   as soon as the job publishes.
+
+For a source build, stage the tree once:
+
+```powershell
+pwsh -File scripts/pb-build-human-parser.ps1   # or copy a staged human-parser folder
+pwsh -File scripts/pb-build-msix.ps1 -ParserDir .\win64-meson\bin\human-parser
+```
+
+The installer is intentionally **best-effort**: the ONNX Runtime core
+(`onnxruntime.dll`, `onnxruntime_providers_shared.dll`) is required, while the
+CUDA provider, cuDNN and cuBLAS DLLs are optional. It copies every available
+file, records the installed and missing closure in `installed.json`, and leaves
+the parser able to run on CPU when the GPU closure is incomplete.
+
 Packaging into `win64-meson\bin\human-parser` was intentionally **not**
 performed here: the shared app tree is owned by other agents and was being
 built concurrently. The DLL is built and tested in

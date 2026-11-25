@@ -255,6 +255,7 @@ void HumanParserService::configure(vlc_object_t *obj)
     }
 
     probeAvailability();
+    ensureProvisioned();
 }
 
 bool HumanParserService::available() const
@@ -981,6 +982,25 @@ void HumanParserService::probeAvailability()
     if (available)
         qputenv("PB_HUMAN_PARSER_DIR", runtimeDir.toUtf8());
     emit availabilityChanged();
+}
+
+void HumanParserService::ensureProvisioned()
+{
+    if (available() || installing())
+        return;
+
+    /* The MSIX ships human-parser beside the executable, which probeAvailability
+     * accepts directly. A public build without the packaged copy can still
+     * self-provision from the pinned manifest configured by the release. */
+    QString url;
+    QString pin;
+    {
+        QMutexLocker lock(&m_mutex);
+        url = m_manifestUrl;
+        pin = m_manifestSha256;
+    }
+    if (!url.isEmpty() && !pin.isEmpty() && !installerScript().isEmpty())
+        installHumanParser();
 }
 
 void HumanParserService::setStatus(const QString &status)

@@ -1,6 +1,6 @@
 # Creative Synthesis — audit and delivery log
 
-Status: **Slice A/B and the named C/D creative slices delivered; E/F/H remain; native OpenFill Expand and recent-look rename/delete shipped. Scene Forge, Auto Splatter, Stage Door, Paper Theatre, LaMa, living stage/compare, tracking and the integrated vector preview are implemented; the 22-look in-app self-test PASSes. The FASHN parser is optional (pinned on-demand installer).** This document is the
+Status: **Slice A/B and the named C/D creative slices delivered; E/F/H remain; native OpenFill Expand and recent-look rename/delete shipped. Scene Forge, Auto Splatter, Stage Door, Paper Theatre, LaMa, living stage/compare, tracking and the integrated vector preview are implemented; the 22-look in-app self-test PASSes. The FASHN parser ships beside the app and is verified on every start; the real fashion gate parses at 47% protection.** This document is the
 honest map of what exists, what was added for the Creative Synthesis work, what
 was verified, and what is deliberately not finished yet.
 
@@ -110,8 +110,9 @@ energy, hold and time on every preview compose for the spark field and Voltage
 bolts; commits bake the same profile at the final frame. The 22-look in-app
 self-test passes at 1440x1800, including Scene Forge, Auto Splatter, Stage Door,
 Paper Theatre (36 layers / 29 props), Lineup, duplicate presets and the
-assistant/agent strokes. The FASHN parser is optional: the packaged copy works
-without it and the pinned-manifest installer enables the real fashion parse.
+assistant/agent strokes. The FASHN parser ships beside the app, is verified on
+each start, can be repaired from a pinned manifest, and the real fashion fixture
+parses at 47% garment protection in the self-test.
 
 ### 2.3 Linked duplication, resume and reuse
 

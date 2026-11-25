@@ -164,6 +164,7 @@ private:
     void setBusy(bool busy);
     bool ensureRuntime(QString *error);
     void probeAvailability();
+    void ensureProvisioned();
     QString installerScript() const;
     void setInstallStatus(const QString &status, int percent);
     void logInfo(const char *format, ...) const;

@@ -1,5 +1,5 @@
 subject: Self-test cutout
-fashion parser: Fashion parse unavailable: human parser runtime is not installed
+fashion parser: No outfit found — the material covers the whole subject.
 preview neon-idol 1440x1800
 preview sticker-forge 1440x1800
 preview pastel-stage 1440x1800
@@ -22,16 +22,16 @@ preview scene-forge 1440x1800
 preview auto-splatter 1440x1800
 preview stage-mode 1440x1800
 preview paper-theatre 1440x1800
-pad reaction neon-idol: 13.64/255
-pad reaction electric-kpop: 5.97/255
-pad reaction sticker-forge: 3.81/255
-pad reaction pastel-stage: 1.19/255
-pad reaction paper-theatre: 31.10/255
+pad reaction neon-idol: 11.87/255
+pad reaction electric-kpop: 6.09/255
+pad reaction sticker-forge: 3.84/255
+pad reaction pastel-stage: 1.24/255
+pad reaction paper-theatre: 30.45/255
 gesture record: OK
 gesture loop: OK
-preview p95: 57.06 ms (22 samples)
+preview p95: 82.07 ms (22 samples)
 commit neon: +12 layers
-commit neon: 488.8 ms
+commit neon: 684.9 ms
 recent look history: 1 (Neon Idol)
 look rename: OK
 look delete: -12 layers
@@ -78,6 +78,6 @@ assistant stroke tool: OK
 post-keep chooser: OK
 chooser selection: OK
 fashion subject: Fashion parser cutout
-fashion parser: Fashion parse unavailable: human parser runtime is not installed
+fashion parser: Fit found — 47% of the subject. Skin, hair and accessories stay untouched.
 preview fashion-real 1440x1800
 RESULT: PASS

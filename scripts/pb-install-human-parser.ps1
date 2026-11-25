@@ -61,15 +61,35 @@ function Copy-Closure([string]$from, [string]$to)
 {
     if (-not (Test-Path -LiteralPath $from)) { return $false }
     $names = Get-ClosureNames
+    $required = Get-RequiredClosure
+    $available = @()
+    $missing = @()
     foreach ($name in $names)
     {
-        if (-not (Test-Path -LiteralPath (Join-Path $from $name))) { return $false }
+        if (Test-Path -LiteralPath (Join-Path $from $name)) {
+            $available += $name
+        } else {
+            $missing += $name
+        }
     }
-    foreach ($name in $names)
+    foreach ($name in $required)
+    {
+        if ($available -notcontains $name) { return $false }
+    }
+    foreach ($name in $available)
     {
         Copy-Item -LiteralPath (Join-Path $from $name) -Destination (Join-Path $to $name) -Force
     }
+    $script:InstalledClosure = $available
+    $script:MissingClosure = $missing
     return $true
+}
+
+function Get-RequiredClosure()
+{
+    # CPU/ORT core is mandatory; CUDA/cuDNN providers are optional and the
+    # parser falls back to CPU when they are absent.
+    @("onnxruntime.dll", "onnxruntime_providers_shared.dll")
 }
 
 function Get-ClosureNames()
@@ -91,6 +111,8 @@ $manifest = $null
 $installManifestPath = $null
 $source = $null
 $bundleZip = $null
+$script:InstalledClosure = @()
+$script:MissingClosure = @()
 
 New-Item -ItemType Directory -Force -Path $temp | Out-Null
 try
@@ -242,7 +264,8 @@ try
         runtimeSha256 = (Get-Sha256 (Join-Path $stage "pb_human_parser_cuda.dll"))
         modelSha256 = (Get-Sha256 (Join-Path $stage "models\fashn-human-parser.onnx"))
         manifestSha256 = $ManifestSha256
-        closure = @(Get-ClosureNames)
+        closure = @($script:InstalledClosure)
+        missing = @($script:MissingClosure)
     }
     $metadata | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $stage "installed.json") -Encoding UTF8
 
