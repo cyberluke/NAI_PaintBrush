@@ -36,6 +36,16 @@ $env:QML_IMPORT_PATH = "C:\msys64\mingw64\share\qt6\qml"
 $env:QML2_IMPORT_PATH = $env:QML_IMPORT_PATH
 $env:PATH = "$bin;C:\msys64\mingw64\bin;$(Join-Path $root 'win64-meson\lib');$(Join-Path $root 'win64-meson\src');" + $env:PATH
 
+# The user's live vlcrc sets one-instance=1; a second VLC then hands off to a
+# stale/other instance before the Qt interface starts. Give this session its own
+# config with the singleton disabled while keeping the real APPDATA for
+# Paintbrush settings/recovery.
+$configRoot = Join-Path $env:TEMP ("pb-paintbrush-config-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $configRoot -Force | Out-Null
+$vlcConfig = Join-Path $configRoot "vlcrc"
+@("[core]", "one-instance=0", "one-instance-when-started-from-file=0") |
+    Set-Content -LiteralPath $vlcConfig -Encoding ascii
+
 $modules = Join-Path $root 'win64-meson\modules'
 $pluginsDat = Join-Path $modules 'plugins.dat'
 $qtPlugin = Join-Path $modules 'libqt_plugin.dll'
@@ -54,12 +64,8 @@ if ($SamModel -ne "") { $extra += "--paintbrush-sam-model=$SamModel" }
 if ($SamDevice -ne "") { $extra += "--paintbrush-sam-device=$SamDevice" }
 
 & $exe `
-  "--plugin-path" "$modules" `
+  "--config=$vlcConfig" `
   "--paintbrush" "--no-media-library" "--no-qt-privacy-ask" "--no-qt-updates-notif" `
   "--no-qt-name-in-title" "--no-one-instance" `
-  "--no-avcodec-hurry-up" `
-  "--avcodec-skip-frame=-1" `
-  "--avcodec-skip-idct=-1" `
-  "--avcodec-skiploopfilter=-1" `
   "--verbose=2" "--file-logging" "--logmode=text" "--logfile=$LogFile" "--log-verbose=2" `
   "-I" "qt" @extra
